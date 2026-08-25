@@ -1,0 +1,64 @@
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.dylib
+*.dll
+*.a
+*.o
+
+# Testing & Benchmark Artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.tex
+*.aux
+*.log
+
+# Build & Packaging Artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Model Weights, Tensors & Calibration Data
+weights/
+*.tgate
+*.tgate8
+*.tgate4
+*.tgate_calib
+*.bin
+*.pt
+*.pth
+*.safetensors
+*.onnx
+*.gguf
+*.tensors
+
+# Logs, Tasks & Scratch Dirs
+*.log
+*.tmp
+scratch/
+.system_generated/
+*.out
+
+# Secrets, Environment & API Keys
+.env
+.env.*
+.venv
+env/
+venv/
+*key*.json
+*token*
+*.pem
+*.key
+
+# OS & Editor Artifacts
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.vscode/
+.idea/

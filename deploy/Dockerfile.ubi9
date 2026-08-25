@@ -1,0 +1,16 @@
+# Red Hat Enterprise Linux 9 (UBI 9) Production Serving Container
+FROM registry.access.redhat.com/ubi9/python-311:latest AS runtime
+
+USER root
+WORKDIR /app
+COPY . /app
+
+RUN dnf install -y gcc-c++ make cmake git && dnf clean all
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir numpy fastapi uvicorn pydantic pybind11 requests httpx
+RUN python setup.py build_ext --inplace
+
+EXPOSE 8000
+USER 1001
+
+ENTRYPOINT ["python", "-m", "turing.cli", "serve", "--host", "0.0.0.0", "--port", "8000", "--device", "cpu"]

@@ -1,0 +1,24 @@
+# Turing Engine NVIDIA CUDA 12/13 Production Serving Container
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip python3-dev \
+    git build-essential cmake \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY . /app
+
+RUN pip3 install --no-cache-dir torch numpy fastapi uvicorn pydantic pybind11 requests httpx
+RUN python3 setup.py build_ext --inplace
+RUN python3 scripts/build_wheels.py
+
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
+WORKDIR /app
+COPY --from=builder /app /app
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir torch numpy fastapi uvicorn pydantic pybind11 requests httpx
+
+EXPOSE 8000
+ENTRYPOINT ["python3", "-m", "turing.cli", "serve", "--host", "0.0.0.0", "--port", "8000"]

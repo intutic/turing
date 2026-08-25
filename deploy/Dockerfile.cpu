@@ -1,0 +1,13 @@
+# Turing Engine AVX2/AVX-512 CPU Serving Container
+FROM python:3.11-slim AS runtime
+
+WORKDIR /app
+COPY . /app
+
+RUN apt-get update && apt-get install -y build-essential git && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir numpy fastapi uvicorn pydantic pybind11 requests httpx
+RUN python setup.py build_ext --inplace
+
+EXPOSE 8000
+ENTRYPOINT ["python", "-m", "turing.cli", "serve", "--host", "0.0.0.0", "--port", "8000", "--device", "cpu"]

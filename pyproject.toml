@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "pybind11>=2.10.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turing-engine"
+version = "0.1.0"
+description = "Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Runtime"
+authors = [
+    {name = "Ishan Gupta", email = "support@intutic.ai"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.0.0",
+    "numpy>=1.22.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "pydantic>=2.0.0",
+    "pybind11>=2.10.0",
+    "requests>=2.28.0",
+    "httpx>=0.24.0",
+    "transformers>=4.38.0",
+    "huggingface-hub>=0.20.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "wheel",
+    "build",
+]
+
+[project.scripts]
+turing = "turing.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+    "ignore::pytest.PytestUnhandledThreadExceptionWarning",
+    "ignore::DeprecationWarning:pkg_resources.*",
+    "ignore::DeprecationWarning:pydantic.*",
+    "ignore::DeprecationWarning:fastapi.*",
+    "ignore::DeprecationWarning:starlette.*",
+    "ignore::DeprecationWarning:urllib3.*",
+    "ignore::DeprecationWarning:torch.*",
+    "ignore::DeprecationWarning:datetime.*",
+    "ignore::DeprecationWarning:importlib.*",
+    "ignore::UserWarning:torch.*",
+    "ignore::UserWarning:urllib3.*",
+    "ignore:.*unauthenticated requests.*:UserWarning",
+    "ignore:.*torch_dtype.*:UserWarning",
+    "ignore:.*SwigPy.*:DeprecationWarning",
+    "ignore:.*swigvarlink.*:DeprecationWarning",
+    "ignore:.*builtin type.*:DeprecationWarning",
+    "ignore:.*datetime.datetime.utcnow.*:DeprecationWarning",
+    "ignore:.*is deprecated and scheduled for removal.*:DeprecationWarning",
+    "ignore:.*CUDA initialization.*:UserWarning",
+    "ignore:.*NVIDIA driver.*:UserWarning",
+    "ignore:.*Torch was not compiled with CUDA enabled.*:UserWarning",
+    "ignore:.*Metal Performance Shaders.*:UserWarning",
+    "ignore:.*not authenticated.*:UserWarning"
+]

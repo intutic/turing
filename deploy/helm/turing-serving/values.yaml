@@ -1,0 +1,30 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/intutic/turing
+  pullPolicy: IfNotPresent
+  tag: "3.0.0-cuda"
+
+service:
+  type: ClusterIP
+  port: 8000
+
+model:
+  name: "llama-3.1-70b"
+  device: "cuda"
+  maxBatchSize: 64
+
+resources:
+  limits:
+    nvidia.com/gpu: 1
+    memory: 32Gi
+    cpu: "8"
+  requests:
+    nvidia.com/gpu: 1
+    memory: 24Gi
+    cpu: "4"
+
+prometheus:
+  enabled: true
+  path: "/metrics"
+  port: 8000

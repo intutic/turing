@@ -1,0 +1,6 @@
+apiVersion: v2
+name: turing-serving
+description: Enterprise Sovereign Control Plane & High-Performance LLM Serving Helm Chart
+type: application
+version: 3.0.0
+appVersion: "3.0.0"

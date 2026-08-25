@@ -1,0 +1,12 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: turing-llama-70b
+  namespace: default
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: turing-subspace
+      runtime: turing-runtime
+      storageUri: "s3://models/llama-3.1-70b-subspace"

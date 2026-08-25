@@ -1,0 +1,31 @@
+Business Source License 1.1
+
+Parameters:
+
+Licensor:           Ishan Gupta
+Licensed Work:      Turing Engine Inference & Serving Stack
+Additional Use:     Use of the Licensed Work for all non-production purposes, local
+                    developer testing, academic and scientific research, personal single-GPU
+                    workstations, and performance benchmarking is permitted free of charge.
+Change Date:        August 24, 2030
+Change License:     Apache License, Version 2.0
+
+--------------------------------------------------------------------------------
+
+1. Grant of License.
+Licensor hereby grants you the right to copy, modify, create derivative works, redistribute,
+and make non-production use of the Licensed Work in accordance with the Additional Use Grant.
+
+2. Commercial Production Use.
+Any use of the Licensed Work in production multi-GPU clusters, commercial model hosting,
+or serving revenue-generating API traffic is subject to the terms of a separate commercial
+license agreement from Licensor.
+
+3. Change to Open Source License.
+Effective on the Change Date, or the fourth anniversary of the first public release of the
+Licensed Work, Licensor grants you the right to copy, modify, create derivative works,
+redistribute, and use the Licensed Work under the Change License.
+
+4. Disclaimer of Warranty & Limitation of Liability.
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY.
