@@ -44,12 +44,12 @@ Turing Engine natively ingests, compresses, and serves open weights directly fro
 
 | Lab / Family | Flagship & Frontier Models Supported | Single-GPU Hardware Target |
 | :--- | :--- | :--- |
+| **DeepSeek** | `deepseek-r1-distill` (`1.5b`–`70b`), `deepseek-v4-flash`, `deepseek-v4-pro` (1.6T MoE) | **1x 8GB–24GB GPU + Host RAM** |
 | **Meta AI** | `llama-4-scout`, `llama-4-maverick`, `muse-glimmer-30b`, `llama-3.3-70b` | **1x 8GB–24GB GPU / Mac** |
-| **DeepSeek** | `deepseek-v4-flash`, `deepseek-v4-pro` (1.6T MoE), `deepseek-r1-0528` (`1.5b`–`70b`) | **1x 8GB–24GB GPU + Host RAM** |
-| **Alibaba Qwen** | `qwen3-coder-30b`, `qwen3-coder-480b`, `qwen-3.8-27b`, `qwen3.8-max` (MoE) | **1x 12GB–24GB GPU / Mac** |
-| **Google** | `gemma-4-31b` (Dense), `gemma-4-26b` (MoE), `gemma-2-27b` | **1x 8GB–16GB GPU / Mac** |
+| **Alibaba Qwen** | `qwen-2.5-coder` (`7b` & `32b`), `qwen-3.8-27b`, `qwen3.8-max` (MoE) | **1x 12GB–24GB GPU / Mac** |
+| **Google** | `gemma-2-27b`, `gemma-2-9b`, `gemma-4-26b` (MoE) | **1x 8GB–16GB GPU / Mac** |
 | **Mistral AI** | `mistral-large-3`, `mistral-small-4` (24B), `mistral-small-24b` | **1x 8GB–24GB GPU / Mac** |
-| **Zhipu / Moonshot** | `glm-5.3-753b` (1M Ctx), `kimi-k3` (2M Ctx), `kimi-k2.6` (1.04T MoE) | **1x 24GB GPU + Host RAM** |
+| **Zhipu / Moonshot** | `glm-5.3-730b` (1M Ctx), `kimi-k3` (2.8T MoE / 2M Ctx), `kimi-k2.6` (1.04T MoE) | **1x 24GB GPU + Host RAM** |
 | **OpenAI & NVIDIA** | `gpt-oss-20b` (3.6B active / runs in 8GB VRAM), `nemotron-3-super/ultra` | **1x 8GB–24GB GPU / Mac** |
 | **Microsoft** | `phi-4` (14B), `phi-4-mini` | **1x 8GB–16GB GPU / Mac** |
 

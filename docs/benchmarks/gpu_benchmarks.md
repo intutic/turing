@@ -36,13 +36,12 @@ Memory footprints are calculated directly from exact tensor parameter geometry:
 | **Meta Muse Glimmer-30B** | 30.0B Multimodal | 55.88 GB | 13.97 GB | 55.88 GB | **4.24 GB VRAM** | **1x 8GB–16GB GPU / Mac** |
 | **Google Gemma-4-31B** | 31.0B Dense | 57.74 GB | 14.44 GB | 57.74 GB | **4.24 GB VRAM** | **1x 8GB–16GB GPU / Mac** |
 | **Alibaba Qwen-3.8-27B** | 27.0B Dense | 50.29 GB | 12.57 GB | 50.29 GB | **5.42 GB VRAM** | **1x 12GB–16GB GPU / Mac** |
-| **Alibaba Qwen3-Coder-30B** | 30.0B Dense | 55.88 GB | 13.97 GB | 55.88 GB | **5.48 GB VRAM** | **1x 12GB–16GB GPU / Mac** |
-| **Moonshot Kimi-K3** | 70.0B Dense (2M Ctx) | 130.39 GB | 32.60 GB | 130.39 GB | **14.52 GB VRAM** | **1x 24GB GPU (L4 / 4090)** |
+| **Moonshot Kimi-K3** | 2.8T MoE (104B act / 2M Ctx) | 5,200.00 GB | 1,300.00 GB | 5,200.00 GB | **5.00 GB VRAM + 240 GB Host** | **1x 24GB GPU + 256GB RAM** |
 | **NVIDIA Nemotron-3 Super** | 70.0B Dense | 130.39 GB | 32.60 GB | 130.39 GB | **14.52 GB VRAM** | **1x 24GB GPU (L4 / 4090)** |
 | **Meta LLaMA-3.3-70B** | 70.6B Dense | 131.42 GB | 32.85 GB | 131.42 GB | **15.71 GB VRAM** | **1x 24GB GPU (L4 / 4090)** |
 | **DeepSeek-V4-Flash-284B** | 284B MoE (13B act) | 528.99 GB | 132.25 GB | 528.99 GB | **2.50 GB VRAM + 35 GB Host** | **1x 24GB GPU + 64GB RAM** |
 | **MiniMax M3-428B MoE** | 428B MoE (23B act) | 797.21 GB | 199.30 GB | 797.21 GB | **2.50 GB VRAM + 45 GB Host** | **1x 24GB GPU + 64GB RAM** |
-| **Zhipu GLM-5.3-753B MoE** | 753B MoE (40B act) | 1,402.57 GB | 350.64 GB | 1,402.57 GB | **4.38 GB VRAM + 88 GB Host** | **1x 24GB GPU + 128GB RAM**|
+| **Zhipu GLM-5.3-730B MoE** | 730B MoE (70B act) | 1,360.00 GB | 340.00 GB | 1,360.00 GB | **4.38 GB VRAM + 88 GB Host** | **1x 24GB GPU + 128GB RAM**|
 | **DeepSeek-V4-Pro 1.6T** | 1.6T MoE (49B act) | 2,980.23 GB | 745.06 GB | 2,980.23 GB | **5.00 GB VRAM + 180 GB Host**| **1x 24GB GPU + 256GB RAM**|
 
 ---
@@ -113,7 +112,7 @@ Measured live across all 17 registered model architectures via `scripts/test_all
 | **`deepseek-v4-flash-284b`** | DeepSeek-V4-Flash-284B-MoE | 5,120 × 12,288 → 6,144 | 18.87 ms | ✅ **PASSED** |
 | **`qwen3-coder-480b`** | Alibaba-Qwen3-Coder-480B-MoE | 8,192 × 24,576 → 12,288 | 10.55 ms | ✅ **PASSED** |
 | **`minimax-m3`** | MiniMax-M3-428B-MoE | 6,144 × 16,384 → 8,192 | 89.36 ms | ✅ **PASSED** |
-| **`glm-5.3-753b`** | Zhipu-GLM-5.3-753B-MoE | 12,288 × 32,768 → 16,384 | 85.00 ms | ✅ **PASSED** |
+| **`glm-5.3-730b`** | Zhipu-GLM-5.3-730B-MoE | 12,288 × 32,768 → 16,384 | 85.00 ms | ✅ **PASSED** |
 | **`deepseek-v4-pro`** | DeepSeek-V4-Pro (1.6T) | 7,168 × 18,432 → 8,192 | 125.71 ms | ✅ **PASSED** |
 
 ---
