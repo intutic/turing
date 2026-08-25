@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langchain-turing"
+version = "0.1.0"
+description = "Official LangChain & LangGraph integration for Turing Engine"
+authors = [
+    {name = "Intutic AI", email = "support@intutic.ai"}
+]
+readme = "README.md"
+license = {text = "BSL-1.1"}
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "langchain-core>=0.2.0"
+]

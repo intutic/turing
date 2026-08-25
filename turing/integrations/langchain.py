@@ -88,6 +88,7 @@ class ChatTuring:
             content = data["choices"][0]["message"]["content"]
             return {"content": content, "raw": data}
         except urllib.error.URLError as e:
+            # Provide helpful diagnostics if server is offline
             raise ConnectionError(
                 f"Failed to connect to Turing Engine at {self.base_url}. "
                 f"Ensure 'turing serve --model {self.model}' is running. Error: {e}"
