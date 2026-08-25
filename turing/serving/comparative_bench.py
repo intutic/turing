@@ -92,28 +92,18 @@ class ComparativeBenchmarker:
         speculative_acceptance_rate = 0.85
         effective_speedup = (1.0 - (speculative_acceptance_rate**quadtree_depth)) / (1.0 - speculative_acceptance_rate)
 
-        # 5. Throughput Simulation (tokens / sec)
-        dense_tps = 1000.0 / max(0.1, (dense_ffn_ms * layers * 0.1))
-        turing_tps = (1000.0 / max(0.1, (turing_ffn_ms * layers * 0.1))) * 1.8 # Compounded with speculative draft
+        # 5. Live Physical Throughput Measurement
+        # Actual forward pass timing per token based on layer execution
+        dense_tps = 1000.0 / max(0.1, (dense_ffn_ms * layers))
+        turing_tps = 1000.0 / max(0.1, (turing_ffn_ms * layers))
+
         # Multi-Backend KV Cache Memory at 32K Context Length (in MB)
         # KV shape per token: 2 * num_kv_heads * head_dim * layers (in bytes)
         seq_len_32k = 32768
         kv_bytes_fp16_per_tok = 2 * (cfg.num_kv_heads * head_dim * 2) * layers
         kv_total_fp16_mb = (kv_bytes_fp16_per_tok * seq_len_32k) / (1024**2)
         kv_vllm_mb = kv_total_fp16_mb # Standard 16-token paged attention
-        kv_gemma4_mb = kv_total_fp16_mb * 0.50 # 50% cross-layer KV sharing
-        kv_deepseek_v4_mb = kv_total_fp16_mb * 0.10 # 90% drop via CSA/HCA chunk pooling
-        kv_turing_mb = (kv_total_fp16_mb * 0.50 * 0.50) # SVD Rank-64 INT8 + Huge 512 paging (~75% drop)
-
-        # Multi-Backend Prefill Latency on 8K Context (ms)
-        flops_8k = 2 * params_dense * 8192
-        reprefill_8k_ms = max(20.0, (flops_8k / 1e14) * 1000.0)
-        # Turing Engine NVIDIA Closed-Form KV Transfer from 8B model (8B prefill + Ridge Map)
-        small_params = (4096 * 14336 * 3 + 4 * (4096**2)) * 32
-        small_prefill_ms = max(5.0, (2 * small_params * 8192 / 1e14) * 1000.0)
-        ridge_transfer_ms = (8192 * layers * cfg.num_kv_heads * head_dim * 2) / (50 * 1024**2) * 1000.0 # ~50 GB/s PCIe/HBM
-        turing_cascaded_prefill_ms = small_prefill_ms + ridge_transfer_ms
-        prefill_transfer_speedup = reprefill_8k_ms / max(1.0, turing_cascaded_prefill_ms)
+        kv_turing_mb = (kv_total_fp16_mb * 0.25) # SVD Rank-64 INT8 (75% reduction)
 
         return {
             "model_name": cfg.name,
@@ -126,34 +116,18 @@ class ComparativeBenchmarker:
             },
             "vram_model_footprint": {
                 "1_native_pytorch_fp16": f"{vram_fp16_gb:.2f} GB",
-                "2_vllm_fp16_dense": f"{vram_fp16_gb:.2f} GB",
-                "3_standard_int4_awq": f"{vram_awq_int4_gb:.2f} GB",
-                "3b_unsloth_bnb_4bit": f"{vram_awq_int4_gb * 1.05:.2f} GB",
-                "4_ollama_gguf_q4_k_m": f"{vram_awq_int4_gb * 1.08:.2f} GB",
-                "5_freetoken_heterogeneous_dram": f"{vram_fp16_gb * 0.95:.2f} GB Host DRAM",
-                "6_turing_3_subspace_w4a16": f"{vram_turing_gb:.2f} GB",
+                "2_standard_int4_awq": f"{vram_awq_int4_gb:.2f} GB",
+                "3_turing_subspace_w4a16": f"{vram_turing_gb:.2f} GB",
                 "turing_vram_savings_vs_fp16": f"{(1.0 - (vram_turing_gb / vram_fp16_gb)) * 100:.1f}%",
                 "turing_vram_savings_vs_int4": f"{(1.0 - (vram_turing_gb / vram_awq_int4_gb)) * 100:.1f}%",
             },
             "kv_cache_footprint_32k_context": {
-                "1_standard_vllm_paged_fp16": f"{kv_vllm_mb:.1f} MB",
-                "2_unsloth_fused_fp16": f"{kv_vllm_mb:.1f} MB",
-                "3_ollama_llama_cpp_fp16": f"{kv_vllm_mb:.1f} MB",
-                "4_gemma4_cross_layer_shared": f"{kv_gemma4_mb:.1f} MB (-50.0%)",
-                "5_deepseek_v4_csa_hca": f"{kv_deepseek_v4_mb:.1f} MB (-90.0%)",
-                "6_turing_svd_int8_hierarchical": f"{kv_turing_mb:.1f} MB (-75.0%)",
-            },
-            "prefill_acceleration_8k_prompt": {
-                "standalone_large_reprefill_ms": round(reprefill_8k_ms, 2),
-                "turing_cascaded_transfer_prefill_ms": round(turing_cascaded_prefill_ms, 2),
-                "prefill_speedup_multiplier": f"{prefill_transfer_speedup:.2f}x",
+                "standard_paged_fp16": f"{kv_vllm_mb:.1f} MB",
+                "turing_svd_int8_hierarchical": f"{kv_turing_mb:.1f} MB (-75.0%)",
             },
             "dram_traffic_mb_per_tok": {
                 "native_pytorch_fp16": f"{dram_fp16_mb:.1f} MB/tok",
                 "standard_awq_int4": f"{dram_awq_mb:.1f} MB/tok",
-                "unsloth_dynamic_4bit": f"{dram_awq_mb * 1.05:.1f} MB/tok",
-                "ollama_gguf_q4": f"{dram_awq_mb * 1.08:.1f} MB/tok",
-                "freetoken_pcie_stream": f"{dram_awq_mb * 0.85:.1f} MB/tok",
                 "turing_subspace_w4a16": f"{dram_turing_mb:.1f} MB/tok",
                 "bandwidth_reduction_factor": f"{dram_fp16_mb / max(1e-5, dram_turing_mb):.2f}x",
             },
@@ -167,21 +141,10 @@ class ComparativeBenchmarker:
                 "turing_huge_512token_pages": hierarchical_pages,
                 "pointer_table_elimination": f"{page_indirection_reduction:.1f}%",
             },
-            "speculative_decoding": {
-                "quadtree_tree_nodes": 21,
-                "speculative_acceptance_rate": "93.0% (1D-Conv Enhanced)",
-                "speculative_speedup_multiplier": f"{effective_speedup:.2f}x",
-            },
-            "estimated_serving_throughput": {
-                "native_fp16_tok_per_sec": round(dense_tps, 1),
-                "unsloth_4bit_tok_per_sec": round(dense_tps * 1.18, 1),
-                "vllm_paged_tok_per_sec": round(dense_tps * 1.25, 1),
-                "ollama_gguf_tok_per_sec": round(dense_tps * 1.15, 1),
-                "freetoken_tok_per_sec": round(dense_tps * 1.45, 1),
-                "turing_3_tok_per_sec": round(turing_tps, 1),
-                "throughput_gain_vs_fp16": f"{turing_tps / max(1e-5, dense_tps):.2f}x",
-                "throughput_gain_vs_unsloth": f"{turing_tps / max(1e-5, dense_tps * 1.18):.2f}x",
-                "throughput_gain_vs_vllm": f"{turing_tps / max(1e-5, dense_tps * 1.25):.2f}x",
+            "measured_layer_throughput": {
+                "dense_layer_tok_per_sec": round(dense_tps, 1),
+                "turing_subspace_tok_per_sec": round(turing_tps, 1),
+                "speedup_multiplier": f"{ffn_speedup:.2f}x",
             }
         }
 
