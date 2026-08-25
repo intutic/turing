@@ -31,5 +31,11 @@ def test_expanded_model_aliases():
     assert RealHuggingFaceLoader.resolve_model_id("qwen-2.5-coder-7b") == "Qwen/Qwen2.5-Coder-7B-Instruct"
     assert RealHuggingFaceLoader.resolve_model_id("phi-4-mini") == "microsoft/Phi-4-mini-instruct"
 
+    # Test Chinese Frontier Labs (GLM-4, InternLM3, MiniCPM3, Yi-1.5)
+    assert RealHuggingFaceLoader.resolve_model_id("glm-4-9b") == "THUDM/glm-4-9b-chat"
+    assert RealHuggingFaceLoader.resolve_model_id("internlm3-8b") == "internlm/internlm3-8b-instruct"
+    assert RealHuggingFaceLoader.resolve_model_id("minicpm3-4b") == "openbmb/MiniCPM3-4B"
+    assert RealHuggingFaceLoader.resolve_model_id("yi-1.5-34b") == "01-ai/Yi-1.5-34B-Chat"
+
     # Test fallback on raw repo identifier
     assert RealHuggingFaceLoader.resolve_model_id("custom/my-fine-tuned-model") == "custom/my-fine-tuned-model"

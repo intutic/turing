@@ -76,6 +76,11 @@ class RealHuggingFaceLoader:
         "mistral-small-24b": "mistralai/Mistral-Small-24B-Instruct-2501",
         "phi-4": "microsoft/phi-4",
         "phi-4-mini": "microsoft/Phi-4-mini-instruct",
+        "glm-4-9b": "THUDM/glm-4-9b-chat",
+        "internlm3-8b": "internlm/internlm3-8b-instruct",
+        "minicpm3-4b": "openbmb/MiniCPM3-4B",
+        "yi-1.5-9b": "01-ai/Yi-1.5-9B-Chat",
+        "yi-1.5-34b": "01-ai/Yi-1.5-34B-Chat",
     }
 
     @classmethod
