@@ -3,7 +3,7 @@
 **Serve Frontier 70B+ Models on a Single Consumer GPU (24GB) or Mac Workstation with 75% Less Memory.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v0.1.4](https://img.shields.io/badge/Release-v0.1.4-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.4)
+[![Release: v0.1.5](https://img.shields.io/badge/Release-v0.1.5-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.5)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
 [![Tests: 94/94 Passing](https://img.shields.io/badge/Tests-94%2F94%20Passing-brightgreen.svg)]()
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
@@ -132,13 +132,13 @@ For researchers and infrastructure engineers looking for deep architectural spec
 
 ---
 
-## 📦 Pre-Built Binary Wheels (v0.1.4)
+## 📦 Pre-Built Binary Wheels (v0.1.5)
 
-Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.1.4](https://github.com/intutic/turing/releases/tag/v0.1.4):
+Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.1.5](https://github.com/intutic/turing/releases/tag/v0.1.5):
 
 ```bash
 # Install directly from release wheel:
-pip install https://github.com/intutic/turing/releases/download/v0.1.4/turing_engine-0.1.4-cp311-cp311-macosx_15_0_arm64.whl
+pip install https://github.com/intutic/turing/releases/download/v0.1.5/turing_engine-0.1.5-cp311-cp311-macosx_15_0_arm64.whl
 ```
 
 ---

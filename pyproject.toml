@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turing-engine"
-version = "0.1.4"
+version = "0.1.5"
 description = "Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Runtime"
 authors = [
     {name = "Ishan Gupta", email = "support@intutic.ai"}
