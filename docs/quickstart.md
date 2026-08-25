@@ -16,10 +16,10 @@ Get up and running with Turing Engine in under 30 seconds.
     
     ```bash
     # Direct wheel download for Linux x86_64:
-    pip install https://github.com/intutic/turing/releases/download/v0.1.1/turing_engine-0.1.1-cp311-cp311-linux_x86_64.whl
+    pip install https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp311-cp311-linux_x86_64.whl
 
     # Direct wheel download for macOS Apple Silicon (universal2):
-    pip install https://github.com/intutic/turing/releases/download/v0.1.1/turing_engine-0.1.1-cp311-cp311-macosx_10_9_universal2.whl
+    pip install https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp311-cp311-macosx_10_9_universal2.whl
     ```
 
 === "3. Docker Container"

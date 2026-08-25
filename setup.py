@@ -90,7 +90,7 @@ ext_modules = [
 
 setup(
     name="turing-engine",
-    version="0.1.1",
+    version="0.1.2",
     author="Ishan Gupta",
     author_email="support@intutic.ai",
     description="Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Runtime",
