@@ -122,10 +122,10 @@ class SubspaceAttention(nn.Module):
 
         # Causal mask if prefilling
         if seq_len > 1:
-            causal_mask = torch.triu(torch.full((seq_len, k_expanded.shape[2]), float("-inf"), device=scores.device), diagonal=1 + start_pos)
+            causal_mask = torch.triu(torch.full((seq_len, k_expanded.shape[2]), float("-inf"), device=scores.device, dtype=scores.dtype), diagonal=1 + start_pos)
             scores = scores + causal_mask
 
-        attn_weights = F.softmax(scores, dim=-1, dtype=torch.float32).to(q.dtype)
+        attn_weights = F.softmax(scores.float(), dim=-1).to(v_expanded.dtype)
         attn_out = torch.matmul(attn_weights, v_expanded) # [Batch, Heads, SeqLen, HeadDim]
 
         attn_out = attn_out.transpose(1, 2).contiguous().view(batch, seq_len, self.num_heads * self.head_dim)
