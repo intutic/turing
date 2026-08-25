@@ -3,7 +3,7 @@
 **Serve Frontier 70B+ Models on a Single Consumer GPU (24GB) or Mac Workstation with 75% Less Memory.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v0.1.5](https://img.shields.io/badge/Release-v0.1.5-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.5)
+[![Release: v0.1.6](https://img.shields.io/badge/Release-v0.1.6-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.6)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
 [![Tests: 94/94 Passing](https://img.shields.io/badge/Tests-94%2F94%20Passing-brightgreen.svg)]()
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
@@ -21,34 +21,37 @@ pip install turing-engine
 ### 2. Instant Terminal Chat (No Setup Needed!)
 Chat with real pretrained weights directly in your terminal:
 ```bash
-# Chat with SmolLM2 or DeepSeek-R1:
+# Chat with SmolLM2, DeepSeek-R1, or LLaMA 4 Scout:
 turing chat --model smollm2
 turing chat --model deepseek-r1-1.5b
+turing chat --model llama-4-scout
+turing chat --model qwen3-coder-30b
 ```
 
 ### 3. Launch an OpenAI & Anthropic-Compatible Serving Server
 ```bash
 # Serve models locally on port 8000:
-turing serve --model smollm2 --port 8000
+turing serve --model gemma-4-31b --port 8000
 turing serve --model deepseek-r1-7b --port 8000
 ```
 Point any chat UI (Open WebUI, LibreChat, Chatbox, Cursor) to `http://localhost:8000/v1` and you're chatting!
 
 ---
 
-## 🌐 Supported Frontier Models
+## 🌐 Supported Frontier & MoE Models
 
 Turing Engine natively ingests, compresses, and serves open weights directly from Hugging Face:
 
-| Lab / Family | Models Supported | Single-GPU Hardware Target |
+| Lab / Family | Flagship & Frontier Models Supported | Single-GPU Hardware Target |
 | :--- | :--- | :--- |
-| **DeepSeek** | `deepseek-r1-1.5b` to `70b`, `deepseek-v3` | 1x 6GB–24GB GPU / Mac |
-| **Alibaba Qwen** | `qwen-coder-32b`, `qwen-coder-7b`, `qwen-72b`, `qwen-14b`, `qwen-7b` | 1x 12GB–24GB GPU / Mac |
-| **Meta AI** | `llama-3.3-70b`, `llama-3.1-70b`, `llama-3.1-8b`, `llama-3.2-1b/3b` | 1x 8GB–24GB GPU / Mac |
-| **Mistral AI** | `mistral-small-24b`, `mistral-7b`, `ministral-8b`, `mistral-large-123b` | 1x 16GB–24GB GPU / Mac |
-| **Google** | `gemma-2-27b`, `gemma-2-9b`, `gemma-2-2b` | 1x 8GB–24GB GPU / Mac |
-| **Zhipu / OpenBMB** | `glm-4-9b`, `internlm3-8b`, `minicpm3-4b`, `yi-1.5-34b` | 1x 8GB–24GB GPU / Mac |
-| **Microsoft** | `phi-4` (14B), `phi-4-mini` | 1x 8GB–16GB GPU / Mac |
+| **Meta AI** | `llama-4-scout`, `llama-4-maverick`, `muse-glimmer-30b`, `llama-3.3-70b` | **1x 8GB–24GB GPU / Mac** |
+| **DeepSeek** | `deepseek-v4-flash`, `deepseek-v4-pro` (1.6T MoE), `deepseek-r1-0528` (`1.5b`–`70b`) | **1x 8GB–24GB GPU + Host RAM** |
+| **Alibaba Qwen** | `qwen3-coder-30b`, `qwen3-coder-480b`, `qwen-3.8-27b`, `qwen3.8-max` (MoE) | **1x 12GB–24GB GPU / Mac** |
+| **Google** | `gemma-4-31b` (Dense), `gemma-4-26b` (MoE), `gemma-2-27b` | **1x 8GB–16GB GPU / Mac** |
+| **Mistral AI** | `mistral-large-3`, `mistral-small-4` (24B), `mistral-small-24b` | **1x 8GB–24GB GPU / Mac** |
+| **Zhipu / Moonshot** | `glm-5.3-753b` (1M Ctx), `kimi-k3` (2M Ctx), `kimi-k2.6` (1.04T MoE) | **1x 24GB GPU + Host RAM** |
+| **OpenAI & NVIDIA** | `gpt-oss-20b` (3.6B active / runs in 8GB VRAM), `nemotron-3-super/ultra` | **1x 8GB–24GB GPU / Mac** |
+| **Microsoft** | `phi-4` (14B), `phi-4-mini` | **1x 8GB–16GB GPU / Mac** |
 
 ---
 
@@ -132,13 +135,13 @@ For researchers and infrastructure engineers looking for deep architectural spec
 
 ---
 
-## 📦 Pre-Built Binary Wheels (v0.1.5)
+## 📦 Pre-Built Binary Wheels (v0.1.6)
 
-Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.1.5](https://github.com/intutic/turing/releases/tag/v0.1.5):
+Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.1.6](https://github.com/intutic/turing/releases/tag/v0.1.6):
 
 ```bash
 # Install directly from release wheel:
-pip install https://github.com/intutic/turing/releases/download/v0.1.5/turing_engine-0.1.5-cp311-cp311-macosx_15_0_arm64.whl
+pip install https://github.com/intutic/turing/releases/download/v0.1.6/turing_engine-0.1.6-cp311-cp311-macosx_15_0_arm64.whl
 ```
 
 ---

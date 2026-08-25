@@ -16,7 +16,7 @@ Get up and running with Turing Engine in under 30 seconds.
     
     ```bash
     # Direct wheel download for macOS Apple Silicon (arm64):
-    pip install https://github.com/intutic/turing/releases/download/v0.1.5/turing_engine-0.1.5-cp311-cp311-macosx_15_0_arm64.whl
+    pip install https://github.com/intutic/turing/releases/download/v0.1.6/turing_engine-0.1.6-cp311-cp311-macosx_15_0_arm64.whl
     ```
 
 === "3. Source Build"
