@@ -55,6 +55,21 @@ Turing Engine natively ingests, compresses, and serves open weights directly fro
 
 ---
 
+## ⚡ Universal Cross-Vendor Hardware Support
+
+Turing Engine auto-discovers and accelerates inference on all major silicon architectures:
+
+| Hardware Vendor | Supported Accelerators | Acceleration Backend | Hardware Optimization |
+| :--- | :--- | :--- | :--- |
+| **NVIDIA** | RTX 3090 / 4090 / 5090, L4, A100, H100 | **CUDA + Triton 3.x** | Custom Tensor Core SwiGLU & Flash-Tree Triton kernels |
+| **AMD** | Radeon RX 7900 XTX / 8000, Instinct MI250X / MI300X | **ROCm (HIP) + Triton** | Wave32 (RDNA) / Wave64 (CDNA) Matrix Core heuristics |
+| **Intel** | Intel Arc A770 / A750 / B580 Battlemage, Max 1550 | **Intel XPU (SYCL / OneAPI)**| Intel XMX Matrix Engines + IPEX bindings |
+| **Apple** | M1 / M2 / M3 / M4 (Pro, Max, Ultra) | **Metal (MPS)** | Metal Performance Shaders + Vectorized Subspace Slicing |
+| **Cross-Vendor** | Intel, AMD APUs, Qualcomm Adreno, ARM Mali | **Vulkan Compute** | SPIR-V Compute Shaders + Host-Visible Coherent Memory |
+| **x86_64 / ARM CPU** | Intel Xeon, AMD EPYC, Ampere Altra, Apple Silicon | **C++20 AVX2 / NEON SIMD** | 64-byte aligned SIMD fused FMA + zero-copy `mmap` |
+
+---
+
 ## 🧠 Why Turing Engine? (3 Core Advantages)
 
 ```

@@ -7,6 +7,71 @@ import torch
 import torch.nn.functional as F
 
 HAS_CUDA = torch.cuda.is_available()
+IS_AMD_ROCM = torch.cuda.is_available() and getattr(torch.version, "hip", None) is not None
+IS_NVIDIA_CUDA = torch.cuda.is_available() and getattr(torch.version, "hip", None) is None
+IS_INTEL_XPU = hasattr(torch, "xpu") and torch.xpu.is_available()
+IS_APPLE_METAL = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+IS_VULKAN = hasattr(torch, "is_vulkan_available") and torch.is_vulkan_available()
+
+def get_hardware_backend_info() -> dict:
+    """
+    Returns comprehensive hardware probe metadata across all accelerators.
+    """
+    if IS_NVIDIA_CUDA:
+        dev_name = torch.cuda.get_device_name(0)
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        return {
+            "backend": "cuda",
+            "vendor": "NVIDIA",
+            "device_name": dev_name,
+            "vram_gb": round(vram_gb, 2),
+            "triton_acceleration": HAS_TRITON,
+            "instruction_set": "Tensor Cores (CUDA / PTX)",
+        }
+    elif IS_AMD_ROCM:
+        dev_name = torch.cuda.get_device_name(0)
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+        return {
+            "backend": "rocm",
+            "vendor": "AMD",
+            "device_name": dev_name,
+            "vram_gb": round(vram_gb, 2),
+            "triton_acceleration": HAS_TRITON,
+            "instruction_set": "Matrix Core (HIP / CDNA / RDNA)",
+        }
+    elif IS_INTEL_XPU:
+        dev_name = torch.xpu.get_device_name(0)
+        return {
+            "backend": "xpu",
+            "vendor": "Intel",
+            "device_name": dev_name,
+            "triton_acceleration": False,
+            "instruction_set": "Intel XMX / SYCL / OneAPI",
+        }
+    elif IS_APPLE_METAL:
+        return {
+            "backend": "mps",
+            "vendor": "Apple",
+            "device_name": "Apple Silicon (Metal Performance Shaders)",
+            "triton_acceleration": False,
+            "instruction_set": "Metal GPU Matrix Engines (MPS)",
+        }
+    elif IS_VULKAN:
+        return {
+            "backend": "vulkan",
+            "vendor": "Cross-Vendor",
+            "device_name": "Vulkan SPIR-V Compute Device",
+            "triton_acceleration": False,
+            "instruction_set": "SPIR-V Compute Shaders",
+        }
+    else:
+        return {
+            "backend": "cpu",
+            "vendor": "Host CPU",
+            "device_name": "x86_64 / ARM CPU",
+            "triton_acceleration": False,
+            "instruction_set": "C++20 AVX2 / AVX-512 / NEON SIMD",
+        }
 
 try:
     from .triton_swiglu import launch_triton_swiglu

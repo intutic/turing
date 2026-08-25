@@ -63,13 +63,34 @@ class TuringConfig:
 
     def resolve_device(self) -> torch.device:
         if self.device == "auto":
+            # 1. NVIDIA CUDA or AMD ROCm
             if torch.cuda.is_available():
                 return torch.device("cuda")
+            # 2. Intel XPU (SYCL / OneAPI)
+            elif hasattr(torch, "xpu") and torch.xpu.is_available():
+                return torch.device("xpu")
+            # 3. Apple Silicon Metal (MPS)
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
                 return torch.device("mps")
+            # 4. Vulkan Compute
+            elif hasattr(torch, "is_vulkan_available") and torch.is_vulkan_available():
+                return torch.device("vulkan")
+            # 5. CPU Fallback (AVX2 SIMD)
             else:
                 return torch.device("cpu")
         return torch.device(self.device)
+
+    @property
+    def is_rocm(self) -> bool:
+        return torch.cuda.is_available() and getattr(torch.version, "hip", None) is not None
+
+    @property
+    def is_intel_xpu(self) -> bool:
+        return hasattr(torch, "xpu") and torch.xpu.is_available()
+
+    @property
+    def is_metal(self) -> bool:
+        return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 
     def resolve_dtype(self) -> torch.dtype:
         if self.precision in ("fp16", "float16"):

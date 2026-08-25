@@ -87,4 +87,6 @@ nav:
       - Ray Serve: integrations/ray_serve.md
       - Modal Labs: integrations/modal.md
       - RunPod: integrations/runpod.md
+  - Hardware & Accelerators:
+      - Universal Cross-Vendor Support: hardware/universal_backends.md
   - Licensing & Enterprise: licensing.md
