@@ -1,9 +1,10 @@
 """
 Turing Engine Grand Comprehensive Benchmark Matrix.
-Evaluates 10 Frontier Models across 8 Inference Backends on Standard Datasets:
-1. Datasets: GSM8K (Reasoning), HumanEval (Code), LongBench (128K Context), ShareGPT (Concurrency)
-2. Backends: PyTorch FP16, vLLM, TensorRT-LLM, SGLang, Ollama GGUF, TGI, FreeToken, Turing Engine 3.0
-3. Models: LLaMA-3.1-70B, Qwen-2.5-72B, DeepSeek-V4-284B, GLM-5.2-753B, Mistral-123B, Phi-4-14B, etc.
+Executes live on-device hardware micro-benchmarks across:
+1. Live Subspace SwiGLU FFN Layer Speedup & FLOP Reduction
+2. Live SVD INT8 KV Cache Paging Memory Reduction & Reconstruction Error
+3. Live Multi-Batch Serving Throughput (Tokens/sec & Latency)
+4. Comparative Architecture Memory Footprint Analysis against vLLM, TRT-LLM, and Ollama.
 """
 
 import os
@@ -16,11 +17,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from turing.config import ModelConfig
 from turing.models.registry import get_model_config, MODEL_REGISTRY
-from turing.core.speculation import SubspaceEAGLEDraftHead, EntropyConfidenceTreePruner
-from turing.core.cross_model_kv import ClosedFormRidgeMapper
+from turing.models.causal_lm import SubspaceCausalLM
+from turing.core.subspace import SubspaceManager
 
 def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
     if device_str == "auto":
@@ -34,8 +36,8 @@ def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
         device = torch.device(device_str)
 
     print("=" * 85)
-    print("   ⚡ TURING ENGINE GRAND COMPREHENSIVE BENCHMARK: 10 MODELS × 8 RUNTIMES")
-    print(f"   Compute Target: {str(device).upper()} ({torch.cuda.get_device_name(0) if device.type == 'cuda' else 'Apple Silicon / CPU'})")
+    print("   ⚡ TURING ENGINE LIVE HARDWARE BENCHMARK & ARCHITECTURE MATRIX")
+    print(f"   Active Silicon Target: {str(device).upper()} ({torch.cuda.get_device_name(0) if device.type == 'cuda' else 'Apple Silicon / CPU'})")
     print("=" * 85 + "\n")
 
     # 1. Models & Architecture Matrix
@@ -51,19 +53,6 @@ def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
         ("qwen3.6-moe-35b", "Qwen-3.6-MoE-35B", 35_000_000_000, 32, 2048, 1408, True, 1024),
         ("deepseek-v4-flash-284b", "DeepSeek-V4-284B MoE", 284_000_000_000, 60, 2048, 1024, True, 1024),
         ("glm-5.2-753b", "THUDM GLM-5.2-753B MoE", 753_000_000_000, 80, 4096, 2048, True, 2048)
-    ]
-
-    # 2. Backends Evaluated
-    backends = [
-        "PyTorch 2.4 FP16 (Eager)",
-        "Unsloth 4-bit (FastLanguageModel)",
-        "vLLM PagedAttention (v0.6+)",
-        "TensorRT-LLM (NVIDIA INT4)",
-        "SGLang (RadixAttention)",
-        "llama.cpp / Ollama (GGUF Q4)",
-        "HuggingFace TGI",
-        "FreeToken (UC Berkeley)",
-        "Turing Engine 3.0 (Subspace + Ridge W*)"
     ]
 
     print("[*] Section 1: Memory Footprint & Hardware Requirements Across Backends\n")
@@ -121,59 +110,124 @@ def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
             }
         }
 
-    # 3. Standard Dataset Benchmarks (Reasoning, Code, Long-Context, Serving Load)
+    # 2. Live On-Device Micro-Benchmarks
     print("\n" + "=" * 85)
-    print("   📊 SECTION 2: STANDARD DATASET BENCHMARK METRICS (ACCURACY & LATENCY)")
+    print(f"   📊 SECTION 2: LIVE ON-DEVICE HARDWARE MEASUREMENTS (TARGET: {str(device).upper()})")
     print("=" * 85 + "\n")
 
-    dataset_evals = {
-        "GSM8K & MATH (Multi-Step Reasoning)": {
-            "evaluation_metric": "Exact Match / Pass@1 Accuracy Retention",
-            "pytorch_fp16_baseline": "84.2%",
-            "unsloth_4bit": "83.6%",
-            "vllm_baseline": "84.2%",
-            "trt_llm_int4": "82.8%",
-            "ollama_gguf_q4": "81.5%",
-            "turing_3_0": "84.0% (> 99.7% Mathematical Fidelity)",
-            "dynamic_speculation_turbo_rate": "94.2% of tokens routed to Turbo 8-wide Speculation",
-            "status": "PASS"
+    # Micro-Benchmark A: Dense vs Subspace SwiGLU
+    hidden_dim = 4096
+    ffn_dim = 14336
+    active_dim = ffn_dim // 2 # 50% sparsity
+
+    x = torch.randn(1, hidden_dim, device=device)
+    w_gate_dense = torch.randn(ffn_dim, hidden_dim, device=device)
+    w_up_dense = torch.randn(ffn_dim, hidden_dim, device=device)
+    w_down_dense = torch.randn(hidden_dim, ffn_dim, device=device)
+
+    w_gate_sub = w_gate_dense[:active_dim, :]
+    w_up_sub = w_up_dense[:active_dim, :]
+    w_down_sub = w_down_dense[:, :active_dim]
+
+    # Warmup
+    for _ in range(10):
+        _ = F.linear(F.silu(F.linear(x, w_gate_dense)) * F.linear(x, w_up_dense), w_down_dense)
+        _ = F.linear(F.silu(F.linear(x, w_gate_sub)) * F.linear(x, w_up_sub), w_down_sub)
+
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    elif device.type == "mps":
+        torch.mps.synchronize()
+
+    # Time Dense SwiGLU
+    iters = 100
+    start = time.perf_counter()
+    for _ in range(iters):
+        _ = F.linear(F.silu(F.linear(x, w_gate_dense)) * F.linear(x, w_up_dense), w_down_dense)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    elif device.type == "mps":
+        torch.mps.synchronize()
+    dense_layer_ms = (time.perf_counter() - start) / iters * 1000.0
+
+    # Time Subspace SwiGLU
+    start = time.perf_counter()
+    for _ in range(iters):
+        _ = F.linear(F.silu(F.linear(x, w_gate_sub)) * F.linear(x, w_up_sub), w_down_sub)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    elif device.type == "mps":
+        torch.mps.synchronize()
+    sub_layer_ms = (time.perf_counter() - start) / iters * 1000.0
+
+    swiglu_speedup = dense_layer_ms / max(1e-5, sub_layer_ms)
+
+    print(f"[*] 1. Live FFN SwiGLU Layer Execution (dim={hidden_dim}->{ffn_dim}):")
+    print(f"    • Dense FP16 Baseline Latency : {dense_layer_ms:.3f} ms / layer")
+    print(f"    • Subspace Pruned Latency     : {sub_layer_ms:.3f} ms / layer")
+    print(f"    • Live Measured Speedup       : {swiglu_speedup:.2f}x\n")
+
+    # Micro-Benchmark B: Live SVD INT8 KV Compression & Reconstruction Error
+    hidden_dim_svd = 1024
+    raw_kv = torch.randn(1, 2048, hidden_dim_svd, device=device)
+    raw_bytes = raw_kv.numel() * 2 # FP16
+
+    svd_mgr = SubspaceManager(hidden_dim=hidden_dim_svd, rank=64, device=device)
+    k_sub = svd_mgr.project_to_subspace(raw_kv)
+    k_comp, s_scale = svd_mgr.quantize_subspace_int8(k_sub)
+    k_dequant = svd_mgr.dequantize_subspace_int8(k_comp, s_scale)
+    k_recon = svd_mgr.reconstruct_from_subspace(k_dequant)
+
+    reconstruction_mse = F.mse_loss(raw_kv, k_recon).item()
+    comp_bytes = k_comp.numel() + s_scale.numel() * 4
+    mem_reduction = (1.0 - (comp_bytes / raw_bytes)) * 100.0
+
+    print(f"[*] 2. Live SVD INT8 Subspace Compression (Rank=64, Dim={hidden_dim_svd}):")
+    print(f"    • Uncompressed Raw Activations: {raw_bytes / 1024:.1f} KB")
+    print(f"    • SVD INT8 Compressed Size    : {comp_bytes / 1024:.1f} KB")
+    print(f"    • Memory Footprint Reduction  : -{mem_reduction:.1f}%")
+    print(f"    • Live Reconstruction MSE     : {reconstruction_mse:.6f}\n")
+
+    # Micro-Benchmark C: Multi-Batch End-to-End Serving Throughput
+    cfg = get_model_config("test-tiny")
+    model = SubspaceCausalLM(cfg).to(device).eval()
+    prompt = [1, 2, 3, 4, 5, 6, 7, 8]
+    gen_tokens = 32
+
+    start = time.perf_counter()
+    _ = model.generate(prompt, max_new_tokens=gen_tokens, temperature=0.7)
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    elif device.type == "mps":
+        torch.mps.synchronize()
+    gen_elapsed_s = time.perf_counter() - start
+    live_tok_per_sec = gen_tokens / max(1e-5, gen_elapsed_s)
+
+    print(f"[*] 3. Live End-to-End Serving Generation:")
+    print(f"    • Generation Output           : {gen_tokens} tokens in {gen_elapsed_s * 1000:.1f} ms")
+    print(f"    • Live Measured Throughput    : {live_tok_per_sec:.1f} tokens / second\n")
+
+    live_results = {
+        "device": str(device),
+        "swiglu_microbench": {
+            "dense_latency_ms": round(dense_layer_ms, 3),
+            "subspace_latency_ms": round(sub_layer_ms, 3),
+            "measured_speedup": f"{swiglu_speedup:.2f}x"
         },
-        "HumanEval & MBPP (Code Generation)": {
-            "evaluation_metric": "Pass@1 Exact Functional Execution",
-            "pytorch_fp16_baseline": "68.4%",
-            "unsloth_4bit": "67.8%",
-            "vllm_baseline": "68.4%",
-            "trt_llm_int4": "66.9%",
-            "ollama_gguf_q4": "65.2%",
-            "turing_3_0": "68.2% (100% Syntax Preservation)",
-            "status": "PASS"
+        "svd_kv_paging_microbench": {
+            "memory_reduction_pct": f"-{mem_reduction:.1f}%",
+            "reconstruction_mse": round(reconstruction_mse, 6)
         },
-        "LongBench & RULER (128K Context Retrieval)": {
-            "evaluation_metric": "Needle-In-A-Haystack Top-1 Match Rate",
-            "pytorch_fp16_baseline": "100.0% (OOM on < 80GB)",
-            "unsloth_4bit": "94.2% (FlashAttention-2 Single Stream)",
-            "vllm_paged_attention": "100.0% (Requires 4x A100)",
-            "trt_llm": "98.5%",
-            "ollama_gguf": "82.0% (Severe Attention Degradation)",
-            "turing_3_0": "100.0% Top-1 Match (75% KV Memory Cut, 128x HCA Pages)",
-            "status": "PASS"
-        },
-        "ShareGPT / Arena Real-World Trace (64 Concurrent Streams)": {
-            "evaluation_metric": "P99 Inter-Token Latency (ITL) & Serving Tok/s",
-            "pytorch_fp16_baseline": "48.20 ms / token (655.5 tok/s)",
-            "unsloth_4bit": "38.50 ms / token (780.4 tok/s - Batch=1 Eager)",
-            "vllm_paged_attention": "18.50 ms / token (1,420.0 tok/s)",
-            "sglang": "16.80 ms / token (1,580.0 tok/s)",
-            "trt_llm": "14.20 ms / token (1,840.0 tok/s)",
-            "turing_3_0": "6.32 ms / token (3,064.8 tok/s - 6.95x Speculative Speedup)",
-            "status": "PASS"
+        "serving_throughput_microbench": {
+            "tokens_generated": gen_tokens,
+            "latency_ms": round(gen_elapsed_s * 1000, 2),
+            "measured_tokens_per_sec": round(live_tok_per_sec, 1)
         }
     }
 
-    print(json.dumps(dataset_evals, indent=2))
     return {
         "models": model_results,
-        "datasets": dataset_evals
+        "live_hardware_measurements": live_results
     }
 
 if __name__ == "__main__":

@@ -174,9 +174,9 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
             "X-Turing-Device": str(engine.device)
         }
 
-        # Flatten messages to pseudo-tokens (or simple ASCII encoding if tokenizer not attached)
+        # Encode messages using real tokenizer with ASCII fallback
         full_text = " ".join([m.content for m in req.messages])
-        prompt_tokens = [ord(c) % engine.model_config.vocab_size for c in full_text]
+        prompt_tokens = engine.encode_prompt(full_text)
         if not prompt_tokens:
             prompt_tokens = [1]
 
@@ -198,7 +198,7 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
                     draft_tokens=controls["draft_tokens"]
                 )
                 async for token_id in token_stream:
-                    char_repr = chr(token_id % 128) if (32 <= (token_id % 128) <= 126) else f"<{token_id}>"
+                    char_repr = engine.decode_tokens([token_id])
                     chunk_data = {
                         "id": req_id,
                         "object": "chat.completion.chunk",
@@ -247,7 +247,7 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
         async for token_id in token_stream:
             generated_tokens.append(token_id)
 
-        out_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in generated_tokens])
+        out_text = engine.decode_tokens(generated_tokens)
 
         return JSONResponse(
             content={
@@ -288,7 +288,7 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
         }
 
         full_text = AnthropicAPIHandler.extract_prompt_from_request(req)
-        prompt_tokens = [ord(c) % engine.model_config.vocab_size for c in full_text]
+        prompt_tokens = engine.encode_prompt(full_text)
         if not prompt_tokens:
             prompt_tokens = [1]
 
@@ -308,7 +308,7 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
                     draft_tokens=controls["draft_tokens"]
                 )
                 async for tok_id in token_stream:
-                    tok_str = chr(tok_id % 128) if (32 <= (tok_id % 128) <= 126) else f"<{tok_id}>"
+                    tok_str = engine.decode_tokens([tok_id])
                     yield tok_id, tok_str
 
             return StreamingResponse(
@@ -335,7 +335,7 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
         async for token_id in token_stream:
             generated_tokens.append(token_id)
 
-        out_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in generated_tokens])
+        out_text = engine.decode_tokens(generated_tokens)
         response = AnthropicAPIHandler.format_non_streaming_response(
             req=req,
             generated_text=out_text,

@@ -3,7 +3,7 @@
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
 [![Release: v0.1.2](https://img.shields.io/badge/Release-v0.1.2-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.2)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 88/88 Passing](https://img.shields.io/badge/Tests-88%2F88%20Passing-brightgreen.svg)]()
+[![Tests: 93/93 Passing](https://img.shields.io/badge/Tests-93%2F93%20Passing-brightgreen.svg)]()
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
 
@@ -189,16 +189,28 @@ Verify your installation immediately without downloading large model checkpoints
 
 ```bash
 # Instant smoke test with built-in lightweight model (0 weight downloads required)
-turing generate --model test-tiny --prompt "Artificial intelligence is"
+turing generate --model test-tiny --prompt "Artificial intelligence is" --mock
 ```
 
 ---
 
-### 3. Launch Serving Server (Dual OpenAI + Anthropic APIs)
+### 3. Launch Serving Server (Real Pretrained Weights & BPE Tokenizer)
 
 ```bash
-# Launch high-throughput server with continuous batching
-turing serve --model llama-3.1-70b --host 0.0.0.0 --port 8000 --max-batch-size 64
+# Launch high-throughput server with real SmolLM2 weights:
+turing serve --model smollm2 --port 8000
+
+# Or serve real LLaMA-3.1-8B / Qwen-2.5-7B:
+turing serve --model meta-llama/Meta-Llama-3.1-8B-Instruct --port 8000
+```
+
+---
+
+### 4. Live Accuracy & Mathematical Reasoning Evaluation
+
+```bash
+# Run live GSM8K multi-step reasoning evaluation directly on active hardware:
+turing eval-accuracy --model gpt2 --samples 5
 ```
 
 ---

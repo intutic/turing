@@ -25,11 +25,13 @@ def main():
 
     # 1. Serve
     serve_parser = subparsers.add_parser("serve", help="Launch OpenAI-compatible FastAPI serving server")
-    serve_parser.add_argument("--model", type=str, default="test-tiny", help="Model identifier")
+    serve_parser.add_argument("--model", type=str, default="smollm2", help="Model identifier (e.g. gpt2, smollm2, Qwen/Qwen2.5-0.5B, or HF repo ID)")
     serve_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, cpu, mps)")
+    serve_parser.add_argument("--sparsity", type=float, default=0.5, help="Subspace channel sparsity ratio (default: 0.5)")
     serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
+    serve_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights for isolated FLOP profiling")
 
     # 2. Bench
     bench_parser = subparsers.add_parser("bench", help="Run comprehensive hardware profiling & benchmark suite")
@@ -39,11 +41,13 @@ def main():
 
     # 3. Generate
     gen_parser = subparsers.add_parser("generate", help="Run single-prompt autoregressive text generation")
-    gen_parser.add_argument("--model", type=str, default="test-tiny", help="Model identifier")
+    gen_parser.add_argument("--model", type=str, default="smollm2", help="Model identifier (e.g. gpt2, smollm2, or HF repo ID)")
     gen_parser.add_argument("--prompt", type=str, default="Artificial intelligence is", help="Input prompt")
     gen_parser.add_argument("--max-new-tokens", type=int, default=32, help="Tokens to generate")
     gen_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
+    gen_parser.add_argument("--sparsity", type=float, default=0.5, help="Subspace channel sparsity ratio")
     gen_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
+    gen_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights")
 
     # 4. Convert
     conv_parser = subparsers.add_parser("convert", help="Export weights into .tgate4 binary container")
@@ -56,7 +60,14 @@ def main():
     niah_parser.add_argument("--context-len", type=int, default=1024, help="Context length to evaluate")
     niah_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
 
-    # 6. Compare
+    # 6. Eval Accuracy (GSM8K)
+    acc_parser = subparsers.add_parser("eval-accuracy", help="Run live GSM8K reasoning evaluation on loaded model")
+    acc_parser.add_argument("--model", type=str, default="smollm2", help="Model identifier (e.g. gpt2, smollm2)")
+    acc_parser.add_argument("--samples", type=int, default=5, help="Number of GSM8K samples to evaluate")
+    acc_parser.add_argument("--sparsity", type=float, default=0.5, help="Subspace channel sparsity ratio")
+    acc_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
+
+    # 7. Compare
     comp_parser = subparsers.add_parser("compare", help="Compare Turing Engine against PyTorch FP16, vLLM PagedAttention, and INT4-AWQ")
     comp_parser.add_argument("--models", type=str, default="gpt-2,llama-3-8b,llama-3.1-70b,qwen-2.5-72b,mistral-large-123b", help="Comma-separated model keys")
     comp_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
@@ -83,7 +94,7 @@ def main():
     hybrid_parser.add_argument("--strategy", type=str, default="all", choices=["1", "2", "3", "all"], help="Hybrid deployment strategy (1: Pipeline, 2: Cascaded Prefill, 3: MoE Sharding, all: Run all 3)")
     hybrid_parser.add_argument("--compression", type=str, default="int8", choices=["fp16", "int8"], help="Tensor transport compression")
 
-    # 11. Interactive Subspace Inference Demo
+    # 12. Interactive Subspace Inference Demo
     demo_parser = subparsers.add_parser("demo", help="Run interactive Turing Engine subspace inference demo")
     demo_parser.add_argument("--model", type=str, default="smollm2", help="Model target (smollm2 or gpt2)")
     demo_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, mps, cuda, cpu)")
@@ -109,12 +120,36 @@ def main():
         from .demo.interactive_demo import run_demo
         run_demo(model_name=args.model, device=args.device, sparsity=args.sparsity, prompt=args.prompt)
 
+    elif args.command == "eval-accuracy":
+        from .serving.accuracy_eval import LiveAccuracyEvaluator
+        evaluator = LiveAccuracyEvaluator(model_id=args.model, sparsity_ratio=args.sparsity, device=args.device)
+        res = evaluator.evaluate_gsm8k(max_samples=args.samples)
+        print("\n" + json.dumps(res, indent=2))
+
     elif args.command == "serve":
-        cfg = get_model_config(args.model)
         jcfg = TuringConfig(device=args.device, max_batch_size=args.max_batch_size)
-        engine = ContinuousBatchEngine(cfg, jcfg)
+        dev = jcfg.resolve_device()
+
+        if getattr(args, "mock", False) or args.model in ["test-tiny", "mock"]:
+            cfg = get_model_config(args.model)
+            engine = ContinuousBatchEngine(cfg, jcfg)
+        else:
+            from .models.hf_loader import RealHuggingFaceLoader
+            try:
+                model, tokenizer = RealHuggingFaceLoader.load_hf_model_into_turing(
+                    hf_model_id=args.model,
+                    sparsity_ratio=args.sparsity,
+                    device=str(dev)
+                )
+                cfg = model.config
+                engine = ContinuousBatchEngine(cfg, jcfg, model=model, tokenizer=tokenizer)
+            except Exception as e:
+                print(f"[!] Notice: Could not load real HuggingFace weights for '{args.model}' ({e}). Falling back to architecture geometry.")
+                cfg = get_model_config(args.model)
+                engine = ContinuousBatchEngine(cfg, jcfg)
+
         app = create_app(engine)
-        print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} (Model: {cfg.name}, Device: {jcfg.resolve_device()})")
+        print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} (Model: {cfg.name}, Device: {dev})")
         uvicorn.run(app, host=args.host, port=args.port)
 
     elif args.command == "bench":
@@ -127,19 +162,38 @@ def main():
         print(json.dumps(results, indent=2))
 
     elif args.command == "generate":
-        cfg = get_model_config(args.model)
         jcfg = TuringConfig(device=args.device)
         dev = jcfg.resolve_device()
-        model = SubspaceCausalLM(cfg).to(dev).eval()
 
-        prompt_tokens = [ord(c) % cfg.vocab_size for c in args.prompt]
-        if not prompt_tokens:
-            prompt_tokens = [1]
+        if getattr(args, "mock", False) or args.model in ["test-tiny", "mock"]:
+            cfg = get_model_config(args.model)
+            model = SubspaceCausalLM(cfg).to(dev).eval()
+            prompt_tokens = [ord(c) % cfg.vocab_size for c in args.prompt] or [1]
+            print(f"[*] Generating from prompt: '{args.prompt}' on {cfg.name} (Mock Synthetic Weights)...")
+            output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
+            out_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in output_tokens])
+        else:
+            from .models.hf_loader import RealHuggingFaceLoader
+            try:
+                model, tokenizer = RealHuggingFaceLoader.load_hf_model_into_turing(
+                    hf_model_id=args.model,
+                    sparsity_ratio=args.sparsity,
+                    device=str(dev)
+                )
+                cfg = model.config
+                prompt_tokens = tokenizer.encode(args.prompt)
+                print(f"[*] Generating from prompt: '{args.prompt}' on {cfg.name} ({len(prompt_tokens)} input tokens)...")
+                output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
+                out_text = tokenizer.decode(output_tokens, skip_special_tokens=True)
+            except Exception as e:
+                print(f"[!] Notice: Could not load real weights for '{args.model}' ({e}). Falling back to architecture geometry.")
+                cfg = get_model_config(args.model)
+                model = SubspaceCausalLM(cfg).to(dev).eval()
+                prompt_tokens = [ord(c) % cfg.vocab_size for c in args.prompt] or [1]
+                output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
+                out_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in output_tokens])
 
-        print(f"[*] Generating from prompt: '{args.prompt}' on {cfg.name}...")
-        output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
-        out_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in output_tokens])
-        print(f"\n[+] Generated Output:\n{out_text}")
+        print(f"\n[+] Generated Output:\n{out_text}\n")
 
     elif args.command == "convert":
         cfg = get_model_config(args.model)

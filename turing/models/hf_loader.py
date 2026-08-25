@@ -31,6 +31,25 @@ class RealHuggingFaceLoader:
     """
     Imports real pretrained weights from HuggingFace directly into Turing Engine Subspace format.
     """
+    MODEL_ALIASES = {
+        "gpt2": "gpt2",
+        "gpt-2": "gpt2",
+        "smollm2": "HuggingFaceTB/SmolLM2-135M",
+        "smollm2-135m": "HuggingFaceTB/SmolLM2-135M",
+        "smollm2-1.7b": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+        "qwen-0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
+        "qwen-2.5-0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
+        "qwen-2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
+        "llama-3.2-1b": "meta-llama/Llama-3.2-1B-Instruct",
+        "llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "llama-3.1-70b": "unsloth/Meta-Llama-3.1-70B-bnb-4bit",
+    }
+
+    @classmethod
+    def resolve_model_id(cls, model_identifier: str) -> str:
+        key = model_identifier.lower().strip()
+        return cls.MODEL_ALIASES.get(key, model_identifier)
+
     @staticmethod
     def load_hf_model_into_turing(
         hf_model_id: str = "gpt2",
@@ -41,13 +60,20 @@ class RealHuggingFaceLoader:
         """
         Loads real Hugging Face model and maps weights to SubspaceCausalLM.
         """
+        resolved_id = RealHuggingFaceLoader.resolve_model_id(hf_model_id)
         hf_token = token or os.environ.get("HF_TOKEN") or huggingface_hub.get_token()
-        print(f"[*] Downloading / Loading real pretrained HuggingFace model: '{hf_model_id}' (Authenticated)...")
-        tokenizer = AutoTokenizer.from_pretrained(hf_model_id, token=hf_token)
+        print(f"[*] Downloading / Loading real pretrained HuggingFace model: '{resolved_id}' (Authenticated)...")
+        tokenizer = AutoTokenizer.from_pretrained(resolved_id, token=hf_token)
+        if getattr(tokenizer, "pad_token", None) is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        target_device = torch.device(device)
+        target_dtype = torch.float16 if target_device.type == "cuda" else torch.float32
+
         hf_model = AutoModelForCausalLM.from_pretrained(
-            hf_model_id,
+            resolved_id,
             token=hf_token,
-            dtype=torch.float32,
+            dtype=target_dtype,
             low_cpu_mem_usage=True
         ).eval()
 

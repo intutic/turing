@@ -62,14 +62,20 @@ class ContinuousBatchEngine:
         self,
         model_config: ModelConfig,
         turing_config: Optional[TuringConfig] = None,
-        prefill_chunk_size: int = 512
+        prefill_chunk_size: int = 512,
+        model: Optional[SubspaceCausalLM] = None,
+        tokenizer: Optional[Any] = None
     ):
         self.model_config = model_config
         self.turing_config = turing_config or TuringConfig()
         self.device = self.turing_config.resolve_device()
         self.prefill_chunk_size = prefill_chunk_size
+        self.tokenizer = tokenizer
 
-        self.model = SubspaceCausalLM(model_config).to(self.device).eval()
+        if model is not None:
+            self.model = model.to(self.device).eval()
+        else:
+            self.model = SubspaceCausalLM(model_config).to(self.device).eval()
 
         # Zero-Allocation Contiguous Page Memory Pool
         head_dim = model_config.hidden_dim // model_config.num_heads
@@ -95,6 +101,24 @@ class ContinuousBatchEngine:
         self.total_requests_completed: int = 0
         self.recent_ttft: Deque[float] = deque(maxlen=1000)
         self.recent_itl: Deque[float] = deque(maxlen=10000)
+
+    def encode_prompt(self, text: str) -> List[int]:
+        """Encodes text using real tokenizer or ASCII fallback."""
+        if self.tokenizer is not None:
+            try:
+                return self.tokenizer.encode(text)
+            except Exception:
+                pass
+        return [ord(c) % self.model_config.vocab_size for c in text]
+
+    def decode_tokens(self, tokens: List[int]) -> str:
+        """Decodes token IDs into coherent text using real tokenizer or ASCII fallback."""
+        if self.tokenizer is not None:
+            try:
+                return self.tokenizer.decode(tokens, skip_special_tokens=True)
+            except Exception:
+                pass
+        return "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in tokens])
 
     async def start(self):
         if not self.is_running:
