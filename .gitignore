@@ -61,5 +61,6 @@ venv/
 .Spotlight-V100
 .Trashes
 .vscode/
+graphify-out/
 .idea/
 site/
