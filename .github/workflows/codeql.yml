@@ -21,27 +21,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - language: python
-            build-mode: none
-          - language: c-cpp
-            build-mode: manual
+        language: [ 'c-cpp', 'python' ]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          queries: +security-and-quality
 
-      - name: Build C++20 AVX2 Native Extensions
-        if: matrix.language == "c-cpp"
+      - name: Build C++ Native Extensions
+        if: matrix.language == 'c-cpp'
         run: |
-          sudo apt-get update && sudo apt-get install -y pybind11-dev python3-dev
-          python3 setup.py build_ext --inplace
+          pip install pybind11 setuptools wheel
+          python setup.py build_ext --inplace
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
