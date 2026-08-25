@@ -1,7 +1,7 @@
 # ⚡ Turing Engine: Subspace-Compressed & Heterogeneous LLM Serving Runtime
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v0.1.2](https://img.shields.io/badge/Release-v0.1.2-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.2)
+[![Release: v0.1.3](https://img.shields.io/badge/Release-v0.1.3-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.3)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
 [![Tests: 93/93 Passing](https://img.shields.io/badge/Tests-93%2F93%20Passing-brightgreen.svg)]()
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
@@ -141,21 +141,21 @@ Real CUDA FP16 forward step executions measured live on physical **Google Cloud 
 
 ---
 
-### 📦 Pre-Built Binary Wheels & Release Artifacts (v0.1.2)
+### 📦 Pre-Built Binary Wheels & Release Artifacts (v0.1.3)
 
-Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on the [Official GitHub Release v0.1.2](https://github.com/intutic/turing/releases/tag/v0.1.2):
+Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on the [Official GitHub Release v0.1.3](https://github.com/intutic/turing/releases/tag/v0.1.3):
 
 | Platform / Operating System | Architecture | Python 3.10 | Python 3.11 | Python 3.12 |
 | :--- | :--- | :---: | :---: | :---: |
-| **Linux (Ubuntu / RHEL / Debian)** | `x86_64` | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp310-cp310-linux_x86_64.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp311-cp311-linux_x86_64.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp312-cp312-linux_x86_64.whl) |
-| **macOS (Apple Silicon M1–M4 & Intel)** | `universal2` | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp310-cp310-macosx_10_9_universal2.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp311-cp311-macosx_10_9_universal2.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp312-cp312-macosx_10_13_universal2.whl) |
-| **Windows 10 / 11 (MSVC)** | `amd64` | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp310-cp310-win_amd64.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp311-cp311-win_amd64.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp312-cp312-win_amd64.whl) |
-| **Source Package & Hashes** | `all` | — | [turing_engine-0.1.2.tar.gz](https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2.tar.gz) | [SHA256SUMS.txt](https://github.com/intutic/turing/releases/download/v0.1.2/SHA256SUMS.txt) |
+| **Linux (Ubuntu / RHEL / Debian)** | `x86_64` | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp310-cp310-linux_x86_64.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp311-cp311-linux_x86_64.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp312-cp312-linux_x86_64.whl) |
+| **macOS (Apple Silicon M1–M4 & Intel)** | `universal2` | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp310-cp310-macosx_10_9_universal2.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp311-cp311-macosx_10_9_universal2.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp312-cp312-macosx_10_13_universal2.whl) |
+| **Windows 10 / 11 (MSVC)** | `amd64` | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp310-cp310-win_amd64.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp311-cp311-win_amd64.whl) | [Download .whl](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp312-cp312-win_amd64.whl) |
+| **Source Package & Hashes** | `all` | — | [turing_engine-0.1.3.tar.gz](https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3.tar.gz) | [SHA256SUMS.txt](https://github.com/intutic/turing/releases/download/v0.1.3/SHA256SUMS.txt) |
 
 **Direct Wheel Installation Example**:
 ```bash
 # Direct install Linux Python 3.11 binary wheel:
-pip install https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp311-cp311-linux_x86_64.whl
+pip install https://github.com/intutic/turing/releases/download/v0.1.3/turing_engine-0.1.3-cp311-cp311-linux_x86_64.whl
 ```
 
 ---
