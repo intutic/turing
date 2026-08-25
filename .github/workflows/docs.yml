@@ -12,17 +12,23 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
-  deploy-docs:
-    name: Build & Deploy MkDocs to GitHub Pages
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -34,8 +40,18 @@ jobs:
           pip install --upgrade pip
           pip install mkdocs mkdocs-material pymdown-extensions
 
-      - name: Build and Deploy to GitHub Pages
+      - name: Build documentation
         run: |
-          git config user.name "Ishan Gupta"
-          git config user.email "ishangupta.ds@gmail.com"
-          mkdocs gh-deploy --force
+          mkdocs build --strict
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
