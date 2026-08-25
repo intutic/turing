@@ -111,7 +111,7 @@ class RealHuggingFaceLoader:
         hf_model = AutoModelForCausalLM.from_pretrained(
             resolved_id,
             token=hf_token,
-            dtype=target_dtype,
+            torch_dtype=target_dtype,
             low_cpu_mem_usage=True
         ).eval()
 
@@ -144,26 +144,26 @@ class RealHuggingFaceLoader:
             rope_theta=getattr(hf_cfg, "rope_theta", 10000.0)
         )
 
-        turing_model = SubspaceCausalLM(turing_cfg).to(device)
+        turing_model = SubspaceCausalLM(turing_cfg).to(target_dtype).to(target_device)
 
         # Copy real embeddings and output head
         with torch.no_grad():
             if hasattr(hf_model, "transformer"): # GPT-2 style
                 if hasattr(hf_model.transformer, "wte"):
-                    turing_model.embed_tokens.weight.copy_(hf_model.transformer.wte.weight)
+                    turing_model.embed_tokens.weight.copy_(hf_model.transformer.wte.weight.to(target_device))
                 if hasattr(hf_model.transformer, "ln_f"):
-                    turing_model.norm.weight.copy_(hf_model.transformer.ln_f.weight)
+                    turing_model.norm.weight.copy_(hf_model.transformer.ln_f.weight.to(target_device))
                 if hasattr(hf_model, "lm_head"):
-                    turing_model.lm_head.weight.copy_(hf_model.lm_head.weight)
+                    turing_model.lm_head.weight.copy_(hf_model.lm_head.weight.to(target_device))
                 elif hasattr(hf_model.transformer, "wte"):
-                    turing_model.lm_head.weight.copy_(hf_model.transformer.wte.weight)
-            elif hasattr(hf_model, "model"): # LLaMA / Qwen style
+                    turing_model.lm_head.weight.copy_(hf_model.transformer.wte.weight.to(target_device))
+            elif hasattr(hf_model, "model"): # LLaMA / Qwen / DeepSeek / Mistral style
                 if hasattr(hf_model.model, "embed_tokens"):
-                    turing_model.embed_tokens.weight.copy_(hf_model.model.embed_tokens.weight)
+                    turing_model.embed_tokens.weight.copy_(hf_model.model.embed_tokens.weight.to(target_device))
                 if hasattr(hf_model.model, "norm"):
-                    turing_model.norm.weight.copy_(hf_model.model.norm.weight)
+                    turing_model.norm.weight.copy_(hf_model.model.norm.weight.to(target_device))
                 if hasattr(hf_model, "lm_head"):
-                    turing_model.lm_head.weight.copy_(hf_model.lm_head.weight)
+                    turing_model.lm_head.weight.copy_(hf_model.lm_head.weight.to(target_device))
 
             # Map real layers
             for l_idx in range(num_layers):
@@ -172,18 +172,18 @@ class RealHuggingFaceLoader:
                 if hasattr(hf_model, "transformer") and hasattr(hf_model.transformer, "h"):
                     hf_layer = hf_model.transformer.h[l_idx]
                     # GPT-2 c_attn contains [Q, K, V] concatenated in dim=-1
-                    qkv_w = hf_layer.attn.c_attn.weight # [hidden, 3*hidden]
+                    qkv_w = hf_layer.attn.c_attn.weight.to(target_device) # [hidden, 3*hidden]
                     qkv_w = qkv_w.t().contiguous() # [3*hidden, hidden]
                     q_w, k_w, v_w = qkv_w.chunk(3, dim=0)
 
                     j_layer.self_attn.q_proj.weight.copy_(q_w)
                     j_layer.self_attn.k_proj.weight.copy_(k_w)
                     j_layer.self_attn.v_proj.weight.copy_(v_w)
-                    j_layer.self_attn.o_proj.weight.copy_(hf_layer.attn.c_proj.weight.t().contiguous())
+                    j_layer.self_attn.o_proj.weight.copy_(hf_layer.attn.c_proj.weight.to(target_device).t().contiguous())
 
                     # GPT-2 MLP c_fc [hidden, ffn_dim], c_proj [ffn_dim, hidden]
-                    fc_w = hf_layer.mlp.c_fc.weight.t().contiguous() # [ffn_dim, hidden]
-                    proj_w = hf_layer.mlp.c_proj.weight.t().contiguous() # [hidden, ffn_dim]
+                    fc_w = hf_layer.mlp.c_fc.weight.to(target_device).t().contiguous() # [ffn_dim, hidden]
+                    proj_w = hf_layer.mlp.c_proj.weight.to(target_device).t().contiguous() # [hidden, ffn_dim]
 
                     # Saliency pruning on real MLP weights
                     saliency = torch.norm(fc_w, dim=-1) * torch.norm(proj_w, dim=0)
@@ -195,19 +195,19 @@ class RealHuggingFaceLoader:
                     j_layer.mlp.gate_proj.weight.copy_(fc_w)
                     j_layer.mlp.up_proj.weight.copy_(torch.ones_like(fc_w))
                     j_layer.mlp.down_proj.weight.copy_(proj_w)
-                    j_layer.mlp.set_active_tiles(torch.tensor(active_indices, dtype=torch.int32))
+                    j_layer.mlp.set_active_tiles(torch.tensor(active_indices, dtype=torch.int32, device=target_device))
 
                 elif hasattr(hf_model, "model") and hasattr(hf_model.model, "layers"):
                     hf_layer = hf_model.model.layers[l_idx]
-                    j_layer.self_attn.q_proj.weight.copy_(hf_layer.self_attn.q_proj.weight)
-                    j_layer.self_attn.k_proj.weight.copy_(hf_layer.self_attn.k_proj.weight)
-                    j_layer.self_attn.v_proj.weight.copy_(hf_layer.self_attn.v_proj.weight)
-                    j_layer.self_attn.o_proj.weight.copy_(hf_layer.self_attn.o_proj.weight)
+                    j_layer.self_attn.q_proj.weight.copy_(hf_layer.self_attn.q_proj.weight.to(target_device))
+                    j_layer.self_attn.k_proj.weight.copy_(hf_layer.self_attn.k_proj.weight.to(target_device))
+                    j_layer.self_attn.v_proj.weight.copy_(hf_layer.self_attn.v_proj.weight.to(target_device))
+                    j_layer.self_attn.o_proj.weight.copy_(hf_layer.self_attn.o_proj.weight.to(target_device))
 
                     # Real SwiGLU FFN: gate, up, down
-                    gate_w = hf_layer.mlp.gate_proj.weight # [ffn, hidden]
-                    up_w = hf_layer.mlp.up_proj.weight
-                    down_w = hf_layer.mlp.down_proj.weight # [hidden, ffn]
+                    gate_w = hf_layer.mlp.gate_proj.weight.to(target_device) # [ffn, hidden]
+                    up_w = hf_layer.mlp.up_proj.weight.to(target_device)
+                    down_w = hf_layer.mlp.down_proj.weight.to(target_device) # [hidden, ffn]
 
                     saliency = torch.norm(gate_w, dim=-1) * torch.norm(up_w, dim=-1) * torch.norm(down_w, dim=0)
                     tile_scores = saliency.view(total_tiles, tile_size).mean(dim=-1)
@@ -217,7 +217,11 @@ class RealHuggingFaceLoader:
                     j_layer.mlp.gate_proj.weight.copy_(gate_w)
                     j_layer.mlp.up_proj.weight.copy_(up_w)
                     j_layer.mlp.down_proj.weight.copy_(down_w)
-                    j_layer.mlp.set_active_tiles(torch.tensor(active_indices, dtype=torch.int32))
+                    j_layer.mlp.set_active_tiles(torch.tensor(active_indices, dtype=torch.int32, device=target_device))
+
+        del hf_model
+        if target_device.type == "cuda":
+            torch.cuda.empty_cache()
 
         print(f"[+] Successfully loaded {num_layers} real layers from '{hf_model_id}' into Turing Engine Subspace format ({sparsity_ratio*100:.1f}% channel pruned).")
         return turing_model, tokenizer

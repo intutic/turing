@@ -642,4 +642,22 @@ def get_model_config(model_name_or_id: str) -> ModelConfig:
     key = model_name_or_id.lower().replace("_", "-")
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]
+
+    alias_map = {
+        "deepseek-r1-1.5b": "deepseek-r1-distill-qwen-1.5b",
+        "deepseek-r1-7b": "deepseek-r1-distill-qwen-7b",
+        "deepseek-r1-14b": "deepseek-r1-distill-qwen-14b",
+        "deepseek-r1-32b": "deepseek-r1-distill-qwen-32b",
+        "deepseek-r1-70b": "deepseek-r1-distill-llama-70b",
+        "deepseek-r1": "deepseek-r1-distill-qwen-1.5b",
+        "llama-3.3": "llama-3.3-70b",
+        "qwen-coder-32b": "qwen-2.5-32b",
+        "qwen-coder-7b": "qwen-2.5-8b",
+        "smollm2": "test-tiny",
+        "smollm2-135m": "test-tiny",
+        "gpt2": "gpt-2",
+    }
+    if key in alias_map and alias_map[key] in MODEL_REGISTRY:
+        return MODEL_REGISTRY[alias_map[key]]
+
     raise ValueError(f"Unknown model identifier '{model_name_or_id}'. Available: {list(MODEL_REGISTRY.keys())}")
