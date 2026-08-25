@@ -40,24 +40,26 @@ def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
     print(f"   Active Silicon Target: {str(device).upper()} ({torch.cuda.get_device_name(0) if device.type == 'cuda' else 'Apple Silicon / CPU'})")
     print("=" * 85 + "\n")
 
-    # 1. Models & Architecture Matrix
+    # 1. Models & Architecture Matrix (2026 Frontier & Single-GPU Champions)
     models_matrix = [
         # (Name, Display, Total Params, Layers, Hidden Dim, FFN Dim, Is MoE, Active Subspace)
-        ("gpt-2", "GPT-2 Base", 124_000_000, 12, 768, 3072, False, 384),
-        ("ministral-3b", "Mistral Ministral-3B", 3_000_000_000, 26, 3072, 8192, False, 1536),
-        ("llama-3-8b", "Meta LLaMA-3-8B", 8_030_000_000, 32, 4096, 14336, False, 2048),
-        ("phi-4-14b", "Microsoft Phi-4-14B", 14_000_000_000, 40, 5120, 17920, False, 2560),
-        ("llama-3.1-70b", "Meta LLaMA-3.1-70B", 70_553_706_496, 80, 8192, 28672, False, 4096),
-        ("qwen-2.5-72b", "Alibaba Qwen-2.5-72B", 72_706_097_152, 80, 8192, 29696, False, 4096),
-        ("mistral-large-123b", "Mistral Large-2-123B", 123_000_000_000, 88, 12288, 28672, False, 6144),
-        ("qwen3.6-moe-35b", "Qwen-3.6-MoE-35B", 35_000_000_000, 32, 2048, 1408, True, 1024),
-        ("deepseek-v4-flash-284b", "DeepSeek-V4-284B MoE", 284_000_000_000, 60, 2048, 1024, True, 1024),
-        ("glm-5.2-753b", "THUDM GLM-5.2-753B MoE", 753_000_000_000, 80, 4096, 2048, True, 2048)
+        ("gpt-oss-20b", "OpenAI GPT-OSS-20B", 20_000_000_000, 32, 3072, 8192, True, 1536),
+        ("qwen-3.8-27b", "Alibaba Qwen-3.8-27B", 27_000_000_000, 56, 5120, 27648, False, 3072),
+        ("muse-glimmer-30b", "Meta Muse Glimmer-30B", 30_000_000_000, 56, 5120, 20480, False, 2560),
+        ("qwen3-coder-30b", "Qwen3-Coder-30B", 30_000_000_000, 60, 5120, 27648, False, 2560),
+        ("gemma-4-31b", "Google Gemma-4-31B", 31_000_000_000, 56, 5120, 20480, False, 2560),
+        ("llama-3.3-70b", "Meta LLaMA-3.3-70B", 70_553_706_496, 80, 8192, 28672, False, 4096),
+        ("nemotron-3-super", "NVIDIA Nemotron-3", 70_000_000_000, 80, 8192, 28672, False, 4096),
+        ("kimi-k3", "Moonshot Kimi-K3", 70_000_000_000, 80, 8192, 28672, False, 4096),
+        ("deepseek-v4-flash-284b", "DeepSeek-V4-Flash-284B", 284_000_000_000, 60, 2048, 1024, True, 1024),
+        ("minimax-m3", "MiniMax M3-428B MoE", 428_000_000_000, 64, 3072, 1536, True, 1536),
+        ("glm-5.3-753b", "Zhipu GLM-5.3-753B MoE", 753_000_000_000, 80, 4096, 2048, True, 2048),
+        ("deepseek-v4-pro", "DeepSeek-V4-Pro 1.6T", 1_600_000_000_000, 64, 4096, 2048, True, 2048)
     ]
 
-    print("[*] Section 1: Memory Footprint & Hardware Requirements Across Backends\n")
-    print(f"{'Model':<22} | {'PyTorch FP16':<13} | {'Unsloth 4-bit':<13} | {'vLLM Paged':<11} | {'TRT-LLM':<10} | {'Ollama Q4':<11} | {'Turing Engine':<12}")
-    print("-" * 115)
+    print("[*] Section 1: Memory Footprint & Hardware Requirements Across Backends (2026 Frontier Models)\n")
+    print(f"{'Model':<24} | {'PyTorch FP16':<13} | {'Unsloth 4-bit':<13} | {'vLLM Paged':<11} | {'TRT-LLM':<10} | {'Ollama Q4':<11} | {'Turing Engine':<12}")
+    print("-" * 117)
 
     model_results = {}
 
