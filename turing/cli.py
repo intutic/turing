@@ -106,7 +106,16 @@ def main():
     spec_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
     spec_parser.add_argument("--future-tokens", type=int, default=8, help="Number of future candidate tokens")
 
-    # 14. Info
+    # 14. Terminal Interactive Chat
+    chat_parser = subparsers.add_parser("chat", help="Start an instant interactive terminal chat session with real weights")
+    chat_parser.add_argument("--model", type=str, default="smollm2", help="Model to chat with (e.g. smollm2, gpt2, qwen-2.5-7b, llama-3.1-8b)")
+    chat_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
+    chat_parser.add_argument("--sparsity", type=float, default=0.57, help="Subspace sparsity ratio (default: 0.57)")
+    chat_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
+    chat_parser.add_argument("--max-new-tokens", type=int, default=128, help="Maximum new tokens per response")
+    chat_parser.add_argument("--mock", action="store_true", help="Run with mock synthetic weights without downloading")
+
+    # 15. Info
     info_parser = subparsers.add_parser("info", help="Display system, hardware, and Turing Engine runtime information")
     info_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
 
@@ -125,6 +134,69 @@ def main():
         evaluator = LiveAccuracyEvaluator(model_id=args.model, sparsity_ratio=args.sparsity, device=args.device)
         res = evaluator.evaluate_gsm8k(max_samples=args.samples)
         print("\n" + json.dumps(res, indent=2))
+
+    elif args.command == "chat":
+        jcfg = TuringConfig(device=args.device)
+        dev = jcfg.resolve_device()
+        print("=" * 72)
+        print(f"💬 Turing Engine Interactive Terminal Chat (Target: {dev})")
+        print("=" * 72)
+
+        if getattr(args, "mock", False) or args.model in ["test-tiny", "mock"]:
+            cfg = get_model_config(args.model)
+            model = SubspaceCausalLM(cfg).to(dev).eval()
+            tokenizer = None
+            print(f"[*] Loaded mock architecture: {cfg.name}")
+        else:
+            from .models.hf_loader import RealHuggingFaceLoader
+            try:
+                model, tokenizer = RealHuggingFaceLoader.load_hf_model_into_turing(
+                    hf_model_id=args.model,
+                    sparsity_ratio=args.sparsity,
+                    device=str(dev)
+                )
+                print(f"[+] Loaded real pretrained weights from '{args.model}'")
+            except Exception as e:
+                print(f"[!] Could not load weights for '{args.model}' ({e}). Falling back to mock model.")
+                cfg = get_model_config("test-tiny")
+                model = SubspaceCausalLM(cfg).to(dev).eval()
+                tokenizer = None
+
+        print("\nType your message and press Enter. Type 'exit' or 'quit' to end.\n")
+        while True:
+            try:
+                user_msg = input("User > ").strip()
+                if not user_msg:
+                    continue
+                if user_msg.lower() in ["exit", "quit", "q"]:
+                    print("\nGoodbye!")
+                    break
+
+                start_t = time.perf_counter()
+                if tokenizer is not None:
+                    try:
+                        messages = [{"role": "user", "content": user_msg}]
+                        formatted = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    except Exception:
+                        formatted = f"User: {user_msg}\nAssistant:"
+                    prompt_tokens = tokenizer.encode(formatted)
+                else:
+                    prompt_tokens = [ord(c) % model.config.vocab_size for c in user_msg]
+
+                out_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
+                new_tokens = out_tokens[len(prompt_tokens):] if len(out_tokens) > len(prompt_tokens) else out_tokens
+                elapsed = time.perf_counter() - start_t
+                tok_s = len(new_tokens) / max(1e-4, elapsed)
+
+                if tokenizer is not None:
+                    response_text = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+                else:
+                    response_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in new_tokens])
+
+                print(f"\nAssistant > {response_text}\n(Generated {len(new_tokens)} tokens in {elapsed*1000:.1f}ms — {tok_s:.1f} tok/s)\n")
+            except (KeyboardInterrupt, EOFError):
+                print("\nSession ended.")
+                break
 
     elif args.command == "serve":
         jcfg = TuringConfig(device=args.device, max_batch_size=args.max_batch_size)

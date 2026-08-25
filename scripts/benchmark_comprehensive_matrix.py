@@ -207,6 +207,12 @@ def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
     print(f"    • Generation Output           : {gen_tokens} tokens in {gen_elapsed_s * 1000:.1f} ms")
     print(f"    • Live Measured Throughput    : {live_tok_per_sec:.1f} tokens / second\n")
 
+    # Micro-Benchmark D: Unified Memory Bandwidth & Memory Traffic Reduction
+    print(f"[*] 4. Unified Memory / DRAM Bandwidth Efficiency:")
+    print(f"    • Memory Bus Architecture     : {'Apple Silicon Unified Memory (SoC Fabric)' if device.type == 'mps' else 'Direct GPU HBM / PCIe Interconnect'}")
+    print(f"    • DRAM Traffic Reduction      : -{mem_reduction:.1f}% per autoregressive step")
+    print(f"    • Bandwidth Sparing Factor    : {raw_bytes / max(1e-5, comp_bytes):.2f}x lower memory bus pressure\n")
+
     live_results = {
         "device": str(device),
         "swiglu_microbench": {
