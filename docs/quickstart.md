@@ -1,4 +1,4 @@
-# Quickstart Guide
+# ⚡ Quickstart Guide
 
 Get up and running with Turing Engine in under 30 seconds.
 
@@ -15,21 +15,11 @@ Get up and running with Turing Engine in under 30 seconds.
     Install pre-compiled C++20 AVX2 native wheels directly from GitHub Releases:
     
     ```bash
-    # Direct wheel download for Linux x86_64:
-    pip install https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp311-cp311-linux_x86_64.whl
-
-    # Direct wheel download for macOS Apple Silicon (universal2):
-    pip install https://github.com/intutic/turing/releases/download/v0.1.2/turing_engine-0.1.2-cp311-cp311-macosx_10_9_universal2.whl
+    # Direct wheel download for macOS Apple Silicon (arm64):
+    pip install https://github.com/intutic/turing/releases/download/v0.1.4/turing_engine-0.1.4-cp311-cp311-macosx_15_0_arm64.whl
     ```
 
-=== "3. Docker Container"
-    Pull and run the official container from GitHub Packages:
-    
-    ```bash
-    docker run -d -p 8000:8000 --gpus all ghcr.io/intutic/turing:latest
-    ```
-
-=== "4. Source Build"
+=== "3. Source Build"
     Clone and build the native C++20 extensions locally:
     
     ```bash
@@ -41,12 +31,24 @@ Get up and running with Turing Engine in under 30 seconds.
 
 ---
 
-## 🖥️ Launching the Inference Server
+## 💬 1. Instant Terminal Chat
 
-Start serving a 70B model with Subspace acceleration:
+Chat directly in your terminal with real pretrained weights:
+```bash
+# Chat with SmolLM2 or DeepSeek-R1:
+turing chat --model smollm2
+turing chat --model deepseek-r1-1.5b
+turing chat --model qwen3-coder-30b
+```
+
+---
+
+## 🖥️ 2. Launching the Serving Server
+
+Start serving a 70B model or MoE architecture with Subspace acceleration:
 
 ```bash
-turing serve --model llama-3.1-70b --port 8000 --device auto
+turing serve --model deepseek-r1-7b --port 8000 --device auto
 ```
 
 ### Test OpenAI Endpoint
@@ -54,7 +56,7 @@ turing serve --model llama-3.1-70b --port 8000 --device auto
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "llama-3.1-70b",
+    "model": "deepseek-r1-7b",
     "messages": [{"role": "user", "content": "Explain Subspace Pruning in two sentences."}]
   }'
 ```
