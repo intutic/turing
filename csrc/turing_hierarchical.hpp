@@ -19,8 +19,8 @@ inline void hca_chunk_pool_cpp(
     int chunk_size = 128
 ) {
     int num_chunks = (seq_len + chunk_size - 1) / chunk_size;
-    int head_stride = head_dim;
-    int token_stride = num_heads * head_dim;
+    size_t head_stride = static_cast<size_t>(head_dim);
+    size_t token_stride = static_cast<size_t>(num_heads) * static_cast<size_t>(head_dim);
 
     for (int c = 0; c < num_chunks; ++c) {
         int t_start = c * chunk_size;
@@ -28,15 +28,15 @@ inline void hca_chunk_pool_cpp(
         int valid_tokens = t_end - t_start;
         float inv_len = 1.0f / static_cast<float>(std::max(1, valid_tokens));
 
-        float* out_chunk = output_tensor + (c * num_heads * head_dim);
+        float* out_chunk = output_tensor + (static_cast<size_t>(c) * static_cast<size_t>(num_heads) * static_cast<size_t>(head_dim));
 
         for (int h = 0; h < num_heads; ++h) {
             for (int d = 0; d < head_dim; ++d) {
                 float sum_val = 0.0f;
                 for (int t = t_start; t < t_end; ++t) {
-                    sum_val += input_tensor[t * token_stride + h * head_stride + d];
+                    sum_val += input_tensor[static_cast<size_t>(t) * token_stride + static_cast<size_t>(h) * head_stride + static_cast<size_t>(d)];
                 }
-                out_chunk[h * head_stride + d] = sum_val * inv_len;
+                out_chunk[static_cast<size_t>(h) * head_stride + static_cast<size_t>(d)] = sum_val * inv_len;
             }
         }
     }
