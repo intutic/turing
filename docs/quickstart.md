@@ -15,11 +15,11 @@ Get up and running with Turing Engine in under 30 seconds.
     Install pre-compiled C++20 AVX2 native wheels directly from GitHub Releases:
     
     ```bash
-    # Linux (Python 3.11)
-    pip install https://github.com/intutic/turing/releases/download/v0.1.0/turing_engine-0.1.0-cp311-cp311-linux_x86_64.whl
-    
-    # macOS Apple Silicon (Python 3.11)
-    pip install https://github.com/intutic/turing/releases/download/v0.1.0/turing_engine-0.1.0-cp311-cp311-macosx_10_9_universal2.whl
+    # Direct wheel download for Linux x86_64:
+    pip install https://github.com/intutic/turing/releases/download/v0.1.1/turing_engine-0.1.1-cp311-cp311-linux_x86_64.whl
+
+    # Direct wheel download for macOS Apple Silicon (universal2):
+    pip install https://github.com/intutic/turing/releases/download/v0.1.1/turing_engine-0.1.1-cp311-cp311-macosx_10_9_universal2.whl
     ```
 
 === "3. Docker Container"

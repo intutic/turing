@@ -49,7 +49,7 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
         finally:
             await engine.stop()
 
-    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.1.1", lifespan=lifespan)
 
     def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
         """

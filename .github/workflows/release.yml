@@ -32,8 +32,9 @@ jobs:
         run: |
           IMAGE_NAME="ghcr.io/${{ github.repository }}"
           IMAGE_NAME=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
-          docker build -f deploy/Dockerfile.cpu -t "${IMAGE_NAME}:v0.1.0" -t "${IMAGE_NAME}:latest" .
-          docker push "${IMAGE_NAME}:v0.1.0"
+          TAG_NAME="${{ github.ref_name }}"
+          docker build -f deploy/Dockerfile.cpu -t "${IMAGE_NAME}:${TAG_NAME}" -t "${IMAGE_NAME}:latest" .
+          docker push "${IMAGE_NAME}:${TAG_NAME}"
           docker push "${IMAGE_NAME}:latest"
 
   build-wheels:

@@ -2,7 +2,7 @@
 
 **High-Performance Frontier LLM Serving Runtime for Single-GPU Hardware (<24GB VRAM)**
 
-[![Release](https://img.shields.io/badge/Release-v0.1.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.0)
+[![Release](https://img.shields.io/badge/Release-v0.1.1-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.1)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
