@@ -48,7 +48,7 @@ def run_all_gpu_architecture_tests(device_str: str = "auto"):
         "deepseek-v4-flash-284b",
         "qwen3-coder-480b",
         "minimax-m3",
-        "glm-5.3-753b",
+        "glm-5.3-730b",
         "deepseek-v4-pro",
     ]
 
