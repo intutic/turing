@@ -1,0 +1,88 @@
+site_name: Turing Engine
+site_description: High-Performance Frontier LLM Serving Runtime for Sub-24GB Hardware
+site_author: Ishan Gupta
+site_url: https://intutic.github.io/turing/
+repo_url: https://github.com/intutic/turing
+repo_name: intutic/turing
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+extra_javascript:
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Overview: index.md
+  - Quickstart: quickstart.md
+  - Architecture:
+      - Subspace Pruning: architecture/subspace_pruning.md
+      - SVD INT8 KV Paging: architecture/svd_kv_paging.md
+      - Heterogeneous MoE: architecture/heterogeneous_moe.md
+      - Birkhoff Hyper-Connections: architecture/birkhoff.md
+      - Speculative Quadtree Decoding: architecture/speculative_decoding.md
+  - Benchmarks:
+      - Physical GPU Benchmarks: benchmarks/gpu_benchmarks.md
+      - Cloud TCO & ROI: benchmarks/tco_comparison.md
+      - Needle In A Haystack (NIAH): benchmarks/niah.md
+  - Serving & Runtime:
+      - Continuous Batching: serving/continuous_batching.md
+      - OpenAI & Anthropic API: serving/api_reference.md
+      - CLI Commands: serving/cli.md
+  - Ecosystem Integrations:
+      - LiteLLM: integrations/litellm.md
+      - LangChain & LangGraph: integrations/langchain.md
+      - LlamaIndex: integrations/llamaindex.md
+      - DSPy: integrations/dspy.md
+      - Open WebUI & LibreChat: integrations/open_webui.md
+      - KServe (Kubernetes): integrations/kserve.md
+      - Ray Serve: integrations/ray_serve.md
+      - Modal Labs: integrations/modal.md
+      - RunPod: integrations/runpod.md
+  - Licensing & Enterprise: licensing.md

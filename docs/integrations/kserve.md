@@ -6,7 +6,7 @@
 
 ## 1. Apply Turing Engine `ServingRuntime`
 
-Apply the custom resource definition from [`integrations/kserve/serving_runtime.yaml`](../../integrations/kserve/serving_runtime.yaml):
+Apply the custom resource definition from [`serving_runtime.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/serving_runtime.yaml):
 
 ```bash
 kubectl apply -f integrations/kserve/serving_runtime.yaml
