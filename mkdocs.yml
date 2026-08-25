@@ -62,6 +62,7 @@ nav:
   - Overview: index.md
   - Quickstart: quickstart.md
   - Architecture:
+      - Architecture Overview: architecture/index.md
       - Subspace Pruning: architecture/subspace_pruning.md
       - SVD INT8 KV Paging: architecture/svd_kv_paging.md
       - Heterogeneous MoE: architecture/heterogeneous_moe.md
