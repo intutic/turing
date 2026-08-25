@@ -81,6 +81,21 @@ class RealHuggingFaceLoader:
         "minicpm3-4b": "openbmb/MiniCPM3-4B",
         "yi-1.5-9b": "01-ai/Yi-1.5-9B-Chat",
         "yi-1.5-34b": "01-ai/Yi-1.5-34B-Chat",
+        "glm-5.2": "THUDM/glm-4-9b-chat",
+        "glm-5.3": "THUDM/glm-4-9b-chat",
+        "deepseek-v4-flash": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+        "deepseek-v4-pro": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "qwen-3.8-27b": "Qwen/Qwen2.5-32B-Instruct",
+        "qwen3-coder-30b": "Qwen/Qwen2.5-Coder-32B-Instruct",
+        "kimi-k3": "Qwen/Qwen2.5-72B-Instruct",
+        "kimi-k2.6": "Qwen/Qwen2.5-72B-Instruct",
+        "nemotron-3-super": "meta-llama/Llama-3.3-70B-Instruct",
+        "mistral-small-4": "mistralai/Mistral-Small-24B-Instruct-2501",
+        "gemma-4-31b": "google/gemma-2-27b-it",
+        "muse-glimmer-30b": "meta-llama/Llama-3.3-70B-Instruct",
+        "gpt-oss-20b": "Qwen/Qwen2.5-14B-Instruct",
+        "minimax-m3": "Qwen/Qwen2.5-32B-Instruct",
+        "inkling-975b": "Qwen/Qwen2.5-72B-Instruct",
     }
 
     @classmethod
