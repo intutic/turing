@@ -64,33 +64,47 @@ def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
     model_results = {}
 
     for key, name, params, layers, hidden, ffn, is_moe, sub_dim in models_matrix:
-        fp16_gb = (params * 2) / (1024 ** 3)
-        unsloth_gb = fp16_gb * 0.27 # Dynamic 4-bit BnB
-        vllm_gb = fp16_gb
-        trt_gb = fp16_gb * 0.25 # INT4 AWQ
+        # Standard analytical formulas
+        fp16_gb = (params * 2.0) / (1024 ** 3)
+        unsloth_gb = fp16_gb * 0.27 # 4-bit BnB with scales/metadata
+        vllm_gb = fp16_gb # FP16 base weights
+        trt_gb = fp16_gb * 0.25 # INT4 AWQ packed
+        ollama_gb = fp16_gb * 0.27 # GGUF Q4_K_M
         sglang_gb = fp16_gb
-        ollama_gb = fp16_gb * 0.27 # Q4_K_M
+        freetoken_gb = fp16_gb * 0.5
 
+        # Turing Engine Memory Geometry Computation:
+        # 1. Base attention weight params: ~ 4 * hidden^2 * layers
+        attn_params = 4 * hidden * hidden * layers
+        
         if is_moe:
-            freetoken_gb = 12.0 # GPU active VRAM
-            if "284b" in key:
-                turing_vram_gb = 5.91
-                turing_host_dram = 35.0
-            elif "753b" in key:
-                turing_vram_gb = 14.20
-                turing_host_dram = 88.0
-            else:
-                turing_vram_gb = 3.80
-                turing_host_dram = 18.0
+            # Active routed experts (typically top-2 or top-4 per token)
+            active_experts_count = 2 if "flash" in key else (4 if "pro" in key else 2)
+            total_experts_count = 64 if ("pro" in key or "753b" in key) else 32
+            
+            # Active Subspace FFN parameters per token: active_experts * 3 * hidden * sub_dim * layers
+            active_ffn_params = active_experts_count * 3 * hidden * sub_dim * layers
+            inactive_ffn_params = (total_experts_count - active_experts_count) * 3 * hidden * sub_dim * layers
+            
+            # INT4 Quantized VRAM (0.5 bytes per param) + Page Cache Metadata
+            turing_vram_gb = ((attn_params + active_ffn_params) * 0.5) / (1024 ** 3)
+            # Ensure minimum VRAM for embeddings and KV buffers
+            turing_vram_gb = max(2.5, turing_vram_gb)
+            
+            # Host Memory-Mapped Swappable Pool for inactive experts
+            turing_host_dram = (inactive_ffn_params * 0.5) / (1024 ** 3)
             turing_str = f"{turing_vram_gb:.2f}G VRAM"
         else:
-            freetoken_gb = fp16_gb * 0.50
-            if params > 50_000_000_000:
-                turing_vram_gb = 21.82 if "llama" in key else (21.91 if "qwen" in key else 43.63)
-            elif params > 5_000_000_000:
-                turing_vram_gb = 2.39 if "llama" in key else 4.12
-            else:
-                turing_vram_gb = max(0.03, fp16_gb * 0.15)
+            # Dense Subspace FFN parameters: 3 * hidden * sub_dim * layers (SwiGLU) or 2 * hidden * sub_dim * layers (GPT-2)
+            ffn_mult = 2 if "gpt" in key else 3
+            sub_ffn_params = ffn_mult * hidden * sub_dim * layers
+            
+            # INT4 Quantized Subspace Model (0.5 bytes per param) + Embedding table
+            vocab_size = 152064 if ("qwen" in key or "glm" in key) else (128256 if "llama" in key else 50257)
+            embed_bytes = vocab_size * hidden * 2 # FP16 embeddings
+            
+            turing_vram_bytes = (attn_params + sub_ffn_params) * 0.5 + embed_bytes
+            turing_vram_gb = turing_vram_bytes / (1024 ** 3)
             turing_host_dram = 0.0
             turing_str = f"{turing_vram_gb:.2f} GB"
 
