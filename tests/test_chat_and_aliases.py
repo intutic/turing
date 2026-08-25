@@ -26,5 +26,10 @@ def test_expanded_model_aliases():
     assert RealHuggingFaceLoader.resolve_model_id("deepseek-r1-32b") == "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
     assert RealHuggingFaceLoader.resolve_model_id("deepseek-r1-70b") == "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
 
+    # Test Mistral Small, Qwen Coder, and Phi-4-mini aliases
+    assert RealHuggingFaceLoader.resolve_model_id("mistral-small-24b") == "mistralai/Mistral-Small-24B-Instruct-2501"
+    assert RealHuggingFaceLoader.resolve_model_id("qwen-2.5-coder-7b") == "Qwen/Qwen2.5-Coder-7B-Instruct"
+    assert RealHuggingFaceLoader.resolve_model_id("phi-4-mini") == "microsoft/Phi-4-mini-instruct"
+
     # Test fallback on raw repo identifier
     assert RealHuggingFaceLoader.resolve_model_id("custom/my-fine-tuned-model") == "custom/my-fine-tuned-model"

@@ -45,7 +45,10 @@ class RealHuggingFaceLoader:
         "qwen-2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
         "qwen-32b": "Qwen/Qwen2.5-32B-Instruct",
         "qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
+        "qwen-coder-7b": "Qwen/Qwen2.5-Coder-7B-Instruct",
+        "qwen-2.5-coder-7b": "Qwen/Qwen2.5-Coder-7B-Instruct",
         "qwen-coder-32b": "Qwen/Qwen2.5-Coder-32B-Instruct",
+        "qwen-2.5-coder-32b": "Qwen/Qwen2.5-Coder-32B-Instruct",
         "qwen-72b": "Qwen/Qwen2.5-72B-Instruct",
         "qwen-2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
         "gemma-2-2b": "google/gemma-2-2b-it",
@@ -55,7 +58,9 @@ class RealHuggingFaceLoader:
         "llama-3.2-3b": "meta-llama/Llama-3.2-3B-Instruct",
         "llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
         "llama-3.1-70b": "unsloth/Meta-Llama-3.1-70B-bnb-4bit",
+        "llama-3.3": "meta-llama/Llama-3.3-70B-Instruct",
         "llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
+        "deepseek-r1": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
         "deepseek-r1-1.5b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
         "deepseek-r1-distill-qwen-1.5b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
         "deepseek-r1-7b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
@@ -67,7 +72,10 @@ class RealHuggingFaceLoader:
         "deepseek-r1-70b": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
         "deepseek-r1-distill-llama-70b": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
         "mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
+        "mistral-small": "mistralai/Mistral-Small-24B-Instruct-2501",
+        "mistral-small-24b": "mistralai/Mistral-Small-24B-Instruct-2501",
         "phi-4": "microsoft/phi-4",
+        "phi-4-mini": "microsoft/Phi-4-mini-instruct",
     }
 
     @classmethod
