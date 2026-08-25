@@ -25,8 +25,15 @@ jobs:
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
             HEAD_SHA="${{ github.event.pull_request.head.sha }}"
             COMMITS=$(git rev-list "${BASE_SHA}..${HEAD_SHA}")
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] && [ -n "${{ github.event.before }}" ]; then
+            COMMITS=$(git rev-list "${{ github.event.before }}..${{ github.event.after }}")
           else
-            COMMITS=$(git rev-list -n 10 HEAD)
+            COMMITS="${{ github.sha }}"
+          fi
+
+          if [ -z "$COMMITS" ]; then
+            echo "ℹ️ No commits to check in this event."
+            exit 0
           fi
 
           for COMMIT in $COMMITS; do
