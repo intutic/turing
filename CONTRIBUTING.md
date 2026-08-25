@@ -80,6 +80,28 @@ python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
 
 ---
 
+## ✍️ Developer Certificate of Origin (DCO)
+
+All contributions to Turing Engine must include a **Developer Certificate of Origin (DCO)** sign-off line in the commit message:
+
+```
+Signed-off-by: Your Name <your.email@example.com>
+```
+
+### How to Sign Off Commits
+- Use the `-s` flag when committing:
+  ```bash
+  git commit -s -m "feat(subspace): optimize INT8 routing projection"
+  ```
+- To sign off your previous commit:
+  ```bash
+  git commit --amend -s --no-edit
+  ```
+
+By adding the sign-off, you certify that your contribution complies with the [Developer Certificate of Origin 1.1](https://developercertificate.org/).
+
+---
+
 ## 📄 License & Attribution
 
 By contributing to Turing Engine, you agree that your contributions will be licensed under the **Business Source License 1.1 (BSL 1.1)** as specified in [`LICENSE`](LICENSE).

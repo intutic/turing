@@ -1,0 +1,57 @@
+name: DCO Check
+
+on:
+  pull_request:
+    branches: [ master, main ]
+  push:
+    branches: [ master, main ]
+
+jobs:
+  dco:
+    name: Developer Certificate of Origin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify DCO Sign-offs
+        run: |
+          echo "🔍 Checking Developer Certificate of Origin (DCO) sign-offs..."
+          FAILED=0
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+            COMMITS=$(git rev-list "${BASE_SHA}..${HEAD_SHA}")
+          else
+            COMMITS=$(git rev-list -n 10 HEAD)
+          fi
+
+          for COMMIT in $COMMITS; do
+            MSG=$(git log -1 --format="%B" "$COMMIT")
+            AUTHOR_EMAIL=$(git log -1 --format="%ae" "$COMMIT")
+            AUTHOR_NAME=$(git log -1 --format="%an" "$COMMIT")
+
+            if ! echo "$MSG" | grep -qE "^Signed-off-by: .+ <.+@.+>"; then
+              echo "❌ Commit $COMMIT is missing a valid 'Signed-off-by:' sign-off."
+              echo "   Author: $AUTHOR_NAME <$AUTHOR_EMAIL>"
+              echo "   How to fix:"
+              echo "     git commit --amend -s"
+              echo "     git push --force"
+              FAILED=1
+            else
+              SIGN_OFF=$(echo "$MSG" | grep -E "^Signed-off-by:" | head -n 1)
+              echo "✅ Commit ${COMMIT:0:7} passed DCO: $SIGN_OFF"
+            fi
+          done
+
+          if [ $FAILED -ne 0 ]; then
+            echo ""
+            echo "❌ DCO check failed! All commits must be signed off with 'git commit -s'."
+            echo "See CONTRIBUTING.md for more details."
+            exit 1
+          fi
+
+          echo "🎉 All commits successfully verified with DCO sign-offs!"

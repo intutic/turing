@@ -89,8 +89,13 @@ def submit_pr(target_key: str, config: dict, dry_run: bool = False):
 
     temp_dir = tempfile.mkdtemp(prefix=f"turing_upstream_{target_key}_")
     try:
-        print(f"Forking and cloning {repo} into temporary workspace...")
-        subprocess.run(["gh", "repo", "fork", repo, "--clone=true", temp_dir], check=True)
+        print(f"Ensuring fork exists for {repo}...")
+        subprocess.run(["gh", "repo", "fork", repo, "--clone=false"], check=False)
+
+        fork_repo_name = repo.split("/")[1]
+        fork_url = f"https://github.com/{gh_user}/{fork_repo_name}.git"
+        print(f"Shallow cloning fork {fork_url}...")
+        subprocess.run(["git", "clone", "--depth=1", fork_url, temp_dir], check=True)
 
         subprocess.run(["git", "checkout", "-b", branch], cwd=temp_dir, check=True)
 
