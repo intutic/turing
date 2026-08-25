@@ -96,6 +96,11 @@ class RealHuggingFaceLoader:
         "gpt-oss-20b": "Qwen/Qwen2.5-14B-Instruct",
         "minimax-m3": "Qwen/Qwen2.5-32B-Instruct",
         "inkling-975b": "Qwen/Qwen2.5-72B-Instruct",
+        "llama-4-scout": "meta-llama/Llama-3.3-70B-Instruct",
+        "llama-4-maverick": "meta-llama/Llama-3.3-70B-Instruct",
+        "mistral-large-3": "mistralai/Mistral-Large-Instruct-2407",
+        "qwen-3.8-max": "Qwen/Qwen2.5-72B-Instruct",
+        "deepseek-r1-0528": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
     }
 
     @classmethod
