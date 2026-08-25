@@ -26,6 +26,9 @@ class ChatCompletionRequest(BaseModel):
     top_k: Optional[int] = 50
     max_tokens: Optional[int] = 64
     stream: Optional[bool] = False
+    sparsity_ratio: Optional[float] = Field(default=None, description="Custom subspace sparsity ratio (0.0 to 0.9)")
+    use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
+    draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
 
 class CompletionRequest(BaseModel):
     model: str
@@ -33,6 +36,9 @@ class CompletionRequest(BaseModel):
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = 64
     stream: Optional[bool] = False
+    sparsity_ratio: Optional[float] = Field(default=None, description="Custom subspace sparsity ratio (0.0 to 0.9)")
+    use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
+    draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
 
 def create_app(engine: ContinuousBatchEngine) -> FastAPI:
     @asynccontextmanager
@@ -44,6 +50,50 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
             await engine.stop()
 
     app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.1.0", lifespan=lifespan)
+
+    def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
+        """
+        Extracts dynamic per-request sparsity, SVD KV paging, and draft speculation knobs
+        from HTTP headers (X-Turing-*) or JSON request payload with fallback to model defaults.
+        """
+        headers = raw_req.headers
+
+        # 1. Sparsity Ratio
+        sparsity = getattr(req_obj, "sparsity_ratio", None)
+        if sparsity is None:
+            raw_hdr = headers.get("x-turing-sparsity") or headers.get("X-Turing-Sparsity")
+            if raw_hdr:
+                try:
+                    sparsity = float(raw_hdr)
+                except ValueError:
+                    pass
+        if sparsity is None:
+            sparsity = engine.model_config.sparsity_ratio
+
+        # 2. SVD KV Paging
+        svd_kv = getattr(req_obj, "use_svd_kv", None)
+        if svd_kv is None:
+            raw_hdr = headers.get("x-turing-svd-kv") or headers.get("X-Turing-SVD-KV")
+            if raw_hdr:
+                svd_kv = raw_hdr.strip().lower() in ("1", "true", "yes")
+        if svd_kv is None:
+            svd_kv = True
+
+        # 3. Draft Speculation Tokens
+        draft_toks = getattr(req_obj, "draft_tokens", None)
+        if draft_toks is None:
+            raw_hdr = headers.get("x-turing-draft-tokens") or headers.get("X-Turing-Draft-Tokens")
+            if raw_hdr:
+                try:
+                    draft_toks = int(raw_hdr)
+                except ValueError:
+                    pass
+
+        return {
+            "sparsity_ratio": float(sparsity),
+            "use_svd_kv": bool(svd_kv),
+            "draft_tokens": draft_toks
+        }
 
     @app.get("/health")
     async def health_check():
@@ -115,7 +165,15 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
         }
 
     @app.post("/v1/chat/completions")
-    async def chat_completions(req: ChatCompletionRequest):
+    async def chat_completions(req: ChatCompletionRequest, raw_req: Request):
+        controls = _extract_turing_controls(req, raw_req)
+        resp_headers = {
+            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
+            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
+            "X-Turing-Model": engine.model_config.name,
+            "X-Turing-Device": str(engine.device)
+        }
+
         # Flatten messages to pseudo-tokens (or simple ASCII encoding if tokenizer not attached)
         full_text = " ".join([m.content for m in req.messages])
         prompt_tokens = [ord(c) % engine.model_config.vocab_size for c in full_text]
@@ -134,7 +192,10 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
                     prompt_tokens=prompt_tokens,
                     max_new_tokens=max_new_tokens,
                     temperature=temp,
-                    top_k=top_k
+                    top_k=top_k,
+                    sparsity_ratio=controls["sparsity_ratio"],
+                    use_svd_kv=controls["use_svd_kv"],
+                    draft_tokens=controls["draft_tokens"]
                 )
                 async for token_id in token_stream:
                     char_repr = chr(token_id % 128) if (32 <= (token_id % 128) <= 126) else f"<{token_id}>"
@@ -170,7 +231,7 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
                 yield f"data: {json.dumps(done_chunk)}\n\n"
                 yield "data: [DONE]\n\n"
 
-            return StreamingResponse(event_generator(), media_type="text/event-stream")
+            return StreamingResponse(event_generator(), media_type="text/event-stream", headers=resp_headers)
 
         # Non-streaming
         generated_tokens = []
@@ -178,40 +239,54 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
             prompt_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
             temperature=temp,
-            top_k=top_k
+            top_k=top_k,
+            sparsity_ratio=controls["sparsity_ratio"],
+            use_svd_kv=controls["use_svd_kv"],
+            draft_tokens=controls["draft_tokens"]
         )
         async for token_id in token_stream:
             generated_tokens.append(token_id)
 
         out_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in generated_tokens])
 
-        return {
-            "id": req_id,
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": req.model,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": out_text
-                    },
-                    "finish_reason": "stop"
+        return JSONResponse(
+            content={
+                "id": req_id,
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": req.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": out_text
+                        },
+                        "finish_reason": "stop"
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": len(prompt_tokens),
+                    "completion_tokens": len(generated_tokens),
+                    "total_tokens": len(prompt_tokens) + len(generated_tokens)
                 }
-            ],
-            "usage": {
-                "prompt_tokens": len(prompt_tokens),
-                "completion_tokens": len(generated_tokens),
-                "total_tokens": len(prompt_tokens) + len(generated_tokens)
-            }
-        }
+            },
+            headers=resp_headers
+        )
 
     @app.post("/v1/messages")
-    async def anthropic_messages(req: AnthropicMessageRequest):
+    async def anthropic_messages(req: AnthropicMessageRequest, raw_req: Request):
         """
         Official Anthropic Messages API Endpoint (/v1/messages).
         """
+        controls = _extract_turing_controls(req, raw_req)
+        resp_headers = {
+            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
+            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
+            "X-Turing-Model": engine.model_config.name,
+            "X-Turing-Device": str(engine.device)
+        }
+
         full_text = AnthropicAPIHandler.extract_prompt_from_request(req)
         prompt_tokens = [ord(c) % engine.model_config.vocab_size for c in full_text]
         if not prompt_tokens:
@@ -227,7 +302,10 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
                     prompt_tokens=prompt_tokens,
                     max_new_tokens=max_new_tokens,
                     temperature=temp,
-                    top_k=top_k
+                    top_k=top_k,
+                    sparsity_ratio=controls["sparsity_ratio"],
+                    use_svd_kv=controls["use_svd_kv"],
+                    draft_tokens=controls["draft_tokens"]
                 )
                 async for tok_id in token_stream:
                     tok_str = chr(tok_id % 128) if (32 <= (tok_id % 128) <= 126) else f"<{tok_id}>"
@@ -239,7 +317,8 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
                     token_stream=anthropic_token_stream(),
                     input_tokens_count=len(prompt_tokens)
                 ),
-                media_type="text/event-stream"
+                media_type="text/event-stream",
+                headers=resp_headers
             )
 
         # Non-streaming
@@ -248,7 +327,10 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
             prompt_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
             temperature=temp,
-            top_k=top_k
+            top_k=top_k,
+            sparsity_ratio=controls["sparsity_ratio"],
+            use_svd_kv=controls["use_svd_kv"],
+            draft_tokens=controls["draft_tokens"]
         )
         async for token_id in token_stream:
             generated_tokens.append(token_id)
@@ -260,6 +342,6 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
             input_tokens_count=len(prompt_tokens),
             output_tokens_count=len(generated_tokens)
         )
-        return response.model_dump()
+        return JSONResponse(content=response.model_dump(), headers=resp_headers)
 
     return app

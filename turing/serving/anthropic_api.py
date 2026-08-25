@@ -35,6 +35,9 @@ class AnthropicMessageRequest(BaseModel):
     top_k: Optional[int] = 50
     stream: Optional[bool] = False
     tools: Optional[List[AnthropicTool]] = None
+    sparsity_ratio: Optional[float] = Field(default=None, description="Custom subspace sparsity ratio (0.0 to 0.9)")
+    use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
+    draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
 
 class AnthropicUsage(BaseModel):
     input_tokens: int

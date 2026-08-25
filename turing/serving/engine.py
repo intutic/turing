@@ -29,13 +29,19 @@ class AsyncSequenceRequest:
         max_new_tokens: int = 32,
         temperature: float = 0.7,
         top_k: int = 50,
-        request_id: Optional[str] = None
+        request_id: Optional[str] = None,
+        sparsity_ratio: Optional[float] = None,
+        use_svd_kv: Optional[bool] = None,
+        draft_tokens: Optional[int] = None
     ):
         self.request_id = request_id or str(uuid.uuid4())[:8]
         self.prompt_tokens = list(prompt_tokens)
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_k = top_k
+        self.sparsity_ratio = sparsity_ratio
+        self.use_svd_kv = use_svd_kv
+        self.draft_tokens = draft_tokens
         self.state = RequestState.WAITING
         self.generated_tokens: List[int] = []
         self.output_queue: asyncio.Queue[Optional[int]] = asyncio.Queue()
@@ -110,13 +116,19 @@ class ContinuousBatchEngine:
         prompt_tokens: List[int],
         max_new_tokens: int = 32,
         temperature: float = 0.7,
-        top_k: int = 50
+        top_k: int = 50,
+        sparsity_ratio: Optional[float] = None,
+        use_svd_kv: Optional[bool] = None,
+        draft_tokens: Optional[int] = None
     ) -> AsyncSequenceRequest:
         req = AsyncSequenceRequest(
             prompt_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
-            top_k=top_k
+            top_k=top_k,
+            sparsity_ratio=sparsity_ratio,
+            use_svd_kv=use_svd_kv,
+            draft_tokens=draft_tokens
         )
         self.waiting_queue.append(req)
         return req
@@ -126,9 +138,20 @@ class ContinuousBatchEngine:
         prompt_tokens: List[int],
         max_new_tokens: int = 32,
         temperature: float = 0.7,
-        top_k: int = 50
+        top_k: int = 50,
+        sparsity_ratio: Optional[float] = None,
+        use_svd_kv: Optional[bool] = None,
+        draft_tokens: Optional[int] = None
     ) -> AsyncGenerator[int, None]:
-        req = await self.add_request(prompt_tokens, max_new_tokens, temperature, top_k)
+        req = await self.add_request(
+            prompt_tokens=prompt_tokens,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            sparsity_ratio=sparsity_ratio,
+            use_svd_kv=use_svd_kv,
+            draft_tokens=draft_tokens
+        )
         while True:
             token = await req.output_queue.get()
             if token is None:
