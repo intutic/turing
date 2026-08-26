@@ -61,33 +61,9 @@ extra_javascript:
 nav:
   - Overview: index.md
   - Quickstart: quickstart.md
-  - Architecture:
-      - Architecture Overview: architecture/index.md
-      - Subspace Pruning: architecture/subspace_pruning.md
-      - SVD INT8 KV Paging: architecture/svd_kv_paging.md
-      - Heterogeneous MoE: architecture/heterogeneous_moe.md
-      - Birkhoff Hyper-Connections: architecture/birkhoff.md
-      - Speculative Quadtree Decoding: architecture/speculative_decoding.md
-      - Cross-Model KV & XKV Latent Agents: architecture/xkv_latent_transfer.md
-      - Architectural Landscape (vs. FreeToken, vLLM): architecture/comparisons.md
-  - Benchmarks:
-      - Physical GPU Benchmarks: benchmarks/gpu_benchmarks.md
-      - Cloud TCO & ROI: benchmarks/tco_comparison.md
-      - Needle In A Haystack (NIAH): benchmarks/niah.md
-  - Serving & Runtime:
-      - Continuous Batching: serving/continuous_batching.md
-      - OpenAI & Anthropic API: serving/api_reference.md
-      - CLI Commands: serving/cli.md
-  - Ecosystem Integrations:
-      - LiteLLM: integrations/litellm.md
-      - LangChain & LangGraph: integrations/langchain.md
-      - LlamaIndex: integrations/llamaindex.md
-      - DSPy: integrations/dspy.md
-      - Open WebUI & LibreChat: integrations/open_webui.md
-      - KServe (Kubernetes): integrations/kserve.md
-      - Ray Serve: integrations/ray_serve.md
-      - Modal Labs: integrations/modal.md
-      - RunPod: integrations/runpod.md
-  - Hardware & Accelerators:
-      - Universal Cross-Vendor Support: hardware/universal_backends.md
-  - Licensing & Enterprise: licensing.md
+  - Models & Hardware: models_and_hardware.md
+  - Serving & API: serving.md
+  - Architecture: architecture.md
+  - Integrations: integrations.md
+  - Benchmarks: benchmarks.md
+  - Licensing: licensing.md

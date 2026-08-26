@@ -44,8 +44,9 @@ turing serve --model deepseek-r1-7b --port 8000
 ## 📖 Navigation
 
 * [⚡ Quickstart Guide](quickstart.md)
-* [🌐 Hardware & Accelerators](hardware/universal_backends.md)
-* [🦜️🔗 LangChain & LangGraph Integration](integrations/langchain.md)
-* [📊 Hardware Benchmarks & Sizing](benchmarks/gpu_benchmarks.md)
-* [🧠 Architecture Deep-Dive](architecture/index.md)
-* [💻 CLI Commands Reference](serving/cli.md)
+* [🌐 Supported Models & Hardware Setup](models_and_hardware.md)
+* [🚀 Serving & API Reference](serving.md)
+* [🧠 Architecture Deep-Dive](architecture.md)
+* [🔌 Ecosystem Integrations](integrations.md)
+* [📊 Empirical Benchmarks](benchmarks.md)
+* [📜 Licensing Terms](licensing.md)
