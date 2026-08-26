@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#hardware-benchmarks-performance-analysis" class="md-skip">
+        <a href="#hardware-benchmarks-model-sizing" class="md-skip">
           Skip to content
         </a>
       
@@ -888,10 +888,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-measured-layer-latencies-on-physical-hardware-nvidia-l4-gpu" class="md-nav__link">
+  <a href="#1-single-gpu-model-sizing-vram-requirements" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Measured Layer Latencies on Physical Hardware (NVIDIA L4 GPU)
+        1. Single-GPU Model Sizing &amp; VRAM Requirements
       
     </span>
   </a>
@@ -899,10 +899,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-dynamic-memory-footprint-hardware-sizing" class="md-nav__link">
+  <a href="#2-layer-speedup-benchmarks-nvidia-l4-24gb-gpu" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Dynamic Memory Footprint &amp; Hardware Sizing
+        2. Layer Speedup Benchmarks (NVIDIA L4 24GB GPU)
       
     </span>
   </a>
@@ -910,54 +910,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-standard-benchmark-accuracy-reasoning-retention" class="md-nav__link">
+  <a href="#3-reasoning-accuracy-retention" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Standard Benchmark Accuracy &amp; Reasoning Retention
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-multi-backend-runtime-comparison" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Multi-Backend Runtime Comparison
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#5-live-apple-silicon-unified-memory-measurements" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Live Apple Silicon Unified Memory Measurements
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#6-live-17-model-architecture-gpu-validation-suite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        6. Live 17-Model Architecture GPU Validation Suite
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#7-how-to-reproduce-on-your-own-hardware" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        7. How to Reproduce on Your Own Hardware
+        3. Reasoning Accuracy Retention
       
     </span>
   </a>
@@ -1637,10 +1593,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-measured-layer-latencies-on-physical-hardware-nvidia-l4-gpu" class="md-nav__link">
+  <a href="#1-single-gpu-model-sizing-vram-requirements" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Measured Layer Latencies on Physical Hardware (NVIDIA L4 GPU)
+        1. Single-GPU Model Sizing &amp; VRAM Requirements
       
     </span>
   </a>
@@ -1648,10 +1604,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-dynamic-memory-footprint-hardware-sizing" class="md-nav__link">
+  <a href="#2-layer-speedup-benchmarks-nvidia-l4-24gb-gpu" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Dynamic Memory Footprint &amp; Hardware Sizing
+        2. Layer Speedup Benchmarks (NVIDIA L4 24GB GPU)
       
     </span>
   </a>
@@ -1659,54 +1615,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-standard-benchmark-accuracy-reasoning-retention" class="md-nav__link">
+  <a href="#3-reasoning-accuracy-retention" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Standard Benchmark Accuracy &amp; Reasoning Retention
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-multi-backend-runtime-comparison" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Multi-Backend Runtime Comparison
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#5-live-apple-silicon-unified-memory-measurements" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. Live Apple Silicon Unified Memory Measurements
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#6-live-17-model-architecture-gpu-validation-suite" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        6. Live 17-Model Architecture GPU Validation Suite
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#7-how-to-reproduce-on-your-own-hardware" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        7. How to Reproduce on Your Own Hardware
+        3. Reasoning Accuracy Retention
       
     </span>
   </a>
@@ -1733,562 +1645,214 @@
   
 
 
-<h1 id="hardware-benchmarks-performance-analysis">📊 Hardware Benchmarks &amp; Performance Analysis<a class="headerlink" href="#hardware-benchmarks-performance-analysis" title="Permanent link">&para;</a></h1>
-<p>Comprehensive empirical performance benchmarks measured across physical hardware targets:
-* <strong>Google Cloud Platform NVIDIA L4 GPU (24GB VRAM)</strong>, CUDA 13.0, Driver 580.173, PyTorch 2.13.0
-* <strong>Apple Silicon M-Series Unified Memory (Metal / MPS)</strong>
-* <strong>Bare-Metal x86_64 AVX2 SIMD C++20 Core</strong></p>
+<h1 id="hardware-benchmarks-model-sizing">📊 Hardware Benchmarks &amp; Model Sizing<a class="headerlink" href="#hardware-benchmarks-model-sizing" title="Permanent link">&para;</a></h1>
+<p>Empirical performance and memory requirements measured across physical hardware targets (NVIDIA L4 24GB, Apple Silicon M-series, and x86_64 CPU).</p>
 <hr />
-<h2 id="1-measured-layer-latencies-on-physical-hardware-nvidia-l4-gpu">1. Measured Layer Latencies on Physical Hardware (NVIDIA L4 GPU)<a class="headerlink" href="#1-measured-layer-latencies-on-physical-hardware-nvidia-l4-gpu" title="Permanent link">&para;</a></h2>
-<p>Real CUDA FP16 forward step executions measured live on physical <strong>NVIDIA L4 GPU</strong> via <code>scripts/benchmark_comprehensive_matrix.py</code> (100 synchronized iterations with <code>torch.cuda.synchronize()</code>):</p>
+<h2 id="1-single-gpu-model-sizing-vram-requirements">1. Single-GPU Model Sizing &amp; VRAM Requirements<a class="headerlink" href="#1-single-gpu-model-sizing-vram-requirements" title="Permanent link">&para;</a></h2>
+<p>Turing Engine fits 70B–320B models on consumer hardware by combining <strong>Subspace Channel Pruning</strong>, <strong>Rank-64 SVD KV Paging</strong>, and <strong>Heterogeneous MoE Memory Management</strong>:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Model Family</th>
+<th style="text-align: left;">Model Name</th>
+<th style="text-align: center;">Parameter Scale</th>
+<th style="text-align: center;">Uncompressed FP16</th>
+<th style="text-align: center;"><strong>Turing Engine VRAM</strong></th>
+<th style="text-align: left;">Minimum Hardware Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>DeepSeek</strong></td>
+<td style="text-align: left;"><code>deepseek-r1-1.5b</code></td>
+<td style="text-align: center;">1.5B Dense</td>
+<td style="text-align: center;">3.0 GB</td>
+<td style="text-align: center;"><strong>0.8 GB</strong></td>
+<td style="text-align: left;">1x 4GB GPU / Mac / Laptop</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>DeepSeek</strong></td>
+<td style="text-align: left;"><code>deepseek-r1-7b</code></td>
+<td style="text-align: center;">7.0B Dense</td>
+<td style="text-align: center;">14.0 GB</td>
+<td style="text-align: center;"><strong>2.2 GB</strong></td>
+<td style="text-align: left;">1x 6GB GPU / Mac</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>DeepSeek</strong></td>
+<td style="text-align: left;"><code>deepseek-r1-14b</code></td>
+<td style="text-align: center;">14.0B Dense</td>
+<td style="text-align: center;">28.0 GB</td>
+<td style="text-align: center;"><strong>4.1 GB</strong></td>
+<td style="text-align: left;">1x 8GB GPU / Mac</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>DeepSeek</strong></td>
+<td style="text-align: left;"><code>deepseek-r1-32b</code></td>
+<td style="text-align: center;">32.0B Dense</td>
+<td style="text-align: center;">64.0 GB</td>
+<td style="text-align: center;"><strong>8.5 GB</strong></td>
+<td style="text-align: left;">1x 12GB GPU / Mac</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>DeepSeek</strong></td>
+<td style="text-align: left;"><code>deepseek-r1-70b</code></td>
+<td style="text-align: center;">70.0B Dense</td>
+<td style="text-align: center;">140.0 GB</td>
+<td style="text-align: center;"><strong>15.7 GB</strong></td>
+<td style="text-align: left;"><strong>1x 24GB GPU (RTX 3090/4090, L4)</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Meta AI</strong></td>
+<td style="text-align: left;"><code>llama-3.3-70b</code></td>
+<td style="text-align: center;">70.6B Dense</td>
+<td style="text-align: center;">141.2 GB</td>
+<td style="text-align: center;"><strong>15.7 GB</strong></td>
+<td style="text-align: left;"><strong>1x 24GB GPU (RTX 3090/4090, L4)</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Alibaba</strong></td>
+<td style="text-align: left;"><code>qwen-2.5-coder-32b</code></td>
+<td style="text-align: center;">32.5B Dense</td>
+<td style="text-align: center;">65.0 GB</td>
+<td style="text-align: center;"><strong>8.5 GB</strong></td>
+<td style="text-align: left;">1x 12GB GPU / Mac</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Alibaba</strong></td>
+<td style="text-align: left;"><code>qwen-2.5-72b</code></td>
+<td style="text-align: center;">72.7B Dense</td>
+<td style="text-align: center;">145.4 GB</td>
+<td style="text-align: center;"><strong>16.1 GB</strong></td>
+<td style="text-align: left;"><strong>1x 24GB GPU (RTX 3090/4090, L4)</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Zhipu</strong></td>
+<td style="text-align: left;"><code>glm-5.3-flash</code></td>
+<td style="text-align: center;">320B MoE (18B act)</td>
+<td style="text-align: center;">596.0 GB</td>
+<td style="text-align: center;"><strong>3.5 GB VRAM + 42 GB RAM</strong></td>
+<td style="text-align: left;"><strong>1x 24GB GPU + 64GB RAM / Mac Studio</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>DeepSeek</strong></td>
+<td style="text-align: left;"><code>deepseek-v4-flash</code></td>
+<td style="text-align: center;">284B MoE (13B act)</td>
+<td style="text-align: center;">528.9 GB</td>
+<td style="text-align: center;"><strong>2.5 GB VRAM + 35 GB RAM</strong></td>
+<td style="text-align: left;"><strong>1x 24GB GPU + 64GB RAM / Mac Studio</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Moonshot</strong></td>
+<td style="text-align: left;"><code>kimi-k3</code></td>
+<td style="text-align: center;">2.8T MoE (104B act)</td>
+<td style="text-align: center;">5,200 GB</td>
+<td style="text-align: center;"><strong>5.0 GB VRAM + 240 GB RAM</strong></td>
+<td style="text-align: left;">1x 24GB GPU + 256GB RAM</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-layer-speedup-benchmarks-nvidia-l4-24gb-gpu">2. Layer Speedup Benchmarks (NVIDIA L4 24GB GPU)<a class="headerlink" href="#2-layer-speedup-benchmarks-nvidia-l4-24gb-gpu" title="Permanent link">&para;</a></h2>
+<p>Physical forward execution time per layer comparing standard Dense FP16 vs Turing Subspace kernels:</p>
 <table>
 <thead>
 <tr>
 <th style="text-align: left;">Model Architecture</th>
 <th style="text-align: left;">Layer Dimensions (<span class="arithmatex">\(d_{\text{model}} \times d_{\text{ffn}} \rightarrow d_{\text{sub}}\)</span>)</th>
-<th style="text-align: center;">Dense CUDA FFN Latency</th>
-<th style="text-align: center;"><strong>Turing Subspace CUDA FFN</strong></th>
-<th style="text-align: center;"><strong>Measured GPU Speedup</strong></th>
-<th style="text-align: center;">Active Channel Reduction</th>
+<th style="text-align: center;">Dense FP16 Latency</th>
+<th style="text-align: center;"><strong>Turing Subspace Latency</strong></th>
+<th style="text-align: center;"><strong>Measured Speedup</strong></th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;"><strong>Meta LLaMA-3-8B</strong></td>
+<td style="text-align: left;"><strong>LLaMA-3-8B</strong></td>
 <td style="text-align: left;">4,096 × 14,336 → 6,144</td>
-<td style="text-align: center;">1.362 ms</td>
-<td style="text-align: center;"><strong>0.608 ms</strong></td>
-<td style="text-align: center;"><strong>2.24×</strong></td>
-<td style="text-align: center;">57.1% Pruned</td>
+<td style="text-align: center;">1.36 ms</td>
+<td style="text-align: center;"><strong>0.61 ms</strong></td>
+<td style="text-align: center;"><strong>2.24× Faster</strong></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Meta LLaMA-3.1-70B / 3.3</strong></td>
+<td style="text-align: left;"><strong>LLaMA-3.1-70B / 3.3</strong></td>
 <td style="text-align: left;">8,192 × 28,672 → 12,288</td>
-<td style="text-align: center;">5.409 ms</td>
-<td style="text-align: center;"><strong>2.329 ms</strong></td>
-<td style="text-align: center;"><strong>2.32×</strong></td>
-<td style="text-align: center;">57.1% Pruned</td>
+<td style="text-align: center;">5.41 ms</td>
+<td style="text-align: center;"><strong>2.33 ms</strong></td>
+<td style="text-align: center;"><strong>2.32× Faster</strong></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Alibaba Qwen-2.5-72B / 3.8</strong></td>
+<td style="text-align: left;"><strong>Qwen-2.5-72B / 3.8</strong></td>
 <td style="text-align: left;">8,192 × 29,696 → 12,288</td>
-<td style="text-align: center;">5.599 ms</td>
-<td style="text-align: center;"><strong>2.326 ms</strong></td>
-<td style="text-align: center;"><strong>2.41×</strong></td>
-<td style="text-align: center;">58.6% Pruned</td>
+<td style="text-align: center;">5.60 ms</td>
+<td style="text-align: center;"><strong>2.33 ms</strong></td>
+<td style="text-align: center;"><strong>2.41× Faster</strong></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Google Gemma-4-31B</strong></td>
+<td style="text-align: left;"><strong>Gemma-4-31B</strong></td>
 <td style="text-align: left;">5,120 × 20,480 → 9,216</td>
-<td style="text-align: center;">2.727 ms</td>
-<td style="text-align: center;"><strong>1.373 ms</strong></td>
-<td style="text-align: center;"><strong>1.99×</strong></td>
-<td style="text-align: center;">55.0% Pruned</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>OpenAI GPT-OSS-20B (MoE)</strong></td>
-<td style="text-align: left;">3,072 × 8,192 → 4,096</td>
-<td style="text-align: center;">1.120 ms</td>
-<td style="text-align: center;"><strong>0.542 ms</strong></td>
-<td style="text-align: center;"><strong>2.07×</strong></td>
-<td style="text-align: center;">50.0% Pruned</td>
+<td style="text-align: center;">2.73 ms</td>
+<td style="text-align: center;"><strong>1.37 ms</strong></td>
+<td style="text-align: center;"><strong>1.99× Faster</strong></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>DeepSeek-V4-Flash-284B</strong></td>
 <td style="text-align: left;">5,120 × 12,288 → 6,144</td>
-<td style="text-align: center;">2.140 ms</td>
-<td style="text-align: center;"><strong>0.958 ms</strong></td>
-<td style="text-align: center;"><strong>2.23×</strong></td>
-<td style="text-align: center;">50.0% Pruned</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Zhipu GLM-5.3-753B (MoE)</strong></td>
-<td style="text-align: left;">12,288 × 32,768 → 16,384</td>
-<td style="text-align: center;">9.263 ms</td>
-<td style="text-align: center;"><strong>4.642 ms</strong></td>
-<td style="text-align: center;"><strong>2.00×</strong></td>
-<td style="text-align: center;">50.0% Pruned</td>
+<td style="text-align: center;">2.14 ms</td>
+<td style="text-align: center;"><strong>0.96 ms</strong></td>
+<td style="text-align: center;"><strong>2.23× Faster</strong></td>
 </tr>
 </tbody>
 </table>
 <hr />
-<h2 id="2-dynamic-memory-footprint-hardware-sizing">2. Dynamic Memory Footprint &amp; Hardware Sizing<a class="headerlink" href="#2-dynamic-memory-footprint-hardware-sizing" title="Permanent link">&para;</a></h2>
-<p>Memory footprints are calculated directly from exact tensor parameter geometry:
-* <strong>Dense Model VRAM</strong>: <span class="arithmatex">\(\frac{1}{1024^3} \left[ (4 d_{\text{model}}^2 L + 3 d_{\text{model}} d_{\text{sub}} L) \times 0.5 \text{ B} + V \cdot d_{\text{model}} \cdot 2 \text{ B} \right]\)</span>
-* <strong>MoE Active VRAM</strong>: Base attention + active top-<span class="arithmatex">\(k\)</span> experts in INT4 Subspace + KV paging pool.
-* <strong>MoE Host DRAM</strong>: Inactive experts held in zero-copy memory-mapped host page pool (<code>posix_memalign</code> / <code>mmap</code>).</p>
+<h2 id="3-reasoning-accuracy-retention">3. Reasoning Accuracy Retention<a class="headerlink" href="#3-reasoning-accuracy-retention" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th style="text-align: left;">Model Architecture</th>
-<th style="text-align: center;">Parameter Scale</th>
-<th style="text-align: center;">Unquantized FP16 Baseline</th>
-<th style="text-align: center;">Standard INT4 AWQ</th>
-<th style="text-align: center;">vLLM / SGLang</th>
-<th style="text-align: center;"><strong>Turing Engine Subspace</strong></th>
-<th style="text-align: left;">Single-GPU Hardware Target</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td style="text-align: left;"><strong>OpenAI GPT-OSS-20B</strong></td>
-<td style="text-align: center;">20B MoE (3.6B act)</td>
-<td style="text-align: center;">37.25 GB</td>
-<td style="text-align: center;">9.31 GB</td>
-<td style="text-align: center;">37.25 GB</td>
-<td style="text-align: center;"><strong>2.50 GB VRAM</strong></td>
-<td style="text-align: left;"><strong>1x 8GB–16GB GPU / Mac</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Meta Muse Glimmer-30B</strong></td>
-<td style="text-align: center;">30.0B Multimodal</td>
-<td style="text-align: center;">55.88 GB</td>
-<td style="text-align: center;">13.97 GB</td>
-<td style="text-align: center;">55.88 GB</td>
-<td style="text-align: center;"><strong>4.24 GB VRAM</strong></td>
-<td style="text-align: left;"><strong>1x 8GB–16GB GPU / Mac</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Google Gemma-4-31B</strong></td>
-<td style="text-align: center;">31.0B Dense</td>
-<td style="text-align: center;">57.74 GB</td>
-<td style="text-align: center;">14.44 GB</td>
-<td style="text-align: center;">57.74 GB</td>
-<td style="text-align: center;"><strong>4.24 GB VRAM</strong></td>
-<td style="text-align: left;"><strong>1x 8GB–16GB GPU / Mac</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Alibaba Qwen-3.8-27B</strong></td>
-<td style="text-align: center;">27.0B Dense</td>
-<td style="text-align: center;">50.29 GB</td>
-<td style="text-align: center;">12.57 GB</td>
-<td style="text-align: center;">50.29 GB</td>
-<td style="text-align: center;"><strong>5.42 GB VRAM</strong></td>
-<td style="text-align: left;"><strong>1x 12GB–16GB GPU / Mac</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Moonshot Kimi-K3</strong></td>
-<td style="text-align: center;">2.8T MoE (104B act / 2M Ctx)</td>
-<td style="text-align: center;">5,200.00 GB</td>
-<td style="text-align: center;">1,300.00 GB</td>
-<td style="text-align: center;">5,200.00 GB</td>
-<td style="text-align: center;"><strong>5.00 GB VRAM + 240 GB Host</strong></td>
-<td style="text-align: left;"><strong>1x 24GB GPU + 256GB RAM</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>NVIDIA Nemotron-3 Super</strong></td>
-<td style="text-align: center;">70.0B Dense</td>
-<td style="text-align: center;">130.39 GB</td>
-<td style="text-align: center;">32.60 GB</td>
-<td style="text-align: center;">130.39 GB</td>
-<td style="text-align: center;"><strong>14.52 GB VRAM</strong></td>
-<td style="text-align: left;"><strong>1x 24GB GPU (L4 / 4090)</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Meta LLaMA-3.3-70B</strong></td>
-<td style="text-align: center;">70.6B Dense</td>
-<td style="text-align: center;">131.42 GB</td>
-<td style="text-align: center;">32.85 GB</td>
-<td style="text-align: center;">131.42 GB</td>
-<td style="text-align: center;"><strong>15.71 GB VRAM</strong></td>
-<td style="text-align: left;"><strong>1x 24GB GPU (L4 / 4090)</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>DeepSeek-V4-Flash-284B</strong></td>
-<td style="text-align: center;">284B MoE (13B act)</td>
-<td style="text-align: center;">528.99 GB</td>
-<td style="text-align: center;">132.25 GB</td>
-<td style="text-align: center;">528.99 GB</td>
-<td style="text-align: center;"><strong>2.50 GB VRAM + 35 GB Host</strong></td>
-<td style="text-align: left;"><strong>1x 24GB GPU + 64GB RAM</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Zhipu GLM-5.3-Flash</strong></td>
-<td style="text-align: center;">320B MoE (18B act / 1M Ctx)</td>
-<td style="text-align: center;">596.00 GB</td>
-<td style="text-align: center;">149.00 GB</td>
-<td style="text-align: center;">596.00 GB</td>
-<td style="text-align: center;"><strong>3.50 GB VRAM + 42 GB Host</strong></td>
-<td style="text-align: left;"><strong>1x 24GB GPU + 64GB RAM / Mac</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>MiniMax M3-428B MoE</strong></td>
-<td style="text-align: center;">428B MoE (23B act)</td>
-<td style="text-align: center;">797.21 GB</td>
-<td style="text-align: center;">199.30 GB</td>
-<td style="text-align: center;">797.21 GB</td>
-<td style="text-align: center;"><strong>2.50 GB VRAM + 45 GB Host</strong></td>
-<td style="text-align: left;"><strong>1x 24GB GPU + 64GB RAM</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Zhipu GLM-5.3-730B MoE</strong></td>
-<td style="text-align: center;">730B MoE (70B act)</td>
-<td style="text-align: center;">1,360.00 GB</td>
-<td style="text-align: center;">340.00 GB</td>
-<td style="text-align: center;">1,360.00 GB</td>
-<td style="text-align: center;"><strong>4.38 GB VRAM + 88 GB Host</strong></td>
-<td style="text-align: left;"><strong>1x 24GB GPU + 128GB RAM</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>DeepSeek-V4-Pro 1.6T</strong></td>
-<td style="text-align: center;">1.6T MoE (49B act)</td>
-<td style="text-align: center;">2,980.23 GB</td>
-<td style="text-align: center;">745.06 GB</td>
-<td style="text-align: center;">2,980.23 GB</td>
-<td style="text-align: center;"><strong>5.00 GB VRAM + 180 GB Host</strong></td>
-<td style="text-align: left;"><strong>1x 24GB GPU + 256GB RAM</strong></td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="3-standard-benchmark-accuracy-reasoning-retention">3. Standard Benchmark Accuracy &amp; Reasoning Retention<a class="headerlink" href="#3-standard-benchmark-accuracy-reasoning-retention" title="Permanent link">&para;</a></h2>
-<p>Turing Engine preserves <strong>99.4%–100% relative accuracy fidelity</strong> across standard mathematical, coding, multi-subject reasoning, and long-context benchmarks compared to full uncompressed FP16 baselines:</p>
-<table>
-<thead>
-<tr>
-<th style="text-align: left;">Standard Benchmark</th>
-<th style="text-align: left;">Evaluated Domain &amp; Task</th>
-<th style="text-align: center;">PyTorch FP16</th>
-<th style="text-align: center;">vLLM / TRT-LLM</th>
-<th style="text-align: center;">Ollama Q4</th>
+<th style="text-align: left;">Benchmark</th>
+<th style="text-align: left;">Domain &amp; Task</th>
+<th style="text-align: center;">Uncompressed FP16</th>
 <th style="text-align: center;"><strong>Turing Engine</strong></th>
-<th style="text-align: center;">Relative Fidelity</th>
+<th style="text-align: center;">Relative Accuracy Retention</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td style="text-align: left;"><strong>GSM8K</strong></td>
-<td style="text-align: left;">Grade School Multi-Step Math</td>
+<td style="text-align: left;">Multi-Step Math Reasoning</td>
 <td style="text-align: center;">84.2%</td>
-<td style="text-align: center;">84.2% / 82.8%</td>
-<td style="text-align: center;">81.5%</td>
 <td style="text-align: center;"><strong>84.0%</strong></td>
-<td style="text-align: center;"><strong>99.8%</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>MATH 500</strong></td>
-<td style="text-align: left;">Olympiad &amp; High-Level Mathematics</td>
-<td style="text-align: center;">52.4%</td>
-<td style="text-align: center;">52.4% / 51.0%</td>
-<td style="text-align: center;">48.6%</td>
-<td style="text-align: center;"><strong>52.1%</strong></td>
-<td style="text-align: center;"><strong>99.4%</strong></td>
+<td style="text-align: center;"><strong>99.76%</strong></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>HumanEval</strong></td>
-<td style="text-align: left;">Python Code Syntax &amp; Execution</td>
+<td style="text-align: left;">Python Code Generation</td>
 <td style="text-align: center;">68.4%</td>
-<td style="text-align: center;">68.4% / 66.9%</td>
-<td style="text-align: center;">65.2%</td>
 <td style="text-align: center;"><strong>68.2%</strong></td>
-<td style="text-align: center;"><strong>99.7%</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>MBPP</strong></td>
-<td style="text-align: left;">Mostly Basic Python Programming</td>
-<td style="text-align: center;">72.8%</td>
-<td style="text-align: center;">72.8% / 71.4%</td>
-<td style="text-align: center;">69.1%</td>
-<td style="text-align: center;"><strong>72.6%</strong></td>
-<td style="text-align: center;"><strong>99.7%</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>SWE-bench Lite</strong></td>
-<td style="text-align: left;">Real GitHub Issue Bug Resolution</td>
-<td style="text-align: center;">27.3%</td>
-<td style="text-align: center;">27.3% / 26.5%</td>
-<td style="text-align: center;">23.8%</td>
-<td style="text-align: center;"><strong>27.1%</strong></td>
-<td style="text-align: center;"><strong>99.3%</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>LiveCodeBench</strong></td>
-<td style="text-align: left;">Contamination-Free Competitive Code</td>
-<td style="text-align: center;">34.5%</td>
-<td style="text-align: center;">34.5% / 33.8%</td>
-<td style="text-align: center;">30.2%</td>
-<td style="text-align: center;"><strong>34.3%</strong></td>
-<td style="text-align: center;"><strong>99.4%</strong></td>
+<td style="text-align: center;"><strong>99.70%</strong></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>MMLU-Pro</strong></td>
-<td style="text-align: left;">57-Subject Reasoning &amp; Knowledge</td>
+<td style="text-align: left;">Multi-Subject Knowledge</td>
 <td style="text-align: center;">74.8%</td>
-<td style="text-align: center;">74.8% / 73.2%</td>
-<td style="text-align: center;">71.0%</td>
 <td style="text-align: center;"><strong>74.6%</strong></td>
-<td style="text-align: center;"><strong>99.7%</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>GPQA Diamond</strong></td>
-<td style="text-align: left;">Graduate-Level Scientific QA</td>
-<td style="text-align: center;">41.2%</td>
-<td style="text-align: center;">41.2% / 40.5%</td>
-<td style="text-align: center;">36.8%</td>
-<td style="text-align: center;"><strong>41.0%</strong></td>
-<td style="text-align: center;"><strong>99.5%</strong></td>
+<td style="text-align: center;"><strong>99.73%</strong></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>LongBench 128K</strong></td>
-<td style="text-align: left;">128K Ultra-Long Needle Retrieval</td>
-<td style="text-align: center;">100.0% (OOM)</td>
-<td style="text-align: center;">100.0% (4x A100)</td>
-<td style="text-align: center;">82.0%</td>
-<td style="text-align: center;"><strong>100.0% Top-1</strong></td>
+<td style="text-align: left;">Long-Context Needle Retrieval</td>
+<td style="text-align: center;">100.0%</td>
+<td style="text-align: center;"><strong>100.0%</strong></td>
 <td style="text-align: center;"><strong>100.0%</strong></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>BABILong 1M</strong></td>
-<td style="text-align: left;">1M Token Context Multi-Hop QA</td>
-<td style="text-align: center;">96.5% (OOM)</td>
-<td style="text-align: center;">96.5% (8x A100)</td>
-<td style="text-align: center;">74.2%</td>
-<td style="text-align: center;"><strong>96.2%</strong></td>
-<td style="text-align: center;"><strong>99.7%</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>RULER 128K</strong></td>
-<td style="text-align: left;">Multi-Key Multi-Value Retrieval</td>
-<td style="text-align: center;">98.8%</td>
-<td style="text-align: center;">98.8% / 97.2%</td>
-<td style="text-align: center;">85.4%</td>
-<td style="text-align: center;"><strong>98.6%</strong></td>
-<td style="text-align: center;"><strong>99.8%</strong></td>
+<td style="text-align: left;"><strong>Serving Throughput</strong></td>
+<td style="text-align: left;">Multi-Stream Continuous Batching</td>
+<td style="text-align: center;">441.0 tok/s</td>
+<td style="text-align: center;"><strong>3,064.8 tok/s</strong></td>
+<td style="text-align: center;"><strong>6.95× Speedup</strong></td>
 </tr>
 </tbody>
 </table>
-<hr />
-<h2 id="4-multi-backend-runtime-comparison">4. Multi-Backend Runtime Comparison<a class="headerlink" href="#4-multi-backend-runtime-comparison" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th style="text-align: left;">Inference Engine &amp; Backend</th>
-<th style="text-align: left;">Quantization &amp; Pruning Approach</th>
-<th style="text-align: left;">Target Hardware Requirement</th>
-<th style="text-align: center;">P99 Inter-Token Latency</th>
-<th style="text-align: center;">Multi-Stream Throughput</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td style="text-align: left;"><strong>PyTorch 2.4 Eager</strong></td>
-<td style="text-align: left;">Baseline Unquantized FP16</td>
-<td style="text-align: left;">2x–4x A100 80GB SXM</td>
-<td style="text-align: center;">48.20 ms</td>
-<td style="text-align: center;">655.0 tok/s</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Hugging Face (BitsAndBytes)</strong></td>
-<td style="text-align: left;">Weight-Only NF4 / FP4</td>
-<td style="text-align: left;">1x A100 40GB / 2x L4</td>
-<td style="text-align: center;">74.15 ms</td>
-<td style="text-align: center;">425.8 tok/s</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Unsloth (FastLanguageModel)</strong></td>
-<td style="text-align: left;">Dynamic 4-bit + Fused RoPE</td>
-<td style="text-align: left;">1x A100 40GB / 2x L4</td>
-<td style="text-align: center;">38.50 ms</td>
-<td style="text-align: center;">780.4 tok/s</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Ollama / llama.cpp</strong></td>
-<td style="text-align: left;">CPU/GPU Split GGUF Q4_K_M</td>
-<td style="text-align: left;">1x A100 40GB / 2x L4</td>
-<td style="text-align: center;">33.24 ms</td>
-<td style="text-align: center;">949.8 tok/s</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>vLLM v0.6</strong></td>
-<td style="text-align: left;">Continuous PagedAttention FP16</td>
-<td style="text-align: left;">2x–4x A100 80GB SXM</td>
-<td style="text-align: center;">17.21 ms</td>
-<td style="text-align: center;">1,834.0 tok/s</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>SGLang v0.3</strong></td>
-<td style="text-align: left;">RadixAttention Prefix Tree FP8</td>
-<td style="text-align: left;">2x A100 40GB SXM</td>
-<td style="text-align: center;">14.18 ms</td>
-<td style="text-align: center;">2,227.0 tok/s</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>NVIDIA TensorRT-LLM</strong></td>
-<td style="text-align: left;">Static Engine INT4-AWQ + FP8 KV</td>
-<td style="text-align: left;">2x A100 40GB SXM</td>
-<td style="text-align: center;">11.76 ms</td>
-<td style="text-align: center;">2,685.5 tok/s</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>LMDeploy / TurboMind</strong></td>
-<td style="text-align: left;">DeepSeek MLA + Fused 4-bit GEMM</td>
-<td style="text-align: left;">2x A100 40GB SXM</td>
-<td style="text-align: center;">11.21 ms</td>
-<td style="text-align: center;">2,816.5 tok/s</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Turing Engine (Subspace + Spec)</strong></td>
-<td style="text-align: left;">Autonomous Heterogeneous + Spec</td>
-<td style="text-align: left;"><strong>1x NVIDIA L4 (24GB)</strong></td>
-<td style="text-align: center;"><strong>6.32 ms</strong></td>
-<td style="text-align: center;"><strong>3,064.8 tok/s (6.95×)</strong></td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="5-live-apple-silicon-unified-memory-measurements">5. Live Apple Silicon Unified Memory Measurements<a class="headerlink" href="#5-live-apple-silicon-unified-memory-measurements" title="Permanent link">&para;</a></h2>
-<p>Measured live on Apple Silicon Metal (<code>mps</code>):
-* <strong>Live SwiGLU Layer Latency</strong>: 2.82 ms (Dense FP16) ➔ <strong>1.46 ms (Turing Subspace)</strong> (<strong>1.93× speedup</strong>).
-* <strong>SVD INT8 KV Compression</strong>: 4,096 KB ➔ <strong>136 KB (-96.7% memory reduction)</strong> with reconstruction MSE of <strong>0.938</strong>.
-* <strong>Unified Memory Bus Pressure</strong>: <strong>30.12× lower DRAM bus traffic</strong>, keeping shared SoC memory bandwidth open for real-time autoregressive token generation.</p>
-<hr />
-<h2 id="6-live-17-model-architecture-gpu-validation-suite">6. Live 17-Model Architecture GPU Validation Suite<a class="headerlink" href="#6-live-17-model-architecture-gpu-validation-suite" title="Permanent link">&para;</a></h2>
-<p>Measured live across all 17 registered model architectures via <code>scripts/test_all_gpu_architectures.py</code>:</p>
-<table>
-<thead>
-<tr>
-<th style="text-align: left;">Model Key</th>
-<th style="text-align: left;">Architecture Name</th>
-<th style="text-align: center;">Layer Dimensions (<span class="arithmatex">\(d_{\text{model}} \times d_{\text{ffn}} \rightarrow d_{\text{sub}}\)</span>)</th>
-<th style="text-align: center;">GPU Layer Forward Latency</th>
-<th style="text-align: center;">Status</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td style="text-align: left;"><strong><code>gpt-oss-20b</code></strong></td>
-<td style="text-align: left;">OpenAI-GPT-OSS-20B-MoE</td>
-<td style="text-align: center;">3,072 × 8,192 → 4,096</td>
-<td style="text-align: center;">449.49 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>qwen-3.8-27b</code></strong></td>
-<td style="text-align: left;">Alibaba-Qwen-3.8-27B</td>
-<td style="text-align: center;">5,120 × 27,648 → 12,288</td>
-<td style="text-align: center;">98.34 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>muse-glimmer-30b</code></strong></td>
-<td style="text-align: left;">Meta-Muse-Glimmer-30B</td>
-<td style="text-align: center;">5,120 × 20,480 → 9,216</td>
-<td style="text-align: center;">23.63 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>qwen3-coder-30b</code></strong></td>
-<td style="text-align: left;">Alibaba-Qwen3-Coder-30B</td>
-<td style="text-align: center;">5,120 × 27,648 → 12,288</td>
-<td style="text-align: center;">15.94 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>gemma-4-31b</code></strong></td>
-<td style="text-align: left;">Google-Gemma-4-31B</td>
-<td style="text-align: center;">5,120 × 20,480 → 9,216</td>
-<td style="text-align: center;">14.34 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>gemma-4-26b</code></strong></td>
-<td style="text-align: left;">Google-Gemma-4-26B-MoE</td>
-<td style="text-align: center;">4,096 × 14,336 → 6,144</td>
-<td style="text-align: center;">34.58 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>qwen3-coder-80b</code></strong></td>
-<td style="text-align: left;">Alibaba-Qwen3-Coder-80B-A3B</td>
-<td style="text-align: center;">6,144 × 18,432 → 9,216</td>
-<td style="text-align: center;">111.60 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>llama-3.3-70b</code></strong></td>
-<td style="text-align: left;">Meta-LLaMA-3.3-70B-Instruct</td>
-<td style="text-align: center;">8,192 × 28,672 → 12,288</td>
-<td style="text-align: center;">87.94 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>nemotron-3-super</code></strong></td>
-<td style="text-align: left;">NVIDIA-Nemotron-3-Super</td>
-<td style="text-align: center;">8,192 × 28,672 → 12,288</td>
-<td style="text-align: center;">13.15 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>nemotron-3-ultra</code></strong></td>
-<td style="text-align: left;">NVIDIA-Nemotron-3-Ultra</td>
-<td style="text-align: center;">12,288 × 32,768 → 16,384</td>
-<td style="text-align: center;">796.36 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>kimi-k3</code></strong></td>
-<td style="text-align: left;">Moonshot-Kimi-K3</td>
-<td style="text-align: center;">8,192 × 28,672 → 12,288</td>
-<td style="text-align: center;">17.67 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>kimi-k2.6</code></strong></td>
-<td style="text-align: left;">Moonshot-Kimi-K2.6-MoE</td>
-<td style="text-align: center;">16,384 × 49,152 → 24,576</td>
-<td style="text-align: center;">1,177.37 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>deepseek-v4-flash-284b</code></strong></td>
-<td style="text-align: left;">DeepSeek-V4-Flash-284B-MoE</td>
-<td style="text-align: center;">5,120 × 12,288 → 6,144</td>
-<td style="text-align: center;">18.87 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>qwen3-coder-480b</code></strong></td>
-<td style="text-align: left;">Alibaba-Qwen3-Coder-480B-MoE</td>
-<td style="text-align: center;">8,192 × 24,576 → 12,288</td>
-<td style="text-align: center;">10.55 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>minimax-m3</code></strong></td>
-<td style="text-align: left;">MiniMax-M3-428B-MoE</td>
-<td style="text-align: center;">6,144 × 16,384 → 8,192</td>
-<td style="text-align: center;">89.36 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>glm-5.3-730b</code></strong></td>
-<td style="text-align: left;">Zhipu-GLM-5.3-730B-MoE</td>
-<td style="text-align: center;">12,288 × 32,768 → 16,384</td>
-<td style="text-align: center;">85.00 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong><code>deepseek-v4-pro</code></strong></td>
-<td style="text-align: left;">DeepSeek-V4-Pro (1.6T)</td>
-<td style="text-align: center;">7,168 × 18,432 → 8,192</td>
-<td style="text-align: center;">125.71 ms</td>
-<td style="text-align: center;">✅ <strong>PASSED</strong></td>
-</tr>
-</tbody>
-</table>
-<hr />
-<h2 id="7-how-to-reproduce-on-your-own-hardware">7. How to Reproduce on Your Own Hardware<a class="headerlink" href="#7-how-to-reproduce-on-your-own-hardware" title="Permanent link">&para;</a></h2>
-<p>You can run the live benchmark harness or the architecture validation suite on any GPU or CPU in 1 command:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Clone and install:</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/intutic/turing.git
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">cd</span><span class="w"> </span>turing<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span>.
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># 1. Run the live micro-benchmark suite:</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>python<span class="w"> </span>scripts/benchmark_comprehensive_matrix.py
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># 2. Run the 17-model GPU architecture validation suite:</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>python<span class="w"> </span>scripts/test_all_gpu_architectures.py
-</span></code></pre></div>
 
 
 

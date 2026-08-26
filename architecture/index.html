@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#turing-engine-architecture-deep-dive" class="md-skip">
+        <a href="#architecture-overview" class="md-skip">
           Skip to content
         </a>
       
@@ -603,10 +603,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-subspace-activation-pruning-571-channel-bypassing" class="md-nav__link">
+  <a href="#1-subspace-activation-pruning" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. ⚡ Subspace Activation Pruning (57.1% Channel Bypassing)
+        1. ⚡ Subspace Activation Pruning
       
     </span>
   </a>
@@ -614,10 +614,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-svd-int8-kv-cache-paging-75-vram-reduction" class="md-nav__link">
+  <a href="#2-svd-int8-kv-cache-paging" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. 💾 SVD INT8 KV Cache Paging (-75% VRAM Reduction)
+        2. 💾 SVD INT8 KV Cache Paging
       
     </span>
   </a>
@@ -625,10 +625,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-bare-metal-c20-avx2-simd-core-csrc" class="md-nav__link">
+  <a href="#3-heterogeneous-moe-memory-management" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. 🏎️ Bare-Metal C++20 AVX2 SIMD Core (csrc/)
+        3. 🌐 Heterogeneous MoE Memory Management
       
     </span>
   </a>
@@ -636,10 +636,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-heterogeneous-cpu-gpu-co-execution" class="md-nav__link">
+  <a href="#4-zero-token-latent-inter-agent-deliberation-xkv" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. 🌐 Heterogeneous CPU-GPU Co-Execution
+        4. ⚡ Zero-Token Latent Inter-Agent Deliberation (XKV)
       
     </span>
   </a>
@@ -1604,10 +1604,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-subspace-activation-pruning-571-channel-bypassing" class="md-nav__link">
+  <a href="#1-subspace-activation-pruning" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. ⚡ Subspace Activation Pruning (57.1% Channel Bypassing)
+        1. ⚡ Subspace Activation Pruning
       
     </span>
   </a>
@@ -1615,10 +1615,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-svd-int8-kv-cache-paging-75-vram-reduction" class="md-nav__link">
+  <a href="#2-svd-int8-kv-cache-paging" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. 💾 SVD INT8 KV Cache Paging (-75% VRAM Reduction)
+        2. 💾 SVD INT8 KV Cache Paging
       
     </span>
   </a>
@@ -1626,10 +1626,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-bare-metal-c20-avx2-simd-core-csrc" class="md-nav__link">
+  <a href="#3-heterogeneous-moe-memory-management" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. 🏎️ Bare-Metal C++20 AVX2 SIMD Core (csrc/)
+        3. 🌐 Heterogeneous MoE Memory Management
       
     </span>
   </a>
@@ -1637,10 +1637,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-heterogeneous-cpu-gpu-co-execution" class="md-nav__link">
+  <a href="#4-zero-token-latent-inter-agent-deliberation-xkv" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. 🌐 Heterogeneous CPU-GPU Co-Execution
+        4. ⚡ Zero-Token Latent Inter-Agent Deliberation (XKV)
       
     </span>
   </a>
@@ -1667,36 +1667,45 @@
   
 
 
-<h1 id="turing-engine-architecture-deep-dive">🧠 Turing Engine Architecture Deep-Dive<a class="headerlink" href="#turing-engine-architecture-deep-dive" title="Permanent link">&para;</a></h1>
-<p>Turing Engine achieves frontier 70B+ inference on single 24GB GPUs and workstations through three mathematical and systems innovations:</p>
+<h1 id="architecture-overview">🧠 Architecture Overview<a class="headerlink" href="#architecture-overview" title="Permanent link">&para;</a></h1>
+<p>Turing Engine enables 70B+ model inference on consumer 24GB GPUs and workstations through four core innovations:</p>
+<pre class="mermaid"><code>graph TD
+    A["Frontier Model (70B-320B)"] --&gt; B["1. Subspace Pruning (-57% FFN Compute)"]
+    A --&gt; C["2. SVD INT8 KV Paging (-75% VRAM)"]
+    A --&gt; D["3. Heterogeneous MoE Offload (GPU + Host RAM)"]
+    A --&gt; E["4. Zero-Token Latent Agents (XKV)"]
+    B --&gt; F["Single 24GB GPU Execution (2.32x Speedup)"]
+    C --&gt; F
+    D --&gt; F
+    E --&gt; F</code></pre>
 <hr />
-<h2 id="1-subspace-activation-pruning-571-channel-bypassing">1. ⚡ Subspace Activation Pruning (57.1% Channel Bypassing)<a class="headerlink" href="#1-subspace-activation-pruning-571-channel-bypassing" title="Permanent link">&para;</a></h2>
-<p>During autoregressive token generation, over 50% of the intermediate hidden channels in the Feed-Forward Network (FFN / SwiGLU) have zero or near-zero activation magnitudes. </p>
-<p>Turing Engine computes calibrated saliency bitmasks offline or via lightweight dynamic gating:
-* <strong>Active Channels</strong>: Only the top active tiles (e.g. 48 of 112 tiles for 70B models) are selected.
-* <strong>Kernel Execution</strong>: A custom Triton block-sparse SwiGLU kernel executes GEMM only on active tiles.
-* <strong>Speedup</strong>: Reduces layer execution time from <strong>5.40 ms ➔ 2.32 ms</strong> on physical NVIDIA L4 GPUs (<strong>2.32× speedup</strong>).</p>
-<hr />
-<h2 id="2-svd-int8-kv-cache-paging-75-vram-reduction">2. 💾 SVD INT8 KV Cache Paging (-75% VRAM Reduction)<a class="headerlink" href="#2-svd-int8-kv-cache-paging-75-vram-reduction" title="Permanent link">&para;</a></h2>
-<p>Long-context attention is severely bottlenecked by Key-Value (KV) cache memory. Turing Engine projects the Key and Value states into a calibrated Rank-64 singular vector subspace:</p>
-<div class="arithmatex">\[K_{\text{sub}} = K \cdot V_k, \quad V_{\text{sub}} = V \cdot U_k\]</div>
+<h2 id="1-subspace-activation-pruning">1. ⚡ Subspace Activation Pruning<a class="headerlink" href="#1-subspace-activation-pruning" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Quantization</strong>: Symmetric INT8 quantization on the low-rank subspace coordinates with per-page scaling factors.</li>
-<li><strong>Hierarchical Paging</strong>: Allocates virtual memory in Huge 512-token pages (for prompt prefill) and Medium 64-token pages (for decode steps), eliminating 96.8% of page table indirection pointers.</li>
-<li><strong>Memory Savings</strong>: 32K context memory drops from <strong>10.0 GB ➔ 2.5 GB (-75%)</strong> with <span class="arithmatex">\(100\%\)</span> needle-in-a-haystack (NIAH) retrieval accuracy.</li>
+<li><strong>The Insight</strong>: During autoregressive generation, over 50% of intermediate SwiGLU feed-forward network (FFN) channels evaluate to near-zero for any given token.</li>
+<li><strong>The Solution</strong>: Custom fused Triton kernels slice out dead channel tiles before Tensor Core GEMM.</li>
+<li><strong>The Result</strong>: <strong>2.32× per-layer speedup</strong> on physical silicon (5.40 ms ➔ 2.32 ms for 70B models).</li>
 </ul>
 <hr />
-<h2 id="3-bare-metal-c20-avx2-simd-core-csrc">3. 🏎️ Bare-Metal C++20 AVX2 SIMD Core (<code>csrc/</code>)<a class="headerlink" href="#3-bare-metal-c20-avx2-simd-core-csrc" title="Permanent link">&para;</a></h2>
-<p>For CPU execution and host pre-processing, Turing Engine implements native C++20 SIMD extensions:
-* <strong>64-Byte Alignment</strong>: Allocations utilize <code>posix_memalign</code> / <code>_aligned_malloc</code> for AVX-512 and AVX2 vector widths.
-* <strong>SIMD Pointer Skipping</strong>: Bitmask-driven inner loops skip inactive memory pages using <code>_mm256_fmadd_ps</code> and <code>_mm256_load_ps</code>.
-* <strong>Zero-Copy Memory Mapping</strong>: Checkpoints are memory-mapped directly via <code>mmap</code> with <code>MADV_WILLNEED</code> and <code>MADV_HUGEPAGE</code> for sub-millisecond cold starts.</p>
+<h2 id="2-svd-int8-kv-cache-paging">2. 💾 SVD INT8 KV Cache Paging<a class="headerlink" href="#2-svd-int8-kv-cache-paging" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The Insight</strong>: At 32K context lengths, uncompressed FP16 KV caches consume over 10 GB of VRAM per stream, leaving no memory for model weights or batches.</li>
+<li><strong>The Solution</strong>: Projects Key and Value heads into a Rank-64 singular vector basis with symmetric INT8 quantization.</li>
+<li><strong>The Result</strong>: <strong>-75% KV memory reduction</strong> (10 GB ➔ 2.5 GB) with 100% Top-1 exact needle-in-a-haystack retrieval.</li>
+</ul>
 <hr />
-<h2 id="4-heterogeneous-cpu-gpu-co-execution">4. 🌐 Heterogeneous CPU-GPU Co-Execution<a class="headerlink" href="#4-heterogeneous-cpu-gpu-co-execution" title="Permanent link">&para;</a></h2>
-<p>For massive Mixture-of-Experts (MoE) models (e.g. DeepSeek-V4 284B, GLM-5.2 753B):
-* <strong>Attention in VRAM</strong>: Dense self-attention weights remain resident in GPU VRAM (5.9GB).
-* <strong>Experts in Host RAM</strong>: Massive expert banks reside in system DRAM (35GB–80GB).
-* <strong>LRU GPU Cache</strong>: Active experts are streamed across PCIe into an on-GPU LRU slot cache with an <strong>80%+ cache hit rate</strong>.</p>
+<h2 id="3-heterogeneous-moe-memory-management">3. 🌐 Heterogeneous MoE Memory Management<a class="headerlink" href="#3-heterogeneous-moe-memory-management" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The Insight</strong>: Large Mixture-of-Experts models (GLM-5.3-Flash 320B, DeepSeek-V4 284B) only activate a small subset of experts (13B–18B) per token.</li>
+<li><strong>The Solution</strong>: Dense self-attention weights stay permanently in GPU VRAM, while inactive experts reside in Host DRAM and are paged into an on-GPU LRU cache via asynchronous PCIe double-buffering.</li>
+<li><strong>The Result</strong>: 320B MoE models run on a single 24GB GPU + 64GB Host RAM.</li>
+</ul>
+<hr />
+<h2 id="4-zero-token-latent-inter-agent-deliberation-xkv">4. ⚡ Zero-Token Latent Inter-Agent Deliberation (XKV)<a class="headerlink" href="#4-zero-token-latent-inter-agent-deliberation-xkv" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>The Insight</strong>: Multi-agent systems waste 85% of their execution time serializing thoughts to natural language strings and re-prefilling tokens across peer agents.</li>
+<li><strong>The Solution</strong>: Agents pass compact per-head KV summaries directly through an inter-model bridge with continuous layer alignment.</li>
+<li><strong>The Result</strong>: <strong>7.85× lower multi-agent latency</strong> with a real-time Spectral SVD Vocabulary Inspector for 100% auditability.</li>
+</ul>
 
 
 

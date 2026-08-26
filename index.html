@@ -501,10 +501,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#key-innovations" class="md-nav__link">
+  <a href="#key-features" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🚀 Key Innovations
+        🚀 Key Features
       
     </span>
   </a>
@@ -512,10 +512,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#quick-navigation" class="md-nav__link">
+  <a href="#quickstart-in-30-seconds" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🏁 Quick Navigation
+        ⏱️ Quickstart in 30 Seconds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#navigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📖 Navigation
       
     </span>
   </a>
@@ -1599,10 +1610,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#key-innovations" class="md-nav__link">
+  <a href="#key-features" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🚀 Key Innovations
+        🚀 Key Features
       
     </span>
   </a>
@@ -1610,10 +1621,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#quick-navigation" class="md-nav__link">
+  <a href="#quickstart-in-30-seconds" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🏁 Quick Navigation
+        ⏱️ Quickstart in 30 Seconds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#navigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        📖 Navigation
       
     </span>
   </a>
@@ -1641,42 +1663,44 @@
 
 
 <h1 id="turing-engine">Turing Engine<a class="headerlink" href="#turing-engine" title="Permanent link">&para;</a></h1>
-<p><strong>High-Performance Frontier LLM Serving Runtime for Single-GPU Hardware (&lt;24GB VRAM)</strong></p>
+<p><strong>Serve 70B+ LLMs on a Single 24GB GPU or Mac with 75% Less Memory.</strong></p>
 <p><a href="https://github.com/intutic/turing/releases/tag/v0.1.8"><img alt="Release" src="https://img.shields.io/badge/Release-v0.1.8-blue.svg" /></a>
 <a href="licensing/"><img alt="License: BSL 1.1" src="https://img.shields.io/badge/License-BSL_1.1-green.svg" /></a>
-<a href=""><img alt="Tests: 98/98 Passing" src="https://img.shields.io/badge/Tests-98%2F98%20Passing-brightgreen.svg" /></a>
+<a href=""><img alt="Tests: 103/103 Passing" src="https://img.shields.io/badge/Tests-103%2F103%20Passing-brightgreen.svg" /></a>
 <a href="https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg" /></a></p>
 <hr />
 <h2 id="what-is-turing-engine">⚡ What is Turing Engine?<a class="headerlink" href="#what-is-turing-engine" title="Permanent link">&para;</a></h2>
-<p><strong>Turing Engine</strong> is an advanced open-core LLM serving runtime designed to execute large frontier reasoning models (<strong>GLM-5.3-Flash-320B</strong>, <strong>LLaMA-3.3-70B</strong>, <strong>DeepSeek-R1 Distill</strong>, <strong>Qwen-2.5-72B</strong>, <strong>DeepSeek-V4-Flash-284B</strong>) fast and efficiently on <strong>single consumer GPUs (24GB VRAM)</strong> or Apple Silicon Macs (M-series Unified Memory).</p>
-<p>By synthesizing <strong>Subspace Channel Pruning</strong>, <strong>SVD INT8 KV Cache Compression</strong>, <strong>Heterogeneous MoE Memory Management</strong>, and <strong>Birkhoff Doubly Stochastic Hyper-Connections (mHC)</strong>, Turing Engine slashes cloud inference costs by <strong>-96.7%</strong> while preserving <strong>&gt;99.4%</strong> full reasoning accuracy at <strong>3,064 tok/s serving throughput</strong>.</p>
+<p>Turing Engine is an open-source LLM serving runtime that makes large models (<strong>LLaMA-3.3-70B</strong>, <strong>DeepSeek-R1 Distill</strong>, <strong>Qwen-2.5-72B</strong>, <strong>GLM-5.3-Flash-320B</strong>) run fast on <strong>consumer 24GB GPUs</strong> (RTX 3090/4090, L4) and <strong>Apple Silicon Macs</strong> without destroying accuracy.</p>
 <hr />
-<h2 id="key-innovations">🚀 Key Innovations<a class="headerlink" href="#key-innovations" title="Permanent link">&para;</a></h2>
-<pre class="mermaid"><code>graph TD
-    A["Frontier Model (70B-320B)"] --&gt; B["Subspace Gated Routing (-57% FFN Compute)"]
-    A --&gt; C["SVD INT8 KV Paging (-75% Memory)"]
-    A --&gt; D["Heterogeneous MoE (Host DRAM + GPU LRU Cache)"]
-    A --&gt; F["Universal Hardware (CUDA / ROCm / Vulkan / Metal)"]
-    B --&gt; E["Single 24GB GPU Execution (2.32x Speedup)"]
-    C --&gt; E
-    D --&gt; E
-    F --&gt; E</code></pre>
-<ol>
-<li><strong>Subspace Channel Pruning</strong>: Dynamically evaluates input tokens and activates only the salient 42.9% subspace of intermediate Feed-Forward Network (FFN) activations, yielding <strong>2.32× faster compute</strong>.</li>
-<li><strong>SVD INT8 KV Cache Paging</strong>: Compresses 32K context memory from <strong>10.24 GB → 2.56 GB (-75%)</strong> using Rank-64 singular vector projections with 100% Top-1 exact NIAH retrieval.</li>
-<li><strong>Heterogeneous MoE Offload</strong>: Stores inactive expert weights in host DRAM while caching active experts in GPU VRAM via asynchronous PCIe double-buffering.</li>
-<li><strong>Universal Cross-Vendor Hardware Support</strong>: Auto-discovers and accelerates inference on <strong>NVIDIA CUDA, AMD ROCm, Intel XPU, Apple Silicon Metal, Vulkan Compute, and CPU AVX2 SIMD</strong>.</li>
-<li><strong>Dual Drop-In API &amp; LangChain</strong>: Native drop-in compatibility with OpenAI <code>/v1</code>, Anthropic <code>/v1/messages</code>, and <code>langchain-turing</code> / <code>ChatTuring</code>.</li>
-</ol>
-<hr />
-<h2 id="quick-navigation">🏁 Quick Navigation<a class="headerlink" href="#quick-navigation" title="Permanent link">&para;</a></h2>
+<h2 id="key-features">🚀 Key Features<a class="headerlink" href="#key-features" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="quickstart/">⚡ 30-Second Quickstart</a></li>
-<li><a href="hardware/universal_backends/">🌐 Universal Hardware Acceleration</a></li>
+<li><strong>57% Subspace Channel Pruning</strong>: Skips inactive neurons during token generation for a <strong>2.32× layer speedup</strong>.</li>
+<li><strong>SVD INT8 KV Cache Paging</strong>: Compresses 32K context memory from <strong>10 GB down to 2.5 GB (-75%)</strong>.</li>
+<li><strong>Heterogeneous MoE Offload</strong>: Runs massive Mixture-of-Experts models (e.g. GLM-5.3-Flash, DeepSeek-V4) by keeping active experts in VRAM and inactive experts in Host RAM.</li>
+<li><strong>Universal Hardware Support</strong>: Auto-discovers and accelerates on <strong>NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (XPU), Vulkan, and CPU (AVX2 SIMD)</strong>.</li>
+<li><strong>Zero-Token Latent Agents (XKV)</strong>: Lets multi-agent systems communicate directly in latent KV space for <strong>7.85× faster deliberation</strong> with real-time auditability.</li>
+<li><strong>OpenAI &amp; Anthropic Compatible</strong>: Drop-in replacement for <code>/v1/chat/completions</code> and <code>/v1/messages</code>.</li>
+</ul>
+<hr />
+<h2 id="quickstart-in-30-seconds">⏱️ Quickstart in 30 Seconds<a class="headerlink" href="#quickstart-in-30-seconds" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 1. Install Turing Engine</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>pip<span class="w"> </span>install<span class="w"> </span>turing-engine
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># 2. Chat in your terminal with real weights</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>turing<span class="w"> </span>chat<span class="w"> </span>--model<span class="w"> </span>deepseek-r1-1.5b
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="c1"># 3. Launch an OpenAI-compatible serving server on port 8000</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>turing<span class="w"> </span>serve<span class="w"> </span>--model<span class="w"> </span>deepseek-r1-7b<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+</span></code></pre></div>
+<hr />
+<h2 id="navigation">📖 Navigation<a class="headerlink" href="#navigation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="quickstart/">⚡ Quickstart Guide</a></li>
+<li><a href="hardware/universal_backends/">🌐 Hardware &amp; Accelerators</a></li>
 <li><a href="integrations/langchain/">🦜️🔗 LangChain &amp; LangGraph Integration</a></li>
-<li><a href="architecture/subspace_pruning/">🏗️ Subspace Architecture</a></li>
-<li><a href="benchmarks/gpu_benchmarks/">📊 Physical Silicon Benchmarks</a></li>
-<li><a href="licensing/">📜 Licensing &amp; Commercial Terms</a></li>
+<li><a href="benchmarks/gpu_benchmarks/">📊 Hardware Benchmarks &amp; Sizing</a></li>
+<li><a href="architecture/">🧠 Architecture Deep-Dive</a></li>
+<li><a href="serving/cli/">💻 CLI Commands Reference</a></li>
 </ul>
 
 
