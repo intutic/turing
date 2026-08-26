@@ -2,106 +2,106 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://intutic.github.io/turing/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/licensing/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/quickstart/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/architecture/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/architecture/birkhoff/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/architecture/comparisons/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/architecture/heterogeneous_moe/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/architecture/speculative_decoding/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/architecture/subspace_pruning/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/architecture/svd_kv_paging/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/benchmarks/gpu_benchmarks/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/benchmarks/niah/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/benchmarks/tco_comparison/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/hardware/universal_backends/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/integrations/dspy/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/integrations/kserve/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/integrations/langchain/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/integrations/litellm/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/integrations/llamaindex/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/integrations/modal/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/integrations/open_webui/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/integrations/ray_serve/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/integrations/runpod/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/serving/api_reference/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/serving/cli/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
     <url>
          <loc>https://intutic.github.io/turing/serving/continuous_batching/</loc>
-         <lastmod>2026-08-25</lastmod>
+         <lastmod>2026-08-26</lastmod>
     </url>
 </urlset>
