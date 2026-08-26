@@ -83,6 +83,8 @@ class RealHuggingFaceLoader:
         "yi-1.5-34b": "01-ai/Yi-1.5-34B-Chat",
         "glm-5.2": "zai-org/GLM-5.2",
         "glm-5.3": "zai-org/GLM-5.3",
+        "glm-5.3-flash": "zai-org/GLM-5.3-Flash",
+        "0x-alpha": "zai-org/GLM-5.3-Flash",
         "deepseek-v4-flash": "deepseek-ai/DeepSeek-V4-Flash",
         "deepseek-v4-pro": "deepseek-ai/DeepSeek-V4-Pro",
         "qwen-3.8-27b": "Qwen/Qwen3.8-27B",

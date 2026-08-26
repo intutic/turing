@@ -49,7 +49,7 @@ Turing Engine natively ingests, compresses, and serves open weights directly fro
 | **Alibaba Qwen** | `qwen-2.5-coder` (`7b` & `32b`), `qwen-3.8-27b`, `qwen3.8-max` (MoE) | **1x 12GB–24GB GPU / Mac** |
 | **Google** | `gemma-2-27b`, `gemma-2-9b`, `gemma-4-26b` (MoE) | **1x 8GB–16GB GPU / Mac** |
 | **Mistral AI** | `mistral-large-3`, `mistral-small-4` (24B), `mistral-small-24b` | **1x 8GB–24GB GPU / Mac** |
-| **Zhipu / Moonshot** | `glm-5.3-730b` (1M Ctx), `kimi-k3` (2.8T MoE / 2M Ctx), `kimi-k2.6` (1.04T MoE) | **1x 24GB GPU + Host RAM** |
+| **Zhipu / Moonshot** | `glm-5.3-flash` (320B-A18B MoE / 1M Ctx), `glm-5.3-730b`, `kimi-k3` (2.8T MoE), `kimi-k2.6` | **1x 24GB GPU + Host RAM** |
 | **OpenAI & NVIDIA** | `gpt-oss-20b` (3.6B active / runs in 8GB VRAM), `nemotron-3-super/ultra` | **1x 8GB–24GB GPU / Mac** |
 | **Microsoft** | `phi-4` (14B), `phi-4-mini` | **1x 8GB–16GB GPU / Mac** |
 

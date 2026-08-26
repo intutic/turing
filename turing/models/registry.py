@@ -636,6 +636,21 @@ MODEL_REGISTRY: Dict[str, ModelConfig] = {
         max_position_embeddings=8192,
         rope_theta=10000.0,
     ),
+    "glm-5.3-flash": ModelConfig(
+        name="Zhipu-GLM-5.3-Flash-320B-A18B-MoE",
+        hidden_dim=5120,
+        ffn_dim=16384,
+        num_heads=40,
+        num_kv_heads=8,
+        head_dim=128,
+        num_layers=45, # 34 KDA + 11 MLA layers
+        vocab_size=152064,
+        tile_size=256,
+        active_tiles=28,
+        rank_sub=64,
+        max_position_embeddings=1048576, # 1M context
+        rope_theta=1000000.0,
+    ),
     "qwen3-coder-480b": ModelConfig(
         name="Alibaba-Qwen3-Coder-480B-A35B-MoE",
         hidden_dim=8192,

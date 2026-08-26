@@ -57,6 +57,7 @@ def run_all_gpu_architecture_tests(device_str: str = "auto"):
         "deepseek-v4-pro",
         "minimax-m3",
         "inkling-975b",
+        "glm-5.3-flash",
         "glm-5.3-730b",
     ]
 
