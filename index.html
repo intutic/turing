@@ -496,10 +496,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#key-features" class="md-nav__link">
+  <a href="#core-technologies" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🚀 Key Features
+        🚀 Core Technologies
       
     </span>
   </a>
@@ -763,10 +763,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#key-features" class="md-nav__link">
+  <a href="#core-technologies" class="md-nav__link">
     <span class="md-ellipsis">
       
-        🚀 Key Features
+        🚀 Core Technologies
       
     </span>
   </a>
@@ -823,16 +823,15 @@
 <a href="https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg" /></a></p>
 <hr />
 <h2 id="what-is-turing-engine">⚡ What is Turing Engine?<a class="headerlink" href="#what-is-turing-engine" title="Permanent link">&para;</a></h2>
-<p>Turing Engine is an open-source LLM serving runtime that makes large models (<strong>LLaMA-3.3-70B</strong>, <strong>DeepSeek-R1 Distill</strong>, <strong>Qwen-2.5-72B</strong>, <strong>GLM-5.3-Flash-320B</strong>) run fast on <strong>consumer 24GB GPUs</strong> (RTX 3090/4090, L4) and <strong>Apple Silicon Macs</strong> without destroying accuracy.</p>
+<p>Turing Engine is an open-source inference and serving runtime that allows you to run frontier models (<strong>LLaMA-3.3-70B</strong>, <strong>DeepSeek-R1 Distill</strong>, <strong>Qwen-2.5-72B</strong>, <strong>GLM-5.3-Flash-320B</strong>) on <strong>single consumer 24GB GPUs</strong> (RTX 3090/4090, L4) and <strong>Apple Silicon Macs</strong> with zero loss in reasoning accuracy.</p>
 <hr />
-<h2 id="key-features">🚀 Key Features<a class="headerlink" href="#key-features" title="Permanent link">&para;</a></h2>
+<h2 id="core-technologies">🚀 Core Technologies<a class="headerlink" href="#core-technologies" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>57% Subspace Channel Pruning</strong>: Skips inactive neurons during token generation for a <strong>2.32× layer speedup</strong>.</li>
+<li><strong>57% Subspace Channel Pruning</strong>: Skips dead intermediate neurons during token generation for a <strong>2.32× per-layer speedup</strong>.</li>
 <li><strong>SVD INT8 KV Cache Paging</strong>: Compresses 32K context memory from <strong>10 GB down to 2.5 GB (-75%)</strong>.</li>
-<li><strong>Heterogeneous MoE Offload</strong>: Runs massive Mixture-of-Experts models (e.g. GLM-5.3-Flash, DeepSeek-V4) by keeping active experts in VRAM and inactive experts in Host RAM.</li>
-<li><strong>Universal Hardware Support</strong>: Auto-discovers and accelerates on <strong>NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (XPU), Vulkan, and CPU (AVX2 SIMD)</strong>.</li>
-<li><strong>Zero-Token Latent Agents (XKV)</strong>: Lets multi-agent systems communicate directly in latent KV space for <strong>7.85× faster deliberation</strong> with real-time auditability.</li>
-<li><strong>OpenAI &amp; Anthropic Compatible</strong>: Drop-in replacement for <code>/v1/chat/completions</code> and <code>/v1/messages</code>.</li>
+<li><strong>Heterogeneous MoE Memory Management</strong>: Runs 320B Mixture-of-Experts models on a single 24GB card by caching active experts in VRAM and streaming inactive experts from Host DRAM.</li>
+<li><strong>Universal Hardware Support</strong>: Native auto-discovery for <strong>NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (XPU), Vulkan, and CPU (AVX2 SIMD)</strong>.</li>
+<li><strong>OpenAI &amp; Anthropic Compatible</strong>: Drop-in serving runtime for <code>/v1/chat/completions</code> and <code>/v1/messages</code>.</li>
 </ul>
 <hr />
 <h2 id="quickstart-in-30-seconds">⏱️ Quickstart in 30 Seconds<a class="headerlink" href="#quickstart-in-30-seconds" title="Permanent link">&para;</a></h2>

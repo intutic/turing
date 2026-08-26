@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#architecture-systems-deep-dive" class="md-skip">
+        <a href="#architecture-deep-dive" class="md-skip">
           Skip to content
         </a>
       
@@ -628,10 +628,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-zero-token-latent-agent-deliberation-xkv" class="md-nav__link">
+  <a href="#4-closed-form-cross-model-representation-transfer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. ⚡ Zero-Token Latent Agent Deliberation (XKV)
+        4. 🔗 Closed-Form Cross-Model Representation Transfer
       
     </span>
   </a>
@@ -787,10 +787,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-zero-token-latent-agent-deliberation-xkv" class="md-nav__link">
+  <a href="#4-closed-form-cross-model-representation-transfer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. ⚡ Zero-Token Latent Agent Deliberation (XKV)
+        4. 🔗 Closed-Form Cross-Model Representation Transfer
       
     </span>
   </a>
@@ -817,22 +817,20 @@
   
 
 
-<h1 id="architecture-systems-deep-dive">🧠 Architecture &amp; Systems Deep-Dive<a class="headerlink" href="#architecture-systems-deep-dive" title="Permanent link">&para;</a></h1>
-<p>Turing Engine fits 70B–320B parameter models onto single consumer GPUs (24GB VRAM) and Mac workstations through four core innovations:</p>
+<h1 id="architecture-deep-dive">🧠 Architecture Deep-Dive<a class="headerlink" href="#architecture-deep-dive" title="Permanent link">&para;</a></h1>
+<p>Turing Engine fits 70B–320B parameter models onto single consumer GPUs (24GB VRAM) and Mac workstations through three core systems pillars:</p>
 <pre class="mermaid"><code>graph TD
     A["Frontier Model (70B-320B)"] --&gt; B["1. Subspace Pruning (-57% FFN Compute)"]
     A --&gt; C["2. SVD INT8 KV Paging (-75% VRAM)"]
     A --&gt; D["3. Heterogeneous MoE Offload (GPU + Host RAM)"]
-    A --&gt; E["4. Zero-Token Latent Agents (XKV)"]
-    B --&gt; F["Single 24GB GPU Execution (2.32x Speedup)"]
-    C --&gt; F
-    D --&gt; F
-    E --&gt; F</code></pre>
+    B --&gt; E["Single 24GB GPU Execution (2.32x Speedup)"]
+    C --&gt; E
+    D --&gt; E</code></pre>
 <hr />
 <h2 id="1-dynamic-subspace-channel-pruning-57-compute">1. ⚡ Dynamic Subspace Channel Pruning (-57% Compute)<a class="headerlink" href="#1-dynamic-subspace-channel-pruning-57-compute" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>The Problem</strong>: In standard SwiGLU feed-forward networks (FFN), over half of intermediate activations evaluate to zero or near-zero for any given token during autoregressive generation.</li>
-<li><strong>How It Works</strong>: Turing Engine calculates optimal channel bitmasks offline or via lightweight dynamic gating. Fused Triton kernels slice out dead channel tiles before Tensor Core execution.</li>
+<li><strong>The Problem</strong>: In standard SwiGLU feed-forward networks (FFN), over 50% of intermediate activations evaluate to zero or near-zero for any given token during autoregressive generation.</li>
+<li><strong>How It Works</strong>: Turing Engine calculates optimal channel bitmasks offline or via lightweight dynamic gating. Custom fused Triton kernels slice out dead channel tiles before Tensor Core execution.</li>
 <li><strong>The Result</strong>: Layer execution time drops from <strong>5.40 ms down to 2.32 ms (2.32× speedup)</strong> on physical NVIDIA L4 GPUs with zero loss of reasoning fidelity.</li>
 </ul>
 <hr />
@@ -850,13 +848,8 @@
 <li><strong>The Result</strong>: 320B MoE models run on <strong>1x 24GB GPU + 64GB Host RAM</strong> or standard Mac Studio unified memory.</li>
 </ul>
 <hr />
-<h2 id="4-zero-token-latent-agent-deliberation-xkv">4. ⚡ Zero-Token Latent Agent Deliberation (XKV)<a class="headerlink" href="#4-zero-token-latent-agent-deliberation-xkv" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>The Problem</strong>: Multi-agent systems waste over 85% of their latency serializing intermediate reasoning thoughts into natural language text strings and re-prefilling tokens in peer agents.</li>
-<li><strong>How It Works</strong>: Agents pass compact per-head KV summaries directly through an inter-model bridge with continuous Gaussian layer alignment (<span class="arithmatex">\(A_{i, j}\)</span>), bypassing text serialization.</li>
-<li><strong>Spectral SVD Semantic Audit</strong>: To solve the "black box" trust problem, a lightweight closed-form probe projects the shared latent state onto the vocabulary embedding (<span class="arithmatex">\(\operatorname{Logits} = \operatorname{LayerNorm}(S_{\text{shared}}) \cdot W_{\text{vocab}}^T\)</span>) in <span class="arithmatex">\(&lt;0.02\text{ ms}\)</span>, producing a human-readable safety audit log.</li>
-<li><strong>The Result</strong>: Delivers <strong>7.85× faster multi-agent deliberation</strong> (82.9 ms vs 650.8 ms) with 100% auditable logging.</li>
-</ul>
+<h2 id="4-closed-form-cross-model-representation-transfer">4. 🔗 Closed-Form Cross-Model Representation Transfer<a class="headerlink" href="#4-closed-form-cross-model-representation-transfer" title="Permanent link">&para;</a></h2>
+<p>For multi-model prefill acceleration, Turing Engine also includes closed-form linear ridge mappings (<span class="arithmatex">\(W^*\)</span>) to transfer cached KV representations between draft and target models without re-prefilling tokens.</p>
 
 
 
