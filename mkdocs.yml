@@ -68,6 +68,7 @@ nav:
       - Heterogeneous MoE: architecture/heterogeneous_moe.md
       - Birkhoff Hyper-Connections: architecture/birkhoff.md
       - Speculative Quadtree Decoding: architecture/speculative_decoding.md
+      - Cross-Model KV & XKV Latent Agents: architecture/xkv_latent_transfer.md
       - Architectural Landscape (vs. FreeToken, vLLM): architecture/comparisons.md
   - Benchmarks:
       - Physical GPU Benchmarks: benchmarks/gpu_benchmarks.md
