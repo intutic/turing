@@ -12,13 +12,13 @@
         <meta name="author" content="Ishan Gupta">
       
       
-        <link rel="canonical" href="https://intutic.github.io/turing/quickstart/">
+        <link rel="canonical" href="https://intutic.github.io/turing/serving/">
       
       
-        <link rel="prev" href="..">
+        <link rel="prev" href="../models_and_hardware/">
       
       
-        <link rel="next" href="../models_and_hardware/">
+        <link rel="next" href="../architecture/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Quickstart - Turing Engine</title>
+        <title>Serving & API - Turing Engine</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#quickstart" class="md-skip">
+        <a href="#serving-api-reference" class="md-skip">
           Skip to content
         </a>
       
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Quickstart
+              Serving & API
             
           </span>
         </div>
@@ -244,11 +244,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../quickstart/" class="md-tabs__link">
         
   
   
@@ -284,9 +282,11 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../serving/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
@@ -451,37 +451,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Quickstart
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
         
   
   
@@ -497,87 +470,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#1-installation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Installation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#2-interactive-terminal-chat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Interactive Terminal Chat
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-launch-serving-server-dual-openai-anthropic-api" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Launch Serving Server (Dual OpenAI &amp; Anthropic API)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. Launch Serving Server (Dual OpenAI &amp; Anthropic API)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#query-with-python-openai-sdk" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Query with Python OpenAI SDK
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#query-with-langchain" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Query with LangChain
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -613,10 +505,37 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../serving/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Serving & API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -632,6 +551,126 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-cli-commands-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. CLI Commands Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. CLI Commands Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#start-serving-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start Serving Server
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#interactive-terminal-chat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interactive Terminal Chat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-prompt-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single Prompt Generation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-openai-compatible-api-v1chatcompletions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. OpenAI-Compatible API (/v1/chat/completions)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. OpenAI-Compatible API (/v1/chat/completions)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#python-sdk-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python SDK Client
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-anthropic-compatible-api-v1messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Anthropic-Compatible API (/v1/messages)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-subspace-pruning-performance-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Subspace Pruning &amp; Performance Headers
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -771,44 +810,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-installation" class="md-nav__link">
+  <a href="#1-cli-commands-reference" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Installation
+        1. CLI Commands Reference
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#2-interactive-terminal-chat" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Interactive Terminal Chat
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3-launch-serving-server-dual-openai-anthropic-api" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Launch Serving Server (Dual OpenAI &amp; Anthropic API)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. Launch Serving Server (Dual OpenAI &amp; Anthropic API)">
+    <nav class="md-nav" aria-label="1. CLI Commands Reference">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#query-with-python-openai-sdk" class="md-nav__link">
+  <a href="#start-serving-server" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Query with Python OpenAI SDK
+        Start Serving Server
       
     </span>
   </a>
@@ -816,10 +833,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#query-with-langchain" class="md-nav__link">
+  <a href="#interactive-terminal-chat" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Query with LangChain
+        Interactive Terminal Chat
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#single-prompt-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single Prompt Generation
       
     </span>
   </a>
@@ -828,6 +856,56 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-openai-compatible-api-v1chatcompletions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. OpenAI-Compatible API (/v1/chat/completions)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. OpenAI-Compatible API (/v1/chat/completions)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#python-sdk-client" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Python SDK Client
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-anthropic-compatible-api-v1messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Anthropic-Compatible API (/v1/messages)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-subspace-pruning-performance-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Subspace Pruning &amp; Performance Headers
+      
+    </span>
+  </a>
   
 </li>
       
@@ -851,59 +929,91 @@
   
 
 
-<h1 id="quickstart">⚡ Quickstart<a class="headerlink" href="#quickstart" title="Permanent link">&para;</a></h1>
-<p>Get Turing Engine running locally in under 30 seconds.</p>
+<h1 id="serving-api-reference">🚀 Serving &amp; API Reference<a class="headerlink" href="#serving-api-reference" title="Permanent link">&para;</a></h1>
+<p>Turing Engine features a production-grade continuous batching engine with dual drop-in compatibility for both <strong>OpenAI</strong> and <strong>Anthropic</strong> API endpoints.</p>
 <hr />
-<h2 id="1-installation">1. Installation<a class="headerlink" href="#1-installation" title="Permanent link">&para;</a></h2>
-<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">pip (Recommended)</label><label for="__tabbed_1_2">Pre-Built Binary Wheel</label><label for="__tabbed_1_3">Build from Source</label></div>
-<div class="tabbed-content">
-<div class="tabbed-block">
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>turing-engine
+<h2 id="1-cli-commands-reference">1. CLI Commands Reference<a class="headerlink" href="#1-cli-commands-reference" title="Permanent link">&para;</a></h2>
+<h3 id="start-serving-server">Start Serving Server<a class="headerlink" href="#start-serving-server" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>turing<span class="w"> </span>serve<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--model<span class="w"> </span>deepseek-r1-7b<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>--device<span class="w"> </span>auto<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>--sparsity<span class="w"> </span><span class="m">0</span>.57<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span>--max-batch-size<span class="w"> </span><span class="m">32</span>
 </span></code></pre></div>
-</div>
-<div class="tabbed-block">
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Direct wheel download for macOS Apple Silicon (arm64):</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>pip<span class="w"> </span>install<span class="w"> </span>https://github.com/intutic/turing/releases/download/v0.1.8/turing_engine-0.1.8-cp311-cp311-macosx_15_0_arm64.whl
+<h3 id="interactive-terminal-chat">Interactive Terminal Chat<a class="headerlink" href="#interactive-terminal-chat" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>turing<span class="w"> </span>chat<span class="w"> </span>--model<span class="w"> </span>deepseek-r1-1.5b
 </span></code></pre></div>
-</div>
-<div class="tabbed-block">
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/intutic/turing.git
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nb">cd</span><span class="w"> </span>turing
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[dev]&quot;</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>python<span class="w"> </span>setup.py<span class="w"> </span>build_ext<span class="w"> </span>--inplace
-</span></code></pre></div>
-</div>
-</div>
-</div>
-<hr />
-<h2 id="2-interactive-terminal-chat">2. Interactive Terminal Chat<a class="headerlink" href="#2-interactive-terminal-chat" title="Permanent link">&para;</a></h2>
-<p>Stream reasoning weights straight from Hugging Face:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Chat with DeepSeek-R1 Distill</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>turing<span class="w"> </span>chat<span class="w"> </span>--model<span class="w"> </span>deepseek-r1-1.5b
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Chat with Qwen Coder</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>turing<span class="w"> </span>chat<span class="w"> </span>--model<span class="w"> </span>qwen-2.5-coder-7b
+<h3 id="single-prompt-generation">Single Prompt Generation<a class="headerlink" href="#single-prompt-generation" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>turing<span class="w"> </span>generate<span class="w"> </span>--model<span class="w"> </span>deepseek-r1-1.5b<span class="w"> </span>--prompt<span class="w"> </span><span class="s2">&quot;Explain quantum entanglement:&quot;</span><span class="w"> </span>--max-tokens<span class="w"> </span><span class="m">128</span>
 </span></code></pre></div>
 <hr />
-<h2 id="3-launch-serving-server-dual-openai-anthropic-api">3. Launch Serving Server (Dual OpenAI &amp; Anthropic API)<a class="headerlink" href="#3-launch-serving-server-dual-openai-anthropic-api" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>turing<span class="w"> </span>serve<span class="w"> </span>--model<span class="w"> </span>deepseek-r1-7b<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+<h2 id="2-openai-compatible-api-v1chatcompletions">2. OpenAI-Compatible API (<code>/v1/chat/completions</code>)<a class="headerlink" href="#2-openai-compatible-api-v1chatcompletions" title="Permanent link">&para;</a></h2>
+<p>Turing Engine provides full standard OpenAI API compatibility:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>curl<span class="w"> </span>http://localhost:8000/v1/chat/completions<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer turing-local&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="s1">    &quot;model&quot;: &quot;deepseek-r1-7b&quot;,</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="s1">    &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Write a quick binary search function in Python:&quot;}],</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="s1">    &quot;temperature&quot;: 0.7,</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="s1">    &quot;max_tokens&quot;: 256,</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="s1">    &quot;stream&quot;: false</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="s1">  }&#39;</span>
 </span></code></pre></div>
-<h3 id="query-with-python-openai-sdk">Query with Python OpenAI SDK<a class="headerlink" href="#query-with-python-openai-sdk" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAI</span>
+<h3 id="python-sdk-client">Python SDK Client<a class="headerlink" href="#python-sdk-client" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAI</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">client</span> <span class="o">=</span> <span class="n">OpenAI</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000/v1&quot;</span><span class="p">,</span> <span class="n">api_key</span><span class="o">=</span><span class="s2">&quot;turing-local&quot;</span><span class="p">)</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-r1-7b&quot;</span><span class="p">,</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">messages</span><span class="o">=</span><span class="p">[{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="s2">&quot;Explain SVD KV cache compression in 2 sentences:&quot;</span><span class="p">}]</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">)</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="nb">print</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">choices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">message</span><span class="o">.</span><span class="n">content</span><span class="p">)</span>
+</span></code></pre></div>
+<hr />
+<h2 id="3-anthropic-compatible-api-v1messages">3. Anthropic-Compatible API (<code>/v1/messages</code>)<a class="headerlink" href="#3-anthropic-compatible-api-v1messages" title="Permanent link">&para;</a></h2>
+<p>Seamless drop-in for Anthropic Claude SDK and tools:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">anthropic</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">client</span> <span class="o">=</span> <span class="n">OpenAI</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000/v1&quot;</span><span class="p">,</span> <span class="n">api_key</span><span class="o">=</span><span class="s2">&quot;turing-local&quot;</span><span class="p">)</span>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">response</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">chat</span><span class="o">.</span><span class="n">completions</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">client</span> <span class="o">=</span> <span class="n">anthropic</span><span class="o">.</span><span class="n">Anthropic</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000&quot;</span><span class="p">,</span> <span class="n">api_key</span><span class="o">=</span><span class="s2">&quot;turing-local&quot;</span><span class="p">)</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">message</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">messages</span><span class="o">.</span><span class="n">create</span><span class="p">(</span>
 </span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-r1-7b&quot;</span><span class="p">,</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">messages</span><span class="o">=</span><span class="p">[{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="s2">&quot;Write a quick Python script to calculate Fibonacci numbers:&quot;</span><span class="p">}]</span>
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">)</span>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="nb">print</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">choices</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">message</span><span class="o">.</span><span class="n">content</span><span class="p">)</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">max_tokens</span><span class="o">=</span><span class="mi">256</span><span class="p">,</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>    <span class="n">messages</span><span class="o">=</span><span class="p">[{</span><span class="s2">&quot;role&quot;</span><span class="p">:</span> <span class="s2">&quot;user&quot;</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="s2">&quot;Hello from Anthropic SDK!&quot;</span><span class="p">}]</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="p">)</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="nb">print</span><span class="p">(</span><span class="n">message</span><span class="o">.</span><span class="n">content</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
 </span></code></pre></div>
-<h3 id="query-with-langchain">Query with LangChain<a class="headerlink" href="#query-with-langchain" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">turing.integrations.langchain</span><span class="w"> </span><span class="kn">import</span> <span class="n">ChatTuring</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">llm</span> <span class="o">=</span> <span class="n">ChatTuring</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-r1-7b&quot;</span><span class="p">,</span> <span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000/v1&quot;</span><span class="p">)</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">llm</span><span class="o">.</span><span class="n">invoke</span><span class="p">(</span><span class="s2">&quot;Explain KV cache compression in 2 sentences:&quot;</span><span class="p">)[</span><span class="s2">&quot;content&quot;</span><span class="p">])</span>
-</span></code></pre></div>
+<hr />
+<h2 id="4-subspace-pruning-performance-headers">4. Subspace Pruning &amp; Performance Headers<a class="headerlink" href="#4-subspace-pruning-performance-headers" title="Permanent link">&para;</a></h2>
+<p>You can dynamically tune compression and routing parameters per-request via HTTP headers:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">HTTP Header</th>
+<th style="text-align: center;">Default</th>
+<th style="text-align: left;">Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><code>X-Turing-Sparsity</code></td>
+<td style="text-align: center;"><code>0.57</code></td>
+<td style="text-align: left;">Fraction of intermediate FFN channels to prune (0.0 to 0.75).</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>X-Turing-SVD-Rank</code></td>
+<td style="text-align: center;"><code>64</code></td>
+<td style="text-align: left;">Rank dimension for singular value KV cache compression (32, 64, 128).</td>
+</tr>
+<tr>
+<td style="text-align: left;"><code>X-Turing-Draft-Tokens</code></td>
+<td style="text-align: center;"><code>4</code></td>
+<td style="text-align: left;">Speculative draft token budget per verification step.</td>
+</tr>
+</tbody>
+</table>
 
 
 

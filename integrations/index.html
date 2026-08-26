@@ -12,13 +12,13 @@
         <meta name="author" content="Ishan Gupta">
       
       
-        <link rel="canonical" href="https://intutic.github.io/turing/architecture/">
+        <link rel="canonical" href="https://intutic.github.io/turing/integrations/">
       
       
-        <link rel="prev" href="../serving/">
+        <link rel="prev" href="../architecture/">
       
       
-        <link rel="next" href="../integrations/">
+        <link rel="next" href="../benchmarks/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>Architecture - Turing Engine</title>
+        <title>Integrations - Turing Engine</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#architecture-systems-deep-dive" class="md-skip">
+        <a href="#ecosystem-integrations" class="md-skip">
           Skip to content
         </a>
       
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Architecture
+              Integrations
             
           </span>
         </div>
@@ -301,11 +301,9 @@
   
   
   
-    
   
-  
-    <li class="md-tabs__item md-tabs__item--active">
-      <a href="./" class="md-tabs__link">
+    <li class="md-tabs__item">
+      <a href="../architecture/" class="md-tabs__link">
         
   
   
@@ -322,9 +320,11 @@
   
   
   
+    
   
-    <li class="md-tabs__item">
-      <a href="../integrations/" class="md-tabs__link">
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
         
   
   
@@ -532,6 +532,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -551,7 +578,7 @@
   <span class="md-ellipsis">
     
   
-    Architecture
+    Integrations
   
 
     
@@ -569,7 +596,7 @@
   <span class="md-ellipsis">
     
   
-    Architecture
+    Integrations
   
 
     
@@ -595,10 +622,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-dynamic-subspace-channel-pruning-57-compute" class="md-nav__link">
+  <a href="#1-langchain-langgraph" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. ⚡ Dynamic Subspace Channel Pruning (-57% Compute)
+        1. LangChain &amp; LangGraph
       
     </span>
   </a>
@@ -606,10 +633,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-calibrated-svd-int8-kv-cache-paging-75-vram" class="md-nav__link">
+  <a href="#2-litellm-proxy-router" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. 💾 Calibrated SVD INT8 KV Cache Paging (-75% VRAM)
+        2. LiteLLM Proxy &amp; Router
       
     </span>
   </a>
@@ -617,10 +644,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-heterogeneous-moe-memory-management" class="md-nav__link">
+  <a href="#3-llamaindex-rag-agents" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. 🌐 Heterogeneous MoE Memory Management
+        3. LlamaIndex RAG &amp; Agents
       
     </span>
   </a>
@@ -628,10 +655,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-zero-token-latent-agent-deliberation-xkv" class="md-nav__link">
+  <a href="#4-open-webui-librechat" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. ⚡ Zero-Token Latent Agent Deliberation (XKV)
+        4. Open WebUI &amp; LibreChat
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-kubernetes-deployment-kserve-helm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Kubernetes Deployment (KServe / Helm)
       
     </span>
   </a>
@@ -642,33 +680,6 @@
   
 </nav>
       
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../integrations/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Integrations
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -754,10 +765,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-dynamic-subspace-channel-pruning-57-compute" class="md-nav__link">
+  <a href="#1-langchain-langgraph" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. ⚡ Dynamic Subspace Channel Pruning (-57% Compute)
+        1. LangChain &amp; LangGraph
       
     </span>
   </a>
@@ -765,10 +776,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-calibrated-svd-int8-kv-cache-paging-75-vram" class="md-nav__link">
+  <a href="#2-litellm-proxy-router" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. 💾 Calibrated SVD INT8 KV Cache Paging (-75% VRAM)
+        2. LiteLLM Proxy &amp; Router
       
     </span>
   </a>
@@ -776,10 +787,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-heterogeneous-moe-memory-management" class="md-nav__link">
+  <a href="#3-llamaindex-rag-agents" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. 🌐 Heterogeneous MoE Memory Management
+        3. LlamaIndex RAG &amp; Agents
       
     </span>
   </a>
@@ -787,10 +798,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#4-zero-token-latent-agent-deliberation-xkv" class="md-nav__link">
+  <a href="#4-open-webui-librechat" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. ⚡ Zero-Token Latent Agent Deliberation (XKV)
+        4. Open WebUI &amp; LibreChat
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-kubernetes-deployment-kserve-helm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Kubernetes Deployment (KServe / Helm)
       
     </span>
   </a>
@@ -817,46 +839,91 @@
   
 
 
-<h1 id="architecture-systems-deep-dive">🧠 Architecture &amp; Systems Deep-Dive<a class="headerlink" href="#architecture-systems-deep-dive" title="Permanent link">&para;</a></h1>
-<p>Turing Engine fits 70B–320B parameter models onto single consumer GPUs (24GB VRAM) and Mac workstations through four core innovations:</p>
-<pre class="mermaid"><code>graph TD
-    A["Frontier Model (70B-320B)"] --&gt; B["1. Subspace Pruning (-57% FFN Compute)"]
-    A --&gt; C["2. SVD INT8 KV Paging (-75% VRAM)"]
-    A --&gt; D["3. Heterogeneous MoE Offload (GPU + Host RAM)"]
-    A --&gt; E["4. Zero-Token Latent Agents (XKV)"]
-    B --&gt; F["Single 24GB GPU Execution (2.32x Speedup)"]
-    C --&gt; F
-    D --&gt; F
-    E --&gt; F</code></pre>
+<h1 id="ecosystem-integrations">🔌 Ecosystem Integrations<a class="headerlink" href="#ecosystem-integrations" title="Permanent link">&para;</a></h1>
+<p>Turing Engine integrates with agent frameworks, model routers, and deployment runtimes.</p>
 <hr />
-<h2 id="1-dynamic-subspace-channel-pruning-57-compute">1. ⚡ Dynamic Subspace Channel Pruning (-57% Compute)<a class="headerlink" href="#1-dynamic-subspace-channel-pruning-57-compute" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>The Problem</strong>: In standard SwiGLU feed-forward networks (FFN), over half of intermediate activations evaluate to zero or near-zero for any given token during autoregressive generation.</li>
-<li><strong>How It Works</strong>: Turing Engine calculates optimal channel bitmasks offline or via lightweight dynamic gating. Fused Triton kernels slice out dead channel tiles before Tensor Core execution.</li>
-<li><strong>The Result</strong>: Layer execution time drops from <strong>5.40 ms down to 2.32 ms (2.32× speedup)</strong> on physical NVIDIA L4 GPUs with zero loss of reasoning fidelity.</li>
-</ul>
+<h2 id="1-langchain-langgraph">1. LangChain &amp; LangGraph<a class="headerlink" href="#1-langchain-langgraph" title="Permanent link">&para;</a></h2>
+<p>Turing Engine provides native drop-in support via <code>langchain-openai</code> or built-in <code>ChatTuring</code>:</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Method A: Drop-In langchain-openai (Zero Extra Dependencies)</label><label for="__tabbed_1_2">Method B: Native ChatTuring (Subspace Controls)</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">langchain_openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">ChatOpenAI</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">llm</span> <span class="o">=</span> <span class="n">ChatOpenAI</span><span class="p">(</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000/v1&quot;</span><span class="p">,</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">api_key</span><span class="o">=</span><span class="s2">&quot;turing-local&quot;</span><span class="p">,</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-r1-7b&quot;</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">response</span> <span class="o">=</span> <span class="n">llm</span><span class="o">.</span><span class="n">invoke</span><span class="p">(</span><span class="s2">&quot;Explain quantum computing in simple terms:&quot;</span><span class="p">)</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="nb">print</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">content</span><span class="p">)</span>
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">turing.integrations.langchain</span><span class="w"> </span><span class="kn">import</span> <span class="n">ChatTuring</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">llm</span> <span class="o">=</span> <span class="n">ChatTuring</span><span class="p">(</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-r1-7b&quot;</span><span class="p">,</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000/v1&quot;</span><span class="p">,</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>    <span class="n">sparsity_ratio</span><span class="o">=</span><span class="mf">0.57</span><span class="p">,</span> <span class="c1"># 57% FFN channel pruning</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>    <span class="n">svd_rank</span><span class="o">=</span><span class="mi">64</span>          <span class="c1"># Rank-64 SVD INT8 KV cache</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="p">)</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="nb">print</span><span class="p">(</span><span class="n">llm</span><span class="o">.</span><span class="n">invoke</span><span class="p">(</span><span class="s2">&quot;Write a quick C++ SIMD routine:&quot;</span><span class="p">)[</span><span class="s2">&quot;content&quot;</span><span class="p">])</span>
+</span></code></pre></div>
+</div>
+</div>
+</div>
 <hr />
-<h2 id="2-calibrated-svd-int8-kv-cache-paging-75-vram">2. 💾 Calibrated SVD INT8 KV Cache Paging (-75% VRAM)<a class="headerlink" href="#2-calibrated-svd-int8-kv-cache-paging-75-vram" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>The Problem</strong>: Long-context inference is severely memory-bound. At 32,768 tokens, an uncompressed FP16 KV cache consumes over <strong>10.0 GB of VRAM per stream</strong>.</li>
-<li><strong>How It Works</strong>: Projects Key and Value heads into a calibrated Rank-64 singular vector basis with symmetric INT8 quantization. Memory is managed using a two-tier virtual page pool (Huge 512-token pages for prefill, Medium 64-token pages for generation).</li>
-<li><strong>The Result</strong>: 32K context memory drops from <strong>10.0 GB down to 2.5 GB (-75%)</strong> while maintaining <strong>100% Top-1 exact needle retrieval</strong> on Needle-In-A-Haystack (NIAH) tests.</li>
-</ul>
+<h2 id="2-litellm-proxy-router">2. LiteLLM Proxy &amp; Router<a class="headerlink" href="#2-litellm-proxy-router" title="Permanent link">&para;</a></h2>
+<p>Configure Turing Engine as a backend in your <code>litellm</code> <code>config.yaml</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">model_list</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">model_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">turing/deepseek-r1</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">litellm_params</span><span class="p">:</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">openai/deepseek-r1-7b</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">      </span><span class="nt">api_base</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://localhost:8000/v1</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">turing-local</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">      </span><span class="nt">extra_headers</span><span class="p">:</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">        </span><span class="nt">X-Turing-Sparsity</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0.57&quot;</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">        </span><span class="nt">X-Turing-SVD-Rank</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;64&quot;</span>
+</span></code></pre></div>
 <hr />
-<h2 id="3-heterogeneous-moe-memory-management">3. 🌐 Heterogeneous MoE Memory Management<a class="headerlink" href="#3-heterogeneous-moe-memory-management" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>The Problem</strong>: Massive Mixture-of-Experts models (GLM-5.3-Flash 320B, DeepSeek-V4 284B) exceed GPU VRAM capacities, but only activate a small subset of parameters (13B–18B) per token.</li>
-<li><strong>How It Works</strong>: Dense self-attention weights remain permanently resident in GPU VRAM (4GB–6GB), while the inactive expert pool resides in system Host DRAM. Active experts are streamed into an on-GPU LRU slot cache via asynchronous PCIe double-buffering.</li>
-<li><strong>The Result</strong>: 320B MoE models run on <strong>1x 24GB GPU + 64GB Host RAM</strong> or standard Mac Studio unified memory.</li>
-</ul>
+<h2 id="3-llamaindex-rag-agents">3. LlamaIndex RAG &amp; Agents<a class="headerlink" href="#3-llamaindex-rag-agents" title="Permanent link">&para;</a></h2>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">llama_index.llms.openai_like</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAILike</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">llm</span> <span class="o">=</span> <span class="n">OpenAILike</span><span class="p">(</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;deepseek-r1-7b&quot;</span><span class="p">,</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">api_base</span><span class="o">=</span><span class="s2">&quot;http://localhost:8000/v1&quot;</span><span class="p">,</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">api_key</span><span class="o">=</span><span class="s2">&quot;turing-local&quot;</span><span class="p">,</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">is_chat_model</span><span class="o">=</span><span class="kc">True</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="p">)</span>
+</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">response</span> <span class="o">=</span> <span class="n">llm</span><span class="o">.</span><span class="n">complete</span><span class="p">(</span><span class="s2">&quot;Summarize the main architectural trade-offs of microservices:&quot;</span><span class="p">)</span>
+</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="nb">print</span><span class="p">(</span><span class="n">response</span><span class="o">.</span><span class="n">text</span><span class="p">)</span>
+</span></code></pre></div>
 <hr />
-<h2 id="4-zero-token-latent-agent-deliberation-xkv">4. ⚡ Zero-Token Latent Agent Deliberation (XKV)<a class="headerlink" href="#4-zero-token-latent-agent-deliberation-xkv" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>The Problem</strong>: Multi-agent systems waste over 85% of their latency serializing intermediate reasoning thoughts into natural language text strings and re-prefilling tokens in peer agents.</li>
-<li><strong>How It Works</strong>: Agents pass compact per-head KV summaries directly through an inter-model bridge with continuous Gaussian layer alignment (<span class="arithmatex">\(A_{i, j}\)</span>), bypassing text serialization.</li>
-<li><strong>Spectral SVD Semantic Audit</strong>: To solve the "black box" trust problem, a lightweight closed-form probe projects the shared latent state onto the vocabulary embedding (<span class="arithmatex">\(\operatorname{Logits} = \operatorname{LayerNorm}(S_{\text{shared}}) \cdot W_{\text{vocab}}^T\)</span>) in <span class="arithmatex">\(&lt;0.02\text{ ms}\)</span>, producing a human-readable safety audit log.</li>
-<li><strong>The Result</strong>: Delivers <strong>7.85× faster multi-agent deliberation</strong> (82.9 ms vs 650.8 ms) with 100% auditable logging.</li>
-</ul>
+<h2 id="4-open-webui-librechat">4. Open WebUI &amp; LibreChat<a class="headerlink" href="#4-open-webui-librechat" title="Permanent link">&para;</a></h2>
+<p>Connect your local web UI directly to Turing Engine:
+1. Open <strong>Open WebUI Settings ➔ Connections ➔ OpenAI API</strong>.
+2. Set <strong>URL</strong>: <code>http://localhost:8000/v1</code>
+3. Set <strong>API Key</strong>: <code>turing-local</code>
+4. Models like <code>deepseek-r1-7b</code> and <code>glm-5.3-flash</code> will automatically appear in your model dropdown.</p>
+<hr />
+<h2 id="5-kubernetes-deployment-kserve-helm">5. Kubernetes Deployment (KServe / Helm)<a class="headerlink" href="#5-kubernetes-deployment-kserve-helm" title="Permanent link">&para;</a></h2>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">serving.kserve.io/v1alpha1</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ServingRuntime</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nt">metadata</span><span class="p">:</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">turing-engine</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nt">spec</span><span class="p">:</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">supportedModelFormats</span><span class="p">:</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">turing-subspace</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">      </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span><span class="nt">containers</span><span class="p">:</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kserve-container</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io/intutic/turing:v0.1.8</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="w">      </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;turing&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;serve&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--model&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;deepseek-r1-7b&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;--port&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;8000&quot;</span><span class="p p-Indicator">]</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="w">      </span><span class="nt">resources</span><span class="p">:</span>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="w">        </span><span class="nt">limits</span><span class="p">:</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="w">          </span><span class="nt">nvidia.com/gpu</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span>
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a><span class="w">          </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">32Gi</span>
+</span></code></pre></div>
 
 
 
