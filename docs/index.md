@@ -11,18 +11,17 @@
 
 ## ⚡ What is Turing Engine?
 
-Turing Engine is an open-source LLM serving runtime that makes large models (**LLaMA-3.3-70B**, **DeepSeek-R1 Distill**, **Qwen-2.5-72B**, **GLM-5.3-Flash-320B**) run fast on **consumer 24GB GPUs** (RTX 3090/4090, L4) and **Apple Silicon Macs** without destroying accuracy.
+Turing Engine is an open-source inference and serving runtime that allows you to run frontier models (**LLaMA-3.3-70B**, **DeepSeek-R1 Distill**, **Qwen-2.5-72B**, **GLM-5.3-Flash-320B**) on **single consumer 24GB GPUs** (RTX 3090/4090, L4) and **Apple Silicon Macs** with zero loss in reasoning accuracy.
 
 ---
 
-## 🚀 Key Features
+## 🚀 Core Technologies
 
-* **57% Subspace Channel Pruning**: Skips inactive neurons during token generation for a **2.32× layer speedup**.
+* **57% Subspace Channel Pruning**: Skips dead intermediate neurons during token generation for a **2.32× per-layer speedup**.
 * **SVD INT8 KV Cache Paging**: Compresses 32K context memory from **10 GB down to 2.5 GB (-75%)**.
-* **Heterogeneous MoE Offload**: Runs massive Mixture-of-Experts models (e.g. GLM-5.3-Flash, DeepSeek-V4) by keeping active experts in VRAM and inactive experts in Host RAM.
-* **Universal Hardware Support**: Auto-discovers and accelerates on **NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (XPU), Vulkan, and CPU (AVX2 SIMD)**.
-* **Zero-Token Latent Agents (XKV)**: Lets multi-agent systems communicate directly in latent KV space for **7.85× faster deliberation** with real-time auditability.
-* **OpenAI & Anthropic Compatible**: Drop-in replacement for `/v1/chat/completions` and `/v1/messages`.
+* **Heterogeneous MoE Memory Management**: Runs 320B Mixture-of-Experts models on a single 24GB card by caching active experts in VRAM and streaming inactive experts from Host DRAM.
+* **Universal Hardware Support**: Native auto-discovery for **NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (XPU), Vulkan, and CPU (AVX2 SIMD)**.
+* **OpenAI & Anthropic Compatible**: Drop-in serving runtime for `/v1/chat/completions` and `/v1/messages`.
 
 ---
 

@@ -29,14 +29,3 @@ Turing Engine preserves **99.4%–100% relative fidelity** across mathematical, 
 | **MMLU-Pro** | Multi-discipline Knowledge | 74.8% | **74.6%** | **99.73%** |
 | **LongBench 128K** | Long-Context Needle Retrieval | 100.0% | **100.0%** | **100.0%** |
 | **Serving Throughput** | Multi-Stream Continuous Batching | 441.0 tok/s | **3,064.8 tok/s** | **6.95× Speedup** |
-
----
-
-## 3. XKV Zero-Token Inter-Agent Deliberation Speedup
-
-| Metric | Conventional Text-to-Text | **Turing Engine XKV Latent Transfer** | Measured Speedup |
-| :--- | :---: | :---: | :---: |
-| **Inter-Agent Transfer Latency** | 650.88 ms | **71.45 ms** | **9.11× Faster** |
-| **Spectral SVD Semantic Audit** | N/A (Manual Text) | **11.46 ms** | **Real-Time (<0.02s)** |
-| **Total End-to-End Deliberation** | **650.88 ms** | **82.91 ms** | **7.85× Faster** |
-| **Semantic Audit Verdict** | — | **PASSED** (Entropy: 10.08 nats) | **100% Auditable** |

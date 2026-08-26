@@ -1,25 +1,23 @@
-# 🧠 Architecture & Systems Deep-Dive
+# 🧠 Architecture Deep-Dive
 
-Turing Engine fits 70B–320B parameter models onto single consumer GPUs (24GB VRAM) and Mac workstations through four core innovations:
+Turing Engine fits 70B–320B parameter models onto single consumer GPUs (24GB VRAM) and Mac workstations through three core systems pillars:
 
 ```mermaid
 graph TD
     A["Frontier Model (70B-320B)"] --> B["1. Subspace Pruning (-57% FFN Compute)"]
     A --> C["2. SVD INT8 KV Paging (-75% VRAM)"]
     A --> D["3. Heterogeneous MoE Offload (GPU + Host RAM)"]
-    A --> E["4. Zero-Token Latent Agents (XKV)"]
-    B --> F["Single 24GB GPU Execution (2.32x Speedup)"]
-    C --> F
-    D --> F
-    E --> F
+    B --> E["Single 24GB GPU Execution (2.32x Speedup)"]
+    C --> E
+    D --> E
 ```
 
 ---
 
 ## 1. ⚡ Dynamic Subspace Channel Pruning (-57% Compute)
 
-* **The Problem**: In standard SwiGLU feed-forward networks (FFN), over half of intermediate activations evaluate to zero or near-zero for any given token during autoregressive generation.
-* **How It Works**: Turing Engine calculates optimal channel bitmasks offline or via lightweight dynamic gating. Fused Triton kernels slice out dead channel tiles before Tensor Core execution.
+* **The Problem**: In standard SwiGLU feed-forward networks (FFN), over 50% of intermediate activations evaluate to zero or near-zero for any given token during autoregressive generation.
+* **How It Works**: Turing Engine calculates optimal channel bitmasks offline or via lightweight dynamic gating. Custom fused Triton kernels slice out dead channel tiles before Tensor Core execution.
 * **The Result**: Layer execution time drops from **5.40 ms down to 2.32 ms (2.32× speedup)** on physical NVIDIA L4 GPUs with zero loss of reasoning fidelity.
 
 ---
@@ -40,9 +38,6 @@ graph TD
 
 ---
 
-## 4. ⚡ Zero-Token Latent Agent Deliberation (XKV)
+## 4. 🔗 Closed-Form Cross-Model Representation Transfer
 
-* **The Problem**: Multi-agent systems waste over 85% of their latency serializing intermediate reasoning thoughts into natural language text strings and re-prefilling tokens in peer agents.
-* **How It Works**: Agents pass compact per-head KV summaries directly through an inter-model bridge with continuous Gaussian layer alignment ($A_{i, j}$), bypassing text serialization.
-* **Spectral SVD Semantic Audit**: To solve the "black box" trust problem, a lightweight closed-form probe projects the shared latent state onto the vocabulary embedding ($\operatorname{Logits} = \operatorname{LayerNorm}(S_{\text{shared}}) \cdot W_{\text{vocab}}^T$) in $<0.02\text{ ms}$, producing a human-readable safety audit log.
-* **The Result**: Delivers **7.85× faster multi-agent deliberation** (82.9 ms vs 650.8 ms) with 100% auditable logging.
+For multi-model prefill acceleration, Turing Engine also includes closed-form linear ridge mappings ($W^*$) to transfer cached KV representations between draft and target models without re-prefilling tokens.
