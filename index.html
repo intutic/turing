@@ -1614,35 +1614,40 @@
 
 <h1 id="turing-engine">Turing Engine<a class="headerlink" href="#turing-engine" title="Permanent link">&para;</a></h1>
 <p><strong>High-Performance Frontier LLM Serving Runtime for Single-GPU Hardware (&lt;24GB VRAM)</strong></p>
-<p><a href="https://github.com/intutic/turing/releases/tag/v0.1.2"><img alt="Release" src="https://img.shields.io/badge/Release-v0.1.2-blue.svg" /></a>
+<p><a href="https://github.com/intutic/turing/releases/tag/v0.1.8"><img alt="Release" src="https://img.shields.io/badge/Release-v0.1.8-blue.svg" /></a>
 <a href="licensing/"><img alt="License: BSL 1.1" src="https://img.shields.io/badge/License-BSL_1.1-green.svg" /></a>
+<a href=""><img alt="Tests: 98/98 Passing" src="https://img.shields.io/badge/Tests-98%2F98%20Passing-brightgreen.svg" /></a>
 <a href="https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg" /></a></p>
 <hr />
 <h2 id="what-is-turing-engine">⚡ What is Turing Engine?<a class="headerlink" href="#what-is-turing-engine" title="Permanent link">&para;</a></h2>
-<p><strong>Turing Engine</strong> is an advanced open-core LLM serving runtime designed to execute large frontier reasoning models (<strong>LLaMA-3.1-70B</strong>, <strong>Qwen-2.5-72B</strong>, <strong>DeepSeek-V4-Flash-284B</strong>) fast and efficiently on <strong>single consumer GPUs (24GB VRAM)</strong> or standard cloud instances (NVIDIA L4, A10G, RTX 4090).</p>
-<p>By synthesizing <strong>Subspace Channel Pruning</strong>, <strong>SVD INT8 KV Cache Compression</strong>, <strong>Heterogeneous MoE Memory Management</strong>, and <strong>Birkhoff Doubly Stochastic Hyper-Connections</strong>, Turing Engine slashes cloud inference costs by <strong>-96.7%</strong> ($210,240 → $7,008/year per serving node) while preserving <strong>&gt;99.4%</strong> full reasoning accuracy.</p>
+<p><strong>Turing Engine</strong> is an advanced open-core LLM serving runtime designed to execute large frontier reasoning models (<strong>GLM-5.3-Flash-320B</strong>, <strong>LLaMA-3.3-70B</strong>, <strong>DeepSeek-R1 Distill</strong>, <strong>Qwen-2.5-72B</strong>, <strong>DeepSeek-V4-Flash-284B</strong>) fast and efficiently on <strong>single consumer GPUs (24GB VRAM)</strong> or Apple Silicon Macs (M-series Unified Memory).</p>
+<p>By synthesizing <strong>Subspace Channel Pruning</strong>, <strong>SVD INT8 KV Cache Compression</strong>, <strong>Heterogeneous MoE Memory Management</strong>, and <strong>Birkhoff Doubly Stochastic Hyper-Connections (mHC)</strong>, Turing Engine slashes cloud inference costs by <strong>-96.7%</strong> while preserving <strong>&gt;99.4%</strong> full reasoning accuracy at <strong>3,064 tok/s serving throughput</strong>.</p>
 <hr />
 <h2 id="key-innovations">🚀 Key Innovations<a class="headerlink" href="#key-innovations" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>graph TD
-    A["Frontier Model (70B-284B)"] --&gt; B["Subspace Gated Routing (-57% FFN Compute)"]
+    A["Frontier Model (70B-320B)"] --&gt; B["Subspace Gated Routing (-57% FFN Compute)"]
     A --&gt; C["SVD INT8 KV Paging (-75% Memory)"]
     A --&gt; D["Heterogeneous MoE (Host DRAM + GPU LRU Cache)"]
+    A --&gt; F["Universal Hardware (CUDA / ROCm / Vulkan / Metal)"]
     B --&gt; E["Single 24GB GPU Execution (2.32x Speedup)"]
     C --&gt; E
-    D --&gt; E</code></pre>
+    D --&gt; E
+    F --&gt; E</code></pre>
 <ol>
 <li><strong>Subspace Channel Pruning</strong>: Dynamically evaluates input tokens and activates only the salient 42.9% subspace of intermediate Feed-Forward Network (FFN) activations, yielding <strong>2.32× faster compute</strong>.</li>
 <li><strong>SVD INT8 KV Cache Paging</strong>: Compresses 32K context memory from <strong>10.24 GB → 2.56 GB (-75%)</strong> using Rank-64 singular vector projections with 100% Top-1 exact NIAH retrieval.</li>
 <li><strong>Heterogeneous MoE Offload</strong>: Stores inactive expert weights in host DRAM while caching active experts in GPU VRAM via asynchronous PCIe double-buffering.</li>
-<li><strong>Dual Drop-In API</strong>: Native drop-in compatibility with both OpenAI <code>/v1/chat/completions</code> and Anthropic <code>/v1/messages</code> endpoints.</li>
+<li><strong>Universal Cross-Vendor Hardware Support</strong>: Auto-discovers and accelerates inference on <strong>NVIDIA CUDA, AMD ROCm, Intel XPU, Apple Silicon Metal, Vulkan Compute, and CPU AVX2 SIMD</strong>.</li>
+<li><strong>Dual Drop-In API &amp; LangChain</strong>: Native drop-in compatibility with OpenAI <code>/v1</code>, Anthropic <code>/v1/messages</code>, and <code>langchain-turing</code> / <code>ChatTuring</code>.</li>
 </ol>
 <hr />
 <h2 id="quick-navigation">🏁 Quick Navigation<a class="headerlink" href="#quick-navigation" title="Permanent link">&para;</a></h2>
 <ul>
 <li><a href="quickstart/">⚡ 30-Second Quickstart</a></li>
+<li><a href="hardware/universal_backends/">🌐 Universal Hardware Acceleration</a></li>
+<li><a href="integrations/langchain/">🦜️🔗 LangChain &amp; LangGraph Integration</a></li>
 <li><a href="architecture/subspace_pruning/">🏗️ Subspace Architecture</a></li>
 <li><a href="benchmarks/gpu_benchmarks/">📊 Physical Silicon Benchmarks</a></li>
-<li><a href="integrations/litellm/">🔌 Ecosystem Integrations</a></li>
 <li><a href="licensing/">📜 Licensing &amp; Commercial Terms</a></li>
 </ul>
 
