@@ -42,14 +42,18 @@ Empirical stress testing of **SVD INT8 KV Cache Paging** across context length (
 
 ### B. Mathematical SVD Rank Degradation & The Outlier Fix
 
-| SVD Subspace Dimension | KV Compression Ratio | Base Accuracy | With Sparse Residual Outlier Correction | Verdict |
-| :--- | :---: | :---: | :---: | :--- |
-| **Rank-128** | 2.0× | 100.0% | **100.0%** | ✅ Stable |
-| **Rank-64 (Default)** | **4.0× (-75% VRAM)** | **100.0%** | **100.0%** | ✅ **Production Default** |
-| **Rank-32** | 8.0× | 100.0% | **100.0%** | ✅ Stable |
-| **Rank-16** | 16.0× | 100.0% | **100.0%** | ✅ Stable |
-| **Rank-8** | 32.0× | 100.0% | **100.0%** | ✅ Stable |
-| **Rank-4** | **64.0×** | 89.0% | **100.0%** | 🛠️ **Fixed with 1-Sparse Outlier Correction** |
+| SVD Dimension / Mode | Cache Bytes / Tok (K+V) | Net VRAM Savings | Base Retrieval Accuracy | With Outlier Correction | Practical Verdict |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Dense FP16 Baseline** | 512 bytes | 0.0% (128 MB / 32K) | 100.0% | N/A | Uncompressed Baseline |
+| **Rank-128 SVD INT8** | 256 bytes | 50.0% (64 MB / 32K) | 100.0% | 100.0% | ✅ Stable |
+| **Rank-64 (Production Default)** | **128 bytes** | **75.0% (32 MB / 32K)** | **100.0%** | **100.0%** | 🚀 **Production Default (0 overhead)** |
+| **Rank-32 SVD INT8** | 64 bytes | 87.5% (16 MB / 32K) | 100.0% | 100.0% | ✅ High-efficiency Mode |
+| **Rank-16 SVD INT8** | 32 bytes | 93.8% (8 MB / 32K) | 100.0% | 100.0% | ✅ Ultra-compact Mode |
+| **Rank-8 SVD INT8** | 16 bytes | 96.9% (4 MB / 32K) | 100.0% | 100.0% | ✅ Aggressive Compression |
+| **Rank-4 SVD INT8** | 8 bytes | 98.4% (2 MB / 32K) | 💥 89.0% | N/A | ⚠️ Subspace Angular Loss |
+| **Rank-4 + Sparse Outlier Fix** | **11 bytes** | **97.3% (3.5 MB / 32K)** | 89.0% | **100.0%** | 🛠️ **Restored to 100% Top-1 Recall** |
+
+> **Note on Metadata Overhead**: Turing Engine does **not** attach outlier metadata to Rank-64 in production because Rank-64 naturally retains 100% Top-1 accuracy across all depths on its own (exact 75.0% savings). Outlier tracking is an opt-in safety mechanism for extreme low-rank modes (Rank-4/8) and low-SNR prompts.
 
 ### C. Reproduce on Your GPU
 ```bash
