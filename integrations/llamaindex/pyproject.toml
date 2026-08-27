@@ -15,7 +15,7 @@ python_version = "3.9"
 
 [tool.poetry]
 authors = ["Ishan Gupta <support@intutic.ai>"]
-description = "llama-index llms turing integration"
+description = "LlamaIndex LLM integration for Turing Engine"
 exclude = ["**/BUILD"]
 keywords = ["llm", "turing", "inference", "subspace", "kv-cache", "rag"]
 license = "MIT"
@@ -23,7 +23,8 @@ maintainers = ["Ishan Gupta <support@intutic.ai>"]
 name = "llama-index-llms-turing"
 packages = [{include = "llama_index/"}]
 readme = "README.md"
-version = "0.2.1"
+version = "0.2.2"
+
 
 [tool.poetry.dependencies]
 python = ">=3.9,<4.0"

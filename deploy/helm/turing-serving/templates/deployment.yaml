@@ -4,6 +4,11 @@ metadata:
   name: {{ .Release.Name }}-turing
   labels:
     app: turing-serving
+    {{- if .Values.llmd.enabled }}
+    llm-d.ai/guide: {{ .Values.llmd.guide | quote }}
+    llm-d.ai/engine-type: {{ .Values.llmd.engineType | quote }}
+    llm-d.ai/role: {{ .Values.llmd.role | quote }}
+    {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -13,11 +18,27 @@ spec:
     metadata:
       labels:
         app: turing-serving
+        {{- if .Values.llmd.enabled }}
+        llm-d.ai/guide: {{ .Values.llmd.guide | quote }}
+        llm-d.ai/engine-type: {{ .Values.llmd.engineType | quote }}
+        llm-d.ai/role: {{ .Values.llmd.role | quote }}
+        {{- end }}
     spec:
       containers:
         - name: turing-engine
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.llmd.enabled }}
+          env:
+            - name: PYTHONHASHSEED
+              value: "0"
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_PORT
+              value: "{{ .Values.service.port }}"
+          {{- end }}
           command: ["python3", "-m", "turing.cli", "serve"]
           args:
             - "--model"
@@ -32,6 +53,14 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
               protocol: TCP
+            {{- if and .Values.llmd.enabled .Values.llmd.kvEvents.enabled }}
+            - name: zmq-pub
+              containerPort: {{ .Values.llmd.kvEvents.pubPort }}
+              protocol: TCP
+            - name: zmq-replay
+              containerPort: {{ .Values.llmd.kvEvents.replayPort }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health

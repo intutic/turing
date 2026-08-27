@@ -3,7 +3,8 @@ replicaCount: 1
 image:
   repository: ghcr.io/intutic/turing
   pullPolicy: IfNotPresent
-  tag: "3.0.0-cuda"
+  tag: "v0.2.2-cuda"
+
 
 service:
   type: ClusterIP
@@ -28,3 +29,14 @@ prometheus:
   enabled: true
   path: "/metrics"
   port: 8000
+
+llmd:
+  enabled: false
+  guide: "optimized-baseline"
+  role: "prefill-decode"     # prefill | decode | prefill-decode
+  engineType: "turing"       # engine type label for EPP discovery
+  kvEvents:
+    enabled: true
+    pubPort: 5556
+    replayPort: 5559
+    blockSize: 64

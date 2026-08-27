@@ -4,8 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turing-engine"
-version = "0.2.1"
+version = "0.2.2"
 description = "Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Runtime"
+
 authors = [
     {name = "Ishan Gupta", email = "support@intutic.ai"}
 ]
@@ -30,7 +31,12 @@ dev = [
     "pytest-cov>=4.0.0",
     "wheel",
     "build",
+    "pyzmq>=24.0.0",
 ]
+llmd = [
+    "pyzmq>=24.0.0",
+]
+
 
 [project.scripts]
 turing = "turing.cli:main"

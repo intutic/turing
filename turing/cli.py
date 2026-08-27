@@ -31,7 +31,12 @@ def main():
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, cpu, mps)")
     serve_parser.add_argument("--sparsity", type=float, default=0.5, help="Subspace channel sparsity ratio (default: 0.5)")
     serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
+    serve_parser.add_argument("--block-size", type=int, default=64, help="KV cache block size tokens (default: 64)")
+    serve_parser.add_argument("--enable-kv-events", action="store_true", help="Enable ZeroMQ KV block event publisher for llm-d EPP prefix cache routing")
+    serve_parser.add_argument("--kv-events-pub-port", type=int, default=5556, help="ZeroMQ PUB port for live KV cache block events (default: 5556)")
+    serve_parser.add_argument("--kv-events-replay-port", type=int, default=5559, help="ZeroMQ ROUTER port for KV cache event replay (default: 5559)")
     serve_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights for isolated FLOP profiling")
+
 
     # 2. Bench
     bench_parser = subparsers.add_parser("bench", help="Run comprehensive hardware profiling & benchmark suite")
@@ -220,9 +225,28 @@ def main():
                 cfg = get_model_config(args.model)
                 engine = ContinuousBatchEngine(cfg, jcfg)
 
-        app = create_app(engine)
+        kv_pub = None
+        import os
+        if getattr(args, "enable_kv_events", False) or os.getenv("ENABLE_KV_EVENTS", "0").lower() in ("1", "true", "yes"):
+            from .serving.kv_events import KVBlockEventPublisher
+            pod_ip = os.getenv("POD_IP", args.host if args.host != "0.0.0.0" else "127.0.0.1")
+            pod_port = args.port
+            pub_port = getattr(args, "kv_events_pub_port", 5556)
+            replay_port = getattr(args, "kv_events_replay_port", 5559)
+            kv_pub = KVBlockEventPublisher(
+                model_name=cfg.name,
+                pod_ip=pod_ip,
+                pod_port=pod_port,
+                pub_endpoint=f"tcp://*:{pub_port}",
+                replay_endpoint=f"tcp://*:{replay_port}",
+                block_size=getattr(args, "block_size", 64),
+            )
+            print(f"[+] Initialized llm-d KVBlockEventPublisher on {kv_pub.pub_endpoint} (topic: {kv_pub.topic})")
+
+        app = create_app(engine, kv_publisher=kv_pub)
         print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} (Model: {cfg.name}, Device: {dev})")
         uvicorn.run(app, host=args.host, port=args.port)
+
 
     elif args.command == "bench":
         cfg = get_model_config(args.model)

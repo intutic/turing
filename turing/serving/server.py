@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from ..config import ModelConfig, TuringConfig
 from .engine import ContinuousBatchEngine
 from .anthropic_api import AnthropicMessageRequest, AnthropicAPIHandler
+from .kv_events import KVBlockEventPublisher
 
 class ChatMessage(BaseModel):
     role: str
@@ -40,16 +41,22 @@ class CompletionRequest(BaseModel):
     use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
     draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
 
-def create_app(engine: ContinuousBatchEngine) -> FastAPI:
+def create_app(engine: ContinuousBatchEngine, kv_publisher: Optional[KVBlockEventPublisher] = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await engine.start()
+        if kv_publisher is not None:
+            kv_publisher.start()
         try:
             yield
         finally:
+            if kv_publisher is not None:
+                kv_publisher.stop()
             await engine.stop()
 
-    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.2.1", lifespan=lifespan)
+    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.2.2", lifespan=lifespan)
+
+
 
     def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
         """
@@ -112,6 +119,7 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
         accept = request.headers.get("accept", "")
         if "text/plain" in accept:
             # Prometheus exposition format
+            llmd = engine.get_llmd_metrics()
             lines = [
                 f"# HELP turing_serving_throughput_tok_per_sec Instantaneous generated tokens per second",
                 f"# TYPE turing_serving_throughput_tok_per_sec gauge",
@@ -133,7 +141,19 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
                 f"turing_ttft_p99_ms {telem['latency']['p99_ttft_ms']}",
                 f"# HELP turing_itl_avg_ms Average Inter-Token Latency in milliseconds",
                 f"# TYPE turing_itl_avg_ms gauge",
-                f"turing_itl_avg_ms {telem['latency']['avg_itl_ms']}"
+                f"turing_itl_avg_ms {telem['latency']['avg_itl_ms']}",
+                f"# HELP turing_num_requests_waiting Number of requests queued in waiting backlog (llm-d TotalQueuedRequests)",
+                f"# TYPE turing_num_requests_waiting gauge",
+                f"turing_num_requests_waiting {llmd['num_requests_waiting']}",
+                f"# HELP turing_num_requests_running Number of requests currently executing in batch (llm-d TotalRunningRequests)",
+                f"# TYPE turing_num_requests_running gauge",
+                f"turing_num_requests_running {llmd['num_requests_running']}",
+                f"# HELP turing_kv_cache_usage_perc Fraction of KV cache memory pool in use (llm-d KVCacheUtilization)",
+                f"# TYPE turing_kv_cache_usage_perc gauge",
+                f"turing_kv_cache_usage_perc {llmd['kv_cache_usage_perc']}",
+                f"# HELP turing_cache_config_info KV cache configuration info (llm-d BlockSize and NumGPUBlocks)",
+                f"# TYPE turing_cache_config_info gauge",
+                f'turing_cache_config_info{{block_size="{llmd["block_size"]}",num_gpu_blocks="{llmd["num_gpu_blocks"]}"}} 1.0',
             ]
             from fastapi.responses import PlainTextResponse
             return PlainTextResponse("\n".join(lines) + "\n")
@@ -144,7 +164,8 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
             "total_tiles": engine.model_config.total_tiles,
             "active_tiles": engine.model_config.active_tiles,
             "subspace_dim": engine.model_config.active_subspace_dim,
-            "telemetry": telem
+            "telemetry": telem,
+            "llmd_metrics": engine.get_llmd_metrics(),
         }
 
     @app.get("/v1/models")
@@ -163,6 +184,141 @@ def create_app(engine: ContinuousBatchEngine) -> FastAPI:
                 }
             ],
         }
+
+    @app.post("/v1/completions/render")
+    async def render_completions(req: Request):
+        """Tokenizes prompt for llm-d EPP token-producer prefix indexing."""
+        body = await req.json()
+        prompt = body.get("prompt", "")
+        if isinstance(prompt, list):
+            tokens = [int(t) for t in prompt]
+        else:
+            tokens = engine.encode_prompt(str(prompt))
+        if not tokens:
+            tokens = [1]
+        return JSONResponse(content={"tokens": tokens, "count": len(tokens)})
+
+    @app.post("/v1/chat/completions/render")
+    async def render_chat_completions(req: Request):
+        """Tokenizes chat messages for llm-d EPP token-producer prefix indexing."""
+        body = await req.json()
+        messages = body.get("messages", [])
+        full_text = " ".join([m.get("content", "") for m in messages if isinstance(m, dict)])
+        tokens = engine.encode_prompt(full_text)
+        if not tokens:
+            tokens = [1]
+        return JSONResponse(content={"tokens": tokens, "count": len(tokens)})
+
+    @app.post("/v1/completions")
+    async def completions(req: CompletionRequest, raw_req: Request):
+        controls = _extract_turing_controls(req, raw_req)
+        resp_headers = {
+            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
+            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
+            "X-Turing-Model": engine.model_config.name,
+            "X-Turing-Device": str(engine.device),
+        }
+
+        if isinstance(req.prompt, list):
+            prompt_tokens = [int(t) for t in req.prompt]
+        else:
+            prompt_tokens = engine.encode_prompt(req.prompt or "")
+
+        if not prompt_tokens:
+            prompt_tokens = [1]
+
+        max_new_tokens = req.max_tokens or 32
+        temp = req.temperature if req.temperature is not None else 0.7
+        top_k = 50
+
+        req_id = f"cmpl-{int(time.time()*1000)}"
+
+        if req.stream:
+            async def event_generator():
+                token_stream = engine.stream_generate(
+                    prompt_tokens=prompt_tokens,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temp,
+                    top_k=top_k,
+                    sparsity_ratio=controls["sparsity_ratio"],
+                    use_svd_kv=controls["use_svd_kv"],
+                    draft_tokens=controls["draft_tokens"],
+                )
+                async for token_id in token_stream:
+                    char_repr = engine.decode_tokens([token_id])
+                    chunk_data = {
+                        "id": req_id,
+                        "object": "text_completion",
+                        "created": int(time.time()),
+                        "model": req.model,
+                        "choices": [
+                            {
+                                "text": char_repr,
+                                "index": 0,
+                                "logprobs": None,
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                    yield f"data: {json.dumps(chunk_data)}\n\n"
+
+                done_chunk = {
+                    "id": req_id,
+                    "object": "text_completion",
+                    "created": int(time.time()),
+                    "model": req.model,
+                    "choices": [
+                        {
+                            "text": "",
+                            "index": 0,
+                            "logprobs": None,
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+                yield f"data: {json.dumps(done_chunk)}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(event_generator(), media_type="text/event-stream", headers=resp_headers)
+
+        # Non-streaming
+        generated_tokens = []
+        token_stream = engine.stream_generate(
+            prompt_tokens=prompt_tokens,
+            max_new_tokens=max_new_tokens,
+            temperature=temp,
+            top_k=top_k,
+            sparsity_ratio=controls["sparsity_ratio"],
+            use_svd_kv=controls["use_svd_kv"],
+            draft_tokens=controls["draft_tokens"],
+        )
+        async for token_id in token_stream:
+            generated_tokens.append(token_id)
+
+        out_text = engine.decode_tokens(generated_tokens)
+
+        return JSONResponse(
+            content={
+                "id": req_id,
+                "object": "text_completion",
+                "created": int(time.time()),
+                "model": req.model,
+                "choices": [
+                    {
+                        "text": out_text,
+                        "index": 0,
+                        "logprobs": None,
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": len(prompt_tokens),
+                    "completion_tokens": len(generated_tokens),
+                    "total_tokens": len(prompt_tokens) + len(generated_tokens),
+                },
+            },
+            headers=resp_headers,
+        )
 
     @app.post("/v1/chat/completions")
     async def chat_completions(req: ChatCompletionRequest, raw_req: Request):

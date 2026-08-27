@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: turing-modelserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: turing-serving
+  template:
+    metadata:
+      labels:
+        app: turing-serving
+        llm-d.ai/engine-type: turing
+        llm-d.ai/guide: optimized-baseline
+        llm-d.ai/role: prefill-decode
+    spec:
+      containers:
+        - name: turing-engine
+          image: ghcr.io/intutic/turing:v0.2.2-cuda
+          imagePullPolicy: IfNotPresent
+
+          env:
+            - name: PYTHONHASHSEED
+              value: "0"
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: POD_PORT
+              value: "8000"
+          command: ["python3", "-m", "turing.cli", "serve"]
+          args:
+            - "--model"
+            - "meta-llama/Llama-3.1-70B-Instruct"
+            - "--device"
+            - "cuda"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8000"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: zmq-pub
+              containerPort: 5556
+              protocol: TCP
+            - name: zmq-replay
+              containerPort: 5559
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              memory: 32Gi
+              cpu: "8"
+            requests:
+              nvidia.com/gpu: "1"
+              memory: 24Gi
+              cpu: "4"

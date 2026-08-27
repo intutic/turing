@@ -29,9 +29,9 @@ turing generate --model deepseek-r1-1.5b --prompt "Explain quantum entanglement:
 
 ---
 
-## 2. OpenAI-Compatible API (`/v1/chat/completions`)
+## 2. OpenAI Chat Completions (`/v1/chat/completions`)
 
-Turing Engine provides full standard OpenAI API compatibility:
+Turing Engine provides full standard OpenAI Chat API compatibility:
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
@@ -46,21 +46,45 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-### Python SDK Client
-```python
-from openai import OpenAI
+---
 
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="turing-local")
-response = client.chat.completions.create(
-    model="deepseek-r1-7b",
-    messages=[{"role": "user", "content": "Explain SVD KV cache compression in 2 sentences:"}]
-)
-print(response.choices[0].message.content)
+## 3. OpenAI Text Completions (`/v1/completions`)
+
+Standard OpenAI raw text completions with both non-streaming JSON and streaming Server-Sent Events (SSE):
+
+```bash
+curl http://localhost:8000/v1/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-r1-7b",
+    "prompt": "Once upon a time in a distributed cluster,",
+    "max_tokens": 64,
+    "stream": false
+  }'
 ```
 
 ---
 
-## 3. Anthropic-Compatible API (`/v1/messages`)
+## 4. Tokenizer Render Endpoints (`/render`)
+
+Exposes token ID sequences for prefix-cache routing (used by llm-d EPP routers and frontend inspectors):
+
+```bash
+# Render text prompt tokens:
+curl -X POST http://localhost:8000/v1/completions/render \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Hello world"}'
+# -> {"tokens": [15496, 995], "count": 2}
+
+# Render chat messages tokens:
+curl -X POST http://localhost:8000/v1/chat/completions/render \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello world"}]}'
+```
+
+---
+
+## 5. Anthropic-Compatible API (`/v1/messages`)
 
 Seamless drop-in for Anthropic Claude SDK and tools:
 
@@ -78,12 +102,31 @@ print(message.content[0].text)
 
 ---
 
-## 4. Subspace Pruning & Performance Headers
+## 6. Prometheus Telemetry & Metrics (`/metrics`)
+
+Scrapes real-time continuous batching and KV memory metrics:
+
+```bash
+curl -H "Accept: text/plain" http://localhost:8000/metrics
+```
+
+Key Prometheus metrics exported:
+- `turing_serving_throughput_tok_per_sec`: Instantaneous token generation speed
+- `turing_total_tokens_generated`: Monotonic token counter
+- `turing_num_requests_waiting` & `turing_num_requests_running`: Active and queued batch sizes
+- `turing_kv_cache_usage_perc`: Fraction of static KV page pool in active use (0.0 to 1.0)
+- `turing_cache_config_info`: Block size tokens (64) and total allocated memory blocks
+- `turing_ttft_avg_ms`, `turing_ttft_p99_ms`, `turing_itl_avg_ms`: P99 latencies
+
+---
+
+## 7. Subspace Pruning & Performance Headers
 
 You can dynamically tune compression and routing parameters per-request via HTTP headers:
 
 | HTTP Header | Default | Description |
 | :--- | :---: | :--- |
 | `X-Turing-Sparsity` | `0.57` | Fraction of intermediate FFN channels to prune (0.0 to 0.75). |
-| `X-Turing-SVD-Rank` | `64` | Rank dimension for singular value KV cache compression (32, 64, 128). |
+| `X-Turing-SVD-KV` | `1` | Enable/disable calibrated SVD INT8 KV cache paging. |
 | `X-Turing-Draft-Tokens` | `4` | Speculative draft token budget per verification step. |
+

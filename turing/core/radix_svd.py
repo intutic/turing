@@ -157,3 +157,93 @@ class SpectralRadixSVDForest:
             return 0, None, None
 
         return matched_tokens, torch.cat(k_blocks, dim=0), torch.cat(v_blocks, dim=0)
+
+    def list_block_hashes(self, seed: int = 0) -> List[Tuple[int, List[int]]]:
+        """
+        Traverses tree and returns (block_hash, token_ids) for all cached prefix nodes.
+        """
+        import hashlib
+        import struct
+
+        results = []
+
+        def _traverse(node: SpectralRadixNode, parent_tokens: List[int]):
+            curr_tokens = parent_tokens + node.token_ids
+            if curr_tokens and node.k_sub_int8 is not None:
+                data = struct.pack(f"<I{'I' * len(curr_tokens)}", seed, *curr_tokens)
+                h = struct.unpack("<Q", hashlib.sha256(data).digest()[:8])[0]
+                results.append((h, curr_tokens))
+            for child in node.children.values():
+                _traverse(child, curr_tokens)
+
+        _traverse(self.root, [])
+        return results
+
+    def insert_compressed_node(
+        self,
+        token_ids: List[int],
+        k_sub_int8: torch.Tensor,
+        k_scale: torch.Tensor,
+        v_sub_int8: torch.Tensor,
+        v_scale: torch.Tensor,
+    ):
+        """
+        Directly inserts pre-compressed SVD INT8 KV tensors into the radix tree.
+        """
+        if not token_ids:
+            return
+
+        seq_len = len(token_ids)
+        curr = self.root
+        first_tok = token_ids[0]
+
+        if first_tok not in curr.children:
+            new_node = SpectralRadixNode(token_ids=token_ids)
+            new_node.k_sub_int8 = k_sub_int8
+            new_node.k_scale = k_scale
+            new_node.v_sub_int8 = v_sub_int8
+            new_node.v_scale = v_scale
+            curr.children[first_tok] = new_node
+            self.total_cached_tokens += seq_len
+        else:
+            child = curr.children[first_tok]
+            match_len = 0
+            while match_len < len(child.token_ids) and match_len < len(token_ids) and child.token_ids[match_len] == token_ids[match_len]:
+                match_len += 1
+
+            if match_len == len(child.token_ids):
+                rem_toks = token_ids[match_len:]
+                if rem_toks:
+                    self.insert_compressed_node(
+                        rem_toks,
+                        k_sub_int8[match_len:],
+                        k_scale[match_len:],
+                        v_sub_int8[match_len:],
+                        v_scale[match_len:],
+                    )
+            else:
+                split_toks = child.token_ids[match_len:]
+                split_node = SpectralRadixNode(token_ids=split_toks)
+                split_node.k_sub_int8 = child.k_sub_int8[match_len:]
+                split_node.k_scale = child.k_scale[match_len:]
+                split_node.v_sub_int8 = child.v_sub_int8[match_len:]
+                split_node.v_scale = child.v_scale[match_len:]
+                split_node.children = child.children
+
+                child.token_ids = child.token_ids[:match_len]
+                child.k_sub_int8 = child.k_sub_int8[:match_len]
+                child.k_scale = child.k_scale[:match_len]
+                child.v_sub_int8 = child.v_sub_int8[:match_len]
+                child.v_scale = child.v_scale[:match_len]
+                child.children = {split_toks[0]: split_node}
+
+                rem_toks = token_ids[match_len:]
+                if rem_toks:
+                    rem_node = SpectralRadixNode(token_ids=rem_toks)
+                    rem_node.k_sub_int8 = k_sub_int8[match_len:]
+                    rem_node.k_scale = k_scale[match_len:]
+                    rem_node.v_sub_int8 = v_sub_int8[match_len:]
+                    rem_node.v_scale = v_scale[match_len:]
+                    child.children[rem_toks[0]] = rem_node
+                    self.total_cached_tokens += len(rem_toks)
+

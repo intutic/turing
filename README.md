@@ -3,9 +3,10 @@
 **Serve Frontier 70B+ Models on a Single Consumer GPU (24GB) or Mac Workstation with 75% Less Memory.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v0.2.1](https://img.shields.io/badge/Release-v0.2.1-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.2.1)
+[![Release: v0.2.2](https://img.shields.io/badge/Release-v0.2.2-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.2.2)
+
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 104/104 Passing](https://img.shields.io/badge/Tests-104%2F104%20Passing-brightgreen.svg)]()
+[![Tests: 114/114 Passing](https://img.shields.io/badge/Tests-114%2F114%20Passing-brightgreen.svg)]()
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
 ---
@@ -145,21 +146,24 @@ Explore the complete documentation at [**intutic.github.io/turing**](https://int
 * 🚀 **[Quickstart Guide](https://intutic.github.io/turing/quickstart/)** — 30-second setup, CLI commands, and OpenAI/Anthropic SDK usage.
 * 🖥️ **[Models & Sizing Table](https://intutic.github.io/turing/models_and_hardware/)** — GPU sizing table (8GB to 24GB VRAM) across 26 frontier models.
 * ⚡ **[Production Serving](https://intutic.github.io/turing/serving/)** — High-concurrency continuous batching, streaming API, and SLAs.
+* ☸️ **[Kubernetes & llm-d](https://intutic.github.io/turing/llmd-integration/)** — Distributed multi-pod serving, prefix-cache aware routing, and P/D disaggregation.
 * 🧠 **[Architecture Deep-Dive](https://intutic.github.io/turing/architecture/)** — Subspace channel pruning, SVD INT8 KV cache paging, and Triton kernels.
 * 📊 **[Empirical Benchmarks](https://intutic.github.io/turing/benchmarks/)** — Unmocked physical GPU layer latency speedups, NIAH 1M context analysis, and real-weight throughput.
 * 🔌 **[Integrations](https://intutic.github.io/turing/integrations/)** — Native guides for LangChain, LlamaIndex, LiteLLM, vLLM, and Docker.
 * 📜 **[Licensing](https://intutic.github.io/turing/licensing/)** — BSL 1.1 terms (Free for all single-node development, testing, and research).
 
+
 ---
 
-## 📦 Pre-Built Binary Wheels (v0.2.1)
+## 📦 Pre-Built Binary Wheels (v0.2.2)
 
-Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.2.1](https://github.com/intutic/turing/releases/tag/v0.2.1):
+Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.2.2](https://github.com/intutic/turing/releases/tag/v0.2.2):
 
 ```bash
 # Install directly from release wheel:
-pip install https://github.com/intutic/turing/releases/download/v0.2.1/turing_engine-0.2.1-cp311-cp311-macosx_15_0_arm64.whl
+pip install https://github.com/intutic/turing/releases/download/v0.2.2/turing_engine-0.2.2-cp311-cp311-macosx_15_0_arm64.whl
 ```
+
 
 ---
 

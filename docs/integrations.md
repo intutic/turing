@@ -96,23 +96,43 @@ Connect your local web UI directly to Turing Engine:
 
 ---
 
-## 5. Kubernetes Deployment (KServe / Helm)
+## 5. Kubernetes Deployment (KServe, Helm & llm-d)
+
+Turing Engine provides production manifests for Kubernetes orchestration:
+
+* ☸️ **[Full llm-d & Kubernetes Distributed Serving Guide](llmd-integration.md)** — Prefix-cache aware routing, InferencePools, and P/D disaggregation.
+* 📦 **[Turing Serving Helm Chart](https://github.com/intutic/turing/tree/master/deploy/helm/turing-serving)** — Configurable deployment with Prometheus metrics and GPU limits.
+* 🚀 **KServe `ServingRuntime`**:
 
 ```yaml
 apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime
 metadata:
-  name: turing-engine
+  name: turing-runtime
+  labels:
+    llm-d.ai/engine-type: "turing"
 spec:
   supportedModelFormats:
     - name: turing-subspace
       version: "1"
+      autoSelect: true
+    - name: huggingface
+      version: "1"
+      autoSelect: false
   containers:
     - name: kserve-container
-      image: ghcr.io/intutic/turing:v0.2.1
-      command: ["turing", "serve", "--model", "deepseek-r1-7b", "--port", "8000"]
+      image: ghcr.io/intutic/turing:v0.2.2-cuda
+      command: ["python3", "-m", "turing.cli", "serve"]
+
+      args: ["--model", "$(MODEL_NAME)", "--port", "8080", "--device", "cuda"]
       resources:
         limits:
           nvidia.com/gpu: "1"
           memory: 32Gi
+          cpu: "8"
+        requests:
+          nvidia.com/gpu: "1"
+          memory: 24Gi
+          cpu: "4"
 ```
+

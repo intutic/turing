@@ -2,8 +2,9 @@
 Double-Buffered Asynchronous PCIe Virtual Page Swapper (128K+ Out-Of-Core Context).
 """
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import torch
+
 
 class DoubleBufferedAsyncRingSwapper:
     """
@@ -70,3 +71,39 @@ class DoubleBufferedAsyncRingSwapper:
 
     def get_ready_slot_tensor(self, ring_slot_idx: int) -> torch.Tensor:
         return self.k_gpu_ring[ring_slot_idx], self.v_gpu_ring[ring_slot_idx]
+
+
+class NetworkKVPuller:
+    """
+    Asynchronous TCP/HTTP KV block puller for distributed and disaggregated serving.
+    Pulls SVD-compressed KV payloads from remote prefiller pods and stages them into local memory.
+    """
+
+    def __init__(self, timeout_s: float = 10.0, device: torch.device = torch.device("cpu")):
+        self.timeout_s = timeout_s
+        self.device = device
+
+    def pull_kv_block_sync(
+        self,
+        remote_host_port: str,
+        request_id: str,
+        block_id: int,
+        u_proj: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, List[int]]:
+        """
+        Synchronously pulls an SVD-compressed KV block from remote host and reconstructs it.
+        """
+        import urllib.request
+        import urllib.error
+        from ..serving.kv_transfer import deserialize_kv_block_svd
+
+        url = f"http://{remote_host_port}/kv/blocks/{request_id}/{block_id}"
+        req = urllib.request.Request(url, method="GET")
+
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                data = resp.read()
+                return deserialize_kv_block_svd(data, u_proj=u_proj, device=self.device)
+        except Exception as e:
+            raise RuntimeError(f"Failed to pull KV block {block_id} for request {request_id} from {remote_host_port}: {e}")
+

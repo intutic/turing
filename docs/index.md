@@ -2,9 +2,10 @@
 
 **Serve 70B+ LLMs on a Single 24GB GPU or Mac with 75% Less Memory.**
 
-[![Release](https://img.shields.io/badge/Release-v0.2.1-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.2.1)
+[![Release](https://img.shields.io/badge/Release-v0.2.2-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.2.2)
+
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests: 104/104 Passing](https://img.shields.io/badge/Tests-104%2F104%20Passing-brightgreen.svg)]()
+[![Tests: 114/114 Passing](https://img.shields.io/badge/Tests-114%2F114%20Passing-brightgreen.svg)]()
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
 ---
@@ -21,7 +22,7 @@ Turing Engine is an open-source inference and serving runtime that allows you to
 * **SVD INT8 KV Cache Paging**: Compresses 32K context memory from **10 GB down to 2.5 GB (-75%)**.
 * **Heterogeneous MoE Memory Management**: Runs 320B Mixture-of-Experts models on a single 24GB card by caching active experts in VRAM and streaming inactive experts from Host DRAM.
 * **Universal Hardware Support**: Native auto-discovery for **NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (XPU), Vulkan, and CPU (AVX2 SIMD)**.
-* **OpenAI & Anthropic Compatible**: Drop-in serving runtime for `/v1/chat/completions` and `/v1/messages`.
+* **OpenAI & Anthropic Compatible**: Drop-in serving runtime for `/v1/chat/completions`, `/v1/completions`, and `/v1/messages`.
 
 ---
 
@@ -45,7 +46,9 @@ turing serve --model deepseek-r1-7b --port 8000
 * [⚡ Quickstart Guide](quickstart.md)
 * [🌐 Supported Models & Hardware Setup](models_and_hardware.md)
 * [🚀 Serving & API Reference](serving.md)
+* [☸️ Kubernetes & llm-d Integration](llmd-integration.md)
 * [🧠 Architecture Deep-Dive](architecture.md)
 * [🔌 Ecosystem Integrations](integrations.md)
 * [📊 Empirical Benchmarks](benchmarks.md)
 * [📜 Licensing Terms](licensing.md)
+

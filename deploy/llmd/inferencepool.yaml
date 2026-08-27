@@ -1,0 +1,19 @@
+apiVersion: inference.networking.k8s.io/v1
+kind: InferencePool
+metadata:
+  name: turing-pool
+  namespace: llm-d-optimized-baseline
+  labels:
+    llm-d.ai/guide: "optimized-baseline"
+spec:
+  selector:
+    matchLabels:
+      llm-d.ai/engine-type: "turing"
+      llm-d.ai/guide: "optimized-baseline"
+  targetPorts:
+    - 8000
+  appProtocol: http
+  endpointPickerRef:
+    name: optimized-baseline-epp
+    port: 9002
+    failureMode: FailOpen

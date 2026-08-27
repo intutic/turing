@@ -41,3 +41,12 @@ graph TD
 ## 4. 🔗 Closed-Form Cross-Model Representation Transfer
 
 For multi-model prefill acceleration, Turing Engine also includes closed-form linear ridge mappings ($W^*$) to transfer cached KV representations between draft and target models without re-prefilling tokens.
+
+---
+
+## 5. ☸️ Kubernetes Distributed Serving with llm-d
+
+* **The Problem**: Standard Kubernetes round-robin ingress destroys KV cache locality across multi-pod deployments, forcing repeated re-prefills.
+* **How It Works**: Turing Engine integrates natively with the **llm-d** (CNCF Sandbox) routing layer via ZeroMQ event publishing (`KVBlockEventPublisher`), deterministic sequence hashing, and SVD-compressed network KV transfers (`SVDNetworkKVWireCodec`). llm-d's Endpoint Policy Provider (EPP) routes requests directly to pods with matching prefix caches.
+* **The Result**: Multi-pod serving clusters achieve up to **3× higher effective throughput** and **75% lower cross-pod transfer bandwidth** during P/D disaggregation.
+

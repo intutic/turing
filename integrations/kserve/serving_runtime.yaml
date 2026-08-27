@@ -3,6 +3,8 @@ kind: ServingRuntime
 metadata:
   name: turing-runtime
   namespace: default
+  labels:
+    llm-d.ai/engine-type: "turing"
 spec:
   supportedModelFormats:
     - name: turing-subspace
@@ -13,8 +15,9 @@ spec:
       autoSelect: false
   containers:
     - name: kserve-container
-      image: ghcr.io/intutic/turing:v0.1.0-cuda
-      command: ["turing", "serve"]
+      image: ghcr.io/intutic/turing:v0.2.2-cuda
+      command: ["python3", "-m", "turing.cli", "serve"]
+
       args:
         - "--model"
         - "$(MODEL_NAME)"
@@ -24,10 +27,19 @@ spec:
         - "cuda"
       ports:
         - containerPort: 8080
+          name: http
+          protocol: TCP
+        - containerPort: 5556
+          name: zmq-pub
+          protocol: TCP
+        - containerPort: 5559
+          name: zmq-replay
           protocol: TCP
       env:
         - name: MODEL_NAME
           value: "llama-3.1-70b"
+        - name: PYTHONHASHSEED
+          value: "0"
       resources:
         limits:
           nvidia.com/gpu: "1"

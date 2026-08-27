@@ -74,13 +74,22 @@ class TensorSerializer:
 
     @staticmethod
     def deserialize(data: bytes, device: torch.device) -> torch.Tensor:
-        dtype_code, scale, ndim = struct.unpack_from("<BfI", data, 0)
+        if len(data) >= 4:
+            potential_len = struct.unpack_from("<I", data, 0)[0]
+            if potential_len == len(data) - 4:
+                offset = 4
+            else:
+                offset = 0
+        else:
+            offset = 0
+
+        dtype_code, scale, ndim = struct.unpack_from("<BfI", data, offset)
         if dtype_code == 1 and HAS_CSRC:
-            arr_np = turing_csrc.deserialize_tensor_int8(data)
+            arr_np = turing_csrc.deserialize_tensor_int8(data[offset:])
             return torch.from_numpy(arr_np).to(device=device, dtype=torch.float32)
 
-        shape = struct.unpack_from(f"<{ndim}I", data, 9)
-        header_len = 9 + 4 * ndim
+        shape = struct.unpack_from(f"<{ndim}I", data, offset + 9)
+        header_len = offset + 9 + 4 * ndim
         raw_bytes = data[header_len:]
 
         if dtype_code == 1: # INT8
@@ -90,7 +99,7 @@ class TensorSerializer:
             arr = np.frombuffer(raw_bytes, dtype=np.float16).reshape(shape)
             tensor = torch.from_numpy(arr.copy()).to(torch.float32)
 
-        return tensor.to(device)
+        return tensor.to(device=device)
 
 
 class LocalPipelineStage(nn.Module):

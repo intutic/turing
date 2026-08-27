@@ -303,3 +303,24 @@ class ContinuousBatchEngine:
             }
         }
 
+    def get_kv_cache_utilization(self) -> float:
+        """Returns KV cache memory pool utilization as a fraction (0.0 to 1.0)."""
+        stats = self.kv_pool.get_stats()
+        if stats["total_pages"] == 0:
+            return 0.0
+        return stats["used_pages"] / stats["total_pages"]
+
+    def get_llmd_metrics(self) -> Dict[str, Any]:
+        """
+        Returns metric key-values structured for llm-d EPP router metric scrapers.
+        """
+        return {
+            "num_requests_waiting": len(self.waiting_queue),
+            "num_requests_running": len(self.running_batch),
+            "kv_cache_usage_perc": self.get_kv_cache_utilization(),
+            "block_size": self.kv_pool.page_size,
+            "num_gpu_blocks": self.kv_pool.max_total_pages,
+            "total_tokens_generated": self.total_tokens_generated,
+        }
+
+
