@@ -56,18 +56,33 @@ model_list:
 
 ## 3. LlamaIndex RAG & Agents
 
-```python
-from llama_index.llms.openai_like import OpenAILike
+=== "Method A: Native Turing LLM (`llama-index-llms-turing` or Built-In)"
+    ```python
+    from turing.integrations.llamaindex import Turing
 
-llm = OpenAILike(
-    model="deepseek-r1-7b",
-    api_base="http://localhost:8000/v1",
-    api_key="turing-local",
-    is_chat_model=True
-)
-response = llm.complete("Summarize the main architectural trade-offs of microservices:")
-print(response.text)
-```
+    llm = Turing(
+        model="deepseek-r1-7b",
+        api_base="http://localhost:8000/v1",
+        sparsity_ratio=0.57,  # 57% FFN channel pruning
+        svd_rank=64           # Calibrated SVD INT8 KV cache
+    )
+    response = llm.complete("Summarize the main architectural trade-offs of microservices:")
+    print(response.text)
+    ```
+
+=== "Method B: Drop-In OpenAILike (Zero Extra Dependencies)"
+    ```python
+    from llama_index.llms.openai_like import OpenAILike
+
+    llm = OpenAILike(
+        model="deepseek-r1-7b",
+        api_base="http://localhost:8000/v1",
+        api_key="turing-local",
+        is_chat_model=True
+    )
+    response = llm.complete("Summarize the main architectural trade-offs of microservices:")
+    print(response.text)
+    ```
 
 ---
 
