@@ -241,8 +241,7 @@ class SubspaceCausalLM(nn.Module):
 
         for _ in range(max_new_tokens):
             logits, past_kv = self.forward(cur_input, past_key_values=past_kv, start_pos=start_pos)
-            start_pos += cur_input.shape[1]
-
+            next_token_logits = logits[:, -1, :]
             if temperature > 0:
                 scaled_logits = torch.nan_to_num(next_token_logits / max(temperature, 1e-4), nan=0.0, posinf=1e4, neginf=-1e4)
                 probs = F.softmax(scaled_logits, dim=-1)
