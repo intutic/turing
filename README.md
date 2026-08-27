@@ -138,25 +138,27 @@ print(response.choices[0].message.content)
 
 ---
 
-## 📚 In-Depth Documentation
+## 📚 Documentation
 
-For researchers and infrastructure engineers looking for deep architectural specs and raw data:
+Explore the complete documentation at [**intutic.github.io/turing**](https://intutic.github.io/turing/):
 
-* 📖 **[Quickstart Guide](docs/quickstart.md)** — Detailed setup, Docker, and multi-GPU configurations.
-* 🧠 **[Architecture Deep-Dive](docs/architecture/index.md)** — Mathematical formulations, SVD rank-64 projections, and Triton kernel designs.
-* 📊 **[Full Hardware Benchmark Matrix](docs/benchmarks/gpu_benchmarks.md)** — Layer latency comparisons, memory geometry, and physical silicon data across 10+ frontier models.
-* 💰 **[Cloud TCO & Cost Comparison](docs/benchmarks/tco_comparison.md)** — Analysis of 96.7% annual hosting savings ($210k ➔ $7k/yr).
-* 📜 **[Licensing & Community Tier](docs/licensing.md)** — Business Source License 1.1 terms (Free for all single-node and consumer GPU deployments).
+* 🚀 **[Quickstart Guide](https://intutic.github.io/turing/quickstart/)** — 30-second setup, CLI commands, and OpenAI/Anthropic SDK usage.
+* 🖥️ **[Models & Sizing Table](https://intutic.github.io/turing/models_and_hardware/)** — GPU sizing table (8GB to 24GB VRAM) across 26 frontier models.
+* ⚡ **[Production Serving](https://intutic.github.io/turing/serving/)** — High-concurrency continuous batching, streaming API, and SLAs.
+* 🧠 **[Architecture Deep-Dive](https://intutic.github.io/turing/architecture/)** — Subspace channel pruning, SVD INT8 KV cache paging, and Triton kernels.
+* 📊 **[Empirical Benchmarks](https://intutic.github.io/turing/benchmarks/)** — Unmocked physical GPU layer latency speedups, NIAH 1M context analysis, and real-weight throughput.
+* 🔌 **[Integrations](https://intutic.github.io/turing/integrations/)** — Native guides for LangChain, LlamaIndex, LiteLLM, vLLM, and Docker.
+* 📜 **[Licensing](https://intutic.github.io/turing/licensing/)** — BSL 1.1 terms (Free for all single-node development, testing, and research).
 
 ---
 
-## 📦 Pre-Built Binary Wheels (v0.1.6)
+## 📦 Pre-Built Binary Wheels (v0.1.9)
 
-Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.1.6](https://github.com/intutic/turing/releases/tag/v0.1.6):
+Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.1.9](https://github.com/intutic/turing/releases/tag/v0.1.9):
 
 ```bash
 # Install directly from release wheel:
-pip install https://github.com/intutic/turing/releases/download/v0.1.6/turing_engine-0.1.6-cp311-cp311-macosx_15_0_arm64.whl
+pip install https://github.com/intutic/turing/releases/download/v0.1.9/turing_engine-0.1.9-cp311-cp311-macosx_15_0_arm64.whl
 ```
 
 ---

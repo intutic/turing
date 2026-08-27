@@ -94,7 +94,7 @@ spec:
       version: "1"
   containers:
     - name: kserve-container
-      image: ghcr.io/intutic/turing:v0.1.8
+      image: ghcr.io/intutic/turing:v0.1.9
       command: ["turing", "serve", "--model", "deepseek-r1-7b", "--port", "8000"]
       resources:
         limits:
