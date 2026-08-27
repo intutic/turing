@@ -10,7 +10,7 @@ We provide active security patches, bug fixes, and vulnerability remediation for
 
 | Version Series | Release Date | Supported Status |
 | :--- | :--- | :---: |
-| **v0.1.x** | August 2026 – Present | 🟢 **Active Security Support** |
+| **v0.2.x / v0.1.x** | August 2026 – Present | 🟢 **Active Security Support** |
 | **< v0.1.0** | Experimental | 🔴 **End of Life** |
 
 ---
