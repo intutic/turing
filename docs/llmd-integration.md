@@ -79,13 +79,15 @@ spec:
     matchLabels:
       llm-d.ai/engine-type: "turing"
   targetPorts:
-    - 8000
+    - number: 8000
   appProtocol: http
   endpointPickerRef:
     name: llm-d-router-epp
-    port: 9002
+    port:
+      number: 9002
     failureMode: FailOpen
 ```
+
 
 Apply the manifest:
 ```bash

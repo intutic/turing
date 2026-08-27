@@ -11,9 +11,11 @@ spec:
       llm-d.ai/engine-type: "turing"
       llm-d.ai/guide: "optimized-baseline"
   targetPorts:
-    - 8000
+    - number: 8000
   appProtocol: http
   endpointPickerRef:
     name: optimized-baseline-epp
-    port: 9002
+    port:
+      number: 9002
     failureMode: FailOpen
+
