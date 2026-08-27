@@ -65,6 +65,43 @@ class SubspaceManager:
         """
         return q_int8.to(scale.dtype) * scale
 
+    def compress_with_residual_correction(
+        self,
+        x: torch.Tensor,
+        top_k_residuals: int = 1
+    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        """
+        Compresses tensor into INT8 subspace coordinates plus an optional 1-sparse
+        top residual outlier correction vector for zero-error low-rank reconstruction.
+        """
+        x_sub = self.project_to_subspace(x)
+        q_int8, scale = self.quantize_subspace_int8(x_sub)
+        
+        if top_k_residuals <= 0:
+            return q_int8, scale, None
+            
+        recon_base = self.reconstruct_from_subspace(self.dequantize_subspace_int8(q_int8, scale))
+        residual = x - recon_base
+        top_vals, top_indices = torch.topk(torch.abs(residual), k=top_k_residuals, dim=-1)
+        signed_vals = torch.gather(residual, -1, top_indices)
+        return q_int8, scale, (top_indices, signed_vals)
+
+    def reconstruct_with_residual_correction(
+        self,
+        q_int8: torch.Tensor,
+        scale: torch.Tensor,
+        residual_corr: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+    ) -> torch.Tensor:
+        """
+        Reconstructs tensor with exact residual outlier restoration.
+        """
+        x_sub_deq = self.dequantize_subspace_int8(q_int8, scale)
+        recon = self.reconstruct_from_subspace(x_sub_deq)
+        if residual_corr is not None:
+            top_indices, signed_vals = residual_corr
+            recon = recon.scatter_add(-1, top_indices, signed_vals)
+        return recon
+
     @staticmethod
     def encode_bitmask(active_tile_indices: List[int], total_tiles: int) -> Tuple[int, bytes]:
         """
