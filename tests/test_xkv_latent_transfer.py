@@ -95,8 +95,54 @@ def test_auditable_semantic_inspector():
     assert "concept_id" in report["top_concepts"][0][0]
     assert "prob" in report["top_concepts"][0][0]
 
+class MockModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.embed = torch.nn.Embedding(256, 64)
+        self.head = torch.nn.Linear(64, 256)
+
+    def forward(self, input_ids, **kwargs):
+        class Output:
+            def __init__(self, logits):
+                self.logits = logits
+        h = self.embed(input_ids)
+        logits = self.head(h)
+        return Output(logits)
+
+    def generate(self, input_ids, max_new_tokens=10, **kwargs):
+        new_ids = torch.tensor([[42] * 5], device=input_ids.device)
+        return torch.cat([input_ids, new_ids], dim=-1)
+
+
+class MockTokenizer:
+    def __init__(self):
+        self.pad_token = "<pad>"
+        self.eos_token = "<eos>"
+        self.eos_token_id = 0
+
+    def apply_chat_template(self, messages, **kwargs):
+        return "\n".join(m["content"] for m in messages)
+
+    def __call__(self, text, **kwargs):
+        class BatchEncoding(dict):
+            def __init__(self):
+                super().__init__({"input_ids": torch.tensor([[1, 2, 3, 4]], dtype=torch.long)})
+            def to(self, dev):
+                self["input_ids"] = self["input_ids"].to(dev)
+                return self
+        return BatchEncoding()
+
+    def decode(self, token_ids, **kwargs):
+        return "Configured resilient multi-cloud edge mesh."
+
+
 def test_multi_agent_coordinator_latent_deliberation():
-    engine = TuringAcceleratedGenerator()
+    engine = TuringAcceleratedGenerator(
+        model_id_or_instance=MockModel(),
+        tokenizer=MockTokenizer(),
+        sparsity_ratio=0.57,
+        device="cpu"
+    )
     coordinator = MultiAgentCoordinator(engine=engine)
 
     result = coordinator.run_xkv_latent_deliberation(
