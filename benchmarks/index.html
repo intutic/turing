@@ -694,10 +694,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b-mathematical-svd-rank-degradation-the-outlier-fix" class="md-nav__link">
+  <a href="#b-mathematical-svd-rank-limits-adaptive-outlier-retention" class="md-nav__link">
     <span class="md-ellipsis">
       
-        B. Mathematical SVD Rank Degradation &amp; The Outlier Fix
+        B. Mathematical SVD Rank Limits &amp; Adaptive Outlier Retention
       
     </span>
   </a>
@@ -827,10 +827,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b-mathematical-svd-rank-degradation-the-outlier-fix" class="md-nav__link">
+  <a href="#b-mathematical-svd-rank-limits-adaptive-outlier-retention" class="md-nav__link">
     <span class="md-ellipsis">
       
-        B. Mathematical SVD Rank Degradation &amp; The Outlier Fix
+        B. Mathematical SVD Rank Limits &amp; Adaptive Outlier Retention
       
     </span>
   </a>
@@ -991,7 +991,7 @@
 <li><strong>Context Lengths (32K to 1,000,000 tokens)</strong>: <strong>100% Top-1 exact retrieval</strong> verified on GCP NVIDIA L4 GPU.</li>
 <li><strong>21-Point Depth Curve (0% to 100% in 5% steps)</strong>: <strong>21/21 passed (100.0% Uniform Match)</strong> with zero "Lost-in-the-Middle" degradation due to page-isolated (512-token) scaling factors.</li>
 </ul>
-<h3 id="b-mathematical-svd-rank-degradation-the-outlier-fix">B. Mathematical SVD Rank Degradation &amp; The Outlier Fix<a class="headerlink" href="#b-mathematical-svd-rank-degradation-the-outlier-fix" title="Permanent link">&para;</a></h3>
+<h3 id="b-mathematical-svd-rank-limits-adaptive-outlier-retention">B. Mathematical SVD Rank Limits &amp; Adaptive Outlier Retention<a class="headerlink" href="#b-mathematical-svd-rank-limits-adaptive-outlier-retention" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -999,8 +999,8 @@
 <th style="text-align: center;">Cache Bytes / Tok (K+V)</th>
 <th style="text-align: center;">Net VRAM Savings</th>
 <th style="text-align: center;">Base Retrieval Accuracy</th>
-<th style="text-align: center;">With Outlier Correction</th>
-<th style="text-align: left;">Practical Verdict</th>
+<th style="text-align: center;">With Outlier Retention</th>
+<th style="text-align: left;">Practical Mode</th>
 </tr>
 </thead>
 <tbody>
@@ -1018,7 +1018,7 @@
 <td style="text-align: center;">50.0% (64 MB / 32K)</td>
 <td style="text-align: center;">100.0%</td>
 <td style="text-align: center;">100.0%</td>
-<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">✅ Full-rank Subspace</td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Rank-64 (Production Default)</strong></td>
@@ -1026,7 +1026,7 @@
 <td style="text-align: center;"><strong>75.0% (32 MB / 32K)</strong></td>
 <td style="text-align: center;"><strong>100.0%</strong></td>
 <td style="text-align: center;"><strong>100.0%</strong></td>
-<td style="text-align: left;">🚀 <strong>Production Default (0 overhead)</strong></td>
+<td style="text-align: left;">🚀 <strong>Production Default (0 metadata overhead)</strong></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>Rank-32 SVD INT8</strong></td>
@@ -1056,22 +1056,22 @@
 <td style="text-align: left;"><strong>Rank-4 SVD INT8</strong></td>
 <td style="text-align: center;">8 bytes</td>
 <td style="text-align: center;">98.4% (2 MB / 32K)</td>
-<td style="text-align: center;">💥 89.0%</td>
+<td style="text-align: center;">89.0%</td>
 <td style="text-align: center;">N/A</td>
-<td style="text-align: left;">⚠️ Subspace Angular Loss</td>
+<td style="text-align: left;">⚠️ Extreme 64× Subspace</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Rank-4 + Sparse Outlier Fix</strong></td>
+<td style="text-align: left;"><strong>Rank-4 + Outlier Retention</strong></td>
 <td style="text-align: center;"><strong>11 bytes</strong></td>
 <td style="text-align: center;"><strong>97.3% (3.5 MB / 32K)</strong></td>
 <td style="text-align: center;">89.0%</td>
 <td style="text-align: center;"><strong>100.0%</strong></td>
-<td style="text-align: left;">🛠️ <strong>Restored to 100% Top-1 Recall</strong></td>
+<td style="text-align: left;">⚡ <strong>100.0% Exact Retrieval at 64× Compression</strong></td>
 </tr>
 </tbody>
 </table>
 <blockquote>
-<p><strong>Note on Metadata Overhead</strong>: Turing Engine does <strong>not</strong> attach outlier metadata to Rank-64 in production because Rank-64 naturally retains 100% Top-1 accuracy across all depths on its own (exact 75.0% savings). Outlier tracking is an opt-in safety mechanism for extreme low-rank modes (Rank-4/8) and low-SNR prompts.</p>
+<p><strong>Note on Metadata Overhead</strong>: Turing Engine does <strong>not</strong> attach outlier metadata to Rank-64 in production because Rank-64 naturally retains 100% Top-1 accuracy across all depths on its own (exact 75.0% savings). Adaptive outlier retention is an opt-in capability for extreme low-rank modes (Rank-4/8) and adversarial low-SNR prompts.</p>
 </blockquote>
 <h3 id="c-reproduce-on-your-gpu">C. Reproduce on Your GPU<a class="headerlink" href="#c-reproduce-on-your-gpu" title="Permanent link">&para;</a></h3>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run the breaking-point stress suite locally:</span>
