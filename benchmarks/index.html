@@ -995,58 +995,84 @@
 <table>
 <thead>
 <tr>
-<th style="text-align: left;">SVD Subspace Dimension</th>
-<th style="text-align: center;">KV Compression Ratio</th>
-<th style="text-align: center;">Base Accuracy</th>
-<th style="text-align: center;">With Sparse Residual Outlier Correction</th>
-<th style="text-align: left;">Verdict</th>
+<th style="text-align: left;">SVD Dimension / Mode</th>
+<th style="text-align: center;">Cache Bytes / Tok (K+V)</th>
+<th style="text-align: center;">Net VRAM Savings</th>
+<th style="text-align: center;">Base Retrieval Accuracy</th>
+<th style="text-align: center;">With Outlier Correction</th>
+<th style="text-align: left;">Practical Verdict</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;"><strong>Rank-128</strong></td>
-<td style="text-align: center;">2.0×</td>
+<td style="text-align: left;"><strong>Dense FP16 Baseline</strong></td>
+<td style="text-align: center;">512 bytes</td>
+<td style="text-align: center;">0.0% (128 MB / 32K)</td>
 <td style="text-align: center;">100.0%</td>
-<td style="text-align: center;"><strong>100.0%</strong></td>
+<td style="text-align: center;">N/A</td>
+<td style="text-align: left;">Uncompressed Baseline</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Rank-128 SVD INT8</strong></td>
+<td style="text-align: center;">256 bytes</td>
+<td style="text-align: center;">50.0% (64 MB / 32K)</td>
+<td style="text-align: center;">100.0%</td>
+<td style="text-align: center;">100.0%</td>
 <td style="text-align: left;">✅ Stable</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Rank-64 (Default)</strong></td>
-<td style="text-align: center;"><strong>4.0× (-75% VRAM)</strong></td>
+<td style="text-align: left;"><strong>Rank-64 (Production Default)</strong></td>
+<td style="text-align: center;"><strong>128 bytes</strong></td>
+<td style="text-align: center;"><strong>75.0% (32 MB / 32K)</strong></td>
 <td style="text-align: center;"><strong>100.0%</strong></td>
 <td style="text-align: center;"><strong>100.0%</strong></td>
-<td style="text-align: left;">✅ <strong>Production Default</strong></td>
+<td style="text-align: left;">🚀 <strong>Production Default (0 overhead)</strong></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Rank-32</strong></td>
-<td style="text-align: center;">8.0×</td>
+<td style="text-align: left;"><strong>Rank-32 SVD INT8</strong></td>
+<td style="text-align: center;">64 bytes</td>
+<td style="text-align: center;">87.5% (16 MB / 32K)</td>
 <td style="text-align: center;">100.0%</td>
-<td style="text-align: center;"><strong>100.0%</strong></td>
-<td style="text-align: left;">✅ Stable</td>
-</tr>
-<tr>
-<td style="text-align: left;"><strong>Rank-16</strong></td>
-<td style="text-align: center;">16.0×</td>
 <td style="text-align: center;">100.0%</td>
-<td style="text-align: center;"><strong>100.0%</strong></td>
-<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: left;">✅ High-efficiency Mode</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Rank-8</strong></td>
-<td style="text-align: center;">32.0×</td>
+<td style="text-align: left;"><strong>Rank-16 SVD INT8</strong></td>
+<td style="text-align: center;">32 bytes</td>
+<td style="text-align: center;">93.8% (8 MB / 32K)</td>
 <td style="text-align: center;">100.0%</td>
-<td style="text-align: center;"><strong>100.0%</strong></td>
-<td style="text-align: left;">✅ Stable</td>
+<td style="text-align: center;">100.0%</td>
+<td style="text-align: left;">✅ Ultra-compact Mode</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>Rank-4</strong></td>
-<td style="text-align: center;"><strong>64.0×</strong></td>
+<td style="text-align: left;"><strong>Rank-8 SVD INT8</strong></td>
+<td style="text-align: center;">16 bytes</td>
+<td style="text-align: center;">96.9% (4 MB / 32K)</td>
+<td style="text-align: center;">100.0%</td>
+<td style="text-align: center;">100.0%</td>
+<td style="text-align: left;">✅ Aggressive Compression</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Rank-4 SVD INT8</strong></td>
+<td style="text-align: center;">8 bytes</td>
+<td style="text-align: center;">98.4% (2 MB / 32K)</td>
+<td style="text-align: center;">💥 89.0%</td>
+<td style="text-align: center;">N/A</td>
+<td style="text-align: left;">⚠️ Subspace Angular Loss</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Rank-4 + Sparse Outlier Fix</strong></td>
+<td style="text-align: center;"><strong>11 bytes</strong></td>
+<td style="text-align: center;"><strong>97.3% (3.5 MB / 32K)</strong></td>
 <td style="text-align: center;">89.0%</td>
 <td style="text-align: center;"><strong>100.0%</strong></td>
-<td style="text-align: left;">🛠️ <strong>Fixed with 1-Sparse Outlier Correction</strong></td>
+<td style="text-align: left;">🛠️ <strong>Restored to 100% Top-1 Recall</strong></td>
 </tr>
 </tbody>
 </table>
+<blockquote>
+<p><strong>Note on Metadata Overhead</strong>: Turing Engine does <strong>not</strong> attach outlier metadata to Rank-64 in production because Rank-64 naturally retains 100% Top-1 accuracy across all depths on its own (exact 75.0% savings). Outlier tracking is an opt-in safety mechanism for extreme low-rank modes (Rank-4/8) and low-SNR prompts.</p>
+</blockquote>
 <h3 id="c-reproduce-on-your-gpu">C. Reproduce on Your GPU<a class="headerlink" href="#c-reproduce-on-your-gpu" title="Permanent link">&para;</a></h3>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run the breaking-point stress suite locally:</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>scripts/stress_test_niah_breaking_point.py<span class="w"> </span>cuda<span class="w">   </span><span class="c1"># On NVIDIA GPU</span>
