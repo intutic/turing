@@ -925,6 +925,14 @@
 </tr>
 </tbody>
 </table>
+<div class="admonition info">
+<p class="admonition-title">Why MoE Host Paging Is Fast (Avoiding Naive Offloading Latency)</p>
+<p>Traditional layer-by-layer offloading crawls at 1–2 tok/s because it transfers uncompressed weights over PCIe synchronously. Turing Engine sustains <strong>18–50+ tok/s</strong> through two distinct hardware paths:</p>
+<ul>
+<li><strong>Apple Silicon (Mac Studio M-series)</strong>: Leverages Unified Memory Architecture with <strong>800 to 1,600 GB/s bandwidth</strong>. There is zero PCIe bus copy overhead—the Metal GPU accesses active experts directly at memory-bus speeds (35–50 tok/s).</li>
+<li><strong>Discrete PCIe GPUs (RTX 4090 / L4 24GB)</strong>: Attention and embeddings remain permanently pinned in VRAM (~4GB). An on-GPU LRU slot cache captures high expert temporal locality (~80% reuse), while missing INT4-packed experts are prefetched asynchronously over CUDA streams during attention compute without stalling the pipeline (18–30+ tok/s).</li>
+</ul>
+</div>
 <hr />
 <h2 id="2-universal-hardware-setup">2. Universal Hardware Setup<a class="headerlink" href="#2-universal-hardware-setup" title="Permanent link">&para;</a></h2>
 <p>Turing Engine auto-detects your silicon at startup. You can also explicitly verify or select your backend:</p>
