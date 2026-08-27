@@ -243,14 +243,17 @@ class SubspaceCausalLM(nn.Module):
             logits, past_kv = self.forward(cur_input, past_key_values=past_kv, start_pos=start_pos)
             start_pos += cur_input.shape[1]
 
-            next_token_logits = logits[:, -1, :]
             if temperature > 0:
-                probs = F.softmax(next_token_logits / temperature, dim=-1)
+                scaled_logits = torch.nan_to_num(next_token_logits / max(temperature, 1e-4), nan=0.0, posinf=1e4, neginf=-1e4)
+                probs = F.softmax(scaled_logits, dim=-1)
+                probs = torch.nan_to_num(probs, nan=1e-8).clamp(min=1e-8)
                 if top_k > 0:
                     topk_probs, topk_indices = torch.topk(probs, k=min(top_k, probs.shape[-1]), dim=-1)
+                    topk_probs = topk_probs / topk_probs.sum(dim=-1, keepdim=True).clamp(min=1e-8)
                     idx = torch.multinomial(topk_probs, num_samples=1)
                     next_token = torch.gather(topk_indices, -1, idx).item()
                 else:
+                    probs = probs / probs.sum(dim=-1, keepdim=True).clamp(min=1e-8)
                     next_token = torch.multinomial(probs, num_samples=1).item()
             else:
                 next_token = torch.argmax(next_token_logits, dim=-1).item()
