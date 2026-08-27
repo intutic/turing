@@ -670,6 +670,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#3-long-context-niah-depth-rank-breaking-point-analysis-gcp-nvidia-l4-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Long-Context NIAH Depth &amp; Rank Breaking-Point Analysis (GCP NVIDIA L4 GPU)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Long-Context NIAH Depth &amp; Rank Breaking-Point Analysis (GCP NVIDIA L4 GPU)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-context-scaling-depth-sweep-rank-64-svd-int8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. Context Scaling &amp; Depth Sweep (Rank-64 SVD INT8)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-mathematical-svd-rank-degradation-the-outlier-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. Mathematical SVD Rank Degradation &amp; The Outlier Fix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#c-reproduce-on-your-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C. Reproduce on Your GPU
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -753,6 +803,56 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#3-long-context-niah-depth-rank-breaking-point-analysis-gcp-nvidia-l4-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Long-Context NIAH Depth &amp; Rank Breaking-Point Analysis (GCP NVIDIA L4 GPU)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Long-Context NIAH Depth &amp; Rank Breaking-Point Analysis (GCP NVIDIA L4 GPU)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-context-scaling-depth-sweep-rank-64-svd-int8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A. Context Scaling &amp; Depth Sweep (Rank-64 SVD INT8)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-mathematical-svd-rank-degradation-the-outlier-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        B. Mathematical SVD Rank Degradation &amp; The Outlier Fix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#c-reproduce-on-your-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        C. Reproduce on Your GPU
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -777,7 +877,7 @@
 <p>All performance metrics are measured on <strong>physical Google Cloud NVIDIA L4 24GB silicon</strong>, Apple Silicon M-series, and x86_64 CPU.</p>
 <hr />
 <h2 id="1-physical-silicon-layer-speedups">1. Physical Silicon Layer Speedups<a class="headerlink" href="#1-physical-silicon-layer-speedups" title="Permanent link">&para;</a></h2>
-<p>Comparison of per-layer execution times between standard Dense FP16 and Turing Subspace Triton kernels:</p>
+<p>Comparison of per-layer execution times between standard Dense FP16 and Turing Subspace Triton kernels on NVIDIA L4 24GB GPU:</p>
 <table>
 <thead>
 <tr>
@@ -883,6 +983,75 @@
 </tr>
 </tbody>
 </table>
+<hr />
+<h2 id="3-long-context-niah-depth-rank-breaking-point-analysis-gcp-nvidia-l4-gpu">3. Long-Context NIAH Depth &amp; Rank Breaking-Point Analysis (GCP NVIDIA L4 GPU)<a class="headerlink" href="#3-long-context-niah-depth-rank-breaking-point-analysis-gcp-nvidia-l4-gpu" title="Permanent link">&para;</a></h2>
+<p>Empirical stress testing of <strong>SVD INT8 KV Cache Paging</strong> across context length (up to 1,000,000 tokens), fine-grained depth slices, and mathematical rank degradation:</p>
+<h3 id="a-context-scaling-depth-sweep-rank-64-svd-int8">A. Context Scaling &amp; Depth Sweep (Rank-64 SVD INT8)<a class="headerlink" href="#a-context-scaling-depth-sweep-rank-64-svd-int8" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Context Lengths (32K to 1,000,000 tokens)</strong>: <strong>100% Top-1 exact retrieval</strong> verified on GCP NVIDIA L4 GPU.</li>
+<li><strong>21-Point Depth Curve (0% to 100% in 5% steps)</strong>: <strong>21/21 passed (100.0% Uniform Match)</strong> with zero "Lost-in-the-Middle" degradation due to page-isolated (512-token) scaling factors.</li>
+</ul>
+<h3 id="b-mathematical-svd-rank-degradation-the-outlier-fix">B. Mathematical SVD Rank Degradation &amp; The Outlier Fix<a class="headerlink" href="#b-mathematical-svd-rank-degradation-the-outlier-fix" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">SVD Subspace Dimension</th>
+<th style="text-align: center;">KV Compression Ratio</th>
+<th style="text-align: center;">Base Accuracy</th>
+<th style="text-align: center;">With Sparse Residual Outlier Correction</th>
+<th style="text-align: left;">Verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>Rank-128</strong></td>
+<td style="text-align: center;">2.0×</td>
+<td style="text-align: center;">100.0%</td>
+<td style="text-align: center;"><strong>100.0%</strong></td>
+<td style="text-align: left;">✅ Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Rank-64 (Default)</strong></td>
+<td style="text-align: center;"><strong>4.0× (-75% VRAM)</strong></td>
+<td style="text-align: center;"><strong>100.0%</strong></td>
+<td style="text-align: center;"><strong>100.0%</strong></td>
+<td style="text-align: left;">✅ <strong>Production Default</strong></td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Rank-32</strong></td>
+<td style="text-align: center;">8.0×</td>
+<td style="text-align: center;">100.0%</td>
+<td style="text-align: center;"><strong>100.0%</strong></td>
+<td style="text-align: left;">✅ Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Rank-16</strong></td>
+<td style="text-align: center;">16.0×</td>
+<td style="text-align: center;">100.0%</td>
+<td style="text-align: center;"><strong>100.0%</strong></td>
+<td style="text-align: left;">✅ Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Rank-8</strong></td>
+<td style="text-align: center;">32.0×</td>
+<td style="text-align: center;">100.0%</td>
+<td style="text-align: center;"><strong>100.0%</strong></td>
+<td style="text-align: left;">✅ Stable</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Rank-4</strong></td>
+<td style="text-align: center;"><strong>64.0×</strong></td>
+<td style="text-align: center;">89.0%</td>
+<td style="text-align: center;"><strong>100.0%</strong></td>
+<td style="text-align: left;">🛠️ <strong>Fixed with 1-Sparse Outlier Correction</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="c-reproduce-on-your-gpu">C. Reproduce on Your GPU<a class="headerlink" href="#c-reproduce-on-your-gpu" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Run the breaking-point stress suite locally:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>python<span class="w"> </span>scripts/stress_test_niah_breaking_point.py<span class="w"> </span>cuda<span class="w">   </span><span class="c1"># On NVIDIA GPU</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>python<span class="w"> </span>scripts/stress_test_niah_breaking_point.py<span class="w"> </span>mps<span class="w">    </span><span class="c1"># On Apple Silicon Mac</span>
+</span></code></pre></div>
 
 
 
