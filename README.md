@@ -5,7 +5,7 @@
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
 [![Release: v0.1.9](https://img.shields.io/badge/Release-v0.1.9-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.1.9)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 103/103 Passing](https://img.shields.io/badge/Tests-103%2F103%20Passing-brightgreen.svg)]()
+[![Tests: 104/104 Passing](https://img.shields.io/badge/Tests-104%2F104%20Passing-brightgreen.svg)]()
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
 ---
