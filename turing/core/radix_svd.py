@@ -60,16 +60,43 @@ class SpectralRadixSVDForest:
             return
 
         seq_len = len(token_ids)
-        # 1. Project into SVD subspace
-        k_sub = torch.matmul(k_tensor, u_proj) # [SeqLen, Heads, rank]
-        v_sub = torch.matmul(v_tensor, u_proj)
+        if k_tensor.is_cuda:
+            try:
+                from ..kernels.triton_svd_paged import fused_svd_int8_quant_cuda
+                k_int8, k_scale = fused_svd_int8_quant_cuda(k_tensor, u_proj)
+                v_int8, v_scale = fused_svd_int8_quant_cuda(v_tensor, u_proj)
+            except Exception:
+                k_sub = torch.matmul(k_tensor, u_proj)
+                v_sub = torch.matmul(v_tensor, u_proj)
+                k_scale = torch.amax(torch.abs(k_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
+                v_scale = torch.amax(torch.abs(v_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
+                k_int8 = torch.clamp(torch.round(k_sub / k_scale), -128, 127).to(torch.int8)
+                v_int8 = torch.clamp(torch.round(v_sub / v_scale), -128, 127).to(torch.int8)
+        else:
+            try:
+                import turing.turing_csrc as turing_csrc
+                HAS_CSRC = True
+            except ImportError:
+                HAS_CSRC = False
 
-        # 2. Symmetric INT8 Quantization
-        k_scale = torch.amax(torch.abs(k_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
-        v_scale = torch.amax(torch.abs(v_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
+            if HAS_CSRC and k_tensor.ndim == 2:
+                k_np = k_tensor.detach().to(torch.float32).cpu().contiguous().numpy()
+                v_np = v_tensor.detach().to(torch.float32).cpu().contiguous().numpy()
+                u_np = u_proj.detach().to(torch.float32).cpu().contiguous().numpy()
+                k_q_np, k_s_np = turing_csrc.fused_svd_int8_quant(k_np, u_np)
+                v_q_np, v_s_np = turing_csrc.fused_svd_int8_quant(v_np, u_np)
+                k_int8 = torch.from_numpy(k_q_np).to(device=k_tensor.device)
+                k_scale = torch.from_numpy(k_s_np).to(device=k_tensor.device, dtype=torch.float32)
+                v_int8 = torch.from_numpy(v_q_np).to(device=v_tensor.device)
+                v_scale = torch.from_numpy(v_s_np).to(device=v_tensor.device, dtype=torch.float32)
+            else:
+                k_sub = torch.matmul(k_tensor, u_proj)
+                v_sub = torch.matmul(v_tensor, u_proj)
+                k_scale = torch.amax(torch.abs(k_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
+                v_scale = torch.amax(torch.abs(v_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
+                k_int8 = torch.clamp(torch.round(k_sub / k_scale), -128, 127).to(torch.int8)
+                v_int8 = torch.clamp(torch.round(v_sub / v_scale), -128, 127).to(torch.int8)
 
-        k_int8 = torch.clamp(torch.round(k_sub / k_scale), -128, 127).to(torch.int8)
-        v_int8 = torch.clamp(torch.round(v_sub / v_scale), -128, 127).to(torch.int8)
 
         # 3. Radix tree insertion
         curr = self.root
@@ -141,11 +168,28 @@ class SpectralRadixSVDForest:
             c_len = len(child.token_ids)
             if rem_tokens[:c_len] == child.token_ids:
                 # Dequantize & reconstruct
-                k_fp = child.k_sub_int8.to(torch.float32) * child.k_scale
-                v_fp = child.v_sub_int8.to(torch.float32) * child.v_scale
+                try:
+                    import turing.turing_csrc as turing_csrc
+                    HAS_CSRC = True
+                except ImportError:
+                    HAS_CSRC = False
 
-                k_recon = torch.matmul(k_fp, u_proj.t())
-                v_recon = torch.matmul(v_fp, u_proj.t())
+                if HAS_CSRC and not child.k_sub_int8.is_cuda and child.k_sub_int8.ndim == 2:
+                    k_q_np = child.k_sub_int8.detach().cpu().contiguous().numpy()
+                    k_s_np = child.k_scale.detach().cpu().contiguous().numpy()
+                    v_q_np = child.v_sub_int8.detach().cpu().contiguous().numpy()
+                    v_s_np = child.v_scale.detach().cpu().contiguous().numpy()
+                    u_np = u_proj.detach().to(torch.float32).cpu().contiguous().numpy()
+                    k_rec_np = turing_csrc.fused_int8_dequant_svd_recon(k_q_np, k_s_np, u_np)
+                    v_rec_np = turing_csrc.fused_int8_dequant_svd_recon(v_q_np, v_s_np, u_np)
+                    k_recon = torch.from_numpy(k_rec_np).to(device=child.k_sub_int8.device, dtype=u_proj.dtype)
+                    v_recon = torch.from_numpy(v_rec_np).to(device=child.v_sub_int8.device, dtype=u_proj.dtype)
+                else:
+                    k_fp = child.k_sub_int8.to(torch.float32) * child.k_scale
+                    v_fp = child.v_sub_int8.to(torch.float32) * child.v_scale
+                    k_recon = torch.matmul(k_fp, u_proj.t()).to(u_proj.dtype)
+                    v_recon = torch.matmul(v_fp, u_proj.t()).to(u_proj.dtype)
+
 
                 k_blocks.append(k_recon)
                 v_blocks.append(v_recon)

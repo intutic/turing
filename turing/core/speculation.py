@@ -101,10 +101,18 @@ class MatryoshkaDraftHead(nn.Module):
         if slice_width is None or slice_width >= self.hidden_dim:
             return F.linear(x, self.weight, self.bias)
 
+        if x.is_cuda and self.bias is None:
+            try:
+                from ..kernels.triton_matryoshka_spec import matryoshka_sliced_gemv_triton
+                return matryoshka_sliced_gemv_triton(x, self.weight, slice_width)
+            except Exception:
+                pass
+
         # Matryoshka Sliced Parameter projection
         w_sliced = self.weight[:, :slice_width]
         x_sliced = x[..., :slice_width]
         return F.linear(x_sliced, w_sliced, self.bias)
+
 
     def compute_nested_logits(
         self,
@@ -166,6 +174,26 @@ class QuadtreeMRPSpeculator(nn.Module):
         hidden = current_hidden.view(-1, self.hidden_dim)
         device = hidden.device
 
+        # Native C++ AVX2 Fast-Path for CPU & Mac
+        if HAS_CSRC and not hidden.is_cuda and isinstance(self.draft_head, MatryoshkaDraftHead):
+            h_np = hidden.squeeze(0).detach().to(torch.float32).cpu().contiguous().numpy()
+            w_np = self.draft_head.weight.detach().to(torch.float32).cpu().contiguous().numpy()
+            s_np = self.spatial_proj.weight.detach().to(torch.float32).cpu().contiguous().numpy()
+            eff_w = slice_width if slice_width is not None else self.hidden_dim
+            tok_arr, parent_arr, mask_arr = turing_csrc.generate_matryoshka_quadtree(h_np, w_np, s_np, eff_w)
+
+            nodes = []
+            for i, (tok, p) in enumerate(zip(tok_arr, parent_arr)):
+                depth = 0 if p == -1 else (1 if p == 0 else 2)
+                node = TreeNode(node_id=i, token_id=int(tok), parent_id=int(p), depth=depth)
+                if p >= 0 and p < len(nodes):
+                    nodes[p].children_ids.append(i)
+                nodes.append(node)
+
+            dag_tree_mask = torch.from_numpy(mask_arr).to(device=device, dtype=torch.float32)
+            token_ids = [n.token_id for n in nodes]
+            return nodes, dag_tree_mask, token_ids
+
         # Compute MRP Origin in 2D spatial coordinates
         mrp_origin = self.spatial_proj(hidden).squeeze(0) # [2]
 
@@ -175,6 +203,7 @@ class QuadtreeMRPSpeculator(nn.Module):
         else:
             logits = self.draft_head(hidden).squeeze(0) # [VocabSize]
         top_k_candidates = torch.topk(logits, k=min(64, self.vocab_size), dim=-1).indices
+
 
         nodes: List[TreeNode] = []
         root_token = top_k_candidates[0].item()

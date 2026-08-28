@@ -41,6 +41,13 @@ class HCAChunkCompressor(nn.Module):
         Returns: [Batch, NumChunks, NumHeads, HeadDim] where NumChunks = ceil(SeqLen / chunk_size)
         """
         batch, seq_len, num_heads, head_dim = k.shape
+        if k.is_cuda:
+            try:
+                from ..kernels.triton_chunk_compression import hca_chunk_pool_cuda
+                return hca_chunk_pool_cuda(k, v, chunk_size=self.chunk_size)
+            except Exception:
+                pass
+
         if HAS_CSRC and batch == 1 and not k.is_cuda:
             k_cpu = k[0].detach().to(torch.float32).cpu().contiguous().numpy()
             v_cpu = v[0].detach().to(torch.float32).cpu().contiguous().numpy()
@@ -50,6 +57,7 @@ class HCAChunkCompressor(nn.Module):
                 torch.from_numpy(k_out).unsqueeze(0).to(device=k.device, dtype=k.dtype),
                 torch.from_numpy(v_out).unsqueeze(0).to(device=v.device, dtype=v.dtype)
             )
+
         batch, seq_len, num_heads, head_dim = k.shape
         pad_len = (self.chunk_size - (seq_len % self.chunk_size)) % self.chunk_size
         if pad_len > 0:

@@ -31,8 +31,12 @@
 #include "turing_pso_objectives.hpp"
 #include "turing_laplacian_2d.hpp"
 #include "turing_welford_anneal.hpp"
+#include "turing_matryoshka_quadtree.hpp"
+#include "turing_svd_quant.hpp"
+#include "turing_ridge_solver.hpp"
 
 #include <pybind11/pybind11.h>
+
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
@@ -956,5 +960,127 @@ PYBIND11_MODULE(turing_csrc, m) {
 
             return out;
         }, py::arg("query"), py::arg("block_table"), py::arg("active_page_mask"));
+
+    // Matryoshka Sliced GEMV & Quadtree Candidate Generator
+    m.def("generate_matryoshka_quadtree", [](
+        py::array_t<float, py::array::c_style> hidden_state_arr,
+        py::array_t<float, py::array::c_style> draft_weight_arr,
+        py::array_t<float, py::array::c_style> spatial_proj_arr,
+        int slice_width
+    ) {
+        py::buffer_info h_buf = hidden_state_arr.request();
+        py::buffer_info w_buf = draft_weight_arr.request();
+        py::buffer_info s_buf = spatial_proj_arr.request();
+
+        int hidden_dim = static_cast<int>(h_buf.shape[0]);
+        int vocab_size = static_cast<int>(w_buf.shape[0]);
+
+        auto res = turing::generate_matryoshka_quadtree_cpp(
+            static_cast<const float*>(h_buf.ptr),
+            static_cast<const float*>(w_buf.ptr),
+            static_cast<const float*>(s_buf.ptr),
+            hidden_dim,
+            vocab_size,
+            slice_width
+        );
+
+        int num_nodes = static_cast<int>(res.token_ids.size());
+        auto tok_arr = py::array_t<int32_t>(num_nodes);
+        auto parent_arr = py::array_t<int32_t>(num_nodes);
+        auto mask_arr = py::array_t<float>({num_nodes, num_nodes});
+
+        std::memcpy(tok_arr.request().ptr, res.token_ids.data(), num_nodes * sizeof(int32_t));
+        std::memcpy(parent_arr.request().ptr, res.parent_indices.data(), num_nodes * sizeof(int32_t));
+        std::memcpy(mask_arr.request().ptr, res.dag_mask.data(), num_nodes * num_nodes * sizeof(float));
+
+        return py::make_tuple(tok_arr, parent_arr, mask_arr);
+    }, "Native C++20 Matryoshka Sliced GEMV & Quadtree Generator");
+
+    // Fused SVD INT8 Quantizer
+    m.def("fused_svd_int8_quant", [](
+        py::array_t<float, py::array::c_style> k_input_arr,
+        py::array_t<float, py::array::c_style> u_proj_arr
+    ) {
+        py::buffer_info k_buf = k_input_arr.request();
+        py::buffer_info u_buf = u_proj_arr.request();
+
+        int seq_len = static_cast<int>(k_buf.shape[0]);
+        int head_dim = static_cast<int>(k_buf.shape[1]);
+        int rank = static_cast<int>(u_buf.shape[1]);
+
+        auto q_out = py::array_t<int8_t>({seq_len, rank});
+        auto scale_out = py::array_t<float>({seq_len, 1});
+
+        turing::fused_svd_int8_quant_cpp(
+            static_cast<const float*>(k_buf.ptr),
+            static_cast<const float*>(u_buf.ptr),
+            static_cast<int8_t*>(q_out.request().ptr),
+            static_cast<float*>(scale_out.request().ptr),
+            seq_len,
+            head_dim,
+            rank
+        );
+
+        return py::make_tuple(q_out, scale_out);
+    }, "Native C++20 Fused SVD INT8 Quantizer");
+
+    // Fused INT8 Dequantize & SVD Reconstruct GEMM
+    m.def("fused_int8_dequant_svd_recon", [](
+        py::array_t<int8_t, py::array::c_style> q_int8_arr,
+        py::array_t<float, py::array::c_style> scale_arr,
+        py::array_t<float, py::array::c_style> u_proj_arr
+    ) {
+        py::buffer_info q_buf = q_int8_arr.request();
+        py::buffer_info s_buf = scale_arr.request();
+        py::buffer_info u_buf = u_proj_arr.request();
+
+        int seq_len = static_cast<int>(q_buf.shape[0]);
+        int rank = static_cast<int>(q_buf.shape[1]);
+        int head_dim = static_cast<int>(u_buf.shape[0]);
+
+        auto out_recon = py::array_t<float>({seq_len, head_dim});
+
+        turing::fused_int8_dequant_svd_recon_cpp(
+            static_cast<const int8_t*>(q_buf.ptr),
+            static_cast<const float*>(s_buf.ptr),
+            static_cast<const float*>(u_buf.ptr),
+            static_cast<float*>(out_recon.request().ptr),
+            seq_len,
+            head_dim,
+            rank
+        );
+
+        return out_recon;
+    }, "Native C++20 Fused INT8 Dequantize & SVD Reconstruct GEMM");
+
+    // Fused Ridge Forward
+    m.def("fused_ridge_forward", [](
+        py::array_t<float, py::array::c_style> x_source_arr,
+        py::array_t<float, py::array::c_style> w_flat_arr,
+        py::array_t<float, py::array::c_style> b_flat_arr
+    ) {
+        py::buffer_info x_buf = x_source_arr.request();
+        py::buffer_info w_buf = w_flat_arr.request();
+        py::buffer_info b_buf = b_flat_arr.request();
+
+        int n_tokens = static_cast<int>(x_buf.shape[0]);
+        int in_dim = static_cast<int>(x_buf.shape[1]);
+        int out_features = static_cast<int>(w_buf.shape[1]);
+
+        auto out_arr = py::array_t<float>({n_tokens, out_features});
+
+        turing::fused_ridge_forward_cpp(
+            static_cast<const float*>(x_buf.ptr),
+            static_cast<const float*>(w_buf.ptr),
+            b_buf.size > 0 ? static_cast<const float*>(b_buf.ptr) : nullptr,
+            static_cast<float*>(out_arr.request().ptr),
+            n_tokens,
+            in_dim,
+            out_features
+        );
+
+        return out_arr;
+    }, "Native C++20 Fused Ridge Representation Projection");
 }
+
 

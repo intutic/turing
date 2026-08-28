@@ -37,10 +37,18 @@ class RoPEContentDecoupler:
             except ImportError:
                 HAS_CSRC = False
 
+        if k_rope.is_cuda:
+            try:
+                from ..kernels.triton_cross_kv import fused_inv_rope_cuda
+                return fused_inv_rope_cuda(k_rope, base=base)
+            except Exception:
+                pass
+
         if HAS_CSRC and not k_rope.is_cuda:
             k_cpu = k_rope.detach().to(torch.float32).cpu().contiguous().numpy()
             out_np = turing_csrc.fused_rope_transform(k_cpu, base, 0, True)
             return torch.from_numpy(out_np).to(device=k_rope.device, dtype=k_rope.dtype)
+
 
         orig_shape = k_rope.shape
         if k_rope.ndim == 2:
@@ -222,6 +230,23 @@ class ClosedFormRidgeMapper(nn.Module):
         w = (self.w_k if is_key else self.w_v).to(device=x.device, dtype=x.dtype)
         b = (self.b_k if is_key else self.b_v).to(device=x.device, dtype=x.dtype)
 
+        try:
+            import turing.turing_csrc as turing_csrc
+            HAS_CSRC = True
+        except ImportError:
+            HAS_CSRC = False
+
+        if HAS_CSRC and not x.is_cuda:
+            x_flat = x.reshape(-1, self.in_dim).detach().to(torch.float32).cpu().contiguous().numpy()
+            w_flat = w.permute(1, 0, 2).reshape(self.in_dim, self.target_heads * self.out_dim).detach().to(torch.float32).cpu().contiguous().numpy()
+            b_flat = b.reshape(self.target_heads * self.out_dim).detach().to(torch.float32).cpu().contiguous().numpy()
+            out_np = turing_csrc.fused_ridge_forward(x_flat, w_flat, b_flat)
+            out_flat = torch.from_numpy(out_np).to(device=x.device, dtype=x.dtype)
+            out = out_flat.view(batch_size, seq_len, self.target_heads, self.out_dim)
+            if orig_ndim == 2:
+                return out.squeeze(0)
+            return out
+
         # Reshape to standard GEMM for hardware compatibility across CPU, MPS, and CUDA
         w_flat = w.permute(1, 0, 2).reshape(self.in_dim, self.target_heads * self.out_dim)
         out_flat = torch.matmul(x.reshape(-1, self.in_dim), w_flat)
@@ -230,6 +255,7 @@ class ClosedFormRidgeMapper(nn.Module):
         if orig_ndim == 2:
             return out.squeeze(0)
         return out
+
 
 
 class SVDNullSpaceProjector:

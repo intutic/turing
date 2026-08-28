@@ -137,6 +137,15 @@ class ManifoldHyperConnection(nn.Module):
         # Step 2: Evaluate transformer layer
         layer_out = layer_fn(x_in)
 
+        if streams.is_cuda and self.num_streams == 4:
+            try:
+                from ..kernels.triton_mhc_fuse import mhc_stream_mix_cuda
+                h_res = self.get_doubly_stochastic_res_map()
+                new_streams = mhc_stream_mix_cuda(streams, layer_out, h_res, self.raw_post_weights)
+                return new_streams, layer_out
+            except Exception:
+                pass
+
         # Step 3: Doubly stochastic residual stream mixing
         streams_mixed = self.res_map(streams)
 
@@ -144,3 +153,4 @@ class ManifoldHyperConnection(nn.Module):
         new_streams = self.post_map(streams_mixed, layer_out)
 
         return new_streams, layer_out
+

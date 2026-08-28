@@ -92,15 +92,26 @@ class CompressedConvolutionalAttention(nn.Module):
         """
         batch, seq_len, _ = x.shape
 
-        # Step 1: Compress to latent representations
-        q_lat = self.q_down(x) # [Batch, SeqLen, LatentDim]
-        k_lat = self.k_down(x)
-        v_lat = self.v_down(x)
+        # Step 1 & 2: Compress and apply 1D depthwise causal convolution on Q and K
+        if x.is_cuda:
+            try:
+                from ..kernels.triton_cca import fused_linear_conv1d_causal_cuda
+                q_conv = fused_linear_conv1d_causal_cuda(x, self.q_down.weight, self.q_conv1d.weight)
+                k_conv = fused_linear_conv1d_causal_cuda(x, self.k_down.weight, self.k_conv1d.weight)
+                v_lat = self.v_down(x)
+            except Exception:
+                q_lat = self.q_down(x)
+                k_lat = self.k_down(x)
+                v_lat = self.v_down(x)
+                q_conv = self.q_conv1d(q_lat.transpose(1, 2))[..., :seq_len].transpose(1, 2)
+                k_conv = self.k_conv1d(k_lat.transpose(1, 2))[..., :seq_len].transpose(1, 2)
+        else:
+            q_lat = self.q_down(x)
+            k_lat = self.k_down(x)
+            v_lat = self.v_down(x)
+            q_conv = self.q_conv1d(q_lat.transpose(1, 2))[..., :seq_len].transpose(1, 2)
+            k_conv = self.k_conv1d(k_lat.transpose(1, 2))[..., :seq_len].transpose(1, 2)
 
-        # Step 2: Apply 1D depthwise causal convolution on Q and K
-        # Transpose for Conv1d: [Batch, LatentDim, SeqLen]
-        q_conv = self.q_conv1d(q_lat.transpose(1, 2))[..., :seq_len].transpose(1, 2)
-        k_conv = self.k_conv1d(k_lat.transpose(1, 2))[..., :seq_len].transpose(1, 2)
 
         # Step 3: Reshape for multi-head attention in latent space
         # [Batch, NumHeads, SeqLen, HeadDim]
