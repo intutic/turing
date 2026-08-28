@@ -50,9 +50,12 @@ scratch/
 env/
 venv/
 *key*.json
-*token*
+*token.json
+*token.txt
+*.token
 *.pem
 *.key
+
 
 # OS & Editor Artifacts
 .DS_Store
