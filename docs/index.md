@@ -5,7 +5,7 @@
 [![Release](https://img.shields.io/badge/Release-v0.3.1-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.3.1)
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests: 131/131 Passing](https://img.shields.io/badge/Tests-131%2F131%20Passing-brightgreen.svg)]()
+[![Tests: 138/138 Passing](https://img.shields.io/badge/Tests-138%2F138%20Passing-brightgreen.svg)]()
 
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
@@ -21,10 +21,13 @@ Turing Engine is an open-source inference and serving runtime that allows you to
 ## 🚀 Core Technologies
 
 * **57% Subspace Channel Pruning**: Skips dead intermediate neurons during token generation for a **2.32× per-layer speedup**.
+* **Latent Flash-Decode (SPECTRA Mode-B)**: Direct attention in rank-64 latent subspace against INT8 cached singular coordinates (**35.37× speedup on 32K context**).
+* **3:1 Hybrid Linear-Full Recurrence**: 75% linear recurrence layers + 25% chunk-scoring full attention, eliminating long-context OOM crashes up to 65K+ tokens.
 * **SVD INT8 KV Cache Paging**: Compresses 32K context memory from **10 GB down to 2.5 GB (-75%)**.
 * **Heterogeneous MoE Memory Management**: Runs 320B Mixture-of-Experts models on a single 24GB card by caching active experts in VRAM and streaming inactive experts from Host DRAM.
 * **Universal Hardware Support**: Native auto-discovery for **NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (XPU), Vulkan, and CPU (AVX2 SIMD)**.
 * **OpenAI & Anthropic Compatible**: Drop-in serving runtime for `/v1/chat/completions`, `/v1/completions`, and `/v1/messages`.
+
 
 ---
 
