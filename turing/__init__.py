@@ -2,8 +2,9 @@
 Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Engine
 """
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 __author__ = "Ishan Gupta"
+
 
 
 from .config import ModelConfig, TuringConfig

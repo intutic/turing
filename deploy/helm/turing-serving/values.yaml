@@ -3,7 +3,8 @@ replicaCount: 1
 image:
   repository: ghcr.io/intutic/turing
   pullPolicy: IfNotPresent
-  tag: "v0.2.2-cuda"
+  tag: "v0.3.0-cuda"
+
 
 
 service:

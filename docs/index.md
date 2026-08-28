@@ -2,10 +2,10 @@
 
 **Serve 70B+ LLMs on a Single 24GB GPU or Mac with 75% Less Memory.**
 
-[![Release](https://img.shields.io/badge/Release-v0.2.2-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.2.2)
-
+[![Release](https://img.shields.io/badge/Release-v0.3.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.3.0)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests: 114/114 Passing](https://img.shields.io/badge/Tests-114%2F114%20Passing-brightgreen.svg)]()
+[![Tests: 122/122 Passing](https://img.shields.io/badge/Tests-122%2F122%20Passing-brightgreen.svg)]()
+
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
 ---
