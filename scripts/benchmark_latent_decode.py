@@ -106,10 +106,11 @@ def benchmark_hybrid_attention_prefill(device_name: str = "cpu"):
         _ = linear_layer(x[:, :512, :])
 
         if device.type == "cuda":
-            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
 
         # Simulate 4 layers: 3 linear + 1 full with chunk scoring vs 4 full layers
         iters = 10 if seq_len <= 8192 else 3
+
 
         # Dense 4 layers
         t0 = time.perf_counter()
