@@ -28,11 +28,18 @@ from turing.core.swarm_objectives import evaluate_objective
 from turing.core.router_annealer import compute_exponential_decay
 
 def run_all_frontier_benchmarks():
-    device = torch.device("cpu")
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+
     print("=" * 88)
     print("   ⚡ TURING ENGINE FRONTIER COMPREHENSIVE BENCHMARKING ENGINE")
     print("=" * 88)
-    print(f"[*] Execution Platform  : {device} (Apple Silicon Metal / C++20 SIMD Native)")
+    print(f"[*] Execution Platform  : {device} ({'NVIDIA GPU' if device.type == 'cuda' else 'Apple Silicon Metal' if device.type == 'mps' else 'CPU SIMD'})")
+
     print(f"[*] Total Models Tested : 7 Frontier Architectures (8B to 1.05 Trillion)")
     print(f"[*] Backends Compared   : Turing Engine 3.0, vLLM, TensorRT-LLM, SGLang, Ollama, PyTorch FP16")
     print(f"[*] Context Lengths     : 8K, 32K, 64K, 128K, 1,000,000 Tokens")
