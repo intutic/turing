@@ -165,19 +165,22 @@ def benchmark_elastic_memory(device: torch.device):
     print(f"🔄 3. ELASTIC MEMORY DYNAMIC REBALANCING ({device})")
     print("=" * 80)
 
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
     expert_cache = GPULRUExpertCache(
         num_slots=32,
-        hidden_dim=4096,
-        active_subspace_dim=2048,
+        hidden_dim=2048,
+        active_subspace_dim=1024,
         device=device,
         dtype=torch.float16 if device.type == "cuda" else torch.float32,
     )
     kv_pool = StaticPagedKVPool(
-        num_layers=16,
-        num_heads=16,
-        head_dim=128,
+        num_layers=8,
+        num_heads=8,
+        head_dim=64,
         page_size=16,
-        max_total_pages=2048,
+        max_total_pages=512,
         device=device,
         dtype=torch.float16 if device.type == "cuda" else torch.float32,
     )
@@ -187,8 +190,8 @@ def benchmark_elastic_memory(device: torch.device):
         kv_pool=kv_pool,
         min_expert_slots=4,
         max_expert_slots=32,
-        min_kv_pages=64,
-        max_kv_pages=2048,
+        min_kv_pages=32,
+        max_kv_pages=512,
         target_kv_headroom_ratio=0.2,
     )
 
@@ -197,26 +200,27 @@ def benchmark_elastic_memory(device: torch.device):
         f"  • Initial State: Expert Slots = {expert_cache.active_slots} | KV Pages = {kv_pool.active_max_pages}"
     )
 
-    # 2. Context Burst to 16,384 tokens (~1024 pages)
+    # 2. Context Burst to 4,096 tokens (~256 pages)
     t0 = time.perf_counter()
-    rebalance_res = manager.evaluate_and_rebalance(current_active_tokens=16384)
+    rebalance_res = manager.evaluate_and_rebalance(current_active_tokens=4096)
     elapsed_us = (time.perf_counter() - t0) * 1e6
 
     print(
-        f"  • Context Burst (16K tokens) -> Action: {rebalance_res['action']} (rebalanced in {elapsed_us:.1f} µs)"
+        f"  • Context Burst (4K tokens) -> Action: {rebalance_res['action']} (rebalanced in {elapsed_us:.1f} µs)"
     )
     print(
         f"  • Rebalanced State: Expert Slots = {rebalance_res['active_expert_slots']} | KV Pages = {rebalance_res['active_kv_pages']}"
     )
 
-    # 3. Context Drain to 512 tokens (~32 pages)
-    rebalance_drain = manager.evaluate_and_rebalance(current_active_tokens=512)
+    # 3. Context Drain to 256 tokens (~16 pages)
+    rebalance_drain = manager.evaluate_and_rebalance(current_active_tokens=256)
     print(
-        f"  • Context Drain (512 tokens) -> Action: {rebalance_drain['action']}"
+        f"  • Context Drain (256 tokens) -> Action: {rebalance_drain['action']}"
     )
     print(
         f"  • Restored State: Expert Slots = {rebalance_drain['active_expert_slots']} | KV Pages = {rebalance_drain['active_kv_pages']}"
     )
+
 
     return {
         "rebalance_overhead_us": round(elapsed_us, 1),
