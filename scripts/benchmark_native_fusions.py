@@ -42,22 +42,22 @@ def benchmark_matryoshka_spec(device: torch.device):
     hidden = torch.randn(1, hidden_dim, device=device, dtype=torch.float32)
     draft_head = MatryoshkaDraftHead(hidden_dim=hidden_dim, vocab_size=vocab_size, bias=False).to(device)
 
-    # Warmup
-    for _ in range(10):
-        _ = draft_head(hidden, slice_width=8192)
-    sync_device(device)
-
     N_ITERS = 100
     results = {}
 
     for w in slice_widths:
+        # Warmup for this specific slice width to trigger Triton JIT compile beforehand
+        for _ in range(10):
+            _ = draft_head(hidden, slice_width=w)
         sync_device(device)
+
         t0 = time.perf_counter()
         for _ in range(N_ITERS):
             _ = draft_head(hidden, slice_width=w)
         sync_device(device)
         t1 = time.perf_counter()
         avg_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
         results[w] = avg_ms
 
     baseline_ms = results[8192]
