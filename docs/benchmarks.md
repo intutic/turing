@@ -61,3 +61,35 @@ Empirical stress testing of **SVD INT8 KV Cache Paging** across context length (
 python scripts/stress_test_niah_breaking_point.py cuda   # On NVIDIA GPU
 python scripts/stress_test_niah_breaking_point.py mps    # On Apple Silicon Mac
 ```
+
+---
+
+## 4. Nested Matryoshka Parameter-Sliced Speculation
+
+Physical execution latencies for `MatryoshkaDraftHead` across nested parameter widths $W \in \{1024, 2048, 4096, 8192\}$:
+
+| Hardware Platform | $W=8192$ (Full) | $W=4096$ | $W=2048$ | $W=1024$ (Fast Draft) | Measured Speedup |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **GCP NVIDIA L4 GPU (CUDA)** | 4.355 ms | 2.190 ms | 1.103 ms | **0.558 ms** | **7.80× Faster** |
+| **Apple Silicon (Metal MPS)** | 4.392 ms | 2.284 ms | 1.186 ms | **0.669 ms** | **6.56× Faster** |
+| **CPU (AVX2 SIMD)** | 16.206 ms | 8.585 ms | 4.161 ms | **2.117 ms** | **7.66× Faster** |
+
+---
+
+## 5. Semantic Anchor Multi-Turn Deliberation Latency
+
+Prefix state restoration latency in `SpectralRadixSVDForest` for 2048-token conversational history across 16 transformer layers:
+
+| Hardware Platform | 2048-Token Full Prefill | Semantic Anchor Restoration | Turn Latency Cut |
+| :--- | :---: | :---: | :---: |
+| **GCP NVIDIA L4 GPU (CUDA)** | 20.142 ms | **0.696 ms** | **96.5% Reduction** |
+| **Apple Silicon (Metal MPS)** | 131.862 ms | **13.353 ms** | **89.9% Reduction** |
+| **CPU (AVX2 SIMD)** | 42.444 ms | **3.440 ms** | **91.9% Reduction** |
+
+### Reproduce Empirical Speculation & Deliberation Benchmarks:
+```bash
+# Run comprehensive Matryoshka & FreeToken benchmark suite:
+python scripts/benchmark_freetoken_matryoshka.py --device cuda   # On NVIDIA GPU
+python scripts/benchmark_freetoken_matryoshka.py --device mps    # On Apple Silicon Mac
+```
+

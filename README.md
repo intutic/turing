@@ -6,7 +6,7 @@
 [![Release: v0.2.2](https://img.shields.io/badge/Release-v0.2.2-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.2.2)
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 114/114 Passing](https://img.shields.io/badge/Tests-114%2F114%20Passing-brightgreen.svg)]()
+[![Tests: 122/122 Passing](https://img.shields.io/badge/Tests-122%2F122%20Passing-brightgreen.svg)]()
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
 ---
@@ -71,22 +71,22 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
 
 ---
 
-## 🧠 Why Turing Engine? (3 Core Advantages)
+## 🧠 Why Turing Engine? (Core Advantages)
 
 ```
        +-----------------------------------------------------------------+
        |                  TURING ENGINE INFERENCE STACK                  |
        +-----------------------------------------------------------------+
-          |                                                             |
-          v                                                             v
-+-----------------------------+                               +-----------------------------+
-|   57% Subspace Channel      |                               |    SVD INT8 KV Cache        |
-|   Activation Pruning        |                               |    Memory Compression       |
-|                             |                               |                             |
-|  * Bypasses inactive FFN    |                               |  * 32K context memory drops |
-|    channels during decode   |                               |    from 10.0 GB -> 2.5 GB   |
-|  * 2.32x CUDA Layer Speedup |                               |  * -75% VRAM KV footprint   |
-+-----------------------------+                               +-----------------------------+
+          |                               |                             |
+          v                               v                             v
++-----------------------------+ +-----------------------------+ +-----------------------------+
+|   57% Subspace Channel      | |    SVD INT8 KV Cache        | |   Matryoshka Slicing &      |
+|   Activation Pruning        | |    Memory Compression       | |   Elastic MoE Memory        |
+|                             | |                             | |                             |
+|  * Bypasses inactive FFN    | |  * 32K context memory drops | |  * 7.8x Faster Draft Tokens |
+|    channels during decode   | |    from 10.0 GB -> 2.5 GB   | |  * 96.5% Deliberation Reuse |
+|  * 2.32x CUDA Layer Speedup | |  * -75% VRAM KV footprint   | |  * Dynamic Slot-Page Budget |
++-----------------------------+ +-----------------------------+ +-----------------------------+
 ```
 
 1. **⚡ 57% Subspace Activation Pruning (2.32× Layer Speedup)**:
@@ -95,8 +95,18 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
 2. **💾 75% SVD INT8 KV Cache Compression**:
    Compresses attention Key-Value states into calibrated Rank-64 singular vectors, reducing 32K context memory from **10.0 GB down to 2.5 GB (-75%)**.
 
-3. **🍏 Universal Hardware Support (Apple Silicon & NVIDIA CUDA)**:
+3. **🎯 Nested Matryoshka Parameter Slicing (7.8× Speculation Speedup)**:
+   Slices single master draft projection matrices ($W \in \{1024, 2048, 4096, 8192\}$) in-place without retraining, cutting candidate draft latency from **4.35 ms to 0.55 ms (7.8× speedup)** on NVIDIA L4 GPU.
+
+4. **⚓ Semantic Anchor Checkpointing (96.5% Latency Cut in Agent Loops)**:
+   Tags and preserves prefix states across multi-turn agent deliberative loops, dropping turn transition latency from **20.14 ms to 0.69 ms**.
+
+5. **🔄 FreeToken Elastic Memory Budgeting**:
+   Dynamically shifts VRAM allocations between MoE expert cache slots and KV pages in **<90 µs** without engine restarts.
+
+6. **🍏 Universal Hardware Support (Apple Silicon & NVIDIA CUDA)**:
    Automatically auto-dispatches between NVIDIA CUDA (Triton GPU kernels), Apple Silicon Metal (`mps`), and bare-metal C++20 AVX2 SIMD CPU routines.
+
 
 ---
 

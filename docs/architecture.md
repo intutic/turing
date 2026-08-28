@@ -50,3 +50,28 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
 * **How It Works**: Turing Engine integrates natively with the **llm-d** (CNCF Sandbox) routing layer via ZeroMQ event publishing (`KVBlockEventPublisher`), deterministic sequence hashing, and SVD-compressed network KV transfers (`SVDNetworkKVWireCodec`). llm-d's Endpoint Policy Provider (EPP) routes requests directly to pods with matching prefix caches.
 * **The Result**: Multi-pod serving clusters achieve up to **3× higher effective throughput** and **75% lower cross-pod transfer bandwidth** during P/D disaggregation.
 
+---
+
+## 6. 🎯 Nested Matryoshka Parameter Slicing (Draft Speculation)
+
+* **The Problem**: Autoregressive draft head evaluation in speculative decoding creates bandwidth bottlenecks on low-memory edge devices.
+* **How It Works**: Slices a single master parameter projection tensor $W \in \mathbb{R}^{V \times 8192}$ along input dimension 0 into nested widths $W_k \in \{1024, 2048, 4096, 8192\}$ (`MatryoshkaDraftHead`). Slicing operates in-place with zero additional memory allocation or base model retraining.
+* **The Result**: Candidate token generation accelerates by up to **7.80×** on NVIDIA L4 GPU (**0.55 ms vs 4.35 ms**) and **6.56×** on Apple Silicon Metal MPS (**0.67 ms vs 4.39 ms**).
+
+---
+
+## 7. 🔄 Elastic Memory Budget Management (FreeToken Co-Design)
+
+* **The Problem**: Static VRAM allocation forces an unnatural trade-off between MoE expert cache hit rates and maximum KV cache context length.
+* **How It Works**: An active runtime manager (`ElasticMemoryBudgetManager`) continuously balances VRAM between the on-GPU expert slot cache (`GPULRUExpertCache`) and the KV page pool (`StaticPagedKVPool`). When long prompts arrive, expert slots contract to give KV pages headroom; when context drains, expert slots expand to maximize temporal hit rates.
+* **The Result**: Dynamic slot/page reallocation takes **<90 µs** with 0 engine restarts, zero CUDA allocation OOMs, and over 85% cache hit rates.
+
+---
+
+## 8. ⚓ Semantic Anchor Checkpointing (Multi-Agent Deliberation)
+
+* **The Problem**: Multi-agent systems (e.g. Deliberator / Tool-Caller / Revision Optimizer) repeatedly re-prefill identical conversational history across iterative turns.
+* **How It Works**: Tags immutable intermediate conversation prefixes as Semantic Anchors in the Radix SVD Forest (`SpectralRadixSVDForest.mark_semantic_anchor`). Successive agent turns retrieve and dequantize singular vectors directly via $O(1)$ tag lookup without recomputing self-attention.
+* **The Result**: Multi-turn agent deliberation latency drops by **96.5% on NVIDIA L4 GPU** (**0.69 ms vs 20.14 ms**) and **89.9% on Apple Silicon MPS**.
+
+
