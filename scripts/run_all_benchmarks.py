@@ -61,8 +61,10 @@ def run_all_frontier_benchmarks():
             model_matrix[m_key] = res
             arch = res["architecture"]
             vram = res["vram_model_footprint"]
+            kv = res["kv_cache_footprint_32k_context"]
             tps = res["measured_layer_throughput"]
             lat = res["layer_latency_ms"]
+
 
             print(f"\n  ┌── [{res['model_name']}] ──────────────────────────────────────────")
             print(f"  │ • Layers / Hidden Dim       : {arch['num_layers']} layers | {arch['hidden_dim']} dim")
