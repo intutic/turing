@@ -70,13 +70,26 @@ Physical execution latencies for `MatryoshkaDraftHead` across nested parameter w
 
 | Hardware Platform | $W=8192$ (Full) | $W=4096$ | $W=2048$ | $W=1024$ (Fast Draft) | Measured Speedup |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **GCP NVIDIA L4 GPU (CUDA)** | 4.355 ms | 2.190 ms | 1.103 ms | **0.558 ms** | **7.80× Faster** |
-| **Apple Silicon (Metal MPS)** | 4.392 ms | 2.284 ms | 1.186 ms | **0.669 ms** | **6.56× Faster** |
+| **GCP NVIDIA L4 GPU (CUDA)** | 4.054 ms | 2.077 ms | 1.043 ms | **0.525 ms** | **7.73× Faster** |
+| **Apple Silicon (Metal MPS)** | 4.434 ms | 2.278 ms | 1.168 ms | **0.621 ms** | **7.14× Faster** |
 | **CPU (AVX2 SIMD)** | 16.206 ms | 8.585 ms | 4.161 ms | **2.117 ms** | **7.66× Faster** |
 
 ---
 
-## 5. Semantic Anchor Multi-Turn Deliberation Latency
+## 5. Fused SVD INT8 Quantization Latency
+
+Single-pass in-SRAM projection and symmetric INT8 quantization on NVIDIA L4 GPU:
+
+| Context Length ($L$) | Unfused PyTorch (4 launches) | Fused Triton Kernel (1 launch) | Measured Speedup |
+| :--- | :---: | :---: | :---: |
+| **512 tokens** | 1.530 ms | **0.056 ms** | **27.28× Faster** |
+| **2,048 tokens** | 0.143 ms | **0.060 ms** | **2.38× Faster** |
+| **8,192 tokens** | 0.143 ms | **0.058 ms** | **2.48× Faster** |
+
+---
+
+## 6. Semantic Anchor Multi-Turn Deliberation Latency
+
 
 Prefix state restoration latency in `SpectralRadixSVDForest` for 2048-token conversational history across 16 transformer layers:
 
