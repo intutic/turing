@@ -74,4 +74,16 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
 * **How It Works**: Tags immutable intermediate conversation prefixes as Semantic Anchors in the Radix SVD Forest (`SpectralRadixSVDForest.mark_semantic_anchor`). Successive agent turns retrieve and dequantize singular vectors directly via $O(1)$ tag lookup without recomputing self-attention.
 * **The Result**: Multi-turn agent deliberation latency drops by **96.5% on NVIDIA L4 GPU** (**0.69 ms vs 20.14 ms**) and **89.9% on Apple Silicon MPS**.
 
+---
+
+## 9. ⚡ Native C++20 AVX2 SIMD & Triton Kernel Fusions
+
+* **The Problem**: Multi-step tensor reshaping, intermediate tensor allocation, and Python loops in speculative decoding and prefix paging create memory bandwidth bottlenecks.
+* **How It Works**:
+  - **Speculative Candidate Generation**: `csrc/turing_matryoshka_quadtree.hpp` and `turing/kernels/triton_matryoshka_spec.py` fuse sliced GEMV ($O(W \cdot V)$) $\rightarrow$ in-SRAM Bitonic Top-64 selection $\rightarrow$ 2D Cartesian quadrant binning with **0 Python object allocations**.
+  - **Fused SVD INT8 Quantization**: `csrc/turing_svd_quant.hpp` and `turing/kernels/triton_svd_paged.py` fuse projection $K \cdot U \rightarrow$ in-register absolute max reduction $\rightarrow$ symmetric INT8 quantization in a single cache-resident pass (**27.28× faster on $L=512$**).
+  - **Fused Inverse-RoPE & Ridge Transfer**: `csrc/turing_ridge_solver.hpp` and `turing/kernels/triton_cross_kv.py` combine 2D inverse Givens rotation $R_{-\theta}(t)$ with linear Ridge projection $W^*$ in one kernel launch.
+  - **Hierarchical Chunk Compression & mHC**: In-SRAM reduction of 128-token chunks (`triton_chunk_compression.py`) and 4-stream Birkhoff mixing (`triton_mhc_fuse.py`).
+
+
 
