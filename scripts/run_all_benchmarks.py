@@ -61,20 +61,21 @@ def run_all_frontier_benchmarks():
             model_matrix[m_key] = res
             arch = res["architecture"]
             vram = res["vram_model_footprint"]
-            kv = res["kv_cache_footprint_32k_context"]
-            tps = res["estimated_serving_throughput"]
+            tps = res["measured_layer_throughput"]
+            lat = res["layer_latency_ms"]
 
             print(f"\n  ┌── [{res['model_name']}] ──────────────────────────────────────────")
             print(f"  │ • Layers / Hidden Dim       : {arch['num_layers']} layers | {arch['hidden_dim']} dim")
             print(f"  │ • Active Subspace Pruning   : {arch['channel_sparsity_pct']} pruned ({arch['turing_subspace_dim']} active / {arch['dense_ffn_dim']} dense)")
             print(f"  │ • Model VRAM (PyTorch FP16) : {vram['1_native_pytorch_fp16']}")
-            print(f"  │ • Model VRAM (Standard INT4): {vram['3_standard_int4_awq']}")
-            print(f"  │ • Model VRAM (Turing Engine W4A16) : {vram['6_turing_3_subspace_w4a16']} ({vram['turing_vram_savings_vs_fp16']} reduction)")
-            print(f"  │ • 32K KV Cache (vLLM Paged) : {kv['1_standard_vllm_paged_fp16']}")
-            print(f"  │ • 32K KV Cache (Turing Engine SVD) : {kv['6_turing_svd_int8_hierarchical']}")
-            print(f"  │ • Est. Throughput (vLLM)    : {tps['vllm_paged_tok_per_sec']} tok/s")
-            print(f"  │ • Est. Throughput (Turing Engine)  : {tps['turing_3_tok_per_sec']} tok/s ({tps['throughput_gain_vs_vllm']} speedup)")
+            print(f"  │ • Model VRAM (Standard INT4): {vram['2_standard_int4_awq']}")
+            print(f"  │ • Model VRAM (Turing Engine W4A16) : {vram['3_turing_subspace_w4a16']} ({vram['turing_vram_savings_vs_fp16']} reduction)")
+            print(f"  │ • 32K KV Cache (Paged FP16) : {kv['standard_paged_fp16']}")
+            print(f"  │ • 32K KV Cache (Turing SVD) : {kv['turing_svd_int8_hierarchical']}")
+            print(f"  │ • Dense Layer Latency       : {lat['dense_layer_ms']} ms ({tps['dense_layer_tok_per_sec']} tok/s)")
+            print(f"  │ • Turing Subspace Latency   : {lat['turing_subspace_layer_ms']} ms ({tps['turing_subspace_tok_per_sec']} tok/s, {tps['speedup_multiplier']} speedup)")
             print(f"  └────────────────────────────────────────────────────────────────────")
+
 
     # -------------------------------------------------------------------------
     # 2. Long-Context Needle-In-A-Haystack (NIAH) Across Context Lengths
