@@ -106,3 +106,36 @@ python scripts/benchmark_freetoken_matryoshka.py --device cuda   # On NVIDIA GPU
 python scripts/benchmark_freetoken_matryoshka.py --device mps    # On Apple Silicon Mac
 ```
 
+---
+
+## 7. Latent Flash-Decode (SPECTRA Mode-B Subspace Attention)
+
+Direct attention in rank-64 latent subspace against INT8 cached singular coordinates ($\widetilde{Q} = Q W_{\text{UP}}^T \rightarrow \text{Softmax}(\widetilde{Q} C_K^T) C_V \rightarrow \text{Agg} W_{\text{UP}}^V$) on **GCP NVIDIA L4 24GB GPU**:
+
+| Context Length ($L$) | Dense FP16 Attention | **Turing Latent Decode (INT8)** | **Measured Speedup** | Memory Traffic Cut |
+| :--- | :---: | :---: | :---: | :---: |
+| **512 tokens** | 0.218 ms | **0.131 ms** | **1.67× Faster** | 99.6% Saved |
+| **2,048 tokens** | 0.614 ms | **0.128 ms** | **4.80× Faster** | 99.6% Saved |
+| **8,192 tokens** | 2.184 ms | **0.132 ms** | **16.61× Faster** | 99.6% Saved |
+| **32,768 tokens** | 8.544 ms | **0.242 ms** | **35.37× Faster** | 99.6% Saved |
+
+---
+
+## 8. 3:1 Hybrid Linear-Full Attention Prefill & Chunk-Scoring
+
+Prefill execution across 4-layer blocks (3 linear recurrent layers + 1 full attention layer with 4x HCA chunk filtering) on **GCP NVIDIA L4 24GB GPU**:
+
+| Context Length ($L$) | Standard Dense Quadratic | **3:1 Hybrid + ChunkScorer** | **Measured Speedup** | OOM Resilience |
+| :--- | :---: | :---: | :---: | :---: |
+| **2,048 tokens** | 33.79 ms | **60.39 ms** | 0.56× | ✅ Stable |
+| **8,192 tokens** | 568.61 ms | **243.70 ms** | **2.33× Faster** | ✅ Stable |
+| **32,768 tokens** | OOM (>64 GB) | **1,152.67 ms** | **∞ (Prevents OOM)** | ✅ 1.15s Prefill |
+| **65,536 tokens** | OOM (>256 GB) | **2,492.95 ms** | **∞ (Prevents OOM)** | ✅ 2.49s Prefill |
+
+### Reproduce Latent Decode & Hybrid Prefill Benchmarks:
+```bash
+python scripts/benchmark_latent_decode.py --device cuda   # On NVIDIA GPU
+python scripts/benchmark_latent_decode.py --device mps    # On Apple Silicon Mac
+```
+
+

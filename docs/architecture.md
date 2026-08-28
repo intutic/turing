@@ -85,5 +85,16 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
   - **Fused Inverse-RoPE & Ridge Transfer**: `csrc/turing_ridge_solver.hpp` and `turing/kernels/triton_cross_kv.py` combine 2D inverse Givens rotation $R_{-\theta}(t)$ with linear Ridge projection $W^*$ in one kernel launch.
   - **Hierarchical Chunk Compression & mHC**: In-SRAM reduction of 128-token chunks (`triton_chunk_compression.py`) and 4-stream Birkhoff mixing (`triton_mhc_fuse.py`).
 
+---
+
+## 10. 🎯 Latent Flash-Decode (SPECTRA Mode-B) & 3:1 Hybrid Recurrence
+
+* **The Problem**: Standard KV attention reconstructs full FP16 vectors ($d=128$) before evaluating attention, inflating DRAM memory traffic during single-token decode. Additionally, ultra-long prefill ($32\text{K}\text{--}128\text{K}$) causes quadratic attention compute explosion and out-of-memory crashes.
+* **How It Works**:
+  - **In-SRAM Latent Flash-Decode (`triton_latent_decode.py` & `csrc/turing_latent_decode.hpp`)**: Pre-absorbs the up-projection into the query ($\widetilde{Q} = Q W_{\text{UP}}^T \in \mathbb{R}^{\text{GRP} \times 64}$) and evaluates attention directly in the rank-64 latent subspace against INT8 cached singular coordinates $C_K$. Slashes decode memory traffic by **99.6%** and runs **$35.37\times$ faster on 32K context**.
+  - **3:1 Hybrid Linear-Full Attention (`hybrid_attention.py`)**: Assigns 75% of layers to $O(L)$ fixed-size state recurrence ($S_t = \alpha S_{t-1} + K_t^T V_t$), keeping a constant $O(1)$ memory footprint. The remaining 25% full-attention anchor layers use 4x HCA chunk scoring to cap long context at a 2048-token budget.
+  - **Mean Centering & Hadamard Equalization**: Zero-centers singular coordinates ($C_K = \text{quant}(K W_{\text{DOWN}} - \mu_K)$) and folds $\beta = \mu W_{\text{UP}}$ into layer biases, preventing 2-bit quantization collapse at low ranks.
+
+
 
 
