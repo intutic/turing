@@ -18,6 +18,8 @@ class SpectralRadixNode:
         self.v_scale: Optional[torch.Tensor] = None    # [SeqLen, Heads, 1]
         self.access_timestamp: float = time.time()
         self.ref_count: int = 1
+        self.is_semantic_anchor: bool = False
+        self.anchor_tag: Optional[str] = None
 
 try:
     import turing.turing_csrc as turing_csrc
@@ -40,7 +42,9 @@ class SpectralRadixSVDForest:
         self.budget_tokens = budget_tokens
         self.root = SpectralRadixNode(token_ids=[])
         self.total_cached_tokens = 0
+        self.anchor_registry: Dict[str, Tuple[List[int], SpectralRadixNode]] = {}
         self.native_trie = turing_csrc.RadixTrieIndex() if HAS_CSRC else None
+
 
     def insert_prefix(
         self,
@@ -246,4 +250,43 @@ class SpectralRadixSVDForest:
                     rem_node.v_scale = v_scale[match_len:]
                     child.children[rem_toks[0]] = rem_node
                     self.total_cached_tokens += len(rem_toks)
+
+    def mark_semantic_anchor(self, token_ids: List[int], tag: str) -> bool:
+        """
+        Locates the radix tree node corresponding to token_ids and marks it as an
+        immutable Semantic Anchor Checkpoint for multi-turn agent context reuse.
+        """
+        curr = self.root
+        rem = token_ids
+
+        while rem and rem[0] in curr.children:
+            child = curr.children[rem[0]]
+            c_len = len(child.token_ids)
+            if rem[:c_len] == child.token_ids:
+                if len(rem) == c_len:
+                    child.is_semantic_anchor = True
+                    child.anchor_tag = tag
+                    self.anchor_registry[tag] = (token_ids, child)
+                    return True
+                rem = rem[c_len:]
+                curr = child
+            else:
+                break
+        return False
+
+    def get_anchor_node(self, tag: str) -> Optional[Tuple[List[int], SpectralRadixNode]]:
+        """Retrieves registered semantic anchor checkpoint by tag."""
+        return self.anchor_registry.get(tag)
+
+    def match_anchor_prefix(self, tag: str, u_proj: torch.Tensor) -> Tuple[int, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Directly matches and reconstructs KV states for a semantic anchor tag.
+        Returns: (matched_token_count, matched_k, matched_v)
+        """
+        anchor_data = self.anchor_registry.get(tag)
+        if not anchor_data:
+            return 0, None, None
+        token_ids, _ = anchor_data
+        return self.match_prefix(token_ids, u_proj)
+
 

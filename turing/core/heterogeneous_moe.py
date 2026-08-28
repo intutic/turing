@@ -134,8 +134,29 @@ class BandwidthAdaptiveDecider:
         gpu_total_ms = transfer_ms + gpu_compute_ms
         return gpu_total_ms < cpu_compute_ms
 
+    def recalibrate_live_bus(self) -> float:
+        """
+        Executes a rapid 8MB host-to-device transfer micro-probe to refresh
+        the real-time PCIe bus bandwidth under active system load.
+        """
+        self.pcie_bandwidth_gb_s = self._calibrate_pcie_bandwidth()
+        return self.pcie_bandwidth_gb_s
+
+    def get_telemetry(self) -> Dict[str, Any]:
+        """
+        Returns live hardware profiling telemetry for FreeToken q* streaming decisions.
+        """
+        return {
+            "device": str(self.device),
+            "pcie_bandwidth_gb_s": round(self.pcie_bandwidth_gb_s, 2),
+            "cpu_throughput_gflops": round(self.cpu_throughput_gflops, 1),
+            "gpu_throughput_gflops": round(self.gpu_throughput_gflops, 1),
+            "policy": "q_star_bandwidth_adaptive"
+        }
+
 
 class HostExpertBank:
+
     """
     Stores full MoE expert pools in Host Pinned Memory in Subspace W4A16 packed format.
     Reduces Host DRAM footprint by 4x and PCIe transfer volume by 75%.

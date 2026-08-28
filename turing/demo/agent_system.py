@@ -81,7 +81,8 @@ class MultiAgentCoordinator:
         sol_res = self.engine.fast_generate(
             system_prompt=self.planner_system,
             user_prompt=sol_prompt,
-            max_new_tokens=max_tokens_per_agent
+            max_new_tokens=max_tokens_per_agent,
+            semantic_anchor_tag="deliberation_proposal_1"
         )
 
         # Step 3: Evaluate Constraint Penalty against environment state
@@ -108,8 +109,10 @@ class MultiAgentCoordinator:
             system_prompt=self.optimizer_system,
             user_prompt=optimizer_prompt,
             max_new_tokens=max_tokens_per_agent + 40,
-            reuse_previous_kv=True
+            reuse_previous_kv=True,
+            restore_anchor_tag="deliberation_proposal_1"
         )
+
 
         # Step 5: Post-Revision Verification (Constraint Penalty Minimization Check)
         world_feedback_final = self.world_model.evaluate_constraint_penalty(

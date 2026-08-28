@@ -23,6 +23,7 @@ class GPULRUExpertCache:
         dtype: torch.dtype = torch.float32
     ):
         self.num_slots = num_slots
+        self.active_slots = num_slots
         self.hidden_dim = hidden_dim
         self.active_dim = active_subspace_dim
         self.device = device
@@ -56,11 +57,37 @@ class GPULRUExpertCache:
         self._hits = 0
         self._misses = 0
 
+    def resize_active_slots(self, new_num_slots: int) -> int:
+        """
+        Dynamically adjusts the active capacity of the expert cache without reallocating tensors.
+        If contracting, evicts LRU experts down to new_num_slots.
+        Returns the new active capacity.
+        """
+        new_slots = max(1, min(new_num_slots, self.num_slots))
+        self.active_slots = new_slots
+
+        # If shrinking below current used slots, evict LRU entries
+        while len(self.cache_map) > new_slots:
+            self.cache_map.popitem(last=False)
+
+        # Recompute free slots based on active capacity
+        occupied = set(self.cache_map.values())
+        self.free_slots = [s for s in range(new_slots) if s not in occupied]
+        return new_slots
+
+
+    @property
+    def used_slots(self) -> int:
+        if self.has_csrc and self.csrc_cache is not None:
+            return min(self.active_slots, self.csrc_cache.used_slots)
+        return len(self.cache_map)
+
     @property
     def hits(self) -> int:
         if self.has_csrc and self.csrc_cache is not None:
             return self.csrc_cache.hits
         return self._hits
+
 
     @property
     def misses(self) -> int:
@@ -106,14 +133,15 @@ class GPULRUExpertCache:
             return self.cache_map[key], None
 
         evicted_key = None
-        if self.free_slots:
-            slot_idx = self.free_slots.pop()
-        else:
+        if len(self.cache_map) >= self.active_slots or not self.free_slots:
             # Evict least recently used (first item)
             evicted_key, slot_idx = self.cache_map.popitem(last=False)
+        else:
+            slot_idx = self.free_slots.pop()
 
         self.cache_map[key] = slot_idx
         return slot_idx, evicted_key
+
 
     def load_expert_weights(
         self,

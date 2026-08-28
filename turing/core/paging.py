@@ -203,6 +203,7 @@ class StaticPagedKVPool:
         self.head_dim = head_dim
         self.page_size = page_size
         self.max_total_pages = max_total_pages
+        self.active_max_pages = max_total_pages
         self.device = device
         self.dtype = dtype
 
@@ -221,11 +222,24 @@ class StaticPagedKVPool:
         self.free_page_indices: List[int] = list(range(max_total_pages))
         self.allocated_pages: Dict[str, List[int]] = {}
 
+    def adjust_active_capacity(self, new_max_pages: int) -> int:
+        """
+        Dynamically adjusts active page pool ceiling without reallocating tensor buffers.
+        Returns the adjusted active capacity.
+        """
+        new_capacity = max(1, min(new_max_pages, self.max_total_pages))
+        self.active_max_pages = new_capacity
+
+        allocated_set = set(p for pages in self.allocated_pages.values() for p in pages)
+        # Keep free pages that are within new_capacity and not currently allocated
+        self.free_page_indices = [p for p in range(new_capacity) if p not in allocated_set]
+        return new_capacity
+
     def allocate_pages(self, request_id: str, num_pages: int) -> List[int]:
         """Allocates contiguous slots with O(1) stack pop."""
         if len(self.free_page_indices) < num_pages:
             raise MemoryError(f"Out of static KV pages: requested {num_pages}, available {len(self.free_page_indices)}")
-        pages = [self.free_page_indices.pop() for _ in range(num_pages)]
+        pages = [self.free_page_indices.pop(0) for _ in range(num_pages)]
         if request_id not in self.allocated_pages:
             self.allocated_pages[request_id] = []
         self.allocated_pages[request_id].extend(pages)
@@ -234,14 +248,22 @@ class StaticPagedKVPool:
     def free_pages(self, request_id: str):
         """Reclaims page slots back to free stack."""
         pages = self.allocated_pages.pop(request_id, [])
-        self.free_page_indices.extend(pages)
+        for p in pages:
+            if p < self.active_max_pages and p not in self.free_page_indices:
+                self.free_page_indices.append(p)
+        self.free_page_indices.sort()
 
     def get_stats(self) -> Dict[str, Any]:
-        used = self.max_total_pages - len(self.free_page_indices)
+        used = sum(len(p) for p in self.allocated_pages.values())
+        free = max(0, self.active_max_pages - used)
         return {
-            "total_pages": self.max_total_pages,
+            "total_pages": self.active_max_pages,
+            "max_physical_pages": self.max_total_pages,
             "used_pages": used,
-            "free_pages": len(self.free_page_indices),
-            "utilization_pct": round((used / self.max_total_pages) * 100.0, 2)
+            "free_pages": free,
+            "utilization_pct": round((used / max(1, self.active_max_pages)) * 100.0, 2)
         }
+
+
+
 

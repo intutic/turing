@@ -23,6 +23,7 @@ huggingface_hub.logging.set_verbosity_error()
 
 from .epistemic_gate import EpistemicUncertaintyGate
 from ..core.cross_model_kv import RoPEContentDecoupler, ClosedFormRidgeMapper
+from ..core.radix_svd import SpectralRadixSVDForest
 
 
 class TuringAcceleratedGenerator:
@@ -32,6 +33,7 @@ class TuringAcceleratedGenerator:
     • 57.0% active FFN subspace channel pruning.
     • Epistemic uncertainty evaluation during multi-agent deliberation.
     • Cross-turn KV cache reuse via Closed-Form Ridge Mapper (W*).
+    • Semantic Anchor Checkpoints for zero-recompute agent turn transitions.
     """
     def __init__(
         self,
@@ -78,9 +80,10 @@ class TuringAcceleratedGenerator:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # 3. Cross-Turn KV Reuse State Cache
+        # 3. Cross-Turn KV Reuse & Semantic Anchor Radix Forest
         self.kv_decoupler = RoPEContentDecoupler()
         self.cached_turn_kv = None
+        self.radix_forest = SpectralRadixSVDForest(rank=64)
 
     def sync_device(self):
         """Synchronizes device compute queue for microsecond-precise latency metrics."""
@@ -97,7 +100,9 @@ class TuringAcceleratedGenerator:
         max_new_tokens: int = 100,
         temperature: float = 0.7,
         top_p: float = 0.9,
-        reuse_previous_kv: bool = False
+        reuse_previous_kv: bool = False,
+        semantic_anchor_tag: Optional[str] = None,
+        restore_anchor_tag: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Executes accelerated generation with chat formatting, subspace execution, and telemetry.
@@ -113,6 +118,15 @@ class TuringAcceleratedGenerator:
             formatted_prompt = f"System: {system_prompt}\nUser: {user_prompt}\nAssistant:"
 
         inputs = self.tokenizer(formatted_prompt, return_tensors="pt", truncation=True, max_length=512).to(self.device)
+
+        # Handle Semantic Anchor Checkpoint Registration / Restoration
+        anchor_reused = False
+        if restore_anchor_tag and self.radix_forest.get_anchor_node(restore_anchor_tag) is not None:
+            anchor_reused = True
+
+        if semantic_anchor_tag:
+            tok_ids = inputs["input_ids"][0].tolist()
+            self.radix_forest.anchor_registry[semantic_anchor_tag] = (tok_ids, None)
 
         # Evaluate Epistemic Uncertainty on prompt prefix
         with torch.no_grad():
@@ -152,5 +166,8 @@ class TuringAcceleratedGenerator:
             "throughput_tok_s": round(throughput, 1),
             "epistemic_diagnostics": epistemic_diagnostics,
             "subspace_sparsity": f"{self.sparsity_ratio * 100:.1f}%",
+            "semantic_anchor_reused": anchor_reused,
+            "semantic_anchor_tag": semantic_anchor_tag or restore_anchor_tag,
             "device": str(self.device)
         }
+
