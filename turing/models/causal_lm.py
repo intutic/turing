@@ -11,7 +11,9 @@ from ..config import ModelConfig
 from ..core.subspace import SubspaceRecirculation
 from ..core.router import SubspaceStructuredRouter
 from ..core.rope import NTKDynamicRoPEScaling, apply_rotary_pos_emb
+from ..core.hybrid_attention import ChunkContextScorer
 from ..kernels.dispatch import dispatch_swiglu
+
 
 class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-6):
@@ -83,6 +85,7 @@ class SubspaceAttention(nn.Module):
             max_position_embeddings=config.max_position_embeddings,
             base_theta=config.rope_theta
         )
+        self.chunk_scorer = ChunkContextScorer(hidden_dim=self.num_kv_heads * self.head_dim, budget_tokens=2048)
 
     def forward(
         self,
@@ -132,6 +135,7 @@ class SubspaceAttention(nn.Module):
         output = self.o_proj(attn_out)
 
         return output, cur_k, cur_v
+
 
 class SubspaceDecoderLayer(nn.Module):
     """

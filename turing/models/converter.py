@@ -127,3 +127,36 @@ class TuringConverter:
             # Write SVD projection matrix
             u_np = u_proj.detach().cpu().numpy().astype(np.float16)
             f.write(u_np.tobytes())
+
+    @staticmethod
+    def compute_mean_centered_klt(
+        activations: torch.Tensor, # [N, Dim]
+        rank: int = 64,
+        apply_hadamard: bool = True
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Computes Mean-Centered Karhunen-Loève / SVD Transform with Hadamard Equalization.
+        Returns: (W_down, W_up, mu, beta)
+        where beta = mu @ W_up (folded into layer residual bias).
+        """
+        mu = activations.mean(dim=0, keepdim=True) # [1, Dim]
+        centered = activations - mu
+
+        # Covariance SVD / PCA
+        U, S, Vh = torch.linalg.svd(centered, full_matrices=False)
+        w_down = Vh[:rank, :].t() # [Dim, Rank]
+        w_up = Vh[:rank, :]       # [Rank, Dim]
+
+        if apply_hadamard and rank >= 16:
+            # Deterministic orthogonal Walsh-Hadamard transform on light singular coordinates
+            # to distribute outlier variance evenly before INT8 quantization
+            g = torch.Generator(device="cpu").manual_seed(42)
+            A = torch.randn(rank, rank, generator=g, dtype=activations.dtype, device=activations.device)
+            H, _ = torch.linalg.qr(A)
+
+            w_down = w_down @ H
+            w_up = H.t() @ w_up
+
+        beta = mu @ w_down @ w_up # Folded bias
+        return w_down, w_up, mu.squeeze(0), beta.squeeze(0)
+

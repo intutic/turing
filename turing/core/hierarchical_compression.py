@@ -67,20 +67,24 @@ class HCAChunkCompressor(nn.Module):
         new_seq_len = k.shape[1]
         num_chunks = new_seq_len // self.chunk_size
 
-        # Reshape into chunks: [Batch, NumChunks, ChunkSize, NumHeads, HeadDim]
-        k_chunks = k.view(batch, num_chunks, self.chunk_size, num_heads, head_dim)
-        v_chunks = v.view(batch, num_chunks, self.chunk_size, num_heads, head_dim)
-
-        # Compute chunk-level attention pooling weights
-        # [Batch, NumChunks, ChunkSize, NumHeads, 1]
-        attn_logits = self.pool_proj(k_chunks)
-        attn_weights = F.softmax(attn_logits, dim=2)
-
-        # Weighted sum: [Batch, NumChunks, NumHeads, HeadDim]
-        k_summary = (k_chunks * attn_weights).sum(dim=2)
-        v_summary = (v_chunks * attn_weights).sum(dim=2)
+        if self.pool_proj.in_features == head_dim:
+            k_chunks = k.view(batch, num_chunks, self.chunk_size, num_heads, head_dim)
+            v_chunks = v.view(batch, num_chunks, self.chunk_size, num_heads, head_dim)
+            attn_logits = self.pool_proj(k_chunks)
+            attn_weights = F.softmax(attn_logits, dim=2)
+            k_summary = (k_chunks * attn_weights).sum(dim=2)
+            v_summary = (v_chunks * attn_weights).sum(dim=2)
+        else:
+            k_chunks = k.contiguous().view(batch, num_chunks, self.chunk_size, num_heads * head_dim)
+            v_chunks = v.contiguous().view(batch, num_chunks, self.chunk_size, num_heads * head_dim)
+            attn_logits = self.pool_proj(k_chunks)
+            attn_weights = F.softmax(attn_logits, dim=2)
+            k_summary = (k_chunks * attn_weights).sum(dim=2).view(batch, num_chunks, num_heads, head_dim)
+            v_summary = (v_chunks * attn_weights).sum(dim=2).view(batch, num_chunks, num_heads, head_dim)
 
         return k_summary, v_summary
+
+
 
 
 class CSAChunkCompressor(nn.Module):

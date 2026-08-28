@@ -34,6 +34,8 @@
 #include "turing_matryoshka_quadtree.hpp"
 #include "turing_svd_quant.hpp"
 #include "turing_ridge_solver.hpp"
+#include "turing_latent_decode.hpp"
+
 
 #include <pybind11/pybind11.h>
 
@@ -1081,6 +1083,44 @@ PYBIND11_MODULE(turing_csrc, m) {
 
         return out_arr;
     }, "Native C++20 Fused Ridge Representation Projection");
+
+    // Native C++20 Latent Flash-Decode (Mode-B)
+    m.def("latent_decode_cpu", [](
+        py::array_t<float, py::array::c_style> qp_arr,
+        py::array_t<int8_t, py::array::c_style> ck_arr,
+        py::array_t<float, py::array::c_style> sk_arr,
+        py::array_t<int8_t, py::array::c_style> cv_arr,
+        py::array_t<float, py::array::c_style> sv_arr,
+        float scale
+    ) {
+        py::buffer_info q_buf = qp_arr.request();
+        py::buffer_info ck_buf = ck_arr.request();
+        py::buffer_info sk_buf = sk_arr.request();
+        py::buffer_info cv_buf = cv_arr.request();
+        py::buffer_info sv_buf = sv_arr.request();
+
+        int B = static_cast<int>(ck_buf.shape[0]);
+        int N = static_cast<int>(ck_buf.shape[1]);
+        int R = static_cast<int>(ck_buf.shape[2]);
+        int total_q = static_cast<int>(q_buf.shape[0]); // B * NKV * GRP
+        int GRP = (total_q >= B) ? (total_q / B) : 1;
+        int NKV = 1;
+
+        auto out_arr = py::array_t<float>({total_q, R});
+
+        turing::latent_decode_avx2(
+            static_cast<const float*>(q_buf.ptr),
+            static_cast<const int8_t*>(ck_buf.ptr),
+            static_cast<const float*>(sk_buf.ptr),
+            static_cast<const int8_t*>(cv_buf.ptr),
+            static_cast<const float*>(sv_buf.ptr),
+            static_cast<float*>(out_arr.request().ptr),
+            B, NKV, GRP, R, N, scale
+        );
+
+        return out_arr;
+    }, "Native C++20 AVX2 Latent Flash-Decode Attention (Mode-B)");
 }
+
 
 

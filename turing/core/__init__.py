@@ -15,7 +15,9 @@ from .cross_model_kv import RoPEContentDecoupler, ClosedFormRidgeMapper, SVDNull
 from .mhc import BirkhoffManifoldProjector, ManifoldHyperConnection
 from .hierarchical_compression import HCAChunkCompressor, CSAChunkCompressor, CrossLayerKVSharingManager
 from .cca import LayerwiseHeadBudgeter, CompressedConvolutionalAttention
+from .hybrid_attention import LinearRecurrentAttention, ChunkContextScorer, HybridAttentionLayerRouter
 from .heterogeneous_moe import BandwidthAdaptiveDecider, HostExpertBank, HeterogeneousMoERunner
+
 from .expert_cache import GPULRUExpertCache
 from .elastic_memory import ElasticMemoryBudgetManager
 from .hybrid_mesh import (
@@ -59,7 +61,11 @@ __all__ = [
     "CrossLayerKVSharingManager",
     "LayerwiseHeadBudgeter",
     "CompressedConvolutionalAttention",
+    "LinearRecurrentAttention",
+    "ChunkContextScorer",
+    "HybridAttentionLayerRouter",
     "BandwidthAdaptiveDecider",
+
     "HostExpertBank",
     "HeterogeneousMoERunner",
     "GPULRUExpertCache",
