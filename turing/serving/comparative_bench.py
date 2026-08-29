@@ -59,10 +59,11 @@ class ComparativeBenchmarker:
         page_indirection_reduction = (1.0 - (hierarchical_pages / static_16_pages)) * 100.0
 
         # 3. Empirical Micro-benchmarking (Single Layer Simulation on Target Device)
-        x = torch.randn(1, hidden_dim, device=self.device)
-        w_gate_dense = torch.randn(ffn_dim, hidden_dim, device=self.device)
-        w_up_dense = torch.randn(ffn_dim, hidden_dim, device=self.device)
-        w_down_dense = torch.randn(hidden_dim, ffn_dim, device=self.device)
+        dtype = torch.float16 if self.device.type == "cuda" else torch.float32
+        x = torch.randn(1, hidden_dim, device=self.device, dtype=dtype)
+        w_gate_dense = torch.randn(ffn_dim, hidden_dim, device=self.device, dtype=dtype)
+        w_up_dense = torch.randn(ffn_dim, hidden_dim, device=self.device, dtype=dtype)
+        w_down_dense = torch.randn(hidden_dim, ffn_dim, device=self.device, dtype=dtype)
 
         w_gate_sub = w_gate_dense[:subspace_dim, :]
         w_up_sub = w_up_dense[:subspace_dim, :]
@@ -74,6 +75,8 @@ class ComparativeBenchmarker:
             g = F.silu(F.linear(x, w_gate_dense))
             u = F.linear(x, w_up_dense)
             _ = F.linear(g * u, w_down_dense)
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
         dense_ffn_ms = (time.perf_counter() - start) / 50 * 1000.0
 
         # Benchmark Turing Engine Subspace Step
@@ -82,9 +85,17 @@ class ComparativeBenchmarker:
             g = F.silu(F.linear(x, w_gate_sub))
             u = F.linear(x, w_up_sub)
             _ = F.linear(g * u, w_down_sub)
+        if self.device.type == "cuda":
+            torch.cuda.synchronize()
         turing_ffn_ms = (time.perf_counter() - start) / 50 * 1000.0
 
         ffn_speedup = dense_ffn_ms / max(1e-5, turing_ffn_ms)
+
+        # Free GPU memory immediately
+        del x, w_gate_dense, w_up_dense, w_down_dense, w_gate_sub, w_up_sub, w_down_sub
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+
 
         # 4. Quadtree MRP Speculative Decoding Acceleration
         quadtree_branching = 4
