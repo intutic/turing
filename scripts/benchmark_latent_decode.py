@@ -128,6 +128,9 @@ def benchmark_hybrid_attention_prefill(device_name: str = "cpu"):
             dense_time = (time.perf_counter() - t0) / iters * 1000.0
         except (torch.cuda.OutOfMemoryError, RuntimeError):
             dense_time = None
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
 
         # 3:1 Hybrid
         t0 = time.perf_counter()
