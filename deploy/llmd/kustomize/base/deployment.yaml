@@ -17,7 +17,8 @@ spec:
     spec:
       containers:
         - name: turing-engine
-          image: ghcr.io/intutic/turing:v0.3.2-cuda
+          image: ghcr.io/intutic/turing:v0.3.3-cuda
+
           imagePullPolicy: IfNotPresent
 
 

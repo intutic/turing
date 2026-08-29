@@ -54,7 +54,8 @@ def create_app(engine: ContinuousBatchEngine, kv_publisher: Optional[KVBlockEven
                 kv_publisher.stop()
             await engine.stop()
 
-    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.3.2", lifespan=lifespan)
+    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.3.3", lifespan=lifespan)
+
 
 
 

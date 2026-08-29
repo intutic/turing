@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turing-engine"
-version = "0.3.2"
-description = "Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Runtime"
+version = "0.3.3"
+description = "High-performance inference engine for 70B+ LLMs on single consumer GPUs"
 
 
 
