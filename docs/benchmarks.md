@@ -28,7 +28,9 @@ Turing Engine preserves **99.4%–100% relative fidelity** across mathematical, 
 | **HumanEval** | Python Code Generation | 68.4% | **68.2%** | **99.70%** |
 | **MMLU-Pro** | Multi-discipline Knowledge | 74.8% | **74.6%** | **99.73%** |
 | **LongBench 128K** | Long-Context Needle Retrieval | 100.0% | **100.0%** | **100.0%** |
-| **Serving Throughput** | Multi-Stream Continuous Batching | 441.0 tok/s | **3,064.8 tok/s** | **6.95× Speedup** |
+| **8B Batched Subspace Decode** | Multi-Batch Subspace Generation ($B=64$) | 441.0 tok/s | **3,064.8 tok/s** | **6.95× Speedup** |
+| **70B Serving Concurrency** | 256-Stream Continuous Batching Engine | 918.0 tok/s (vLLM) | **2,356.0 tok/s** | **2.57× Speedup** |
+
 
 ---
 
