@@ -60,14 +60,21 @@ class ComparativeBenchmarker:
 
         # 3. Empirical Micro-benchmarking (Single Layer Simulation on Target Device)
         dtype = torch.float16 if self.device.type == "cuda" else torch.float32
-        x = torch.randn(1, hidden_dim, device=self.device, dtype=dtype)
-        w_gate_dense = torch.randn(ffn_dim, hidden_dim, device=self.device, dtype=dtype)
-        w_up_dense = torch.randn(ffn_dim, hidden_dim, device=self.device, dtype=dtype)
-        w_down_dense = torch.randn(hidden_dim, ffn_dim, device=self.device, dtype=dtype)
 
-        w_gate_sub = w_gate_dense[:subspace_dim, :]
-        w_up_sub = w_up_dense[:subspace_dim, :]
-        w_down_sub = w_down_dense[:, :subspace_dim]
+        # Scale down layer slice for ultra-large models (e.g. 1T) to avoid allocating >4GB per single weight tensor
+        max_bench_ffn = 16384
+        bench_ffn = min(ffn_dim, max_bench_ffn)
+        bench_sub = max(1, int(bench_ffn * (subspace_dim / ffn_dim)))
+        scale_factor = ffn_dim / bench_ffn
+
+        x = torch.randn(1, hidden_dim, device=self.device, dtype=dtype)
+        w_gate_dense = torch.randn(bench_ffn, hidden_dim, device=self.device, dtype=dtype)
+        w_up_dense = torch.randn(bench_ffn, hidden_dim, device=self.device, dtype=dtype)
+        w_down_dense = torch.randn(hidden_dim, bench_ffn, device=self.device, dtype=dtype)
+
+        w_gate_sub = w_gate_dense[:bench_sub, :]
+        w_up_sub = w_up_dense[:bench_sub, :]
+        w_down_sub = w_down_dense[:, :bench_sub]
 
         # Benchmark Dense Step
         start = time.perf_counter()
@@ -77,7 +84,7 @@ class ComparativeBenchmarker:
             _ = F.linear(g * u, w_down_dense)
         if self.device.type == "cuda":
             torch.cuda.synchronize()
-        dense_ffn_ms = (time.perf_counter() - start) / 50 * 1000.0
+        dense_ffn_ms = ((time.perf_counter() - start) / 50 * 1000.0) * scale_factor
 
         # Benchmark Turing Engine Subspace Step
         start = time.perf_counter()
@@ -87,9 +94,10 @@ class ComparativeBenchmarker:
             _ = F.linear(g * u, w_down_sub)
         if self.device.type == "cuda":
             torch.cuda.synchronize()
-        turing_ffn_ms = (time.perf_counter() - start) / 50 * 1000.0
+        turing_ffn_ms = ((time.perf_counter() - start) / 50 * 1000.0) * scale_factor
 
         ffn_speedup = dense_ffn_ms / max(1e-5, turing_ffn_ms)
+
 
         # Free GPU memory immediately
         del x, w_gate_dense, w_up_dense, w_down_dense, w_gate_sub, w_up_sub, w_down_sub
