@@ -4,10 +4,16 @@ Physical Empirical Benchmarking Suite for Native C++20 SIMD & Triton/CUDA Kernel
 Measures execution latencies, throughput, and speedup ratios on CPU, Apple Silicon (MPS), and NVIDIA GPU (CUDA).
 """
 
+import os
+import sys
 import time
 import argparse
 import torch
 import numpy as np
+
+# Ensure repo root is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 # Check native C++
 try:
@@ -248,6 +254,182 @@ def benchmark_mhc_hyperconnections(device: torch.device):
     print(f"mHC 4-Stream Recirculation Step (2048 tokens): {avg_ms:.3f} ms / layer")
 
 
+def benchmark_linear_recurrence(device: torch.device):
+    print("\n" + "=" * 80)
+    print(f"[*] 6. 3:1 LINEAR RECURRENT ATTENTION STEP & PREFILL ({device.type.upper()})")
+    print("=" * 80)
+
+    from turing.core.hybrid_attention import LinearRecurrentAttention
+
+    hidden_dim = 2048
+    num_heads = 16
+    head_dim = 128
+    layer = LinearRecurrentAttention(hidden_dim=hidden_dim, num_heads=num_heads, head_dim=head_dim).to(device)
+
+    # 1. Single-step decode (L=1)
+    x_dec = torch.randn(1, 1, hidden_dim, device=device)
+    state = torch.zeros(1, num_heads, head_dim, head_dim, device=device)
+
+    for _ in range(10):
+        _, state = layer(x_dec, state)
+    sync_device(device)
+
+    N_ITERS = 200
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _, state = layer(x_dec, state)
+    sync_device(device)
+    t1 = time.perf_counter()
+    dec_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    # 2. Chunk prefill (L=2048)
+    x_pref = torch.randn(1, 2048, hidden_dim, device=device)
+    for _ in range(5):
+        _, _ = layer(x_pref)
+    sync_device(device)
+
+    N_PREF = 30
+    t0 = time.perf_counter()
+    for _ in range(N_PREF):
+        _, _ = layer(x_pref)
+    sync_device(device)
+    t1 = time.perf_counter()
+    pref_ms = ((t1 - t0) / N_PREF) * 1000.0
+
+    print(f"Linear Recurrence Single-Step Decode (L=1)     : {dec_ms:.4f} ms / step ({1000.0/max(1e-6, dec_ms):.1f} tok/s)")
+    print(f"Linear Recurrence Chunk Prefill (L=2048)       : {pref_ms:.3f} ms / pass ({2048.0/(pref_ms/1000.0):.1f} tok/s)")
+
+
+def benchmark_svd_wire_codec(device: torch.device):
+    print("\n" + "=" * 80)
+    print(f"[*] 7. ZERO-COPY SVD WIRE ENCODE & DECODE CODEC ({device.type.upper()})")
+    print("=" * 80)
+
+    from turing.serving.kv_transfer import SVDNetworkKVWireCodec
+
+    seq_len = 64
+    num_heads = 8
+    head_dim = 128
+    rank = 64
+
+    u_raw = torch.randn(head_dim, rank, dtype=torch.float32)
+    q_u, _ = torch.linalg.qr(u_raw)
+    u_proj = q_u[:, :rank].contiguous()
+
+    k = torch.randn(seq_len, num_heads, head_dim, dtype=torch.float32)
+    v = torch.randn(seq_len, num_heads, head_dim, dtype=torch.float32)
+    toks = list(range(seq_len))
+
+    # Encode benchmark
+    for _ in range(10):
+        payload = SVDNetworkKVWireCodec.encode(k, v, u_proj, token_ids=toks)
+
+    N_ITERS = 100
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        payload = SVDNetworkKVWireCodec.encode(k, v, u_proj, token_ids=toks)
+    t1 = time.perf_counter()
+    enc_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    # Decode benchmark
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _ = SVDNetworkKVWireCodec.decode(payload, u_proj, device=torch.device("cpu"))
+    t1 = time.perf_counter()
+    dec_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    payload_kb = len(payload) / 1024.0
+    raw_fp16_kb = (2 * seq_len * num_heads * head_dim * 2) / 1024.0
+
+    print(f"SVD Wire Encode Latency (64 tokens, INT8)     : {enc_ms:.3f} ms / block")
+    print(f"SVD Wire Decode Latency (64 tokens, Full Recon): {dec_ms:.3f} ms / block")
+    print(f"Wire Payload Size                              : {payload_kb:.2f} KB vs Raw FP16 {raw_fp16_kb:.2f} KB (-{100*(1-payload_kb/raw_fp16_kb):.1f}%)")
+
+
+def benchmark_deterministic_fast_hash():
+    print("\n" + "=" * 80)
+    print(f"[*] 8. DETERMINISTIC TOKEN BLOCK HASHING (CPU SIMD / RAW POINTER)")
+    print("=" * 80)
+
+    from turing.serving.kv_events import deterministic_block_hash
+    import struct
+    import hashlib
+
+    tokens = list(range(1000, 1064)) # 64-token block
+    N_ITERS = 5000
+
+    # Benchmark standard Python struct + hashlib.sha256
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        data = struct.pack(f"<Q{'I' * len(tokens)}", 0, *tokens)
+        digest = hashlib.sha256(data).digest()
+        _ = struct.unpack("<Q", digest[:8])[0]
+    t1 = time.perf_counter()
+    py_sha_us = ((t1 - t0) / N_ITERS) * 1e6
+
+    # Benchmark native C++ xxHash64 / SHA-NI wrapper
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _ = deterministic_block_hash(tokens, seed=0)
+    t1 = time.perf_counter()
+    fast_us = ((t1 - t0) / N_ITERS) * 1e6
+
+    print(f"Python hashlib.sha256 Baseline: {py_sha_us:.3f} µs / block hash")
+    print(f"Native C++ Fast Hasher        : {fast_us:.3f} µs / block hash ({py_sha_us / max(1e-6, fast_us):.2f}x speedup)")
+
+
+def benchmark_fused_shannon_entropy(device: torch.device):
+    print("\n" + "=" * 80)
+    print(f"[*] 9. FUSED SHANNON ENTROPY & EPISTEMIC UNCERTAINTY ({device.type.upper()})")
+    print("=" * 80)
+
+    from turing.demo.epistemic_gate import EpistemicUncertaintyGate
+
+    gate = EpistemicUncertaintyGate(uncertainty_threshold=2.5)
+    logits = torch.randn(1, 32000, device=device, dtype=torch.float32)
+
+    # Warmup
+    for _ in range(10):
+        _ = gate.calculate_entropy(logits)
+    sync_device(device)
+
+    N_ITERS = 200
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _ = gate.calculate_entropy(logits)
+    sync_device(device)
+    t1 = time.perf_counter()
+    avg_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    print(f"Shannon Entropy & Epistemic Gate (Vocab=32000): {avg_ms:.4f} ms / step")
+
+
+def benchmark_hex_quant(device: torch.device):
+    print("\n" + "=" * 80)
+    print(f"[*] 10. HEXAGONAL TOPOLOGICAL CODEBOOK QUANTIZATION ({device.type.upper()})")
+    print("=" * 80)
+
+    from turing.core.hex_quant import HexagonalSubspaceQuantizer
+
+    quantizer = HexagonalSubspaceQuantizer(codebook_dim=64, grid_width=8, grid_height=8, device=device)
+    activations = torch.randn(256, 64, device=device, dtype=torch.float32)
+
+    # Warmup
+    for _ in range(10):
+        _, _ = quantizer.quantize_subspace(activations)
+    sync_device(device)
+
+    N_ITERS = 100
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _, _ = quantizer.quantize_subspace(activations)
+    sync_device(device)
+    t1 = time.perf_counter()
+    avg_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    print(f"Hexagonal BMU Quantization (256 tokens, 64-D)  : {avg_ms:.4f} ms / pass")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Turing Engine Native Kernel Fusions Benchmark")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cuda", "mps", "cpu"])
@@ -272,11 +454,17 @@ def main():
     benchmark_cross_kv(device)
     benchmark_hca_chunk_pool(device)
     benchmark_mhc_hyperconnections(device)
+    benchmark_linear_recurrence(device)
+    benchmark_svd_wire_codec(device)
+    benchmark_deterministic_fast_hash()
+    benchmark_fused_shannon_entropy(device)
+    benchmark_hex_quant(device)
 
     print("\n" + "=" * 80)
-    print("✅ All Kernel Fusion Benchmarks Completed Successfully.")
+    print("✅ All 10 Kernel Fusion Benchmarks Completed Successfully.")
     print("=" * 80 + "\n")
 
 
 if __name__ == "__main__":
     main()
+
