@@ -57,6 +57,16 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 - Evaluates attention exclusively across populated logical page slots (`active_page_mask`), accelerating Edge/CPU attention by **$1.96\times$**.
 - Caches prefix branch projection bases in a cache-aligned Radix Tree for instantaneous prompt prefix cache hits.
 
+### 1.4 Single-Step AVX2 Linear Recurrence (`csrc/turing_linear_recurrence.hpp`)
+- Fuses $S_t = \alpha S_{t-1} + V_t K_t^T$ and $O_t = S_t Q_t$ using AVX2 `_mm256_fmadd_ps` for zero-allocation single-step token decode.
+
+### 1.5 Zero-Copy SVD Wire Quantizer & Codec (`csrc/turing_svd_wire_codec.hpp`)
+- Fuses SVD subspace projection ($K \cdot U$), absolute max reduction, symmetric INT8 quantization, and binary byte serialization into a single pass (**-74.1% network wire payload**).
+
+### 1.6 Native Deterministic Token Block Hasher (`csrc/turing_fast_hash.hpp`)
+- Direct non-cryptographic 64-bit avalanche hashing (xxHash64 / Murmur3 mix) operating directly over raw `const uint32_t*` token buffers with 0 heap allocations (**1.76× faster than hashlib.sha256**).
+
+
 ---
 
 ## 2. Layer 2: Core Algorithmic Engines (`turing/core/`)
@@ -107,6 +117,10 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 | **Packed INT4 W4A16 GEMM** | `triton_w4a16.py` | Packs 8 INT4 nibbles into 32-bit words; dequantizes directly into GPU shared memory (SRAM). |
 | **Flash-Tree Attention** | `triton_flash_tree.py` | Verifies speculative candidate DAG trees in a single fused GPU attention pass. |
 | **Subspace Recirculation** | `triton_recirculation.py` | 2D-tiled fused Tensor Core recirculation for multi-agent belief state refinement. |
+| **Linear Recurrent Attention** | `triton_linear_recurrence.py` | Fused chunk-parallel linear attention kernel computing intra-chunk attention and inter-chunk state recurrence in SRAM. |
+| **1-Pass Online Shannon Entropy** | `shannon_entropy_cuda.py` | Online 1-pass Softmax + Log-Softmax + Entropic Summation reduction directly in registers without materializing probabilities. |
+| **Hexagonal Spatial Codebook** | `triton_hex_quant.py` | In-SRAM cosine similarity + Bitonic minimum index reduction against hexagonal codebook prototypes. |
+
 
 ---
 

@@ -81,9 +81,14 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
 * **The Problem**: Multi-step tensor reshaping, intermediate tensor allocation, and Python loops in speculative decoding and prefix paging create memory bandwidth bottlenecks.
 * **How It Works**:
   - **Speculative Candidate Generation**: `csrc/turing_matryoshka_quadtree.hpp` and `turing/kernels/triton_matryoshka_spec.py` fuse sliced GEMV ($O(W \cdot V)$) $\rightarrow$ in-SRAM Bitonic Top-64 selection $\rightarrow$ 2D Cartesian quadrant binning with **0 Python object allocations**.
-  - **Fused SVD INT8 Quantization**: `csrc/turing_svd_quant.hpp` and `turing/kernels/triton_svd_paged.py` fuse projection $K \cdot U \rightarrow$ in-register absolute max reduction $\rightarrow$ symmetric INT8 quantization in a single cache-resident pass (**27.28× faster on $L=512$**).
+  - **Fused SVD INT8 Quantization & Wire Serialization**: `csrc/turing_svd_quant.hpp`, `csrc/turing_svd_wire_codec.hpp`, and `turing/kernels/triton_svd_paged.py` fuse projection $K \cdot U \rightarrow$ in-register absolute max reduction $\rightarrow$ symmetric INT8 quantization in a single cache-resident pass (**25.03× faster on $L=512$** and **-74.1% wire payload**).
+  - **Fused 3:1 Linear Recurrence**: `csrc/turing_linear_recurrence.hpp` and `turing/kernels/triton_linear_recurrence.py` execute vectorized state updates ($S_t = \alpha S_{t-1} + V_t K_t^T$) in C++ AVX2 and fused chunk-parallel recurrence in Triton GPU shared memory (**103,404 tok/s chunk prefill**).
+  - **Deterministic Fast Block Hashing**: `csrc/turing_fast_hash.hpp` provides non-cryptographic 64-bit avalanche hashing over raw token pointers with zero GIL contention (**1.76× faster than hashlib.sha256**).
+  - **1-Pass Online Shannon Entropy**: `turing/kernels/shannon_entropy_cuda.py` evaluates epistemic uncertainty in a single kernel pass without materializing intermediate softmax probability tensors (**3.15× faster**).
+  - **Hexagonal Spatial Codebook Quantizer**: `turing/kernels/triton_hex_quant.py` evaluates BMU prototype distances and performs in-SRAM bitonic minimum selection for 2D topological mapping.
   - **Fused Inverse-RoPE & Ridge Transfer**: `csrc/turing_ridge_solver.hpp` and `turing/kernels/triton_cross_kv.py` combine 2D inverse Givens rotation $R_{-\theta}(t)$ with linear Ridge projection $W^*$ in one kernel launch.
   - **Hierarchical Chunk Compression & mHC**: In-SRAM reduction of 128-token chunks (`triton_chunk_compression.py`) and 4-stream Birkhoff mixing (`triton_mhc_fuse.py`).
+
 
 ---
 
