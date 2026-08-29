@@ -27,6 +27,7 @@ if HAS_TRITON:
         State_out_ptr,  # [B, H, D, D]
         decay,
         L,
+        H,
         stride_qb, stride_qh, stride_ql, stride_qd,
         stride_sb, stride_sh, stride_sd1, stride_sd2,
         D: tl.constexpr,
@@ -34,8 +35,9 @@ if HAS_TRITON:
         HAS_STATE: tl.constexpr
     ):
         bh = tl.program_id(0)
-        b = bh // stride_qh
-        h = bh % stride_qh
+        b = bh // H
+        h = bh % H
+
 
         offs_d1 = tl.arange(0, D)
         offs_d2 = tl.arange(0, D)
@@ -116,8 +118,9 @@ def chunk_linear_recurrence_cuda(
     _chunk_linear_recurrence_kernel[grid](
         q, k, v, out,
         state_in, next_state,
-        decay, seq_len,
+        decay, seq_len, h,
         q.stride(0), q.stride(1), q.stride(2), q.stride(3),
+
         next_state.stride(0), next_state.stride(1), next_state.stride(2), next_state.stride(3),
         D=d,
         CHUNK_SIZE=chunk_size,
