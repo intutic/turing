@@ -46,6 +46,13 @@ class HexagonalSubspaceQuantizer:
         x: [batch, codebook_dim]
         Returns: (bmu_indices [batch], min_distances [batch])
         """
+        if x.is_cuda:
+            try:
+                from ..kernels.triton_hex_quant import hex_quant_cuda
+                return hex_quant_cuda(x, self.codebook)
+            except Exception:
+                pass
+
         x_norm = nn.functional.normalize(x, p=2, dim=-1)
         
         # Parallel cosine similarity: [batch, total_cells]
@@ -54,6 +61,7 @@ class HexagonalSubspaceQuantizer:
 
         min_dists, bmu_indices = torch.min(dists, dim=-1)
         return bmu_indices, min_dists
+
 
     def quantize_subspace(self, activations: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """

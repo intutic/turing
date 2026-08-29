@@ -54,7 +54,25 @@ class LinearRecurrentAttention(nn.Module):
         if state is None:
             state = torch.zeros(batch, self.num_heads, self.head_dim, self.head_dim, device=x.device, dtype=x.dtype)
 
+        # 1. Native C++20 AVX2 single-step decode dispatch (L=1)
         if seq_len == 1:
+            try:
+                import turing.turing_csrc as turing_csrc
+                HAS_CSRC = True
+            except ImportError:
+                HAS_CSRC = False
+
+            if HAS_CSRC and not x.is_cuda and x.dtype == torch.float32:
+                q_np = q[:, :, 0, :].detach().cpu().contiguous().numpy()
+                k_np = k[:, :, 0, :].detach().cpu().contiguous().numpy()
+                v_np = v[:, :, 0, :].detach().cpu().contiguous().numpy()
+                s_np = state.detach().cpu().contiguous().numpy()
+
+                out_np, next_s_np = turing_csrc.linear_recurrence_step_cpu(q_np, k_np, v_np, s_np, float(self.decay))
+                out_t = torch.from_numpy(out_np).to(device=x.device, dtype=x.dtype).unsqueeze(1)
+                next_state = torch.from_numpy(next_s_np).to(device=x.device, dtype=x.dtype)
+                return self.out_proj(out_t.view(batch, 1, self.num_heads * self.head_dim)), next_state
+
             q_t = q[:, :, 0, :].unsqueeze(-1)  # [B, H, D, 1]
             k_t = k[:, :, 0, :].unsqueeze(-2)  # [B, H, 1, D]
             v_t = v[:, :, 0, :].unsqueeze(-1)  # [B, H, D, 1]
@@ -64,7 +82,18 @@ class LinearRecurrentAttention(nn.Module):
             out_seq = o_t.unsqueeze(2).transpose(1, 2).contiguous().view(batch, 1, self.num_heads * self.head_dim)
             return self.out_proj(out_seq), cur_state
 
-        # Fully vectorized chunk-parallel linear attention for fast prefill
+        # 2. Triton CUDA chunk-parallel linear recurrence dispatch (L > 1)
+        if x.is_cuda:
+            try:
+                from ..kernels.triton_linear_recurrence import chunk_linear_recurrence_cuda
+                out_seq, next_state = chunk_linear_recurrence_cuda(q, k, v, decay=float(self.decay), state=state)
+                out_seq = out_seq.transpose(1, 2).contiguous().view(batch, seq_len, self.num_heads * self.head_dim)
+                return self.out_proj(out_seq), next_state
+            except Exception:
+                pass
+
+        # Fully vectorized chunk-parallel linear attention for fast prefill fallback
+
         chunk_size = 64
         num_chunks = math.ceil(seq_len / chunk_size)
         pad_len = num_chunks * chunk_size - seq_len

@@ -22,12 +22,17 @@ except ImportError:
 def deterministic_block_hash(token_ids: List[int], seed: int = 0) -> int:
     """
     Deterministic 64-bit hash of a token ID sequence.
-    Uses SHA-256 truncated to 64 bits for cross-process/cross-pod consistency,
-    independent of Python's PYTHONHASHSEED.
+    Uses native C++20 xxHash64 / SHA-NI when available with zero allocations,
+    falling back to SHA-256 truncated to 64 bits.
     """
-    data = struct.pack(f"<Q{'I' * len(token_ids)}", seed, *token_ids)
-    digest = hashlib.sha256(data).digest()
-    return struct.unpack("<Q", digest[:8])[0]
+    try:
+        import turing.turing_csrc as turing_csrc
+        return int(turing_csrc.deterministic_token_hash_cpu(token_ids, seed))
+    except Exception:
+        data = struct.pack(f"<Q{'I' * len(token_ids)}", seed, *token_ids)
+        digest = hashlib.sha256(data).digest()
+        return struct.unpack("<Q", digest[:8])[0]
+
 
 
 class KVBlockEventPublisher:

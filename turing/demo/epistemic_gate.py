@@ -41,10 +41,18 @@ class EpistemicUncertaintyGate:
             ent_np = turing_csrc.compute_shannon_entropy(l_np)
             return float(ent_np.mean())
 
+        if logits.is_cuda:
+            try:
+                from ..kernels.shannon_entropy_cuda import fused_shannon_entropy_cuda
+                return float(fused_shannon_entropy_cuda(logits).mean().item())
+            except Exception:
+                pass
+
         probs = F.softmax(logits.float(), dim=-1)
         log_probs = F.log_softmax(logits.float(), dim=-1)
         entropy = -(probs * log_probs).sum(dim=-1).mean().item()
         return entropy
+
 
     def evaluate_step_uncertainty(self, logits: torch.Tensor) -> Dict[str, Any]:
         """

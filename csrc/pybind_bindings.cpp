@@ -35,9 +35,12 @@
 #include "turing_svd_quant.hpp"
 #include "turing_ridge_solver.hpp"
 #include "turing_latent_decode.hpp"
-
+#include "turing_linear_recurrence.hpp"
+#include "turing_svd_wire_codec.hpp"
+#include "turing_fast_hash.hpp"
 
 #include <pybind11/pybind11.h>
+
 
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
@@ -1120,7 +1123,106 @@ PYBIND11_MODULE(turing_csrc, m) {
 
         return out_arr;
     }, "Native C++20 AVX2 Latent Flash-Decode Attention (Mode-B)");
+
+    // Native C++20 Linear Recurrent Attention Step (Decode L=1)
+    m.def("linear_recurrence_step_cpu", [](
+        py::array_t<float, py::array::c_style> q_arr,
+        py::array_t<float, py::array::c_style> k_arr,
+        py::array_t<float, py::array::c_style> v_arr,
+        py::array_t<float, py::array::c_style> state_arr,
+        float decay
+    ) {
+        py::buffer_info q_buf = q_arr.request();
+        py::buffer_info k_buf = k_arr.request();
+        py::buffer_info v_buf = v_arr.request();
+        py::buffer_info s_buf = state_arr.request();
+
+        int B = static_cast<int>(q_buf.shape[0]);
+        int H = static_cast<int>(q_buf.shape[1]);
+        int D = static_cast<int>(q_buf.shape[2]);
+
+        auto out_arr = py::array_t<float>({B, H, D});
+        auto next_state_arr = py::array_t<float>({B, H, D, D});
+
+        // Copy current state into next_state_arr
+        std::memcpy(next_state_arr.request().ptr, s_buf.ptr, B * H * D * D * sizeof(float));
+
+        turing::linear_recurrence_step_avx2(
+            static_cast<const float*>(q_buf.ptr),
+            static_cast<const float*>(k_buf.ptr),
+            static_cast<const float*>(v_buf.ptr),
+            static_cast<float*>(next_state_arr.request().ptr),
+            static_cast<float*>(out_arr.request().ptr),
+            B, H, D, decay
+        );
+
+        return py::make_tuple(out_arr, next_state_arr);
+    }, "Native C++20 AVX2 Linear Recurrent Attention Step");
+
+    // Native C++20 SVD Wire Project & Quantize
+    m.def("svd_wire_project_quantize_cpu", [](
+        py::array_t<float, py::array::c_style> input_arr,
+        py::array_t<float, py::array::c_style> u_proj_arr
+    ) {
+        py::buffer_info in_buf = input_arr.request();
+        py::buffer_info u_buf = u_proj_arr.request();
+
+        int N = static_cast<int>(in_buf.shape[0]);
+        int Heads = static_cast<int>(in_buf.shape[1]);
+        int HeadDim = static_cast<int>(in_buf.shape[2]);
+        int Rank = static_cast<int>(u_buf.shape[1]);
+
+        auto int8_out = py::array_t<int8_t>({N, Heads, Rank});
+        auto scale_out = py::array_t<float>({N, Heads, 1});
+
+        turing::svd_wire_project_quantize_avx2(
+            static_cast<const float*>(in_buf.ptr),
+            static_cast<const float*>(u_buf.ptr),
+            static_cast<int8_t*>(int8_out.request().ptr),
+            static_cast<float*>(scale_out.request().ptr),
+            N, Heads, HeadDim, Rank
+        );
+
+        return py::make_tuple(int8_out, scale_out);
+    }, "Native C++20 AVX2 SVD Wire Projection and INT8 Quantization");
+
+    // Native C++20 SVD Wire Dequantize & Reconstruct
+    m.def("svd_wire_dequantize_reconstruct_cpu", [](
+        py::array_t<int8_t, py::array::c_style> input_int8_arr,
+        py::array_t<float, py::array::c_style> scale_arr,
+        py::array_t<float, py::array::c_style> u_proj_arr
+    ) {
+        py::buffer_info in_buf = input_int8_arr.request();
+        py::buffer_info sc_buf = scale_arr.request();
+        py::buffer_info u_buf = u_proj_arr.request();
+
+        int N = static_cast<int>(in_buf.shape[0]);
+        int Heads = static_cast<int>(in_buf.shape[1]);
+        int Rank = static_cast<int>(in_buf.shape[2]);
+        int HeadDim = static_cast<int>(u_buf.shape[0]);
+
+        auto out_arr = py::array_t<float>({N, Heads, HeadDim});
+
+        turing::svd_wire_dequantize_reconstruct_avx2(
+            static_cast<const int8_t*>(in_buf.ptr),
+            static_cast<const float*>(sc_buf.ptr),
+            static_cast<const float*>(u_buf.ptr),
+            static_cast<float*>(out_arr.request().ptr),
+            N, Heads, HeadDim, Rank
+        );
+
+        return out_arr;
+    }, "Native C++20 AVX2 SVD Wire Dequantization and Full-Rank Reconstruction");
+
+    // Native C++20 High-Throughput Deterministic Token Hasher
+    m.def("deterministic_token_hash_cpu", [](
+        std::vector<uint32_t> token_ids,
+        uint64_t seed
+    ) -> uint64_t {
+        return turing::deterministic_token_hash_cpp(token_ids.data(), token_ids.size(), seed);
+    }, "Native C++20 Deterministic 64-bit Token Block Hasher");
 }
+
 
 
 

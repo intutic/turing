@@ -47,16 +47,35 @@ class SVDNetworkKVWireCodec:
         rank = u_proj.shape[1]
         toks = token_ids if token_ids is not None else [0] * seq_len
 
-        # 1. Project into SVD subspace
-        k_sub = torch.matmul(k_tensor, u_proj)  # [SeqLen, Heads, Rank]
-        v_sub = torch.matmul(v_tensor, u_proj)
+        # 1. Project into SVD subspace & INT8 Quantize
+        try:
+            import turing.turing_csrc as turing_csrc
+            HAS_CSRC = True
+        except ImportError:
+            HAS_CSRC = False
 
-        # 2. Symmetric INT8 Quantization
-        k_scale = torch.amax(torch.abs(k_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
-        v_scale = torch.amax(torch.abs(v_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
+        if HAS_CSRC and not k_tensor.is_cuda and k_tensor.dtype == torch.float32:
+            k_np = k_tensor.detach().cpu().contiguous().numpy()
+            v_np = v_tensor.detach().cpu().contiguous().numpy()
+            u_np = u_proj.detach().cpu().contiguous().numpy()
 
-        k_int8 = torch.clamp(torch.round(k_sub / k_scale), -128, 127).to(torch.int8)
-        v_int8 = torch.clamp(torch.round(v_sub / v_scale), -128, 127).to(torch.int8)
+            k_int8_np, k_scale_np = turing_csrc.svd_wire_project_quantize_cpu(k_np, u_np)
+            v_int8_np, v_scale_np = turing_csrc.svd_wire_project_quantize_cpu(v_np, u_np)
+
+            k_int8 = torch.from_numpy(k_int8_np)
+            k_scale = torch.from_numpy(k_scale_np)
+            v_int8 = torch.from_numpy(v_int8_np)
+            v_scale = torch.from_numpy(v_scale_np)
+        else:
+            k_sub = torch.matmul(k_tensor, u_proj)  # [SeqLen, Heads, Rank]
+            v_sub = torch.matmul(v_tensor, u_proj)
+
+            k_scale = torch.amax(torch.abs(k_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
+            v_scale = torch.amax(torch.abs(v_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
+
+            k_int8 = torch.clamp(torch.round(k_sub / k_scale), -128, 127).to(torch.int8)
+            v_int8 = torch.clamp(torch.round(v_sub / v_scale), -128, 127).to(torch.int8)
+
 
         # 3. Serialize tensors
         k_int8_bytes = TensorSerializer.serialize(k_int8.to(torch.float32), compress_int8=True)
@@ -122,14 +141,34 @@ class SVDNetworkKVWireCodec:
         v_scale_t = TensorSerializer.deserialize(v_scale_bytes, device=device)
 
         # Dequantize & reconstruct via u_proj.T
-        u_proj_dev = u_proj.to(device)
-        k_sub_fp = k_int8_t * k_scale_t
-        v_sub_fp = v_int8_t * v_scale_t
+        try:
+            import turing.turing_csrc as turing_csrc
+            HAS_CSRC = True
+        except ImportError:
+            HAS_CSRC = False
 
-        k_recon = torch.matmul(k_sub_fp, u_proj_dev.t())
-        v_recon = torch.matmul(v_sub_fp, u_proj_dev.t())
+        if HAS_CSRC and device.type == "cpu":
+            k_int8_np = k_int8_t.to(torch.int8).contiguous().numpy()
+            k_scale_np = k_scale_t.to(torch.float32).contiguous().numpy()
+            v_int8_np = v_int8_t.to(torch.int8).contiguous().numpy()
+            v_scale_np = v_scale_t.to(torch.float32).contiguous().numpy()
+            u_np = u_proj.detach().cpu().to(torch.float32).contiguous().numpy()
+
+            k_recon_np = turing_csrc.svd_wire_dequantize_reconstruct_cpu(k_int8_np, k_scale_np, u_np)
+            v_recon_np = turing_csrc.svd_wire_dequantize_reconstruct_cpu(v_int8_np, v_scale_np, u_np)
+
+            k_recon = torch.from_numpy(k_recon_np).to(device)
+            v_recon = torch.from_numpy(v_recon_np).to(device)
+        else:
+            u_proj_dev = u_proj.to(device)
+            k_sub_fp = k_int8_t * k_scale_t
+            v_sub_fp = v_int8_t * v_scale_t
+
+            k_recon = torch.matmul(k_sub_fp, u_proj_dev.t())
+            v_recon = torch.matmul(v_sub_fp, u_proj_dev.t())
 
         return k_recon, v_recon, toks
+
 
 
 def serialize_kv_block_svd(
