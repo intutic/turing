@@ -112,7 +112,7 @@ def chunk_linear_recurrence_cuda(
     has_state = state is not None
     state_in = state if has_state else next_state
 
-    chunk_size = 64
+    chunk_size = 32 if d <= 64 else 32
     grid = (b * h,)
 
     _chunk_linear_recurrence_kernel[grid](
@@ -120,13 +120,12 @@ def chunk_linear_recurrence_cuda(
         state_in, next_state,
         decay, seq_len, h,
         q.stride(0), q.stride(1), q.stride(2), q.stride(3),
-
         next_state.stride(0), next_state.stride(1), next_state.stride(2), next_state.stride(3),
         D=d,
         CHUNK_SIZE=chunk_size,
         HAS_STATE=has_state,
         num_warps=4,
-        num_stages=2
+        num_stages=1
     )
 
     return out, next_state
