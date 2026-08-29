@@ -90,8 +90,9 @@ ext_modules = [
 
 setup(
     name="turing-engine",
-    version="0.3.1",
+    version="0.3.2",
     author="Ishan Gupta",
+
 
 
 

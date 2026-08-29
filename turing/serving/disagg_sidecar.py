@@ -63,7 +63,8 @@ class DisaggRoutingCoordinator:
 
 def create_disagg_proxy_app(coordinator: DisaggRoutingCoordinator) -> FastAPI:
     """Creates FastAPI proxy app for disaggregated sidecar deployment."""
-    app = FastAPI(title="Turing Disaggregation Proxy Sidecar", version="0.3.1")
+    app = FastAPI(title="Turing Disaggregation Proxy Sidecar", version="0.3.2")
+
 
 
 

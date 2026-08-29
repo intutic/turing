@@ -14,8 +14,9 @@ Get Turing Engine running locally in under 30 seconds.
 === "Pre-Built Binary Wheel"
     ```bash
     # Direct wheel download for macOS Apple Silicon (arm64):
-    pip install https://github.com/intutic/turing/releases/download/v0.3.1/turing_engine-0.3.1-cp311-cp311-macosx_15_0_arm64.whl
+    pip install https://github.com/intutic/turing/releases/download/v0.3.2/turing_engine-0.3.2-cp311-cp311-macosx_15_0_arm64.whl
     ```
+
 
 
 

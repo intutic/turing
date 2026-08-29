@@ -3,7 +3,8 @@
 **Serve Frontier 70B+ Models on a Single Consumer GPU (24GB) or Mac Workstation with 75% Less Memory.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v0.3.1](https://img.shields.io/badge/Release-v0.3.1-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.3.1)
+[![Release: v0.3.2](https://img.shields.io/badge/Release-v0.3.2-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.3.2)
+
 
 
 
@@ -169,14 +170,15 @@ Explore the complete documentation at [**intutic.github.io/turing**](https://int
 
 ---
 
-## 📦 Pre-Built Binary Wheels (v0.3.1)
+## 📦 Pre-Built Binary Wheels (v0.3.2)
 
-Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.3.1](https://github.com/intutic/turing/releases/tag/v0.3.1):
+Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.3.2](https://github.com/intutic/turing/releases/tag/v0.3.2):
 
 ```bash
 # Install directly from release wheel:
-pip install https://github.com/intutic/turing/releases/download/v0.3.1/turing_engine-0.3.1-cp311-cp311-macosx_15_0_arm64.whl
+pip install https://github.com/intutic/turing/releases/download/v0.3.2/turing_engine-0.3.2-cp311-cp311-macosx_15_0_arm64.whl
 ```
+
 
 
 
