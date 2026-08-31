@@ -253,45 +253,33 @@ class ContinuousBatchEngine:
         finished_indices = []
         now = time.time()
 
-        for i, req in enumerate(self.running_batch):
-            with torch.inference_mode():
-                # Case A: Chunked Prefilling with Lane-Specific Budget
-                if req.state == RequestState.PREFILLING:
-                    chunk_budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) else self.prefill_chunk_size
-                    chunk_end = min(req.prefill_offset + chunk_budget, len(req.prompt_tokens))
-                    chunk_tokens = req.prompt_tokens[req.prefill_offset:chunk_end]
-                    chunk_input = torch.tensor([chunk_tokens], dtype=torch.long, device=self.device)
+        # Partition running batch into prefill and decode requests
+        prefill_reqs = [req for req in self.running_batch if req.state == RequestState.PREFILLING]
+        decode_reqs = [req for req in self.running_batch if req.state == RequestState.DECODING]
 
-                    logits, new_kv = self.model(chunk_input, past_key_values=req.past_kv)
-                    req.past_kv = new_kv
-                    req.prefill_offset = chunk_end
+        with torch.inference_mode():
+            # =========================================================================
+            # Phase 1: Piggybacked Chunked Prefill (Compute-Bound Slice)
+            # =========================================================================
+            if prefill_reqs:
+                # Process highest priority prefill request up to its chunk budget
+                req = prefill_reqs[0]
+                chunk_budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) else self.prefill_chunk_size
+                chunk_end = min(req.prefill_offset + chunk_budget, len(req.prompt_tokens))
+                chunk_tokens = req.prompt_tokens[req.prefill_offset:chunk_end]
+                chunk_input = torch.tensor([chunk_tokens], dtype=torch.long, device=self.device)
 
-                    # If entire prompt has been prefilled, transition to decode
-                    if req.prefill_offset >= len(req.prompt_tokens):
-                        req.state = RequestState.DECODING
-                        next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)
-                        req.first_token_at = now
-                        req.last_token_at = now
-                        self.recent_ttft.append(now - req.created_at)
+                logits, new_kv = self.model(chunk_input, past_key_values=req.past_kv)
+                req.past_kv = new_kv
+                req.prefill_offset = chunk_end
 
-                        req.generated_tokens.append(next_token)
-                        self.total_tokens_generated += 1
-                        req.output_queue.put_nowait(next_token)
-                        req.current_input = torch.tensor([[next_token]], dtype=torch.long, device=self.device)
-
-                        if len(req.generated_tokens) >= req.max_new_tokens:
-                            self._finish_request(req, now)
-                            finished_indices.append(i)
-
-                # Case B: Autoregressive Decoding
-                elif req.state == RequestState.DECODING:
-                    logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
-                    req.past_kv = new_kv
-
+                # If entire prompt prefilled, transition to decode & emit first token
+                if req.prefill_offset >= len(req.prompt_tokens):
+                    req.state = RequestState.DECODING
                     next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)
-                    if req.last_token_at is not None:
-                        self.recent_itl.append(now - req.last_token_at)
+                    req.first_token_at = now
                     req.last_token_at = now
+                    self.recent_ttft.append(now - req.created_at)
 
                     req.generated_tokens.append(next_token)
                     self.total_tokens_generated += 1
@@ -300,11 +288,32 @@ class ContinuousBatchEngine:
 
                     if len(req.generated_tokens) >= req.max_new_tokens:
                         self._finish_request(req, now)
-                        finished_indices.append(i)
 
-        # Clean up finished requests
-        for idx in reversed(finished_indices):
-            self.running_batch.pop(idx)
+            # =========================================================================
+            # Phase 2: Parallel Interleaved Autoregressive Decode (Bandwidth-Bound Slice)
+            # =========================================================================
+            for req in decode_reqs:
+                if req.state != RequestState.DECODING:
+                    continue
+
+                logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
+                req.past_kv = new_kv
+
+                next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)
+                if req.last_token_at is not None:
+                    self.recent_itl.append(now - req.last_token_at)
+                req.last_token_at = now
+
+                req.generated_tokens.append(next_token)
+                self.total_tokens_generated += 1
+                req.output_queue.put_nowait(next_token)
+                req.current_input = torch.tensor([[next_token]], dtype=torch.long, device=self.device)
+
+                if len(req.generated_tokens) >= req.max_new_tokens:
+                    self._finish_request(req, now)
+
+        # Clean up finished requests from active running batch
+        self.running_batch = [req for req in self.running_batch if req.state != RequestState.FINISHED]
 
     def _sample_token(self, next_token_logits: torch.Tensor, temperature: float, top_k: int) -> int:
         if temperature > 0:
@@ -334,8 +343,13 @@ class ContinuousBatchEngine:
         avg_ttft_ms = (sum(self.recent_ttft) / len(self.recent_ttft) * 1000.0) if self.recent_ttft else 0.0
         avg_itl_ms = (sum(self.recent_itl) / len(self.recent_itl) * 1000.0) if self.recent_itl else 0.0
 
+        p50_ttft_ms = float(torch.tensor(list(self.recent_ttft)).quantile(0.50).item() * 1000.0) if len(self.recent_ttft) >= 2 else avg_ttft_ms
         p95_ttft_ms = float(torch.tensor(list(self.recent_ttft)).quantile(0.95).item() * 1000.0) if len(self.recent_ttft) >= 5 else avg_ttft_ms
         p99_ttft_ms = float(torch.tensor(list(self.recent_ttft)).quantile(0.99).item() * 1000.0) if len(self.recent_ttft) >= 10 else avg_ttft_ms
+
+        p50_itl_ms = float(torch.tensor(list(self.recent_itl)).quantile(0.50).item() * 1000.0) if len(self.recent_itl) >= 2 else avg_itl_ms
+        p95_itl_ms = float(torch.tensor(list(self.recent_itl)).quantile(0.95).item() * 1000.0) if len(self.recent_itl) >= 5 else avg_itl_ms
+        p99_itl_ms = float(torch.tensor(list(self.recent_itl)).quantile(0.99).item() * 1000.0) if len(self.recent_itl) >= 10 else avg_itl_ms
 
         telemetry: Dict[str, Any] = {
             "uptime_seconds": round(uptime, 2),
@@ -347,9 +361,13 @@ class ContinuousBatchEngine:
             "kv_memory_pool": self.kv_pool.get_stats(),
             "latency": {
                 "avg_ttft_ms": round(avg_ttft_ms, 2),
+                "p50_ttft_ms": round(p50_ttft_ms, 2),
                 "p95_ttft_ms": round(p95_ttft_ms, 2),
                 "p99_ttft_ms": round(p99_ttft_ms, 2),
-                "avg_itl_ms": round(avg_itl_ms, 2)
+                "avg_itl_ms": round(avg_itl_ms, 2),
+                "p50_itl_ms": round(p50_itl_ms, 2),
+                "p95_itl_ms": round(p95_itl_ms, 2),
+                "p99_itl_ms": round(p99_itl_ms, 2)
             }
         }
         if self.admission is not None:
