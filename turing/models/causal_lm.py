@@ -2,7 +2,7 @@
 Full Subspace Causal Language Model (SubspaceCausalLM) Architecture with GQA, RoPE & Subspace SwiGLU.
 """
 
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Any
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -172,11 +172,12 @@ class SubspaceCausalLM(nn.Module):
     """
     End-to-end Autoregressive Subspace Causal Language Model with stateful generation.
     """
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: ModelConfig, adapter_manager: Optional[Any] = None):
         super().__init__()
         self.config = config
         self.vocab_size = config.vocab_size
         self.hidden_dim = config.hidden_dim
+        self.adapter_manager = adapter_manager
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_dim)
         self.layers = nn.ModuleList([SubspaceDecoderLayer(config, i) for i in range(config.num_layers)])
@@ -197,7 +198,8 @@ class SubspaceCausalLM(nn.Module):
         self,
         input_ids: torch.Tensor,
         past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
-        start_pos: int = 0
+        start_pos: int = 0,
+        tenant_id: Optional[str] = None
     ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
         batch, seq_len = input_ids.shape
         hidden_states = self.embed_tokens(input_ids)
@@ -220,6 +222,10 @@ class SubspaceCausalLM(nn.Module):
             if i == len(self.layers) - 2 and shallow_state is not None:
                 hidden_states = self.recirculation(hidden_states, shallow_state)
 
+        # Apply multi-tenant dynamic LoRA adapter if active
+        if tenant_id is not None and self.adapter_manager is not None:
+            hidden_states = self.adapter_manager.forward_tenant(hidden_states, tenant_id)
+
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)
 
@@ -231,10 +237,11 @@ class SubspaceCausalLM(nn.Module):
         prompt_token_ids: List[int],
         max_new_tokens: int = 32,
         temperature: float = 0.7,
-        top_k: int = 50
+        top_k: int = 50,
+        tenant_id: Optional[str] = None
     ) -> List[int]:
         """
-        Stateful autoregressive token generation loop.
+        Stateful autoregressive token generation loop with optional multi-tenant LoRA routing.
         """
         device = next(self.parameters()).device
         output_ids = list(prompt_token_ids)
@@ -244,7 +251,13 @@ class SubspaceCausalLM(nn.Module):
         start_pos = 0
 
         for _ in range(max_new_tokens):
-            logits, past_kv = self.forward(cur_input, past_key_values=past_kv, start_pos=start_pos)
+            logits, past_kv = self.forward(
+                cur_input,
+                past_key_values=past_kv,
+                start_pos=start_pos,
+                tenant_id=tenant_id
+            )
+
             next_token_logits = logits[:, -1, :]
             if temperature > 0:
                 scaled_logits = torch.nan_to_num(next_token_logits / max(temperature, 1e-4), nan=0.0, posinf=1e4, neginf=-1e4)

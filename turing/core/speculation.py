@@ -371,23 +371,27 @@ class EntropyConfidenceTreePruner:
 
 class SubspaceEAGLEDraftHead(nn.Module):
     """
-    Subspace-EAGLE3 & DFlash Block-Parallel Recurrent Drafter:
+    Subspace-EAGLE3 & DFlash Block-Parallel Recurrent Drafter with DSpark Entropy Pruning:
     1. Projects target hidden states h_{L-1} into Rank-64 Subspace (z_t = U_k^T h_{L-1}).
-    2. Synthesizes 8 future candidate tokens in a single parallel step using 1D-Depthwise Dilated Conv (O(1) DFlash style).
-    3. Performs recurrent feature updates for deep multi-step context (EAGLE-3 style).
+    2. Synthesizes K future candidate tokens in a single parallel step using 1D-Depthwise Dilated Conv (O(1) DFlash style).
+    3. Employs Matryoshka parameter-sliced vocab projection (W in {1024, 2048, 4096, 8192}).
+    4. Applies DSpark online Shannon entropy confidence gating to dynamically scale tree width (K in {1, 4, 8}).
     """
     def __init__(
         self,
         hidden_dim: int = 4096,
         rank_subspace: int = 64,
         vocab_size: int = 32000,
-        future_tokens: int = 8
+        future_tokens: int = 8,
+        use_matryoshka: bool = True,
+        slice_widths: Optional[List[int]] = None
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.rank_subspace = rank_subspace
         self.vocab_size = vocab_size
         self.future_tokens = future_tokens
+        self.use_matryoshka = use_matryoshka
 
         # Rank-64 Subspace Projection Matrix U_k
         self.proj_to_subspace = nn.Linear(hidden_dim, rank_subspace, bias=False)
@@ -405,14 +409,25 @@ class SubspaceEAGLEDraftHead(nn.Module):
 
         # Multi-Head Parallel Linear Projections for K future tokens
         self.future_heads = nn.Linear(rank_subspace, future_tokens * rank_subspace, bias=False)
-        self.vocab_head = nn.Linear(rank_subspace, vocab_size, bias=False)
+        
+        # Vocab head (Standard or Nested Matryoshka)
+        if use_matryoshka:
+            self.vocab_head = MatryoshkaDraftHead(
+                hidden_dim=rank_subspace,
+                vocab_size=vocab_size,
+                slice_widths=slice_widths or [16, 32, 64],
+                bias=False
+            )
+        else:
+            self.vocab_head = nn.Linear(rank_subspace, vocab_size, bias=False)
 
-        # Entropy-Gated Entropy-Gated Pruner
+        # Entropy-Gated Dynamic Tree Pruner (DSpark)
         self.pruner = EntropyConfidenceTreePruner()
 
     def forward(
         self,
-        hidden_states: torch.Tensor
+        hidden_states: torch.Tensor,
+        slice_width: Optional[int] = None
     ) -> Tuple[List[TreeNode], torch.Tensor, List[int], float, int]:
         """
         hidden_states: [Batch, SeqLen, HiddenDim]
@@ -433,7 +448,10 @@ class SubspaceEAGLEDraftHead(nn.Module):
         future_z = self.future_heads(last_z).view(batch, self.future_tokens, self.rank_subspace) # [Batch, K, RankSubspace]
 
         # 4. Vocab Logits Projection for all K candidates
-        candidate_logits = self.vocab_head(future_z[0]) # [K, VocabSize]
+        if isinstance(self.vocab_head, MatryoshkaDraftHead):
+            candidate_logits = self.vocab_head(future_z[0], slice_width=slice_width) # [K, VocabSize]
+        else:
+            candidate_logits = self.vocab_head(future_z[0]) # [K, VocabSize]
 
         # 5. Entropy-Gated Dynamic Tree Pruning
         nodes, dag_mask, token_ids, entropy, tree_width = self.pruner.prune_and_build_tree(candidate_logits, device=device)
@@ -460,9 +478,12 @@ class RidgeAssistedTreeSpeculator:
         """
         Verifies draft candidate tokens against target model logits.
         draft_token_ids: List of K candidate tokens
-        target_logits: [K, VocabSize]
+        target_logits: [K, VocabSize] or [1, K, VocabSize]
         Returns: (accepted_tokens, num_accepted)
         """
+        if target_logits.dim() == 3:
+            target_logits = target_logits.squeeze(0)
+
         accepted = []
         for i, draft_tok in enumerate(draft_token_ids):
             if i >= target_logits.shape[0]:
@@ -484,5 +505,6 @@ class RidgeAssistedTreeSpeculator:
 
     def get_acceptance_rate(self) -> float:
         return (self.total_accepted / self.total_drafted) if self.total_drafted > 0 else 1.0
+
 
 
