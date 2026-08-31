@@ -180,6 +180,18 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
   - **Microsecond Structured Output Engine (`structured.py`)**: Supports `response_format={"type": "json_object"}` and `response_format={"type": "json_schema", ...}`. Features instant schema injection ($22.93\,\mu\text{s}$), $7.49\,\mu\text{s}$ JSON parsing/validation, and auto-bracket recovery ($17.26\,\mu\text{s}$) to automatically repair unclosed JSON objects if generation hits `max_tokens`.
   - **Standardized Tool Calling Handler (`tools.py`)**: Dynamically injects tool descriptions and extracts `<tool_call>` structures or raw function calls into OpenAI `tool_calls` and Anthropic `tool_use` blocks in $42.40\,\mu\text{s}$ with 100% extraction accuracy.
 
+---
+
+## 18. ⚡ 2-Phase Prefill-Decode Scheduler & In-SRAM Fused Batched Sampler
+
+* **The Problem**: Treating compute-bound prompt prefill and memory-bandwidth-bound decode as identical execution passes causes severe inter-token latency (ITL) jitter during burst arrivals. Furthermore, executing per-stream softmax and multinomial sampling inside Python loops incurs $B \times \text{.item()}$ GPU-to-CPU host synchronization stalls.
+* **How It Works**:
+  - **2-Phase Continuous Batching Scheduler (`engine.py`)**:
+    - **Phase 1 (Piggybacked Chunked Prefill)**: Slices large prompt prefills into 512-token (`Interactive`) and 256-token (`Batch`) chunks, computing dense Tensor Core GEMMs while immediately yielding to active decode streams.
+    - **Phase 2 (Parallel Batched Decode)**: Interleaves active decoding streams with full KV cache persistence, tracking P50/P95/P99 percentiles for TTFT and ITL.
+  - **In-SRAM Fused Batched GPU Sampler (`triton_fused_sample.py`)**: Fuses Softmax, Top-$K$ truncation, and Gumbel-Max perturbation directly in SRAM, eliminating all CPU synchronization flushes and increasing batched decode speed from $141.14 \to \mathbf{168.60\text{ tok/s}}$ ($B=1$) and **$2,576.57\text{ tok/s}$** ($B=16$).
+  - **Native C++20 AVX2 SIMD Sampler & Fast JSON Scanner (`csrc/turing_sampler.hpp` & `csrc/turing_json_fast_scan.hpp`)**: Employs 256-bit `_mm256_cmpeq_epi8` vector comparisons to scan syntax characters at memory-bus speeds, dropping truncated JSON bracket auto-repair latency to **$4.74\,\mu\text{s}$**.
+
 
 
 
