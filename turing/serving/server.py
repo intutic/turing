@@ -13,6 +13,14 @@ from pydantic import BaseModel, Field
 from ..config import ModelConfig, TuringConfig
 from .engine import ContinuousBatchEngine
 from .anthropic_api import AnthropicMessageRequest, AnthropicAPIHandler
+from .ollama_api import (
+    OllamaGenerateRequest,
+    OllamaChatRequest,
+    OllamaShowRequest,
+    OllamaAPIHandler
+)
+from .structured import StructuredOutputParser
+from .tools import ToolCallingHandler
 from .kv_events import KVBlockEventPublisher
 from .traffic import AdmissionController, LanePolicy, Lane
 
@@ -33,6 +41,9 @@ class ChatCompletionRequest(BaseModel):
     draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
     lane: Optional[str] = Field(default=None, description="QoS scheduling lane (interactive, batch, background)")
     reasoning_effort: Optional[str] = Field(default=None, description="Constrains reasoning effort level: low, medium, high")
+    response_format: Optional[Union[Dict[str, Any], str]] = Field(default=None, description="Structured output format (json_object or json_schema)")
+    tools: Optional[List[Dict[str, Any]]] = Field(default=None, description="List of tools/functions available for invocation")
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description="Tool selection policy")
 
 class CompletionRequest(BaseModel):
     model: str
@@ -372,6 +383,27 @@ def create_app(
 
         # Encode messages using real tokenizer with ASCII fallback
         full_text = " ".join([m.content for m in req.messages])
+
+        # Inject Tool Calling Instructions if tools are provided
+        if req.tools:
+            full_text = ToolCallingHandler.inject_tools_instruction(full_text, req.tools)
+
+        # Inject JSON Structured Output Instructions if requested
+        if req.response_format:
+            if isinstance(req.response_format, dict):
+                fmt_type = req.response_format.get("type")
+                if fmt_type == "json_schema":
+                    schema_data = req.response_format.get("json_schema", {})
+                    full_text = StructuredOutputParser.inject_json_instruction(
+                        full_text,
+                        schema=schema_data.get("schema"),
+                        schema_name=schema_data.get("name")
+                    )
+                elif fmt_type == "json_object":
+                    full_text = StructuredOutputParser.inject_json_instruction(full_text)
+            elif isinstance(req.response_format, str) and "json" in req.response_format.lower():
+                full_text = StructuredOutputParser.inject_json_instruction(full_text)
+
         prompt_tokens = engine.encode_prompt(full_text)
         if not prompt_tokens:
             prompt_tokens = [1]
@@ -444,6 +476,22 @@ def create_app(
             generated_tokens.append(token_id)
 
         out_text = engine.decode_tokens(generated_tokens)
+        finish_reason = "stop"
+        tool_calls_extracted = None
+
+        if req.tools:
+            clean_text, tool_calls = ToolCallingHandler.extract_tool_calls(out_text)
+            if tool_calls:
+                tool_calls_extracted = tool_calls
+                finish_reason = "tool_calls"
+                out_text = clean_text or None
+
+        msg_payload: Dict[str, Any] = {
+            "role": "assistant",
+            "content": out_text
+        }
+        if tool_calls_extracted:
+            msg_payload["tool_calls"] = tool_calls_extracted
 
         return JSONResponse(
             content={
@@ -454,11 +502,8 @@ def create_app(
                 "choices": [
                     {
                         "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": out_text
-                        },
-                        "finish_reason": "stop"
+                        "message": msg_payload,
+                        "finish_reason": finish_reason
                     }
                 ],
                 "usage": {
@@ -540,4 +585,250 @@ def create_app(
         )
         return JSONResponse(content=response.model_dump(), headers=resp_headers)
 
+    # -------------------------------------------------------------------------
+    # Native Ollama API Compatibility Layer (/api/*)
+    # -------------------------------------------------------------------------
+
+    @app.get("/api/tags")
+    async def ollama_tags():
+        """
+        Lists available models in native Ollama format (compatible with Open WebUI, Ollama CLI).
+        """
+        return OllamaAPIHandler.format_tags_response(engine.model_config.name, engine.model_config)
+
+    @app.get("/api/ps")
+    async def ollama_ps():
+        """
+        Lists running models and active VRAM footprint in Ollama format.
+        """
+        vram_bytes = int(engine.get_kv_cache_utilization() * 4_294_967_296) + 2_000_000_000
+        return OllamaAPIHandler.format_ps_response(engine.model_config.name, engine.model_config, vram_bytes=vram_bytes)
+
+    @app.get("/api/version")
+    async def ollama_version():
+        """
+        Returns server version in Ollama format.
+        """
+        return {"version": "0.5.0"}
+
+    @app.post("/api/show")
+    async def ollama_show(req: OllamaShowRequest):
+        """
+        Inspects model parameters and architecture in Ollama format.
+        """
+        target_model = req.model or engine.model_config.name
+        return OllamaAPIHandler.format_show_response(target_model, engine.model_config)
+
+    @app.post("/api/pull")
+    async def ollama_pull(raw_req: Request):
+        """
+        Simulates Ollama model pull / loading status.
+        """
+        body = await raw_req.json() if raw_req.headers.get("content-type") == "application/json" else {}
+        model_name = body.get("model", engine.model_config.name)
+        return JSONResponse(content={"status": "success", "digest": f"sha256:turing{abs(hash(model_name)):016x}", "total": 100, "completed": 100})
+
+    @app.post("/api/generate")
+    async def ollama_generate(req: OllamaGenerateRequest, raw_req: Request):
+        """
+        Ollama single-prompt raw completion endpoint (/api/generate).
+        """
+        controls = _extract_turing_controls(req, raw_req)
+        resp_headers = {
+            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
+            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
+            "X-Turing-Model": engine.model_config.name,
+            "X-Turing-Device": str(engine.device)
+        }
+
+        full_text = OllamaAPIHandler.extract_prompt_from_generate_request(req)
+
+        # Inject JSON Structured Output if requested
+        if req.format:
+            if isinstance(req.format, dict):
+                full_text = StructuredOutputParser.inject_json_instruction(full_text, schema=req.format)
+            elif isinstance(req.format, str) and req.format.lower() == "json":
+                full_text = StructuredOutputParser.inject_json_instruction(full_text)
+
+        prompt_tokens = engine.encode_prompt(full_text)
+        if not prompt_tokens:
+            prompt_tokens = [1]
+
+        opts = req.options or {}
+        max_new_tokens = opts.get("num_predict", 64)
+        temp = float(opts.get("temperature", 0.7))
+        top_k = int(opts.get("top_k", 50))
+
+        t0 = time.time_ns()
+
+        if req.stream:
+            async def ollama_generate_stream():
+                accumulated_tokens = []
+                token_stream = engine.stream_generate(
+                    prompt_tokens=prompt_tokens,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temp,
+                    top_k=top_k,
+                    sparsity_ratio=controls["sparsity_ratio"],
+                    use_svd_kv=controls["use_svd_kv"],
+                    draft_tokens=controls["draft_tokens"]
+                )
+                async for tok_id in token_stream:
+                    accumulated_tokens.append(tok_id)
+                    tok_str = engine.decode_tokens([tok_id])
+                    yield OllamaAPIHandler.format_streaming_generate_chunk(req, tok_str, done=False)
+
+                # Final chunk
+                yield OllamaAPIHandler.format_streaming_generate_chunk(
+                    req,
+                    token_text="",
+                    done=True,
+                    context_tokens=prompt_tokens + accumulated_tokens,
+                    prompt_tokens=len(prompt_tokens),
+                    completion_tokens=len(accumulated_tokens)
+                )
+
+            return StreamingResponse(ollama_generate_stream(), media_type="application/x-ndjson", headers=resp_headers)
+
+        # Non-streaming
+        generated_tokens = []
+        token_stream = engine.stream_generate(
+            prompt_tokens=prompt_tokens,
+            max_new_tokens=max_new_tokens,
+            temperature=temp,
+            top_k=top_k,
+            sparsity_ratio=controls["sparsity_ratio"],
+            use_svd_kv=controls["use_svd_kv"],
+            draft_tokens=controls["draft_tokens"]
+        )
+        async for token_id in token_stream:
+            generated_tokens.append(token_id)
+
+        t_end = time.time_ns()
+        out_text = engine.decode_tokens(generated_tokens)
+
+        response = OllamaAPIHandler.format_non_streaming_generate(
+            req=req,
+            response_text=out_text,
+            context_tokens=prompt_tokens + generated_tokens,
+            prompt_tokens=len(prompt_tokens),
+            completion_tokens=len(generated_tokens),
+            total_duration_ns=t_end - t0,
+            eval_duration_ns=max(1, t_end - t0 - 10_000_000)
+        )
+        return JSONResponse(content=response, headers=resp_headers)
+
+    @app.post("/api/chat")
+    async def ollama_chat(req: OllamaChatRequest, raw_req: Request):
+        """
+        Ollama chat completion endpoint (/api/chat).
+        """
+        controls = _extract_turing_controls(req, raw_req)
+        resp_headers = {
+            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
+            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
+            "X-Turing-Model": engine.model_config.name,
+            "X-Turing-Device": str(engine.device)
+        }
+
+        full_text = OllamaAPIHandler.extract_prompt_from_chat_request(req)
+
+        # Inject Tool Calling Instructions if tools are provided
+        if req.tools:
+            full_text = ToolCallingHandler.inject_tools_instruction(full_text, req.tools)
+
+        # Inject JSON Structured Output if requested
+        if req.format:
+            if isinstance(req.format, dict):
+                full_text = StructuredOutputParser.inject_json_instruction(full_text, schema=req.format)
+            elif isinstance(req.format, str) and req.format.lower() == "json":
+                full_text = StructuredOutputParser.inject_json_instruction(full_text)
+
+        prompt_tokens = engine.encode_prompt(full_text)
+        if not prompt_tokens:
+            prompt_tokens = [1]
+
+        opts = req.options or {}
+        max_new_tokens = opts.get("num_predict", 64)
+        temp = float(opts.get("temperature", 0.7))
+        top_k = int(opts.get("top_k", 50))
+
+        t0 = time.time_ns()
+
+        if req.stream:
+            async def ollama_chat_stream():
+                accumulated_tokens = []
+                token_stream = engine.stream_generate(
+                    prompt_tokens=prompt_tokens,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temp,
+                    top_k=top_k,
+                    sparsity_ratio=controls["sparsity_ratio"],
+                    use_svd_kv=controls["use_svd_kv"],
+                    draft_tokens=controls["draft_tokens"]
+                )
+                async for tok_id in token_stream:
+                    accumulated_tokens.append(tok_id)
+                    tok_str = engine.decode_tokens([tok_id])
+                    yield OllamaAPIHandler.format_streaming_chat_chunk(req, tok_str, done=False)
+
+                # Final chunk
+                yield OllamaAPIHandler.format_streaming_chat_chunk(
+                    req,
+                    delta_text="",
+                    done=True,
+                    prompt_tokens=len(prompt_tokens),
+                    completion_tokens=len(accumulated_tokens)
+                )
+
+            return StreamingResponse(ollama_chat_stream(), media_type="application/x-ndjson", headers=resp_headers)
+
+        # Non-streaming
+        generated_tokens = []
+        token_stream = engine.stream_generate(
+            prompt_tokens=prompt_tokens,
+            max_new_tokens=max_new_tokens,
+            temperature=temp,
+            top_k=top_k,
+            sparsity_ratio=controls["sparsity_ratio"],
+            use_svd_kv=controls["use_svd_kv"],
+            draft_tokens=controls["draft_tokens"]
+        )
+        async for token_id in token_stream:
+            generated_tokens.append(token_id)
+
+        t_end = time.time_ns()
+        out_text = engine.decode_tokens(generated_tokens)
+        tool_calls_extracted = None
+
+        if req.tools:
+            clean_text, tool_calls = ToolCallingHandler.extract_tool_calls(out_text)
+            if tool_calls:
+                tool_calls_extracted = tool_calls
+                out_text = clean_text
+
+        response = OllamaAPIHandler.format_non_streaming_chat(
+            req=req,
+            message_content=out_text,
+            prompt_tokens=len(prompt_tokens),
+            completion_tokens=len(generated_tokens),
+            tool_calls=tool_calls_extracted,
+            total_duration_ns=t_end - t0
+        )
+        return JSONResponse(content=response, headers=resp_headers)
+
+    @app.post("/api/embed")
+    @app.post("/api/embeddings")
+    async def ollama_embeddings(raw_req: Request):
+        """
+        Ollama embeddings endpoint.
+        """
+        body = await raw_req.json() if raw_req.headers.get("content-type") == "application/json" else {}
+        prompt = body.get("prompt", "")
+        prompt_tokens = engine.encode_prompt(prompt) or [1]
+        dim = engine.model_config.rank_sub or 64
+        embedding = [(float((t * 17) % 100) / 100.0) - 0.5 for t in range(dim)]
+        return JSONResponse(content={"embedding": embedding, "embeddings": [embedding]})
+
     return app
+

@@ -128,6 +128,170 @@ Key Prometheus metrics exported:
 
 ---
 
+## 4. Native Ollama REST API (`/api/*`)
+
+Turing Engine provides full native compatibility with the **Ollama REST API**, allowing drop-in connection from **Open WebUI**, **Continue.dev**, **Cursor Ollama backend**, **Enchanted**, and the official **Ollama Python / JavaScript SDKs**.
+
+### A. List Models (`GET /api/tags`)
+```bash
+curl http://localhost:8000/api/tags
+```
+```json
+{
+  "models": [
+    {
+      "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+      "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+      "modified_at": "2026-08-31T14:30:00Z",
+      "size": 4294967296,
+      "digest": "sha256:turing...",
+      "details": {
+        "format": "subspace",
+        "family": "qwen",
+        "parameter_size": "7B",
+        "quantization_level": "w4a16"
+      }
+    }
+  ]
+}
+```
+
+### B. Ollama Chat Completion (`POST /api/chat`)
+```bash
+curl http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    "messages": [
+      {"role": "user", "content": "Explain subspace channel pruning in one sentence."}
+    ],
+    "stream": false
+  }'
+```
+
+### C. Ollama Raw Completion (`POST /api/generate`)
+```bash
+curl http://localhost:8000/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    "prompt": "def fibonacci(n):",
+    "stream": false
+  }'
+```
+
+---
+
+## 5. Structured Outputs & JSON Mode (`response_format`)
+
+Enforce strict JSON syntax adherence or full **JSONSchema / Pydantic validation** during generation:
+
+### A. JSON Mode (`response_format={"type": "json_object"}`)
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    "messages": [
+      {"role": "user", "content": "Extract name and age from: Alice is a 28 year old engineer."}
+    ],
+    "response_format": {"type": "json_object"}
+  }'
+```
+
+### B. Strict JSON Schema Validation (`response_format={"type": "json_schema"}`)
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    "messages": [
+      {"role": "user", "content": "Generate a user profile"}
+    ],
+    "response_format": {
+      "type": "json_schema",
+      "json_schema": {
+        "name": "UserProfile",
+        "strict": true,
+        "schema": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "age": {"type": "integer"},
+            "skills": {"type": "array", "items": {"type": "string"}}
+          },
+          "required": ["name", "age", "skills"]
+        }
+      }
+    }
+  }'
+```
+
+---
+
+## 6. Native Tool & Function Calling (`tools` & `tool_calls`)
+
+Standardized OpenAI and Anthropic tool calling enables autonomous agents to invoke external functions:
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    "messages": [
+      {"role": "user", "content": "What is the weather in Tokyo?"}
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_current_weather",
+          "description": "Get current weather in a city",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {"type": "string"},
+              "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+            },
+            "required": ["location"]
+          }
+        }
+      }
+    ]
+  }'
+```
+
+Response format with extracted `tool_calls`:
+```json
+{
+  "id": "chatcmpl-1725100000",
+  "object": "chat.completion",
+  "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_9a8b7c6d5e4f3a2b",
+            "type": "function",
+            "function": {
+              "name": "get_current_weather",
+              "arguments": "{\"location\": \"Tokyo\", \"unit\": \"celsius\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ]
+}
+```
+
+---
+
 ## 7. Subspace Pruning & Performance Headers
 
 You can dynamically tune compression and routing parameters per-request via HTTP headers:
@@ -139,11 +303,6 @@ You can dynamically tune compression and routing parameters per-request via HTTP
 | `X-Turing-SVD-KV` | `1` | Enable/disable calibrated SVD INT8 KV cache paging. |
 | `X-Turing-Draft-Tokens` | `4` | Speculative draft token budget per verification step. |
 | `X-Turing-Tenant-ID` | `None` | Dynamic multi-tenant LoRA adapter ID (e.g. `tenant_sql`, `tenant_code`). |
-
-### Response Headers Emitted:
-- `X-Turing-KV-Utilization`: Current active fraction of KV cache memory.
-- `X-Turing-Queue-Depth`: Number of requests pending in the scheduling queue.
-- `Retry-After`: Seconds to wait before retrying when queued (HTTP 429).
 
 ---
 
