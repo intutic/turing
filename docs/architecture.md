@@ -158,6 +158,18 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
   - **Native C++20 AVX2 Prefix Hasher & Parity Verifier (`csrc/turing_prefix_router.hpp` & `csrc/turing_spec_verifier.hpp`)**: Vectorized 256-bit FNV-1a hashing over raw token buffers (**28.76× faster, 0.840 µs**) and SIMD `_mm256_cmpeq_epi32` token stream comparison (**13.72× faster, 1.192 µs**).
   - **Fused Gated Zero-Identity Head (`triton_gated_zero_identity.py`) & Chunk Context Filter (`triton_chunk_filter.py`)**: Fuses linear projections, sigmoid gating, and 128-token chunk summary dot-products into single-pass Tensor Core operations.
 
+---
+
+## 16. 🏛️ Universal Architecture Registry & Dynamic Checkpoint Resolution
+
+* **The Problem**: Hardcoding individual model checkpoints inside an inference engine creates an brittle maintenance anti-pattern that fails whenever new open-weight models, fine-tunes, or checkpoint releases are published.
+* **How It Works**:
+  - **`ArchitectureRegistry` (`turing/models/architecture_registry.py`)**: Decouples model families (`LlamaForCausalLM`, `Qwen2ForCausalLM`, `DeepseekV3ForCausalLM`, `MistralForCausalLM`, `Gemma2ForCausalLM`, `GPT2LMHeadModel`, `OPTForCausalLM`) from checkpoint weights.
+  - **`ModelResolver` (`turing/models/resolver.py`)**: Universally resolves canonical Hugging Face Hub repository IDs (`meta-llama/Llama-3.3-70B-Instruct`), LiteLLM prefixes (`huggingface/`), local directories, and tri-part provider/model/effort namespaces (`deepseek-ai/DeepSeek-R1/high`).
+  - **Dynamic AutoConfig Geometry**: Automatically pulls `hidden_size`, `intermediate_size`, `num_heads`, `num_kv_heads`, and `rope_theta` on the fly from the remote `config.json` via `ModelConfig.from_pretrained()`.
+  - **Universal Parameter Extraction (`RealHuggingFaceLoader`)**: Adaptively extracts embeddings (`get_input_embeddings()`), norms (`ln_f`, `norm`, `final_layernorm`), LM heads (`get_output_embeddings()`), separate/fused QKV projections, and SwiGLU/standard MLPs directly into Subspace format.
+  - **Reasoning Engine (`turing/serving/reasoning.py`)**: Dynamically manages reasoning token budgets (`low` $\to 1\text{K}$, `medium` $\to 4\text{K}$, `high` $\to 16\text{K}$) and streams `<think>...</think>` tokens into OpenAI `delta.reasoning_content` and Anthropic `thinking` blocks.
+
 
 
 

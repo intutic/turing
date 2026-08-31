@@ -30,22 +30,26 @@ pip install turing-engine
 *(Or install locally with C++ SIMD optimizations: `git clone https://github.com/intutic/turing.git && cd turing && pip install -e .`)*
 
 ### 2. Instant Terminal Chat (No Setup Needed!)
-Chat with real pretrained weights directly in your terminal:
+Chat with real pretrained weights dynamically directly from Hugging Face Hub:
 ```bash
-# Chat with SmolLM2, DeepSeek-R1, or LLaMA 4 Scout:
+# Chat with any canonical Hugging Face Hub repository:
+turing chat --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B --reasoning-effort high
+
+# Chat using provider/model/effort namespace:
+turing chat --model deepseek-ai/DeepSeek-R1/medium
+
+# Ergonomic shortcuts for popular checkpoints:
 turing chat --model smollm2
-turing chat --model deepseek-r1-1.5b
-turing chat --model llama-4-scout
-turing chat --model qwen3-coder-30b
+turing chat --model llama-3.3-70b
 ```
 
 ### 3. Launch an OpenAI & Anthropic-Compatible Serving Server
 ```bash
-# Serve models locally on port 8000:
-turing serve --model gemma-4-31b --port 8000
-turing serve --model deepseek-r1-7b --port 8000
+# Serve any model dynamically on port 8000:
+turing serve --model meta-llama/Llama-3.3-70B-Instruct --port 8000
+turing serve --model deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --port 8000 --reasoning-effort high
 ```
-Point any chat UI (Open WebUI, LibreChat, Chatbox, Cursor) to `http://localhost:8000/v1` and you're chatting!
+Point any chat UI (Open WebUI, LibreChat, Chatbox, Cursor, Cline) to `http://localhost:8000/v1` and you're chatting!
 
 ---
 

@@ -186,3 +186,9 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 - **`MultiAgentCoordinator`**: Orchestrates proposal generation, environment constraint evaluation, and automated multi-turn self-revision loops with `clean_base` lineage isolation.
 - **`DynamicEnvironmentModel` (`turing/demo/world_model.py`)**: Computes real-time constraint penalties to guide multi-agent cloud and systems decisions.
 - **`EpistemicUncertaintyGate` (`turing/demo/epistemic_gate.py`)**: Evaluates token entropy to dynamically trigger verification loops or fast-path pass-throughs.
+
+### 4.5 Universal Architecture Registry & Reasoning Engine (`turing/models/`, `turing/serving/reasoning.py`)
+- **`ArchitectureRegistry` (`turing/models/architecture_registry.py`)**: Maps 15+ Hugging Face architecture families (`LlamaForCausalLM`, `Qwen2ForCausalLM`, `DeepseekV3ForCausalLM`, `MistralForCausalLM`, `Gemma2ForCausalLM`, `GPT2LMHeadModel`, `OPTForCausalLM`) to `SubspaceCausalLM` and exposes the `AutoSubspaceModel` factory class.
+- **`ModelResolver` (`turing/models/resolver.py`)**: Universally resolves canonical Hugging Face repository IDs, `provider/model/reasoning_effort` namespaces (`deepseek-ai/DeepSeek-R1/high`), LiteLLM prefixes (`huggingface/`), local directories, and CLI aliases.
+- **`ReasoningBudgetManager` (`turing/serving/reasoning.py`)**: Scales token budgets and recommended sampling temperatures across `low` (1K), `medium` (4K), and `high` (16K) effort levels.
+- **`ReasoningStreamFilter` (`turing/serving/reasoning.py`)**: Dynamically parses and filters `<think>...</think>` tokens during autoregressive streaming into OpenAI `delta.reasoning_content` and Anthropic `thinking` blocks.

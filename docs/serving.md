@@ -9,38 +9,44 @@ Turing Engine features a production-grade continuous batching engine with dual d
 ### Start Serving Server
 ```bash
 turing serve \
-  --model deepseek-r1-7b \
+  --model deepseek-ai/DeepSeek-R1-Distill-Qwen-7B \
   --host 0.0.0.0 \
   --port 8000 \
   --device auto \
   --sparsity 0.57 \
+  --reasoning-effort high \
   --max-batch-size 32
 ```
 
 ### Interactive Terminal Chat
 ```bash
-turing chat --model deepseek-r1-1.5b
+# Direct Hugging Face Hub checkpoint with reasoning budget:
+turing chat --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B --reasoning-effort high
+
+# Tri-part provider/model/effort namespace:
+turing chat --model deepseek-ai/DeepSeek-R1/medium
 ```
 
 ### Single Prompt Generation
 ```bash
-turing generate --model deepseek-r1-1.5b --prompt "Explain quantum entanglement:" --max-tokens 128
+turing generate --model meta-llama/Llama-3.3-70B-Instruct --prompt "Explain quantum entanglement:" --max-tokens 128
 ```
 
 ---
 
 ## 2. OpenAI Chat Completions (`/v1/chat/completions`)
 
-Turing Engine provides full standard OpenAI Chat API compatibility:
+Turing Engine provides full standard OpenAI Chat API compatibility, including native reasoning effort constraints (`low`, `medium`, `high`) and dynamic extraction of `<think>...</think>` tokens into `delta.reasoning_content`:
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer turing-local" \
   -d '{
-    "model": "deepseek-r1-7b",
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
     "messages": [{"role": "user", "content": "Write a quick binary search function in Python:"}],
-    "temperature": 0.7,
+    "reasoning_effort": "high",
+    "temperature": 0.6,
     "max_tokens": 256,
     "stream": false
   }'

@@ -33,14 +33,17 @@ Get Turing Engine running locally in under 30 seconds.
 
 ## 2. Interactive Terminal Chat
 
-Stream reasoning weights straight from Hugging Face:
+Stream reasoning weights dynamically straight from Hugging Face Hub:
 
 ```bash
-# Chat with DeepSeek-R1 Distill
-turing chat --model deepseek-r1-1.5b
+# Chat with DeepSeek-R1 Distill with high reasoning effort
+turing chat --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B --reasoning-effort high
 
-# Chat with Qwen Coder
-turing chat --model qwen-2.5-coder-7b
+# Chat using provider/model/effort namespace:
+turing chat --model deepseek-ai/DeepSeek-R1/medium
+
+# Chat with Qwen 2.5 Coder
+turing chat --model Qwen/Qwen2.5-Coder-7B-Instruct
 ```
 
 ---
@@ -48,7 +51,7 @@ turing chat --model qwen-2.5-coder-7b
 ## 3. Launch Serving Server (Dual OpenAI & Anthropic API)
 
 ```bash
-turing serve --model deepseek-r1-7b --port 8000
+turing serve --model deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --port 8000
 ```
 
 ### Query with Python OpenAI SDK
@@ -58,10 +61,27 @@ from openai import OpenAI
 
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="turing-local")
 response = client.chat.completions.create(
-    model="deepseek-r1-7b",
-    messages=[{"role": "user", "content": "Write a quick Python script to calculate Fibonacci numbers:"}]
+    model="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    messages=[{"role": "user", "content": "Write a quick Python script to calculate Fibonacci numbers:"}],
+    extra_body={"reasoning_effort": "high"}
 )
 print(response.choices[0].message.content)
+```
+
+### Python SDK Programmatic Usage
+
+```python
+from turing.models.architecture_registry import AutoSubspaceModel
+
+# Dynamically load any Hugging Face model into Subspace format
+model, tokenizer = AutoSubspaceModel.from_pretrained(
+    "Qwen/Qwen2.5-Coder-7B-Instruct",
+    sparsity_ratio=0.5,
+    device="auto"
+)
+prompt_tokens = tokenizer.encode("def quicksort(arr):")
+output = model.generate(prompt_tokens, max_new_tokens=64)
+print(tokenizer.decode(output))
 ```
 
 ### Query with LangChain
@@ -69,6 +89,6 @@ print(response.choices[0].message.content)
 ```python
 from turing.integrations.langchain import ChatTuring
 
-llm = ChatTuring(model="deepseek-r1-7b", base_url="http://localhost:8000/v1")
+llm = ChatTuring(model="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", base_url="http://localhost:8000/v1")
 print(llm.invoke("Explain KV cache compression in 2 sentences:")["content"])
 ```
