@@ -80,7 +80,7 @@ def create_app(
                 kv_publisher.stop()
             await engine.stop()
 
-    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.5.0", lifespan=lifespan)
+    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.6.0", lifespan=lifespan)
 
     def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
         """
@@ -609,7 +609,7 @@ def create_app(
         """
         Returns server version in Ollama format.
         """
-        return {"version": "0.5.0"}
+        return {"version": "0.6.0"}
 
     @app.post("/api/show")
     async def ollama_show(req: OllamaShowRequest):

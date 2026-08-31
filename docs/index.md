@@ -2,7 +2,7 @@
 
 **Serve 70B+ LLMs on a Single 24GB GPU or Mac with 75% Less Memory.**
 
-[![Release](https://img.shields.io/badge/Release-v0.5.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.5.0)
+[![Release](https://img.shields.io/badge/Release-v0.6.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.6.0)
 
 
 
