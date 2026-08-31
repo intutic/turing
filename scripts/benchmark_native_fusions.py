@@ -430,6 +430,183 @@ def benchmark_hex_quant(device: torch.device):
     print(f"Hexagonal BMU Quantization (256 tokens, 64-D)  : {avg_ms:.4f} ms / pass")
 
 
+def benchmark_dilated_causal_conv(device: torch.device):
+    print("\n" + "=" * 80)
+    print(f"[*] 11. DFLASH 1D DILATED DEPTHWISE CAUSAL CONVOLUTION ({device.type.upper()})")
+    print("=" * 80)
+
+    from turing.kernels.triton_dilated_conv import dilated_causal_conv1d_cuda
+
+    batch, seq_len, channels = 4, 64, 64
+    kernel_size = 3
+    dilation = 2
+
+    x = torch.randn(batch, seq_len, channels, device=device, dtype=torch.float32)
+    conv_layer = torch.nn.Conv1d(
+        in_channels=channels,
+        out_channels=channels,
+        kernel_size=kernel_size,
+        padding=(kernel_size - 1) * dilation,
+        dilation=dilation,
+        groups=channels,
+        bias=False
+    ).to(device)
+
+    # PyTorch Baseline
+    for _ in range(10):
+        x_t = x.transpose(1, 2)
+        _ = conv_layer(x_t)[..., :seq_len].transpose(1, 2).contiguous()
+    sync_device(device)
+
+    N_ITERS = 100
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        x_t = x.transpose(1, 2)
+        _ = conv_layer(x_t)[..., :seq_len].transpose(1, 2).contiguous()
+    sync_device(device)
+    t1 = time.perf_counter()
+    py_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    # Fused Kernel / SIMD
+    weights_s = conv_layer.weight.squeeze(1)
+    for _ in range(10):
+        _ = dilated_causal_conv1d_cuda(x, weights_s, dilation=dilation)
+    sync_device(device)
+
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _ = dilated_causal_conv1d_cuda(x, weights_s, dilation=dilation)
+    sync_device(device)
+    t1 = time.perf_counter()
+    fused_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    speedup = py_ms / max(1e-5, fused_ms)
+    print(f"PyTorch Conv1d (4 DRAM copies)      : {py_ms:>8.4f} ms")
+    print(f"Fused Dilated Conv (In-SRAM / SIMD)  : {fused_ms:>8.4f} ms | Speedup: {speedup:.2f}x")
+
+
+def benchmark_fused_lora(device: torch.device):
+    print("\n" + "=" * 80)
+    print(f"[*] 12. FUSED BASE GEMV + MULTI-TENANT LORA CONTRACTION ({device.type.upper()})")
+    print("=" * 80)
+
+    from turing.kernels.triton_fused_lora import fused_lora_gemv_cuda
+
+    batch = 64
+    in_dim = 8192
+    out_dim = 8192
+    rank = 8
+    alpha = 0.5
+
+    x = torch.randn(batch, in_dim, device=device, dtype=torch.float32)
+    w_base = torch.randn(in_dim, out_dim, device=device, dtype=torch.float32) * 0.02
+    w_a = torch.randn(in_dim, rank, device=device, dtype=torch.float32) * 0.02
+    w_b = torch.randn(rank, out_dim, device=device, dtype=torch.float32) * 0.02
+
+    # PyTorch baseline
+    for _ in range(10):
+        _ = torch.matmul(x, w_base) + torch.matmul(torch.matmul(x, w_a) * alpha, w_b)
+    sync_device(device)
+
+    N_ITERS = 50
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _ = torch.matmul(x, w_base) + torch.matmul(torch.matmul(x, w_a) * alpha, w_b)
+    sync_device(device)
+    t1 = time.perf_counter()
+    py_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    # Fused kernel
+    for _ in range(10):
+        _ = fused_lora_gemv_cuda(x, w_base, w_a, w_b, alpha=alpha)
+    sync_device(device)
+
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _ = fused_lora_gemv_cuda(x, w_base, w_a, w_b, alpha=alpha)
+    sync_device(device)
+    t1 = time.perf_counter()
+    fused_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    speedup = py_ms / max(1e-5, fused_ms)
+    print(f"PyTorch Separate GEMMs (2 launches) : {py_ms:>8.4f} ms")
+    print(f"Fused Base + LoRA (In-SRAM / SIMD)   : {fused_ms:>8.4f} ms | Speedup: {speedup:.2f}x")
+
+
+def benchmark_residual_outlier(device: torch.device):
+    print("\n" + "=" * 80)
+    print(f"[*] 13. 1-PASS SUBSPACE RESIDUAL OUTLIER EXTRACTION ({device.type.upper()})")
+    print("=" * 80)
+
+    from turing.kernels.triton_residual_outlier import find_residual_outlier_cuda
+
+    batch = 128
+    hidden_dim = 8192
+    residual = torch.randn(batch, hidden_dim, device=device, dtype=torch.float32)
+
+    # PyTorch topk
+    for _ in range(10):
+        top_vals, top_indices = torch.topk(torch.abs(residual), k=1, dim=-1)
+        _ = torch.gather(residual, -1, top_indices)
+    sync_device(device)
+
+    N_ITERS = 100
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        top_vals, top_indices = torch.topk(torch.abs(residual), k=1, dim=-1)
+        _ = torch.gather(residual, -1, top_indices)
+    sync_device(device)
+    t1 = time.perf_counter()
+    py_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    # 1-Pass In-SRAM kernel
+    for _ in range(10):
+        _ = find_residual_outlier_cuda(residual)
+    sync_device(device)
+
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _ = find_residual_outlier_cuda(residual)
+    sync_device(device)
+    t1 = time.perf_counter()
+    fused_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    speedup = py_ms / max(1e-5, fused_ms)
+    print(f"PyTorch torch.topk (Global Sort)    : {py_ms:>8.4f} ms")
+    print(f"1-Pass Fused Outlier (In-SRAM / SIMD): {fused_ms:>8.4f} ms | Speedup: {speedup:.2f}x")
+
+
+def benchmark_fused_router(device: torch.device):
+    print("\n" + "=" * 80)
+    print(f"[*] 14. IN-SRAM FUSED SUBSPACE STRUCTURED ROUTER ({device.type.upper()})")
+    print("=" * 80)
+
+    from turing.core.router import SubspaceStructuredRouter
+
+    batch = 64
+    seq_len = 16
+    hidden_dim = 8192
+    total_tiles = 112
+
+    router = SubspaceStructuredRouter(hidden_dim=hidden_dim, total_tiles=total_tiles, min_tiles=16, max_tiles=64).to(device)
+    router.eval()
+    h = torch.randn(batch, seq_len, hidden_dim, device=device, dtype=torch.float32)
+
+    for _ in range(10):
+        _, _ = router(h, top_k_override=32)
+    sync_device(device)
+
+    N_ITERS = 100
+    t0 = time.perf_counter()
+    for _ in range(N_ITERS):
+        _, _ = router(h, top_k_override=32)
+    sync_device(device)
+    t1 = time.perf_counter()
+    avg_ms = ((t1 - t0) / N_ITERS) * 1000.0
+
+    print(f"Fused Subspace Structured Router (B={batch}, S={seq_len}): {avg_ms:.4f} ms / step")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Turing Engine Native Kernel Fusions Benchmark")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cuda", "mps", "cpu"])
@@ -459,12 +636,17 @@ def main():
     benchmark_deterministic_fast_hash()
     benchmark_fused_shannon_entropy(device)
     benchmark_hex_quant(device)
+    benchmark_dilated_causal_conv(device)
+    benchmark_fused_lora(device)
+    benchmark_residual_outlier(device)
+    benchmark_fused_router(device)
 
     print("\n" + "=" * 80)
-    print("✅ All 10 Kernel Fusion Benchmarks Completed Successfully.")
+    print("✅ All 14 Kernel Fusion Benchmarks Completed Successfully.")
     print("=" * 80 + "\n")
 
 
 if __name__ == "__main__":
     main()
+
 
