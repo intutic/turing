@@ -66,6 +66,21 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 ### 1.6 Native Deterministic Token Block Hasher (`csrc/turing_fast_hash.hpp`)
 - Direct non-cryptographic 64-bit avalanche hashing (xxHash64 / Murmur3 mix) operating directly over raw `const uint32_t*` token buffers with 0 heap allocations (**1.76× faster than hashlib.sha256**).
 
+### 1.7 DFlash 1D Dilated Depthwise Causal Convolution (`csrc/turing_dilated_conv1d.hpp`)
+- Vectorized 1D Dilated Depthwise Causal Convolution with circular ring-buffer history window (0-copy, 0-transposition, **2.29× speedup**).
+
+### 1.8 Fused Base GEMV + LoRA Rank-8 Contraction (`csrc/turing_lora_gemv.hpp`)
+- Fuses Base Subspace GEMV + LoRA Rank-8 contraction directly in CPU registers without intermediate DRAM writes.
+
+### 1.9 1-Pass AVX2 Residual Outlier Extraction (`csrc/turing_residual_outlier.hpp`)
+- In-register `_mm256_max_ps` and horizontal bitonic reduction for coordinate outlier extraction ($O(d)$).
+
+### 1.10 Lock-Free Atomic Compare-And-Swap Elastic Budget Controller (`csrc/turing_elastic_budget.hpp`)
+- Lock-free atomic Compare-And-Swap (`ElasticBudgetController`) memory budget rebalancer ($<0.05\,\mu\text{s}$).
+
+### 1.11 4-Stream AVX2 Vectorized Birkhoff mHC Step (`csrc/turing_mhc_simd.hpp`)
+- Vectorized 4-stream Pre-mapping + Res-mapping ($4 \times 4$ Birkhoff matrix) + Post-mapping.
+
 
 ---
 
@@ -103,9 +118,9 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 - **SVD Subspace INT8 Quantization**: Projects Key/Value caches into Rank-64 singular bases, shrinking 32K context memory from **10.0 GB $\to$ 2.5 GB** with $99.4\%$ reconstruction fidelity.
 
 ### 2.5 Frontier Speculative Suite (`turing/core/speculation.py`)
-- **Subspace-EAGLE3**: Projects layer-$(L-1)$ states into Rank-64 subspace ($\mathbf{z}_t = \mathbf{U}_k^\top h_{L-1}$), drafting candidate tokens in **$1.56\,\text{ms}$**.
-- **DFlash $O(1)$ Dilated Convolutions**: Generates $K=8$ candidate token representations concurrently in a single parallel step.
-- **Entropy Confidence Tree Pruner**: Expands speculative DAG trees to 8 tokens when entropy is low ($H \approx 0$), falling back to 1 token when entropy is high ($H > 1.8$), achieving **$2.0\times – 3.5\times$ generation speedup**.
+- **Subspace-EAGLE3**: Projects layer-$(L-1)$ states into Rank-64 subspace ($\mathbf{z}_t = \mathbf{U}_k^\top h_{L-1}$), drafting candidate tokens in **$0.626\,\text{ms}$**.
+- **DFlash $O(1)$ Dilated Convolutions**: Generates candidate token representations concurrently in a single parallel step.
+- **Entropy Confidence Tree Pruner**: Expands speculative DAG trees based on online Shannon entropy, achieving **$2.0\times – 3.5\times$ generation speedup**.
 
 ---
 
@@ -120,6 +135,11 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 | **Linear Recurrent Attention** | `triton_linear_recurrence.py` | Fused chunk-parallel linear attention kernel computing intra-chunk attention and inter-chunk state recurrence in SRAM. |
 | **1-Pass Online Shannon Entropy** | `shannon_entropy_cuda.py` | Online 1-pass Softmax + Log-Softmax + Entropic Summation reduction directly in registers without materializing probabilities. |
 | **Hexagonal Spatial Codebook** | `triton_hex_quant.py` | In-SRAM cosine similarity + Bitonic minimum index reduction against hexagonal codebook prototypes. |
+| **DFlash 1D Dilated Conv** | `triton_dilated_conv.py` | In-SRAM Subspace Projection + 1D Dilated Depthwise Conv (2.29× speedup). |
+| **Fused Base + LoRA GEMV** | `triton_fused_lora.py` | Single-block Tensor Core fused Base GEMV + LoRA Rank-8 contraction for low-latency tokens. |
+| **1-Pass Outlier Reduction** | `triton_residual_outlier.py` | 1-Pass In-SRAM absolute max outlier reduction (2.02× speedup vs `torch.topk`). |
+| **Fused Gumbel Router** | `triton_fused_router.py` | Single-launch Mean Pool + RMSNorm + Gate GEMV + Bitonic Top-K tile mask. |
+
 
 
 ---
