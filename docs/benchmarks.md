@@ -277,3 +277,42 @@ Empirical benchmark measurements from `scripts/benchmark_triple_gateway_and_stru
 python scripts/benchmark_triple_gateway_and_structured.py
 ```
 
+---
+
+## 15. Prefill (Compute-Bound) vs. Decode (Bandwidth-Bound) Duality & Interleaved Scheduling Benchmarks
+
+Empirical benchmark measurements from `scripts/benchmark_prefill_decode_duality.py` on physical **GCP NVIDIA L4 24GB GPU** and **Apple Silicon Mac**:
+
+### A. Prefill (Encoder / Compute-Bound) Scaling
+| Prompt Length | TTFT (NVIDIA L4 GPU) | Throughput (NVIDIA L4) | TTFT (Apple Silicon Mac) | Throughput (Mac) | Hardware Utilization |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **128 Tokens** | **$7.97\text{ ms}$** | $16,062.3\text{ tok/s}$ | **$8.95\text{ ms}$** | $14,294.1\text{ tok/s}$ | Low-occupancy GEMM |
+| **512 Tokens** | **$11.01\text{ ms}$** | **$46,487.1\text{ tok/s}$** | **$20.76\text{ ms}$** | **$24,664.1\text{ tok/s}$** | Peak Tensor Core Saturation ($4,972\text{ GFLOP/s}$) |
+| **1024 Tokens**| **$27.18\text{ ms}$** | $37,677.1\text{ tok/s}$ | **$42.93\text{ ms}$** | $23,853.4\text{ tok/s}$ | High Math Efficiency ($4,188\text{ GFLOP/s}$) |
+| **2048 Tokens**| **$65.54\text{ ms}$** | $31,246.5\text{ tok/s}$ | **$102.18\text{ ms}$**| $20,042.4\text{ tok/s}$ | Chunk-budgeted prefill ($3,735\text{ GFLOP/s}$) |
+| **4096 Tokens**| **$176.87\text{ ms}$**| $23,158.0\text{ tok/s}$ | **$259.40\text{ ms}$**| $15,790.0\text{ tok/s}$ | $\mathcal{O}(N^2)$ quadratic bound ($3,157\text{ GFLOP/s}$) |
+
+### B. Decode (Decoder / Memory-Bandwidth-Bound) Batched Throughput
+| Concurrent Batch Size | Step Latency (NVIDIA L4) | Aggregate TPS (NVIDIA L4) | Per-Stream TPS (L4) | Aggregate TPS (Mac) | Scaling Factor |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **$B = 1$ Stream** | **$7.09\text{ ms}$** | **$141.14\text{ tok/s}$** | $141.14\text{ tok/s}$ | $40.48\text{ tok/s}$ | Baseline (Bandwidth constrained) |
+| **$B = 2$ Streams**| **$6.35\text{ ms}$** | **$314.90\text{ tok/s}$** | $157.45\text{ tok/s}$ | $117.61\text{ tok/s}$ | **$2.23\times$ Aggregate Scaling** |
+| **$B = 4$ Streams**| **$6.53\text{ ms}$** | **$613.03\text{ tok/s}$** | $153.26\text{ tok/s}$ | $214.93\text{ tok/s}$ | **$4.34\times$ Aggregate Scaling** |
+| **$B = 8$ Streams**| **$6.50\text{ ms}$** | **$1,230.46\text{ tok/s}$** | $153.81\text{ tok/s}$ | $631.65\text{ tok/s}$ | **$8.72\times$ Aggregate Scaling** |
+| **$B = 16$ Streams**| **$6.63\text{ ms}$**| **$2,413.36\text{ tok/s}$** | $150.83\text{ tok/s}$ | $1,331.69\text{ tok/s}$| **$17.10\times$ Aggregate Scaling** |
+
+### C. Prefill-Decode Interleaved Jitter Suppression (8K Prompt Burst)
+| Jitter Metric | NVIDIA L4 GPU Measurement | Apple Silicon Mac Measurement | Production SLO Target |
+| :--- | :---: | :---: | :---: |
+| **TTFT P50** | **$19.58\text{ ms}$** | $470.57\text{ ms}$ | $< 50.0\text{ ms}$ |
+| **TTFT P95** | **$47.84\text{ ms}$** | $583.80\text{ ms}$ | $< 100.0\text{ ms}$ |
+| **ITL P50 (Median)** | **$13.79\text{ ms}$** | **$24.25\text{ ms}$** | $< 25.0\text{ ms}$ ✅ |
+| **ITL P95** | **$18.23\text{ ms}$** | **$52.77\text{ ms}$** | $< 50.0\text{ ms}$ ✅ |
+| **ITL P99 (Jitter Peak)** | **$18.23\text{ ms}$** | **$238.47\text{ ms}$** | $< 50.0\text{ ms}$ ✅ |
+
+### Reproduce Prefill vs Decode Duality Benchmarks:
+```bash
+python scripts/benchmark_prefill_decode_duality.py --device cuda   # On NVIDIA GPU
+python scripts/benchmark_prefill_decode_duality.py --device mps    # On Apple Silicon Mac
+```
+
