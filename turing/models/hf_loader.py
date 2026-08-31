@@ -27,122 +27,22 @@ from .causal_lm import SubspaceCausalLM, SubspaceDecoderLayer
 from .converter import TuringConverter
 from ..core.subspace import SubspaceManager
 
+from .resolver import ModelResolver, ResolvedModelSpec
+
 class RealHuggingFaceLoader:
     """
     Imports real pretrained weights from HuggingFace directly into Turing Engine Subspace format.
     """
-    MODEL_ALIASES = {
-        "gpt2": "gpt2",
-        "gpt-2": "gpt2",
-        "smollm2": "HuggingFaceTB/SmolLM2-135M",
-        "smollm2-135m": "HuggingFaceTB/SmolLM2-135M",
-        "smollm2-1.7b": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
-        "qwen-0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
-        "qwen-2.5-0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
-        "qwen-7b": "Qwen/Qwen2.5-7B-Instruct",
-        "qwen-2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
-        "qwen-14b": "Qwen/Qwen2.5-14B-Instruct",
-        "qwen-2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
-        "qwen-32b": "Qwen/Qwen2.5-32B-Instruct",
-        "qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
-        "qwen-coder-7b": "Qwen/Qwen2.5-Coder-7B-Instruct",
-        "qwen-2.5-coder-7b": "Qwen/Qwen2.5-Coder-7B-Instruct",
-        "qwen-coder-32b": "Qwen/Qwen2.5-Coder-32B-Instruct",
-        "qwen-2.5-coder-32b": "Qwen/Qwen2.5-Coder-32B-Instruct",
-        "qwen-72b": "Qwen/Qwen2.5-72B-Instruct",
-        "qwen-2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
-        "gemma-2-2b": "google/gemma-2-2b-it",
-        "gemma-2-9b": "google/gemma-2-9b-it",
-        "gemma-2-27b": "google/gemma-2-27b-it",
-        "llama-3.2-1b": "meta-llama/Llama-3.2-1B-Instruct",
-        "llama-3.2-3b": "meta-llama/Llama-3.2-3B-Instruct",
-        "llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-        "llama-3.1-70b": "unsloth/Meta-Llama-3.1-70B-bnb-4bit",
-        "llama-3.3": "meta-llama/Llama-3.3-70B-Instruct",
-        "llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
-        "deepseek-r1": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
-        "deepseek-r1-1.5b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
-        "deepseek-r1-distill-qwen-1.5b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
-        "deepseek-r1-7b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-        "deepseek-r1-distill-qwen-7b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-        "deepseek-r1-14b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
-        "deepseek-r1-distill-qwen-14b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
-        "deepseek-r1-32b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
-        "deepseek-r1-distill-qwen-32b": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
-        "deepseek-r1-70b": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
-        "deepseek-r1-distill-llama-70b": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
-        "mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
-        "mistral-small": "mistralai/Mistral-Small-24B-Instruct-2501",
-        "mistral-small-24b": "mistralai/Mistral-Small-24B-Instruct-2501",
-        "phi-4": "microsoft/phi-4",
-        "phi-4-mini": "microsoft/Phi-4-mini-instruct",
-        "glm-4-9b": "THUDM/glm-4-9b-chat",
-        "internlm3-8b": "internlm/internlm3-8b-instruct",
-        "minicpm3-4b": "openbmb/MiniCPM3-4B",
-        "yi-1.5-9b": "01-ai/Yi-1.5-9B-Chat",
-        "yi-1.5-34b": "01-ai/Yi-1.5-34B-Chat",
-        "glm-5.2": "zai-org/GLM-5.2",
-        "glm-5.3": "zai-org/GLM-5.3",
-        "glm-5.3-flash": "zai-org/GLM-5.3-Flash",
-        "0x-alpha": "zai-org/GLM-5.3-Flash",
-        "deepseek-v4-flash": "deepseek-ai/DeepSeek-V4-Flash",
-        "deepseek-v4-pro": "deepseek-ai/DeepSeek-V4-Pro",
-        "qwen-3.8-27b": "Qwen/Qwen3.8-27B",
-        "qwen3-coder-30b": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-        "qwen3-coder-480b": "Qwen/Qwen3-Coder-480B-A35B-Instruct",
-        "kimi-k3": "moonshotai/Kimi-K3",
-        "kimi-k2.6": "moonshotai/Kimi-K2.6",
-        "nemotron-3-super": "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-BF16",
-        "nemotron-3-ultra": "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16",
-        "mistral-small-4": "mistralai/Mistral-Small-4-119B-2603",
-        "gemma-4-31b": "google/gemma-4-31B",
-        "gemma-4-26b": "google/gemma-4-26B-A4B",
-        "muse-glimmer-30b": "meta-models/Muse-Glimmer-30B",
-        "gpt-oss-20b": "openai/gpt-oss-20b",
-        "gpt-oss-120b": "openai/gpt-oss-120b",
-        "minimax-m3": "MiniMaxAI/MiniMax-M3",
-        "inkling-975b": "thinkingmachines/Inkling",
-        "llama-4-scout": "meta-llama/Llama-4-Scout-17B-16E",
-        "llama-4-maverick": "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
-        "mistral-large-3": "mistralai/Mistral-Large-Instruct-2407",
-        "qwen-3.8-max": "Qwen/Qwen3.8-2.4T-A95B",
-        "deepseek-r1-0528": "deepseek-ai/DeepSeek-R1-0528",
-    }
+    MODEL_ALIASES = ModelResolver.CLI_ALIASES
 
     @classmethod
     def parse_model_identifier(cls, model_identifier: str) -> Tuple[str, Optional[str]]:
-        """
-        Parses model identifier strings into (resolved_repo_id, reasoning_effort).
-        Supports:
-        - Short aliases: 'deepseek-r1-1.5b' -> ('deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B', None)
-        - Provider/model: 'deepseek-ai/DeepSeek-R1' -> ('deepseek-ai/DeepSeek-R1', None)
-        - Provider/model/effort: 'deepseek-ai/DeepSeek-R1/high' -> ('deepseek-ai/DeepSeek-R1', 'high')
-        - Colon suffix: 'deepseek-ai/DeepSeek-R1:low' -> ('deepseek-ai/DeepSeek-R1', 'low')
-        """
-        raw = model_identifier.strip()
-        effort = None
-
-        # Check colon delimiter
-        if ":" in raw:
-            parts = raw.split(":", 1)
-            raw = parts[0].strip()
-            if parts[1].strip().lower() in ["high", "medium", "low", "default"]:
-                effort = parts[1].strip().lower()
-
-        # Check 3-part provider/model/effort pattern
-        slash_parts = raw.split("/")
-        if len(slash_parts) == 3 and slash_parts[2].lower() in ["high", "medium", "low", "default"]:
-            effort = slash_parts[2].lower()
-            raw = f"{slash_parts[0]}/{slash_parts[1]}"
-
-        key = raw.lower().strip()
-        resolved_repo = cls.MODEL_ALIASES.get(key, raw)
-        return resolved_repo, effort
+        spec = ModelResolver.parse(model_identifier)
+        return spec.repo_id, spec.reasoning_effort
 
     @classmethod
     def resolve_model_id(cls, model_identifier: str) -> str:
-        repo_id, _ = cls.parse_model_identifier(model_identifier)
-        return repo_id
+        return ModelResolver.resolve_repo_id(model_identifier)
 
     @staticmethod
     def load_hf_model_into_turing(

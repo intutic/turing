@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 198/198 Passing](https://img.shields.io/badge/Tests-198%2F198%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 209/209 Passing](https://img.shields.io/badge/Tests-209%2F209%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 
 

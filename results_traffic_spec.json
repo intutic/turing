@@ -1,0 +1,71 @@
+{
+  "part1": {
+    "kv_estimates_bytes": {
+      "128": 16777216,
+      "512": 67108864,
+      "2048": 268435456,
+      "8192": 1073741824,
+      "32768": 4294967296
+    },
+    "admission_overhead_us": 12.520391599900904,
+    "qos_overhead_us": 0.0800917001470225
+  },
+  "part2": {
+    "concurrencies": [
+      {
+        "c": 1,
+        "always_spec_tps": 91.0,
+        "always_plain_tps": 50.0,
+        "gated_tps": 91.0,
+        "mode": "full_spec"
+      },
+      {
+        "c": 2,
+        "always_spec_tps": 152.0,
+        "always_plain_tps": 100.0,
+        "gated_tps": 152.0,
+        "mode": "full_spec"
+      },
+      {
+        "c": 3,
+        "always_spec_tps": 183.00000000000003,
+        "always_plain_tps": 150.0,
+        "gated_tps": 183.00000000000003,
+        "mode": "full_spec"
+      },
+      {
+        "c": 4,
+        "always_spec_tps": 184.00000000000003,
+        "always_plain_tps": 200.0,
+        "gated_tps": 200.0,
+        "mode": "plain"
+      },
+      {
+        "c": 8,
+        "always_spec_tps": 200.0,
+        "always_plain_tps": 400.0,
+        "gated_tps": 400.0,
+        "mode": "plain"
+      },
+      {
+        "c": 12,
+        "always_spec_tps": 300.0,
+        "always_plain_tps": 600.0,
+        "gated_tps": 600.0,
+        "mode": "plain"
+      },
+      {
+        "c": 16,
+        "always_spec_tps": 400.0,
+        "always_plain_tps": 800.0,
+        "gated_tps": 800.0,
+        "mode": "plain"
+      }
+    ]
+  },
+  "part3": {
+    "exact_match_pass": true,
+    "divergence_pass": false,
+    "divergence_index": 3
+  }
+}
