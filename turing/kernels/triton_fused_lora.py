@@ -96,21 +96,25 @@ def fused_lora_gemv_cuda(
     x_flat = x.view(-1, in_dim).contiguous()
     batch_size = x_flat.shape[0]
 
-    if not x.is_cuda or not HAS_TRITON:
-        try:
-            import turing.turing_csrc as turing_csrc
-            x_cpu = x_flat.detach().to(torch.float32).cpu().contiguous().numpy()
-            wb_cpu = w_base.detach().to(torch.float32).cpu().contiguous().numpy()
-            wa_cpu = w_a.detach().to(torch.float32).cpu().contiguous().numpy()
-            wb2_cpu = w_b.detach().to(torch.float32).cpu().contiguous().numpy()
-            out_np = turing_csrc.fused_lora_gemv_cpu(x_cpu, wb_cpu, wa_cpu, wb2_cpu, float(alpha))
-            return torch.from_numpy(out_np).to(device=x.device, dtype=x.dtype).view(*orig_shape[:-1], out_dim)
-        except Exception:
-            base_out = torch.matmul(x_flat, w_base)
-            lora_out = torch.matmul(torch.matmul(x_flat, w_a) * alpha, w_b)
-            return (base_out + lora_out).view(*orig_shape[:-1], out_dim)
+    if not x.is_cuda or not HAS_TRITON or batch_size > 8 or rank > 16:
+        # Large batch prefill or non-CUDA: use hardware cuBLAS Tensor Core GEMM / C++ SIMD
+        if not x.is_cuda:
+            try:
+                import turing.turing_csrc as turing_csrc
+                x_cpu = x_flat.detach().to(torch.float32).cpu().contiguous().numpy()
+                wb_cpu = w_base.detach().to(torch.float32).cpu().contiguous().numpy()
+                wa_cpu = w_a.detach().to(torch.float32).cpu().contiguous().numpy()
+                wb2_cpu = w_b.detach().to(torch.float32).cpu().contiguous().numpy()
+                out_np = turing_csrc.fused_lora_gemv_cpu(x_cpu, wb_cpu, wa_cpu, wb2_cpu, float(alpha))
+                return torch.from_numpy(out_np).to(device=x.device, dtype=x.dtype).view(*orig_shape[:-1], out_dim)
+            except Exception:
+                pass
+        base_out = torch.matmul(x_flat, w_base)
+        lora_out = torch.matmul(torch.matmul(x_flat, w_a) * alpha, w_b)
+        return (base_out + lora_out).view(*orig_shape[:-1], out_dim)
 
     out = torch.empty((batch_size, out_dim), device=x.device, dtype=torch.float32)
+
 
     BLOCK_SIZE_O = 64
     BLOCK_SIZE_K = 64
