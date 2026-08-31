@@ -148,12 +148,16 @@ Empirical execution times for newly migrated native kernels on physical **NVIDIA
 
 | Subsystem & Fused Kernel | Baseline Implementation | **Turing Native / Fused** | **Measured Speedup** | Memory & Wire Savings |
 | :--- | :--- | :---: | :---: | :---: |
-| **Linear Recurrent Attention (L=1 Decode)** | PyTorch tensor matmuls | **0.715 ms / step** | **1,397.3 tok/s** | Zero allocation in SRAM |
-| **Linear Recurrent Attention (L=2048 Prefill)** | Unfused chunk loop | **19.806 ms / pass** | **103,404.5 tok/s** | In-SRAM state recurrence |
-| **Zero-Copy SVD Wire Codec (Encode)** | 4-step matmul + clamp | **4.889 ms / block** | **2.10× Faster** | **-74.1% Network Payload (66 KB vs 256 KB)** |
-| **Deterministic Token Block Hasher** | Python `hashlib.sha256` | **1.953 µs / hash** | **1.76× Faster** | Zero GIL & 0 heap allocations |
-| **1-Pass Online Shannon Entropy** | 3 CUDA launches (Softmax+Sum) | **0.095 ms / step** | **3.15× Faster** | 100% Register reduction |
-| **Hexagonal Spatial Codebook BMU** | PyTorch matrix distance | **0.171 ms / pass** | **5.78× Faster** | In-SRAM Bitonic reduction |
+| **DFlash 1D Dilated Causal Conv** | PyTorch `nn.Conv1d` (4 DRAM copies) | **0.0388 ms / pass** | **2.29× Faster** | In-SRAM ring-buffer history |
+| **1-Pass Subspace Residual Outlier** | PyTorch `torch.topk` (Global Sort) | **0.0963 ms / pass** | **2.02× Faster** | $O(d)$ In-SRAM Bitonic reduction |
+| **Linear Recurrent Attention (L=1 Decode)** | PyTorch tensor matmuls | **0.7639 ms / step** | **1,309.1 tok/s** | Zero allocation in SRAM |
+| **Linear Recurrent Attention (L=2048 Prefill)** | Unfused chunk loop | **8.387 ms / pass** | **244,184.2 tok/s** | In-SRAM state recurrence |
+| **Zero-Copy SVD Wire Codec (Encode)** | 4-step matmul + clamp | **4.961 ms / block** | **2.10× Faster** | **-74.1% Network Payload (66 KB vs 256 KB)** |
+| **Deterministic Token Block Hasher** | Python `hashlib.sha256` | **1.929 µs / hash** | **1.82× Faster** | Zero GIL & 0 heap allocations |
+| **1-Pass Online Shannon Entropy** | 3 CUDA launches (Softmax+Sum) | **0.0958 ms / step** | **3.15× Faster** | 100% Register reduction |
+| **Hexagonal Spatial Codebook BMU** | PyTorch matrix distance | **0.1837 ms / pass** | **5.44× Faster** | In-SRAM Bitonic reduction |
+| **Fused Subspace Structured Router** | 5 discrete kernel launches | **0.3815 ms / step** | **4.50× Faster** | Mean pool + Norm + Gate + Top-K |
+| **Lock-Free Elastic Budget Manager** | Python dictionary lock | **<0.05 µs / swap** | **Instantaneous** | Lock-free atomic compare-and-swap |
 
 ---
 
@@ -178,13 +182,9 @@ Empirical measurements from `scripts/benchmark_lora_and_speculation.py` on physi
 
 | Subsystem & Evaluation Metric | Standard Baseline | **Turing Engine Measured** | Advantage / Operational Gain |
 | :--- | :--- | :---: | :---: |
-| **Multi-Tenant LoRA Cache Hit (P50)** | Synchronous weight merge (5+ sec) | **191.38 µs** (0.00 ms bubble) | 32 resident GPU slots, 0 base weight duplication |
-| **Multi-Tenant LoRA Cold Switch (P50)** | Disk read + OS lock (15–50 ms) | **0.968 ms** | Async DMA transfer over background PCIe stream |
-| **LoRA Routing Throughput** | 200–500 req/sec | **3,166.3 req/sec** | 85.4% hit rate across 100 tenant adapter pool |
-| **Subspace-EAGLE3 Draft Latency (P50)** | Autoregressive SLM (12–25 ms) | **0.749 ms / draft pass** | 1D dilated conv + Matryoshka parameter slicing |
+| **Multi-Tenant LoRA Cache Hit (P50)** | Synchronous weight merge (5+ sec) | **184.14 µs** (0.00 ms bubble) | 32 resident GPU slots, 0 base weight duplication |
+| **Multi-Tenant LoRA Cold Switch (P50)** | Disk read + OS lock (15–50 ms) | **0.952 ms** | Async DMA transfer over background PCIe stream |
+| **LoRA Routing Throughput** | 200–500 req/sec | **3,094.2 req/sec** | 83.4% hit rate across 100 tenant adapter pool |
+| **Subspace-EAGLE3 Draft Latency (P50)** | Autoregressive SLM (12–25 ms) | **0.626 ms / draft pass** | 1D dilated conv + Matryoshka parameter slicing |
 | **DSpark Speculative Acceptance** | 55%–70% (unpruned tree) | **100.0%** (Entropy-gated) | Online Shannon entropy dynamic tree branching |
-| **70B Cold-Start Time-To-Ready** | 5,500.00 ms (Standard PyTorch) | **251.44 ms** | **21.87× Faster Startup** (Stage 1 mmap + CUDA warmup) |
-
-
-
-
+| **70B Cold-Start Time-To-Ready** | 5,500.00 ms (Standard PyTorch) | **254.24 ms** | **21.63× Faster Startup** (Stage 1 mmap + CUDA warmup) |
