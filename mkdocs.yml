@@ -60,6 +60,7 @@ extra_javascript:
 
 nav:
   - Overview: index.md
+  - Technical Comparison: comparison.md
   - Quickstart: quickstart.md
   - Models & Hardware: models_and_hardware.md
   - Serving & API: serving.md

@@ -56,6 +56,7 @@ turing serve --model deepseek-r1-7b --port 8000
 
 ## 📖 Navigation
 
+* [🌐 Technical Comparison: vs vLLM, SGLang, Ollama & llama.cpp](comparison.md)
 * [⚡ Quickstart Guide](quickstart.md)
 * [🌐 Supported Models & Hardware Setup](models_and_hardware.md)
 * [🚀 Serving & API Reference](serving.md)
