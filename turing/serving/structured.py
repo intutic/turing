@@ -88,6 +88,17 @@ class StructuredOutputParser:
         if not s:
             return "{}"
 
+        try:
+            import turing.turing_csrc as turing_csrc
+            res = turing_csrc.scan_json_structure_fast(s)
+            suffix = res.get("repair_suffix", "")
+            if suffix:
+                s_repaired = re.sub(r",\s*$", "", s)
+                s_repaired = re.sub(r":\s*$", ': null', s_repaired)
+                return s_repaired + suffix
+        except Exception:
+            pass
+
         # State tracking
         in_string = False
         escape = False

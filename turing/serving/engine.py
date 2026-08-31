@@ -20,6 +20,7 @@ from .traffic import (
     AdmissionResult, Lane, LanePolicy
 )
 from .spec_gate import SpecGateDecision, SpeculationGatePolicy
+from ..kernels.triton_fused_sample import batched_sample_tokens
 
 class RequestState(Enum):
     WAITING = 0
@@ -316,16 +317,11 @@ class ContinuousBatchEngine:
         self.running_batch = [req for req in self.running_batch if req.state != RequestState.FINISHED]
 
     def _sample_token(self, next_token_logits: torch.Tensor, temperature: float, top_k: int) -> int:
-        if temperature > 0:
-            probs = F.softmax(next_token_logits / temperature, dim=-1)
-            if top_k > 0:
-                topk_probs, topk_indices = torch.topk(probs, k=min(top_k, probs.shape[-1]), dim=-1)
-                idx = torch.multinomial(topk_probs, num_samples=1)
-                return torch.gather(topk_indices, -1, idx).item()
-            else:
-                return torch.multinomial(probs, num_samples=1).item()
-        else:
-            return torch.argmax(next_token_logits, dim=-1).item()
+        if next_token_logits.ndim == 1:
+            next_token_logits = next_token_logits.unsqueeze(0)
+        temps = torch.tensor([temperature], dtype=torch.float32, device=next_token_logits.device)
+        sampled = batched_sample_tokens(next_token_logits, temps, top_k=top_k)
+        return int(sampled[0].item())
 
     def _finish_request(self, req: AsyncSequenceRequest, finished_time: float):
         req.state = RequestState.FINISHED

@@ -53,17 +53,13 @@ class KSlotCachePooler(nn.Module):
         return torch.softmax(logits, dim=-1)
 
     def forward(self, keys: torch.Tensor, values: torch.Tensor, padding_mask: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Pools keys and values.
-        
-        Args:
-            keys: (B, L, H, N, D)
-            values: (B, L, H, N, D)
-            padding_mask: (B, N) optional
-            
-        Returns:
-            Tuple of pooled keys and values, both of shape (B, L, H, k, D)
-        """
+        if keys.is_cuda and padding_mask is None:
+            try:
+                from ..kernels.triton_kslot_pool import fused_kslot_pool_cuda
+                return fused_kslot_pool_cuda(keys, values, self.queries)
+            except Exception:
+                pass
+
         attn = self.attention_weights(keys, padding_mask)
         pooled_keys = torch.einsum('blhjn,blhnd->blhjd', attn, keys)
         pooled_values = torch.einsum('blhjn,blhnd->blhjd', attn, values)

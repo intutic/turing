@@ -46,6 +46,8 @@
 #include "turing_prefix_router.hpp"
 #include "turing_spec_verifier.hpp"
 #include "turing_fast_hash_tensor.hpp"
+#include "turing_sampler.hpp"
+#include "turing_json_fast_scan.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -1408,6 +1410,48 @@ PYBIND11_MODULE(turing_csrc, m) {
         }
         return turing::hash_tensor_buffer_hex(reinterpret_cast<const uint8_t*>(data_ptr), num_bytes);
     }, py::arg("data_ptr"), py::arg("num_bytes"), "Fast AVX2 SIMD Tensor Memory Checksum");
+
+    // Native C++20 AVX2 Batched Logits Sampler
+    m.def("sample_batched_logits_simd", [](
+        py::array_t<float, py::array::c_style | py::array::forcecast> logits_arr,
+        py::array_t<float, py::array::c_style | py::array::forcecast> temps_arr,
+        py::array_t<int32_t, py::array::c_style | py::array::forcecast> topks_arr,
+        py::array_t<float, py::array::c_style | py::array::forcecast> unifs_arr
+    ) -> std::vector<int32_t> {
+        py::buffer_info l_buf = logits_arr.request();
+        py::buffer_info t_buf = temps_arr.request();
+        py::buffer_info k_buf = topks_arr.request();
+        py::buffer_info u_buf = unifs_arr.request();
+
+        if (l_buf.ndim != 2) {
+            throw std::runtime_error("Logits array must be 2D [Batch, Vocab]");
+        }
+
+        size_t batch_size = static_cast<size_t>(l_buf.shape[0]);
+        size_t vocab_size = static_cast<size_t>(l_buf.shape[1]);
+
+        const float* l_ptr = static_cast<const float*>(l_buf.ptr);
+        const float* t_ptr = static_cast<const float*>(t_buf.ptr);
+        const int32_t* k_ptr = static_cast<const int32_t*>(k_buf.ptr);
+        const float* u_ptr = static_cast<const float*>(u_buf.ptr);
+
+        return turing::sample_batched_logits_simd_cpp(l_ptr, batch_size, vocab_size, t_ptr, k_ptr, u_ptr);
+    }, py::arg("logits"), py::arg("temperatures"), py::arg("top_ks"), py::arg("uniform_samples"),
+       "Native AVX2 SIMD Batched Logits Sampler");
+
+    // Native C++20 AVX2 Fast JSON Syntax Scanner & Bracket Balancer
+    m.def("scan_json_structure_fast", [](const std::string& text) -> py::dict {
+        auto res = turing::scan_json_structure_simd_cpp(text.data(), text.size());
+        py::dict d;
+        d["is_valid"] = res.is_valid_json_boundary;
+        d["first_brace_idx"] = res.first_brace_idx;
+        d["last_brace_idx"] = res.last_brace_idx;
+        d["depth_curly"] = res.depth_curly;
+        d["depth_square"] = res.depth_square;
+        d["in_string"] = res.in_string;
+        d["repair_suffix"] = res.suggested_repair_suffix;
+        return d;
+    }, py::arg("text"), "Native AVX2 SIMD Fast JSON Syntax Scanner & Bracket Balancer");
 }
 
 
