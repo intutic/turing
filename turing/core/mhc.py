@@ -146,6 +146,23 @@ class ManifoldHyperConnection(nn.Module):
             except Exception:
                 pass
 
+        if not streams.is_cuda and self.num_streams == 4:
+            try:
+                import turing.turing_csrc as turing_csrc
+                batch, seq_len, _, hidden_dim = streams.shape
+                s_np = streams.view(-1, 4, hidden_dim).detach().to(torch.float32).cpu().contiguous().numpy()
+                lup_np = layer_out.view(-1, hidden_dim).detach().to(torch.float32).cpu().contiguous().numpy()
+                alpha_np = F.softmax(self.raw_pre_weights, dim=0).detach().to(torch.float32).cpu().contiguous().numpy()
+                h_res = self.get_doubly_stochastic_res_map()
+                h_np = h_res.detach().to(torch.float32).cpu().contiguous().numpy()
+                beta_np = torch.sigmoid(self.raw_post_weights).detach().to(torch.float32).cpu().contiguous().numpy()
+
+                _, s_out_np = turing_csrc.mhc_4stream_simd_cpu(s_np, lup_np, alpha_np, h_np, beta_np)
+                new_streams = torch.from_numpy(s_out_np).to(device=streams.device, dtype=streams.dtype).view(batch, seq_len, 4, hidden_dim)
+                return new_streams, layer_out
+            except Exception:
+                pass
+
         # Step 3: Doubly stochastic residual stream mixing
         streams_mixed = self.res_map(streams)
 
@@ -153,4 +170,5 @@ class ManifoldHyperConnection(nn.Module):
         new_streams = self.post_map(streams_mixed, layer_out)
 
         return new_streams, layer_out
+
 

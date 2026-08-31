@@ -38,6 +38,11 @@
 #include "turing_linear_recurrence.hpp"
 #include "turing_svd_wire_codec.hpp"
 #include "turing_fast_hash.hpp"
+#include "turing_dilated_conv1d.hpp"
+#include "turing_lora_gemv.hpp"
+#include "turing_residual_outlier.hpp"
+#include "turing_elastic_budget.hpp"
+#include "turing_mhc_simd.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -1221,7 +1226,149 @@ PYBIND11_MODULE(turing_csrc, m) {
     ) -> uint64_t {
         return turing::deterministic_token_hash_cpp(token_ids.data(), token_ids.size(), seed);
     }, "Native C++20 Deterministic 64-bit Token Block Hasher");
+
+    // Native C++20 AVX2 1D Dilated Depthwise Causal Convolution
+    m.def("dilated_causal_conv1d_cpu", [](
+        py::array_t<float, py::array::c_style> input_arr,
+        py::array_t<float, py::array::c_style> weight_arr,
+        int dilation
+    ) {
+        py::buffer_info in_buf = input_arr.request();
+        py::buffer_info w_buf = weight_arr.request();
+
+        int B = static_cast<int>(in_buf.shape[0]);
+        int S = static_cast<int>(in_buf.shape[1]);
+        int C = static_cast<int>(in_buf.shape[2]);
+        int K = static_cast<int>(w_buf.shape[1]);
+
+        auto out_arr = py::array_t<float>({B, S, C});
+
+        turing::dilated_causal_conv1d_simd(
+            static_cast<const float*>(in_buf.ptr),
+            static_cast<const float*>(w_buf.ptr),
+            static_cast<float*>(out_arr.request().ptr),
+            B, S, C, K, dilation
+        );
+
+        return out_arr;
+    }, "Native C++20 AVX2 1D Dilated Depthwise Causal Convolution");
+
+    // Native C++20 AVX2 Fused Base GEMV + LoRA Rank-8 Additive Contraction
+    m.def("fused_lora_gemv_cpu", [](
+        py::array_t<float, py::array::c_style> x_arr,
+        py::array_t<float, py::array::c_style> w_base_arr,
+        py::array_t<float, py::array::c_style> w_a_arr,
+        py::array_t<float, py::array::c_style> w_b_arr,
+        float alpha
+    ) {
+        py::buffer_info x_buf = x_arr.request();
+        py::buffer_info wb_buf = w_base_arr.request();
+        py::buffer_info wa_buf = w_a_arr.request();
+        py::buffer_info wb2_buf = w_b_arr.request();
+
+        int B = static_cast<int>(x_buf.shape[0]);
+        int InDim = static_cast<int>(x_buf.shape[1]);
+        int OutDim = static_cast<int>(wb_buf.shape[1]);
+        int Rank = static_cast<int>(wa_buf.shape[1]);
+
+        auto out_arr = py::array_t<float>({B, OutDim});
+
+        turing::fused_lora_gemv_simd(
+            static_cast<const float*>(x_buf.ptr),
+            static_cast<const float*>(wb_buf.ptr),
+            static_cast<const float*>(wa_buf.ptr),
+            static_cast<const float*>(wb2_buf.ptr),
+            alpha,
+            static_cast<float*>(out_arr.request().ptr),
+            B, InDim, OutDim, Rank
+        );
+
+        return out_arr;
+    }, "Native C++20 AVX2 Fused Base GEMV + LoRA Rank-8 Contraction");
+
+    // Native C++20 AVX2 1-Pass Subspace Residual Outlier Extraction
+    m.def("find_residual_outlier_cpu", [](
+        py::array_t<float, py::array::c_style> residual_arr
+    ) {
+        py::buffer_info r_buf = residual_arr.request();
+        int B = static_cast<int>(r_buf.shape[0]);
+        int D = static_cast<int>(r_buf.shape[1]);
+
+        auto indices_arr = py::array_t<int>(std::vector<ssize_t>{B});
+        auto values_arr = py::array_t<float>(std::vector<ssize_t>{B});
+
+        turing::find_residual_outlier_simd(
+            static_cast<const float*>(r_buf.ptr),
+            static_cast<int*>(indices_arr.request().ptr),
+            static_cast<float*>(values_arr.request().ptr),
+            B, D
+        );
+
+        return py::make_tuple(indices_arr, values_arr);
+    }, "Native C++20 AVX2 1-Pass Subspace Residual Outlier Extraction");
+
+    // Native C++20 Lock-Free Elastic Memory Budget Controller
+    py::class_<turing::ElasticBudgetController>(m, "NativeElasticBudgetController")
+        .def(py::init<int, int, int, int, int, int, int, int, int, float>(),
+             py::arg("initial_expert_slots"),
+             py::arg("min_expert_slots"),
+             py::arg("max_expert_slots"),
+             py::arg("initial_kv_pages"),
+             py::arg("min_kv_pages"),
+             py::arg("max_kv_pages"),
+             py::arg("bytes_per_slot"),
+             py::arg("bytes_per_page"),
+             py::arg("page_size_tokens"),
+             py::arg("target_headroom") = 0.25f)
+        .def("evaluate_and_rebalance", [](turing::ElasticBudgetController& self, int active_tokens, bool force) {
+            auto res = self.evaluate_and_rebalance(active_tokens, force);
+            py::dict d;
+            d["rebalanced"] = res.rebalanced;
+            d["new_expert_slots"] = res.new_expert_slots;
+            d["new_kv_pages"] = res.new_kv_pages;
+            d["rebalance_count"] = res.rebalance_count;
+            d["action"] = res.action;
+            return d;
+        }, py::arg("active_tokens"), py::arg("force") = false)
+        .def("get_expert_slots", &turing::ElasticBudgetController::get_expert_slots)
+        .def("get_kv_pages", &turing::ElasticBudgetController::get_kv_pages)
+        .def("get_rebalance_count", &turing::ElasticBudgetController::get_rebalance_count);
+
+    // Native C++20 AVX2 4-Stream Birkhoff mHC Fusion
+    m.def("mhc_4stream_simd_cpu", [](
+        py::array_t<float, py::array::c_style> streams_in_arr,
+        py::array_t<float, py::array::c_style> layer_update_arr,
+        py::array_t<float, py::array::c_style> alpha_weights_arr,
+        py::array_t<float, py::array::c_style> h_res_matrix_arr,
+        py::array_t<float, py::array::c_style> beta_weights_arr
+    ) {
+        py::buffer_info s_buf = streams_in_arr.request();
+        py::buffer_info lup_buf = layer_update_arr.request();
+        py::buffer_info a_buf = alpha_weights_arr.request();
+        py::buffer_info h_buf = h_res_matrix_arr.request();
+        py::buffer_info b_buf = beta_weights_arr.request();
+
+        int T = static_cast<int>(s_buf.shape[0]);
+        int D = static_cast<int>(s_buf.shape[2]);
+
+        auto l_in_arr = py::array_t<float>({T, D});
+        auto s_out_arr = py::array_t<float>({T, 4, D});
+
+        turing::mhc_4stream_simd(
+            static_cast<const float*>(s_buf.ptr),
+            static_cast<const float*>(lup_buf.ptr),
+            static_cast<const float*>(a_buf.ptr),
+            static_cast<const float*>(h_buf.ptr),
+            static_cast<const float*>(b_buf.ptr),
+            static_cast<float*>(l_in_arr.request().ptr),
+            static_cast<float*>(s_out_arr.request().ptr),
+            T, D
+        );
+
+        return py::make_tuple(l_in_arr, s_out_arr);
+    }, "Native C++20 AVX2 4-Stream Birkhoff mHC Hyper-Connection Step");
 }
+
 
 
 

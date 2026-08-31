@@ -82,9 +82,19 @@ class SubspaceManager:
             
         recon_base = self.reconstruct_from_subspace(self.dequantize_subspace_int8(q_int8, scale))
         residual = x - recon_base
+        
+        if top_k_residuals == 1:
+            try:
+                from ..kernels.triton_residual_outlier import find_residual_outlier_cuda
+                top_indices, signed_vals = find_residual_outlier_cuda(residual)
+                return q_int8, scale, (top_indices, signed_vals)
+            except Exception:
+                pass
+
         top_vals, top_indices = torch.topk(torch.abs(residual), k=top_k_residuals, dim=-1)
         signed_vals = torch.gather(residual, -1, top_indices)
         return q_int8, scale, (top_indices, signed_vals)
+
 
     def reconstruct_with_residual_correction(
         self,

@@ -56,6 +56,24 @@ class ElasticMemoryBudgetManager:
         self.target_headroom = target_kv_headroom_ratio
         self.rebalance_count = 0
 
+        # Native Lock-Free C++ Controller
+        try:
+            import turing.turing_csrc as turing_csrc
+            self.native_controller = turing_csrc.NativeElasticBudgetController(
+                expert_cache.active_slots,
+                self.min_expert_slots,
+                self.max_expert_slots,
+                kv_pool.get_stats()["total_pages"],
+                self.min_kv_pages,
+                self.max_kv_pages,
+                self.bytes_per_slot,
+                self.bytes_per_page,
+                kv_pool.page_size,
+                float(target_kv_headroom_ratio)
+            )
+        except Exception:
+            self.native_controller = None
+
     def evaluate_and_rebalance(
         self,
         current_active_tokens: int,
@@ -66,6 +84,20 @@ class ElasticMemoryBudgetManager:
         If KV pool is constrained (<20% free pages), shrinks MoE slots to expand KV pages.
         If KV pool has excess headroom (>50% free pages), expands MoE slots for higher hit rate.
         """
+        if self.native_controller is not None:
+            res = self.native_controller.evaluate_and_rebalance(current_active_tokens, force)
+            if res["rebalanced"]:
+                self.expert_cache.resize_active_slots(res["new_expert_slots"])
+                self.kv_pool.adjust_active_capacity(res["new_kv_pages"])
+                self.rebalance_count = res["rebalance_count"]
+            return {
+                "rebalanced": res["rebalanced"],
+                "active_expert_slots": res["new_expert_slots"],
+                "active_kv_pages": res["new_kv_pages"],
+                "rebalance_count": res["rebalance_count"],
+                "action": res["action"]
+            }
+
         tokens_per_page = self.kv_pool.page_size
         needed_pages = math.ceil(current_active_tokens / max(1, tokens_per_page))
         target_kv_pages = max(

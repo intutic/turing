@@ -55,22 +55,26 @@ class SubspaceStructuredRouter(nn.Module):
         else:
             if top_k_override is not None:
                 k_val = min(max(top_k_override, self.min_tiles), self.total_tiles)
-                tile_scores = logits[:, :, 1] - logits[:, :, 0]
-                _, topk_idx = torch.topk(tile_scores, k=k_val, dim=-1)
-                tile_mask = torch.zeros(ctx.shape[0], self.total_tiles, device=ctx.device, dtype=torch.float32)
-                tile_mask.scatter_(1, topk_idx, 1.0)
             else:
-                # Dynamic top-k scaling based on sequence uncertainty
                 mean_uncertainty = uncertainty.mean().item()
                 k_dynamic = int(round(self.min_tiles + mean_uncertainty * (self.max_tiles - self.min_tiles)))
-                k_dynamic = max(self.min_tiles, min(self.max_tiles, k_dynamic))
+                k_val = max(self.min_tiles, min(self.max_tiles, k_dynamic))
 
-                tile_scores = logits[:, :, 1] - logits[:, :, 0]
-                _, topk_idx = torch.topk(tile_scores, k=k_dynamic, dim=-1)
-                tile_mask = torch.zeros(ctx.shape[0], self.total_tiles, device=ctx.device, dtype=torch.float32)
-                tile_mask.scatter_(1, topk_idx, 1.0)
+            if ctx.is_cuda and not self.gate_proj.bias is not None:
+                try:
+                    from ..kernels.triton_fused_router import fused_router_cuda
+                    tile_mask = fused_router_cuda(ctx, self.gate_proj.weight.t(), k_tiles=k_val)
+                    return tile_mask, uncertainty
+                except Exception:
+                    pass
+
+            tile_scores = logits[:, :, 1] - logits[:, :, 0]
+            _, topk_idx = torch.topk(tile_scores, k=k_val, dim=-1)
+            tile_mask = torch.zeros(ctx.shape[0], self.total_tiles, device=ctx.device, dtype=torch.float32)
+            tile_mask.scatter_(1, topk_idx, 1.0)
 
         return tile_mask, uncertainty
+
 
     def anneal_temperature(self, step: int, max_steps: int):
         """Anneals Gumbel temperature: tau(t) = max(0.2, 1.0 - 0.8 * (t / T))"""

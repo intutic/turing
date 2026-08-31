@@ -46,8 +46,29 @@ class TenantLoRAAdapter(nn.Module):
         nn.init.kaiming_uniform_(self.lora_a.weight, a=5**0.5)
         nn.init.zeros_(self.lora_b.weight)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, base_weight: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if base_weight is not None:
+            if x.is_cuda:
+                try:
+                    from ..kernels.triton_fused_lora import fused_lora_gemv_cuda
+                    return fused_lora_gemv_cuda(x, base_weight, self.lora_a.weight.t(), self.lora_b.weight.t(), alpha=self.alpha)
+                except Exception:
+                    pass
+            else:
+                try:
+                    import turing.turing_csrc as turing_csrc
+                    x_cpu = x.detach().to(torch.float32).cpu().contiguous().numpy()
+                    wb_cpu = base_weight.detach().to(torch.float32).cpu().contiguous().numpy()
+                    wa_cpu = self.lora_a.weight.t().detach().to(torch.float32).cpu().contiguous().numpy()
+                    wb2_cpu = self.lora_b.weight.t().detach().to(torch.float32).cpu().contiguous().numpy()
+                    out_np = turing_csrc.fused_lora_gemv_cpu(x_cpu, wb_cpu, wa_cpu, wb2_cpu, float(self.alpha))
+                    return torch.from_numpy(out_np).to(device=x.device, dtype=x.dtype)
+                except Exception:
+                    pass
+            return torch.matmul(x, base_weight) + self.alpha * self.lora_b(self.lora_a(x))
+
         return x + self.alpha * self.lora_b(self.lora_a(x))
+
 
 
 class GPULRUAdapterCache:

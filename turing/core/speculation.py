@@ -439,11 +439,27 @@ class SubspaceEAGLEDraftHead(nn.Module):
         # 1. Project to Rank-64 Subspace
         z = self.proj_to_subspace(hidden_states) # [Batch, SeqLen, RankSubspace]
 
-        # 2. 1D Depthwise Dilated Conv over Subspace Sequence
-        z_trans = z.transpose(1, 2)
-        z_conv = self.dilated_conv(z_trans)[..., :seq_len].transpose(1, 2) # [Batch, SeqLen, RankSubspace]
+        # 2. 1D Depthwise Dilated Conv over Subspace Sequence (Fused In-SRAM / SIMD)
+        if z.is_cuda:
+            try:
+                from ..kernels.triton_dilated_conv import dilated_causal_conv1d_cuda
+                z_conv = dilated_causal_conv1d_cuda(z, self.dilated_conv.weight.squeeze(1), dilation=2)
+            except Exception:
+                z_trans = z.transpose(1, 2)
+                z_conv = self.dilated_conv(z_trans)[..., :seq_len].transpose(1, 2)
+        else:
+            try:
+                import turing.turing_csrc as turing_csrc
+                z_np = z.detach().to(torch.float32).cpu().contiguous().numpy()
+                w_np = self.dilated_conv.weight.squeeze(1).detach().to(torch.float32).cpu().contiguous().numpy()
+                out_np = turing_csrc.dilated_causal_conv1d_cpu(z_np, w_np, 2)
+                z_conv = torch.from_numpy(out_np).to(device=z.device, dtype=z.dtype)
+            except Exception:
+                z_trans = z.transpose(1, 2)
+                z_conv = self.dilated_conv(z_trans)[..., :seq_len].transpose(1, 2)
 
         # 3. Block-Parallel Future Token Feature Synthesis (O(1))
+
         last_z = z_conv[:, -1, :] # [Batch, RankSubspace]
         future_z = self.future_heads(last_z).view(batch, self.future_tokens, self.rank_subspace) # [Batch, K, RankSubspace]
 
