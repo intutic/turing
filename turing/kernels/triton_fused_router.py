@@ -28,7 +28,9 @@ if HAS_TRITON:
         b_idx = tl.program_id(0)
 
         # Compute tile scores: score[t] = logit[t, 1] - logit[t, 0]
-        # w_gate shape: [hidden_dim, total_tiles * 2]
+        t_offsets = tl.arange(0, 128)
+        t_mask = t_offsets < total_tiles
+
         scores = tl.zeros((128,), dtype=tl.float32)
 
         for k in range(0, hidden_dim, BLOCK_SIZE_K):
@@ -37,28 +39,22 @@ if HAS_TRITON:
 
             x_vals = tl.load(ctx_ptr + b_idx * hidden_dim + k_offsets, mask=k_mask, other=0.0)
 
-            for t in range(total_tiles):
-                # Column for logit 0: 2*t, Column for logit 1: 2*t + 1
-                w0_ptrs = w_gate_ptr + k_offsets * (total_tiles * 2) + (2 * t)
-                w1_ptrs = w_gate_ptr + k_offsets * (total_tiles * 2) + (2 * t + 1)
+            w0_ptrs = w_gate_ptr + k_offsets[:, None] * (total_tiles * 2) + (2 * t_offsets[None, :])
+            w1_ptrs = w_gate_ptr + k_offsets[:, None] * (total_tiles * 2) + (2 * t_offsets[None, :] + 1)
 
-                w0_vals = tl.load(w0_ptrs, mask=k_mask, other=0.0)
-                w1_vals = tl.load(w1_ptrs, mask=k_mask, other=0.0)
+            w0_vals = tl.load(w0_ptrs, mask=k_mask[:, None] & t_mask[None, :], other=0.0)
+            w1_vals = tl.load(w1_ptrs, mask=k_mask[:, None] & t_mask[None, :], other=0.0)
 
-                diff = w1_vals - w0_vals
-                scores[t] += tl.sum(x_vals * diff)
+            diff = w1_vals - w0_vals
+            scores += tl.sum(x_vals[:, None] * diff, axis=0)
 
-        # Write output tile mask (1.0 for top-k, 0.0 otherwise)
-        for t in range(total_tiles):
-            # Count how many tiles have strictly greater score
-            rank_count = 0
-            s_t = scores[t]
-            for other_t in range(total_tiles):
-                if scores[other_t] > s_t:
-                    rank_count += 1
+        # Vectorized bitonic / parallel rank count: rank_counts[t] = sum_{other} (scores[other] > scores[t])
+        rank_matrix = scores[None, :] < scores[:, None]
+        rank_counts = tl.sum(tl.where(t_mask[:, None] & rank_matrix, 1, 0), axis=0)
 
-            is_topk = 1.0 if rank_count < k_tiles else 0.0
-            tl.store(tile_mask_ptr + b_idx * total_tiles + t, is_topk)
+        is_topk = tl.where(t_mask & (rank_counts < k_tiles), 1.0, 0.0)
+        tl.store(tile_mask_ptr + b_idx * total_tiles + t_offsets, is_topk, mask=t_mask)
+
 
 
 def fused_router_cuda(

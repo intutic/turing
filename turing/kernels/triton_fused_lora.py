@@ -39,6 +39,9 @@ if HAS_TRITON:
         x_base = x_ptr + pid_b * in_dim
 
         # 1. Compute LoRA intermediate z = x @ W_A (Rank <= 16) in SRAM
+        r_offsets = tl.arange(0, 16)
+        r_mask = r_offsets < rank
+
         z_lora = tl.zeros((16,), dtype=tl.float32)
 
         for k in range(0, in_dim, BLOCK_SIZE_K):
@@ -46,10 +49,9 @@ if HAS_TRITON:
             k_mask = k_offsets < in_dim
             x_vals = tl.load(x_base + k_offsets, mask=k_mask, other=0.0)
 
-            for r in range(rank):
-                wa_ptrs = w_a_ptr + k_offsets * rank + r
-                wa_vals = tl.load(wa_ptrs, mask=k_mask, other=0.0)
-                z_lora[r] += tl.sum(x_vals * wa_vals)
+            wa_ptrs = w_a_ptr + k_offsets[:, None] * rank + r_offsets[None, :]
+            wa_vals = tl.load(wa_ptrs, mask=k_mask[:, None] & r_mask[None, :], other=0.0)
+            z_lora += tl.sum(x_vals[:, None] * wa_vals, axis=0)
 
         # 2. Accumulate Base GEMV (x @ W_base)
         accum_base = tl.zeros((BLOCK_SIZE_O,), dtype=tl.float32)
@@ -65,16 +67,15 @@ if HAS_TRITON:
             accum_base += tl.sum(wb_vals * x_vals[:, None], axis=0)
 
         # 3. Add LoRA W_B contribution: sum_r z[r] * W_B[r, o] * alpha
-        accum_lora = tl.zeros((BLOCK_SIZE_O,), dtype=tl.float32)
-        for r in range(rank):
-            wb2_ptrs = w_b_ptr + r * out_dim + o_offsets
-            wb2_vals = tl.load(wb2_ptrs, mask=o_mask, other=0.0)
-            accum_lora += (z_lora[r] * alpha) * wb2_vals
+        wb2_ptrs = w_b_ptr + r_offsets[:, None] * out_dim + o_offsets[None, :]
+        wb2_vals = tl.load(wb2_ptrs, mask=r_mask[:, None] & o_mask[None, :], other=0.0)
+        accum_lora = tl.sum((z_lora[:, None] * alpha) * wb2_vals, axis=0)
 
         # 4. Store final sum
         total_out = accum_base + accum_lora
         out_base = out_ptr + pid_b * out_dim + o_offsets
         tl.store(out_base, total_out, mask=o_mask)
+
 
 
 def fused_lora_gemv_cuda(
