@@ -32,8 +32,9 @@ Turing Engine features a **Universal Dynamic Model Resolver** (`ModelResolver`) 
 Turing Engine's `ModelResolver` seamlessly parses all industry-standard model naming patterns:
 
 ```bash
-# 1. Canonical Hugging Face Hub Repository ID:
+# 1. Canonical Hugging Face Hub Repository ID (Any open-weight model):
 turing serve --model meta-llama/Llama-3.3-70B-Instruct
+turing chat --model EleutherAI/pythia-70m
 
 # 2. Tri-Part Provider/Model/Reasoning Namespace:
 turing serve --model deepseek-ai/DeepSeek-R1/high
@@ -50,6 +51,18 @@ turing serve --model /path/to/custom/finetuned/weights/
 # 6. Ergonomic CLI Shortcuts:
 turing chat --model deepseek-r1-1.5b
 ```
+
+### C. ❓ Architecture Clarification: `CLI_ALIASES` vs. `SIZING_PROFILES`
+
+To ensure full transparency and avoid confusion regarding model loading:
+
+* **`CLI_ALIASES` (`turing/models/resolver.py`)**:
+  - **What it is**: Purely optional **typing shortcuts for interactive developers** (e.g. typing `turing chat --model smollm2` instead of typing `turing chat --model HuggingFaceTB/SmolLM2-135M`).
+  - **Dynamic Passthrough**: If you pass any full repo ID (e.g., `turing chat --model stabilityai/stablelm-base-alpha-3b` or `EleutherAI/pythia-70m`), `ModelResolver` skips aliases and loads directly from Hugging Face Hub.
+* **`SIZING_PROFILES` (`turing/models/sizing_profiles.py`)**:
+  - **What it is**: An offline catalog of theoretical parameter dimensions used **strictly by `turing bench`** for dry-run theoretical FLOP simulations, memory bandwidth calculations, and PCIe bottleneck modeling without needing to download 140GB weight checkpoints to disk.
+  - **Zero Impact on Live Inference**: Live serving and chat **never use static sizing profiles**; they dynamically introspect the model's remote `config.json` on the fly via `ModelConfig.from_pretrained()`.
+
 
 !!! info "Why MoE Host Paging Is Fast (Avoiding Naive Offloading Latency)"
     Traditional layer-by-layer offloading crawls at 1–2 tok/s because it transfers uncompressed weights over PCIe synchronously. Turing Engine sustains **18–50+ tok/s** through two distinct hardware paths:

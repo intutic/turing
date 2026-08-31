@@ -68,6 +68,11 @@ Turing Engine natively ingests, compresses, and serves open weights directly fro
 | **OpenAI & NVIDIA** | `gpt-oss-20b` (3.6B active / runs in 8GB VRAM), `nemotron-3-super/ultra` | **1x 8GB–24GB GPU / Mac** |
 | **Microsoft** | `phi-4` (14B), `phi-4-mini` | **1x 8GB–16GB GPU / Mac** |
 
+> **❓ Clarification: `CLI_ALIASES` vs. `SIZING_PROFILES`**
+> * **`CLI_ALIASES` (`resolver.py`)**: Purely optional typing shortcuts for interactive developers (e.g. typing `turing chat --model smollm2` instead of `turing chat --model HuggingFaceTB/SmolLM2-135M`). Passing any full repo ID (e.g. `turing chat --model EleutherAI/pythia-70m` or `meta-llama/Llama-3.3-70B-Instruct`) bypasses aliases and streams weights directly from Hugging Face Hub.
+> * **`SIZING_PROFILES` (`sizing_profiles.py`)**: An offline catalog of theoretical parameter counts used **only by `turing bench`** for dry-run FLOP simulations and PCIe bandwidth calculations without downloading 140GB weights to disk. It is **never used during live inference**.
+> * **Zero Hardcoding**: Live inference uses `ModelConfig.from_pretrained()` to dynamically derive architecture parameters on the fly for any model in the world.
+
 ---
 
 ## ⚡ Universal Cross-Vendor Hardware Support
