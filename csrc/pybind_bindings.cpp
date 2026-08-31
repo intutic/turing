@@ -1294,8 +1294,8 @@ PYBIND11_MODULE(turing_csrc, m) {
         int B = static_cast<int>(r_buf.shape[0]);
         int D = static_cast<int>(r_buf.shape[1]);
 
-        auto indices_arr = py::array_t<int>(std::vector<ssize_t>{B});
-        auto values_arr = py::array_t<float>(std::vector<ssize_t>{B});
+        auto indices_arr = py::array_t<int>(std::vector<py::ssize_t>{static_cast<py::ssize_t>(B)});
+        auto values_arr = py::array_t<float>(std::vector<py::ssize_t>{static_cast<py::ssize_t>(B)});
 
         turing::find_residual_outlier_simd(
             static_cast<const float*>(r_buf.ptr),

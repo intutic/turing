@@ -13,7 +13,9 @@
 
 #if defined(_WIN32) || defined(_MSC_VER)
 #include <malloc.h>
-#define __restrict__
+#ifndef __restrict__
+#define __restrict__ __restrict
+#endif
 #endif
 
 #if defined(__x86_64__) || defined(_M_X64)

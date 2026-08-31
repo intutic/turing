@@ -5,6 +5,12 @@
 #include <algorithm>
 #include <cstring>
 
+#if defined(_WIN32) || defined(_MSC_VER)
+#ifndef __restrict__
+#define __restrict__ __restrict
+#endif
+#endif
+
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__)
 #include <immintrin.h>
 #define TURING_HAS_AVX2 1
