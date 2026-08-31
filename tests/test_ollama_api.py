@@ -37,7 +37,7 @@ def test_ollama_version_endpoint(test_app):
     with TestClient(test_app) as client:
         resp = client.get("/api/version")
         assert resp.status_code == 200
-        assert resp.json()["version"] == "0.6.0"
+        assert resp.json()["version"] == "0.7.0"
 
 
 def test_ollama_ps_endpoint(test_app):
