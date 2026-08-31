@@ -39,6 +39,45 @@ class ModelConfig:
         if self.router_layer_idx is None:
             self.router_layer_idx = max(1, self.num_layers // 3)
 
+    @classmethod
+    def from_pretrained(cls, model_name_or_id: str, sparsity_ratio: float = 0.5, token: Optional[str] = None) -> "ModelConfig":
+        """
+        Dynamically extracts ModelConfig architecture geometry from any Hugging Face Hub repository
+        or local directory containing a config.json file. Zero hardcoding required.
+        """
+        try:
+            from transformers import AutoConfig
+            import os, huggingface_hub
+            hf_token = token or os.environ.get("HF_TOKEN") or huggingface_hub.get_token()
+            hf_cfg = AutoConfig.from_pretrained(model_name_or_id, token=hf_token)
+            hidden_dim = getattr(hf_cfg, "hidden_size", getattr(hf_cfg, "n_embd", 768))
+            num_layers = getattr(hf_cfg, "num_hidden_layers", getattr(hf_cfg, "n_layer", 12))
+            num_heads = getattr(hf_cfg, "num_attention_heads", getattr(hf_cfg, "n_head", 12))
+            num_kv_heads = getattr(hf_cfg, "num_key_value_heads", num_heads)
+            head_dim = getattr(hf_cfg, "head_dim", hidden_dim // num_heads)
+            vocab_size = getattr(hf_cfg, "vocab_size", 32000)
+            ffn_dim = getattr(hf_cfg, "intermediate_size", hidden_dim * 4)
+            tile_size = 64 if ffn_dim <= 4096 else 256
+            total_tiles = ffn_dim // tile_size
+            active_tiles = max(1, int(total_tiles * (1.0 - sparsity_ratio)))
+            return cls(
+                name=model_name_or_id,
+                hidden_dim=hidden_dim,
+                ffn_dim=ffn_dim,
+                num_heads=num_heads,
+                num_kv_heads=num_kv_heads,
+                head_dim=head_dim,
+                num_layers=num_layers,
+                vocab_size=vocab_size,
+                tile_size=tile_size,
+                active_tiles=active_tiles,
+                rank_sub=64 if hidden_dim >= 768 else 32,
+                max_position_embeddings=getattr(hf_cfg, "max_position_embeddings", 2048),
+                rope_theta=getattr(hf_cfg, "rope_theta", 10000.0)
+            )
+        except Exception as e:
+            raise ValueError(f"Could not dynamically derive ModelConfig from '{model_name_or_id}': {e}")
+
 @dataclass
 class TuringConfig:
     device: str = "auto"
