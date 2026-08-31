@@ -8,7 +8,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests: 154/154 Passing](https://img.shields.io/badge/Tests-154%2F154%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-160%2F160%20Passing-brightgreen.svg)]()
 
 
 
