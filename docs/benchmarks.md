@@ -191,7 +191,7 @@ Empirical measurements from `scripts/benchmark_lora_and_speculation.py` on physi
 
 ---
 
-## 12. Cross-Model Lineage, $k$-Slot Pooling & AI Traffic Serving (v0.4.0)
+## 12. Cross-Model Lineage, $k$-Slot Pooling & AI Traffic Serving
 
 Empirical measurements from `scripts/benchmark_lineage_strategies.py`, `scripts/benchmark_traffic_and_spec.py`, and `scripts/benchmark_serving_e2e.py` on physical **GCP NVIDIA L4 24GB GPU** and **Apple Silicon Mac**:
 
