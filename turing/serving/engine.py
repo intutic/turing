@@ -15,6 +15,11 @@ import torch.nn.functional as F
 from ..config import ModelConfig, TuringConfig
 from ..models.causal_lm import SubspaceCausalLM
 from ..core.paging import StaticPagedKVPool
+from .traffic import (
+    KVMemoryEstimator, AdmissionController, AdmissionDecision,
+    AdmissionResult, Lane, LanePolicy
+)
+from .spec_gate import SpecGateDecision, SpeculationGatePolicy
 
 class RequestState(Enum):
     WAITING = 0
@@ -32,7 +37,8 @@ class AsyncSequenceRequest:
         request_id: Optional[str] = None,
         sparsity_ratio: Optional[float] = None,
         use_svd_kv: Optional[bool] = None,
-        draft_tokens: Optional[int] = None
+        draft_tokens: Optional[int] = None,
+        lane: Optional[Lane] = None
     ):
         self.request_id = request_id or str(uuid.uuid4())[:8]
         self.prompt_tokens = list(prompt_tokens)
@@ -42,6 +48,7 @@ class AsyncSequenceRequest:
         self.sparsity_ratio = sparsity_ratio
         self.use_svd_kv = use_svd_kv
         self.draft_tokens = draft_tokens
+        self.lane = lane
         self.state = RequestState.WAITING
         self.generated_tokens: List[int] = []
         self.output_queue: asyncio.Queue[Optional[int]] = asyncio.Queue()
@@ -64,13 +71,19 @@ class ContinuousBatchEngine:
         turing_config: Optional[TuringConfig] = None,
         prefill_chunk_size: int = 512,
         model: Optional[SubspaceCausalLM] = None,
-        tokenizer: Optional[Any] = None
+        tokenizer: Optional[Any] = None,
+        admission: Optional[AdmissionController] = None,
+        lane_policy: Optional[LanePolicy] = None,
+        spec_gate: Optional[SpeculationGatePolicy] = None
     ):
         self.model_config = model_config
         self.turing_config = turing_config or TuringConfig()
         self.device = self.turing_config.resolve_device()
         self.prefill_chunk_size = prefill_chunk_size
         self.tokenizer = tokenizer
+        self.admission = admission
+        self.lane_policy = lane_policy
+        self.spec_gate = spec_gate
 
         if model is not None:
             self.model = model.to(self.device).eval()
@@ -143,8 +156,13 @@ class ContinuousBatchEngine:
         top_k: int = 50,
         sparsity_ratio: Optional[float] = None,
         use_svd_kv: Optional[bool] = None,
-        draft_tokens: Optional[int] = None
+        draft_tokens: Optional[int] = None,
+        lane: Optional[Lane] = None
     ) -> AsyncSequenceRequest:
+        # Classify QoS lane if policy provided and lane not explicit
+        if lane is None and self.lane_policy is not None:
+            lane = self.lane_policy.classify_request(max_tokens=max_new_tokens, stream=True)
+
         req = AsyncSequenceRequest(
             prompt_tokens=prompt_tokens,
             max_new_tokens=max_new_tokens,
@@ -152,8 +170,27 @@ class ContinuousBatchEngine:
             top_k=top_k,
             sparsity_ratio=sparsity_ratio,
             use_svd_kv=use_svd_kv,
-            draft_tokens=draft_tokens
+            draft_tokens=draft_tokens,
+            lane=lane
         )
+
+        # Check VRAM Admission Control if configured
+        if self.admission is not None:
+            head_dim = self.model_config.hidden_dim // self.model_config.num_heads
+            est_bytes = KVMemoryEstimator.estimate_kv_bytes(
+                num_prompt_tokens=len(prompt_tokens),
+                max_new_tokens=max_new_tokens,
+                num_layers=self.model_config.num_layers,
+                num_kv_heads=self.model_config.num_heads,
+                head_dim=head_dim,
+                svd_compression_ratio=0.75 if use_svd_kv else 0.0
+            )
+            adm_res = self.admission.admit(req.request_id, est_bytes)
+            if adm_res.decision == AdmissionDecision.SHED:
+                req.state = RequestState.FINISHED
+                req.output_queue.put_nowait(None)
+                raise RuntimeError(f"Request {req.request_id} rejected by admission controller: {adm_res.reason or 'VRAM limit exceeded'}")
+
         self.waiting_queue.append(req)
         return req
 
@@ -165,7 +202,8 @@ class ContinuousBatchEngine:
         top_k: int = 50,
         sparsity_ratio: Optional[float] = None,
         use_svd_kv: Optional[bool] = None,
-        draft_tokens: Optional[int] = None
+        draft_tokens: Optional[int] = None,
+        lane: Optional[Lane] = None
     ) -> AsyncGenerator[int, None]:
         req = await self.add_request(
             prompt_tokens=prompt_tokens,
@@ -174,7 +212,8 @@ class ContinuousBatchEngine:
             top_k=top_k,
             sparsity_ratio=sparsity_ratio,
             use_svd_kv=use_svd_kv,
-            draft_tokens=draft_tokens
+            draft_tokens=draft_tokens,
+            lane=lane
         )
         while True:
             token = await req.output_queue.get()
@@ -184,7 +223,15 @@ class ContinuousBatchEngine:
 
     async def _scheduler_loop(self):
         while self.is_running:
-            # 1. Admit waiting requests up to batch capacity
+            # 1. Update Speculation Gating Mode based on active running batch
+            if self.spec_gate is not None:
+                self.spec_gate.gate_decision(len(self.running_batch))
+
+            # 2. Priority sort waiting queue by lane policy (Interactive > Batch > Background)
+            if self.lane_policy is not None and self.waiting_queue:
+                self.waiting_queue.sort(key=lambda r: self.lane_policy.priority(r.lane) if r.lane else 0)
+
+            # 3. Admit waiting requests up to batch capacity
             while len(self.running_batch) < self.max_batch_size and self.waiting_queue:
                 req = self.waiting_queue.pop(0)
                 req.state = RequestState.PREFILLING
@@ -195,7 +242,7 @@ class ContinuousBatchEngine:
                 await asyncio.sleep(0.001)
                 continue
 
-            # 2. Execute single iteration step
+            # 4. Execute single iteration step
             self._step_batch()
             await asyncio.sleep(0)
 
@@ -208,9 +255,10 @@ class ContinuousBatchEngine:
 
         for i, req in enumerate(self.running_batch):
             with torch.inference_mode():
-                # Case A: Chunked Prefilling
+                # Case A: Chunked Prefilling with Lane-Specific Budget
                 if req.state == RequestState.PREFILLING:
-                    chunk_end = min(req.prefill_offset + self.prefill_chunk_size, len(req.prompt_tokens))
+                    chunk_budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) else self.prefill_chunk_size
+                    chunk_end = min(req.prefill_offset + chunk_budget, len(req.prompt_tokens))
                     chunk_tokens = req.prompt_tokens[req.prefill_offset:chunk_end]
                     chunk_input = torch.tensor([chunk_tokens], dtype=torch.long, device=self.device)
 
@@ -275,6 +323,8 @@ class ContinuousBatchEngine:
         req.finished_at = finished_time
         req.past_kv = None  # Free VRAM/DRAM allocated tensors
         self.kv_pool.free_pages(req.request_id)
+        if self.admission is not None:
+            self.admission.release(req.request_id)
         req.output_queue.put_nowait(None)
         self.total_requests_completed += 1
 
@@ -287,7 +337,7 @@ class ContinuousBatchEngine:
         p95_ttft_ms = float(torch.tensor(list(self.recent_ttft)).quantile(0.95).item() * 1000.0) if len(self.recent_ttft) >= 5 else avg_ttft_ms
         p99_ttft_ms = float(torch.tensor(list(self.recent_ttft)).quantile(0.99).item() * 1000.0) if len(self.recent_ttft) >= 10 else avg_ttft_ms
 
-        return {
+        telemetry: Dict[str, Any] = {
             "uptime_seconds": round(uptime, 2),
             "total_tokens_generated": self.total_tokens_generated,
             "total_requests_completed": self.total_requests_completed,
@@ -302,6 +352,14 @@ class ContinuousBatchEngine:
                 "avg_itl_ms": round(avg_itl_ms, 2)
             }
         }
+        if self.admission is not None:
+            telemetry["admission"] = self.admission.stats
+        if self.spec_gate is not None:
+            telemetry["spec_gate"] = self.spec_gate.stats
+        if self.lane_policy is not None:
+            telemetry["lane_policy"] = {"slo_target_p99_ms": self.lane_policy.slo_target_p99_ms}
+
+        return telemetry
 
     def get_kv_cache_utilization(self) -> float:
         """Returns KV cache memory pool utilization as a fraction (0.0 to 1.0)."""

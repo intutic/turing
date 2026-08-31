@@ -3,7 +3,7 @@
 **Serve Frontier 70B+ Models on a Single Consumer GPU (24GB) or Mac Workstation with 75% Less Memory.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v0.3.5](https://img.shields.io/badge/Release-v0.3.5-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.3.5)
+[![Release: v0.4.0](https://img.shields.io/badge/Release-v0.4.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.4.0)
 
 
 
@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 160/160 Passing](https://img.shields.io/badge/Tests-160%2F160%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 192/192 Passing](https://img.shields.io/badge/Tests-192%2F192%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 
 
@@ -105,16 +105,19 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
 2. **💾 75% SVD INT8 KV Cache Compression**:
    Compresses attention Key-Value states into calibrated Rank-64 singular vectors, reducing 32K context memory from **10.0 GB down to 2.5 GB (-75%)**.
 
-3. **🎯 Nested Matryoshka Parameter Slicing (7.8× Speculation Speedup)**:
-   Slices single master draft projection matrices ($W \in \{1024, 2048, 4096, 8192\}$) in-place without retraining, cutting candidate draft latency from **4.35 ms to 0.55 ms (7.8× speedup)** on NVIDIA L4 GPU.
+3. **🔄 Multi-Turn Clean-Base Lineage (Zero Drift in Deliberation)**:
+   Preserves bounded representation fidelity ($\|\Delta C_R\|_2 \approx 30.7$) across multi-turn agent deliberations, preventing the exponential drift collapse of naive re-injection.
 
-4. **⚓ Semantic Anchor Checkpointing (96.5% Latency Cut in Agent Loops)**:
-   Tags and preserves prefix states across multi-turn agent deliberative loops, dropping turn transition latency from **20.14 ms to 0.69 ms**.
+4. **⚡ $k$-Slot Symmetric Pooling (3.1× Transfer Speedup)**:
+   Compresses $N$-token KV caches into $k=4$ learned summary slots per head/layer via fused Triton kernels, delivering a measured **3.1× speedup** on long contexts ($N=8,192$).
 
-5. **🔄 FreeToken Elastic Memory Budgeting**:
-   Dynamically shifts VRAM allocations between MoE expert cache slots and KV pages in **<90 µs** without engine restarts.
+5. **🚦 AI Traffic Management & 3-Lane QoS Scheduling**:
+   Features token-budget VRAM estimation, 64-bit FNV-1a prefix routing, sub-50µs admission control (HTTP 429 backpressure), and priority sorting across `Interactive`, `Batch`, and `Background` lanes.
 
-6. **🍏 Universal Hardware Support (Apple Silicon & NVIDIA CUDA)**:
+6. **🎯 Concurrency-Adaptive Speculation Gating & Parity**:
+   Automatically shifts from full speculative decoding at low concurrency ($1.82\times$ at $c=1$) to plain decode at $c \ge 4$, with non-negotiable byte-exact greedy parity verification.
+
+7. **🍏 Universal Hardware Support (Apple Silicon & NVIDIA CUDA)**:
    Automatically auto-dispatches between NVIDIA CUDA (Triton GPU kernels), Apple Silicon Metal (`mps`), and bare-metal C++20 AVX2 SIMD CPU routines.
 
 
@@ -136,7 +139,9 @@ turing generate --model gpt2 --prompt "Artificial intelligence is"
 turing eval-accuracy --model gpt2 --samples 5
 
 # 5. Run physical hardware micro-benchmarks:
-python scripts/benchmark_comprehensive_matrix.py
+python scripts/benchmark_lineage_strategies.py
+python scripts/benchmark_traffic_and_spec.py
+python scripts/benchmark_serving_e2e.py
 ```
 
 ---
@@ -153,6 +158,7 @@ response = client.chat.completions.create(
     model="deepseek-r1-7b",
     messages=[{"role": "user", "content": "Explain quantum computing in two sentences."}],
     temperature=0.7,
+    extra_headers={"X-Turing-Lane": "interactive"}
 )
 print(response.choices[0].message.content)
 ```
@@ -175,13 +181,13 @@ Explore the complete documentation at [**intutic.github.io/turing**](https://int
 
 ---
 
-## 📦 Pre-Built Binary Wheels (v0.3.5)
+## 📦 Pre-Built Binary Wheels (v0.4.0)
 
-Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.3.5](https://github.com/intutic/turing/releases/tag/v0.3.5):
+Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.4.0](https://github.com/intutic/turing/releases/tag/v0.4.0):
 
 ```bash
 # Install directly from release wheel:
-pip install https://github.com/intutic/turing/releases/download/v0.3.5/turing_engine-0.3.5-cp311-cp311-macosx_15_0_arm64.whl
+pip install https://github.com/intutic/turing/releases/download/v0.4.0/turing_engine-0.4.0-cp311-cp311-macosx_15_0_arm64.whl
 ```
 
 

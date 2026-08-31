@@ -13,6 +13,11 @@ import torch.nn.functional as F
 
 from ..config import ModelConfig
 from ..core.rope import NTKDynamicRoPEScaling
+from .lineage import (
+    CleanBaseLineageBuffer, CacheLineage, CacheLineageEntry,
+    CleanBaseStrategy, AppendOnlyStrategy, NaiveStrategy, TurnStrategy
+)
+from .kslot_pooling import KSlotCachePooler
 
 
 class RoPEContentDecoupler:
@@ -296,11 +301,15 @@ class CrossModelKVPipeline:
         source_config: ModelConfig,
         target_config: ModelConfig,
         top_k_layers: int = 8,
-        ridge_lambda: float = 0.01
+        ridge_lambda: float = 0.01,
+        lineage_buffer: Optional['CleanBaseLineageBuffer'] = None,
+        pooler: Optional['KSlotCachePooler'] = None
     ):
         self.source_config = source_config
         self.target_config = target_config
         self.top_k = top_k_layers
+        self.lineage_buffer = lineage_buffer
+        self.pooler = pooler
 
         # Target has target_config.num_layers layers
         self.layer_mappers_k: Dict[int, ClosedFormRidgeMapper] = {}
@@ -361,6 +370,18 @@ class CrossModelKVPipeline:
 
         batch, seq_len, _, head_dim = src_keys_formatted[0].shape
 
+        # Step 0: Apply k-slot attention pooling if pooler is configured
+        if self.pooler is not None:
+            # Format inputs to [Batch, NumLayers, Heads, SeqLen, HeadDim] for pooler
+            stacked_k = torch.stack(src_keys_formatted, dim=1).transpose(2, 3) # [B, L, H, N, D]
+            stacked_v = torch.stack(src_vals_formatted, dim=1).transpose(2, 3) # [B, L, H, N, D]
+            pooled_k, pooled_v = self.pooler(stacked_k, stacked_v) # [B, L, H, k, D]
+            
+            # Unpack back to list of [Batch, k, Heads, HeadDim]
+            src_keys_formatted = [pooled_k[:, l].transpose(1, 2).contiguous() for l in range(self.source_config.num_layers)]
+            src_vals_formatted = [pooled_v[:, l].transpose(1, 2).contiguous() for l in range(self.source_config.num_layers)]
+            seq_len = self.pooler.num_slots
+
         # Step 1: Strip RoPE from all source key layers
         stripped_source_keys = [
             RoPEContentDecoupler.strip_rope(k, base=self.source_config.rope_theta)
@@ -397,6 +418,49 @@ class CrossModelKVPipeline:
             tgt_values.append(mapped_v)
 
         return tgt_keys, tgt_values
+
+    def transfer_cache_multi_turn(
+        self,
+        source_keys_by_layer: List[torch.Tensor],
+        source_values_by_layer: List[torch.Tensor],
+        turn_index: int = 0,
+        strategy: Optional[TurnStrategy] = None,
+        lineage: Optional[CacheLineage] = None,
+        previous_target_keys: Optional[List[torch.Tensor]] = None,
+        previous_target_values: Optional[List[torch.Tensor]] = None,
+    ) -> Tuple[List[torch.Tensor], List[torch.Tensor], Optional[CacheLineageEntry]]:
+        """
+        Executes multi-turn cross-model KV transfer governed by TurnStrategy and recorded in CacheLineage.
+        """
+        if strategy is None:
+            strategy = CleanBaseStrategy()
+
+        # If we have a lineage buffer, retrieve the clean base
+        if self.lineage_buffer is not None:
+            base_keys = self.lineage_buffer.get_clean_base()
+        else:
+            base_keys = None
+
+        if strategy.translates_on_turn(turn_index):
+            tgt_keys, tgt_values = self.transfer_cache(source_keys_by_layer, source_values_by_layer)
+        else:
+            if previous_target_keys is not None and previous_target_values is not None:
+                tgt_keys, tgt_values = previous_target_keys, previous_target_values
+            else:
+                tgt_keys, tgt_values = self.transfer_cache(source_keys_by_layer, source_values_by_layer)
+
+        lineage_entry = None
+        if lineage is not None:
+            read_ref = base_keys if base_keys is not None else source_keys_by_layer
+            lineage_entry = lineage.record(
+                turn_index=turn_index,
+                strategy=strategy.name,
+                read_kv=read_ref,
+                wrote_kv=tgt_keys,
+                residual_norm=0.0
+            )
+
+        return tgt_keys, tgt_values, lineage_entry
 
 
 class XKVLayerAlignmentTransport(nn.Module):

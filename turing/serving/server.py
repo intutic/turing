@@ -14,6 +14,7 @@ from ..config import ModelConfig, TuringConfig
 from .engine import ContinuousBatchEngine
 from .anthropic_api import AnthropicMessageRequest, AnthropicAPIHandler
 from .kv_events import KVBlockEventPublisher
+from .traffic import AdmissionController, LanePolicy, Lane
 
 class ChatMessage(BaseModel):
     role: str
@@ -30,6 +31,7 @@ class ChatCompletionRequest(BaseModel):
     sparsity_ratio: Optional[float] = Field(default=None, description="Custom subspace sparsity ratio (0.0 to 0.9)")
     use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
     draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
+    lane: Optional[str] = Field(default=None, description="QoS scheduling lane (interactive, batch, background)")
 
 class CompletionRequest(BaseModel):
     model: str
@@ -40,8 +42,19 @@ class CompletionRequest(BaseModel):
     sparsity_ratio: Optional[float] = Field(default=None, description="Custom subspace sparsity ratio (0.0 to 0.9)")
     use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
     draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
+    lane: Optional[str] = Field(default=None, description="QoS scheduling lane (interactive, batch, background)")
 
-def create_app(engine: ContinuousBatchEngine, kv_publisher: Optional[KVBlockEventPublisher] = None) -> FastAPI:
+def create_app(
+    engine: ContinuousBatchEngine,
+    kv_publisher: Optional[KVBlockEventPublisher] = None,
+    admission_controller: Optional[AdmissionController] = None,
+    lane_policy: Optional[LanePolicy] = None
+) -> FastAPI:
+    if admission_controller is not None:
+        engine.admission = admission_controller
+    if lane_policy is not None:
+        engine.lane_policy = lane_policy
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await engine.start()
@@ -54,19 +67,11 @@ def create_app(engine: ContinuousBatchEngine, kv_publisher: Optional[KVBlockEven
                 kv_publisher.stop()
             await engine.stop()
 
-    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.3.5", lifespan=lifespan)
-
-
-
-
-
-
-
-
+    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.4.0", lifespan=lifespan)
 
     def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
         """
-        Extracts dynamic per-request sparsity, SVD KV paging, and draft speculation knobs
+        Extracts dynamic per-request sparsity, SVD KV paging, QoS lane, and draft speculation knobs
         from HTTP headers (X-Turing-*) or JSON request payload with fallback to model defaults.
         """
         headers = raw_req.headers
@@ -102,10 +107,23 @@ def create_app(engine: ContinuousBatchEngine, kv_publisher: Optional[KVBlockEven
                 except ValueError:
                     pass
 
+        # 4. QoS Lane
+        lane_str = getattr(req_obj, "lane", None)
+        if lane_str is None:
+            lane_str = headers.get("x-turing-lane") or headers.get("X-Turing-Lane")
+
+        lane_obj = None
+        if lane_str:
+            try:
+                lane_obj = Lane(lane_str.lower())
+            except ValueError:
+                pass
+
         return {
             "sparsity_ratio": float(sparsity),
             "use_svd_kv": bool(svd_kv),
-            "draft_tokens": draft_toks
+            "draft_tokens": draft_toks,
+            "lane": lane_obj
         }
 
     @app.get("/health")
@@ -117,6 +135,7 @@ def create_app(engine: ContinuousBatchEngine, kv_publisher: Optional[KVBlockEven
             "running_requests": len(engine.running_batch),
             "waiting_requests": len(engine.waiting_queue),
             "sparsity_ratio": f"{engine.model_config.sparsity_ratio * 100:.1f}%",
+            "kv_cache_utilization": f"{engine.get_kv_cache_utilization() * 100:.2f}%",
         }
 
     @app.get("/metrics")
@@ -161,6 +180,15 @@ def create_app(engine: ContinuousBatchEngine, kv_publisher: Optional[KVBlockEven
                 f"# TYPE turing_cache_config_info gauge",
                 f'turing_cache_config_info{{block_size="{llmd["block_size"]}",num_gpu_blocks="{llmd["num_gpu_blocks"]}"}} 1.0',
             ]
+            if "admission" in telem:
+                lines.extend([
+                    f"# HELP turing_vram_utilization_ratio Admission controller tracked VRAM utilization ratio",
+                    f"# TYPE turing_vram_utilization_ratio gauge",
+                    f"turing_vram_utilization_ratio {telem['admission']['utilization']}",
+                    f"# HELP turing_admission_shed_total Total requests shed by admission control",
+                    f"# TYPE turing_admission_shed_total counter",
+                    f"turing_admission_shed_total {telem['admission']['shed_count']}",
+                ])
             from fastapi.responses import PlainTextResponse
             return PlainTextResponse("\n".join(lines) + "\n")
 
@@ -221,6 +249,8 @@ def create_app(engine: ContinuousBatchEngine, kv_publisher: Optional[KVBlockEven
         resp_headers = {
             "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
             "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
+            "X-Turing-KV-Utilization": f"{engine.get_kv_cache_utilization():.4f}",
+            "X-Turing-Queue-Depth": str(len(engine.waiting_queue)),
             "X-Turing-Model": engine.model_config.name,
             "X-Turing-Device": str(engine.device),
         }
@@ -332,6 +362,8 @@ def create_app(engine: ContinuousBatchEngine, kv_publisher: Optional[KVBlockEven
         resp_headers = {
             "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
             "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
+            "X-Turing-KV-Utilization": f"{engine.get_kv_cache_utilization():.4f}",
+            "X-Turing-Queue-Depth": str(len(engine.waiting_queue)),
             "X-Turing-Model": engine.model_config.name,
             "X-Turing-Device": str(engine.device)
         }

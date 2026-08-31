@@ -26,7 +26,7 @@ python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
 # Run quick quiet validation
 python -W error -m pytest -q
 ```
-> **Invariant**: All 160 automated tests MUST pass with 0 warnings. Any newly introduced warning or test regression must be resolved immediately.
+> **Invariant**: All 192 automated tests MUST pass with 0 warnings. Any newly introduced warning or test regression must be resolved immediately.
 
 
 
@@ -37,10 +37,10 @@ python -W error -m pytest -q
 
 ### 1. Core Directories & Responsibilities
 - **`csrc/`**: Bare-metal C++20 AVX2 SIMD headers and PyBind11 bindings (`pybind_bindings.cpp`). All allocations must be 64-byte aligned (`posix_memalign` / `aligned_alloc`). Native code must compile with `-fvisibility=hidden` and LTO.
-- **`turing/core/`**: Algorithmic & mathematical primitives (closed-form $W^*$ KV transfer, Birkhoff hyper-connections, heterogeneous MoE routing, SVD KV paging, quadtree MRP speculative decoding).
-- **`turing/kernels/`**: Triton GPU kernels (`triton_swiglu.py`, `triton_flash_tree.py`, `triton_w4a16.py`, `triton_recirculation.py`) and CUDA dispatch wrappers.
+- **`turing/core/`**: Algorithmic & mathematical primitives (closed-form $W^*$ KV transfer, `lineage.py` multi-turn clean-base controller, `kslot_pooling.py` $k$-slot attention summaries & gated zero-identity heads, Birkhoff hyper-connections, heterogeneous MoE routing, SVD KV paging, quadtree MRP speculative decoding).
+- **`turing/kernels/`**: Triton GPU kernels (`triton_swiglu.py`, `triton_flash_tree.py`, `triton_w4a16.py`, `triton_recirculation.py`, `triton_kslot_pool.py`) and CUDA dispatch wrappers.
 - **`turing/models/`**: Subspace model architectures (`causal_lm.py`), weight converters (`converter.py`), safetensors mmap loaders, and vLLM integration adapters.
-- **`turing/serving/`**: Production continuous batching engine (`engine.py`), dual OpenAI + Anthropic `/v1/messages` server (`server.py`), and NIAH evaluator (`niah.py`).
+- **`turing/serving/`**: Production continuous batching engine (`engine.py`), dual OpenAI + Anthropic `/v1/messages` server (`server.py`), AI traffic management & 3-lane QoS scheduling (`traffic.py`), concurrency-adaptive speculation gating (`spec_gate.py`), and NIAH evaluator (`niah.py`).
 - **`turing/demo/`**: Multi-agent deliberation coordinator (`agent_system.py`), dynamic environment model (`world_model.py`), epistemic uncertainty gate (`epistemic_gate.py`), and interactive CLI runner.
 
 ### 2. Coding Principles & Guidelines
@@ -50,6 +50,8 @@ python -W error -m pytest -q
    - `MultiAgentCoordinator` (not `AstraAgentSystem`)
    - `DynamicEnvironmentModel` (not `ActiveInferenceWorldModel`)
    - `EntropyConfidenceTreePruner` (not `BAPHConfidenceTreePruner`)
+   - `CleanBaseLineageBuffer` (not `PristineCacheRegistry`)
+   - `KSlotCachePooler` (not `SlotSummaryCompressor`)
    - `constraint_penalty` (not `free_energy`)
 4. **Platform Compatibility**: Code must gracefully handle and auto-dispatch between NVIDIA CUDA (Triton), Apple Silicon Metal (MPS), and x86_64/ARM CPU (AVX2 SIMD fallback).
 5. **License Compliance**: Respect Business Source License 1.1 terms in [`LICENSE`](LICENSE).

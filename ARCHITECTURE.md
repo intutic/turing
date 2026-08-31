@@ -122,6 +122,12 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 - **DFlash $O(1)$ Dilated Convolutions**: Generates candidate token representations concurrently in a single parallel step.
 - **Entropy Confidence Tree Pruner**: Expands speculative DAG trees based on online Shannon entropy, achieving **$2.0\times – 3.5\times$ generation speedup**.
 
+### 2.6 Multi-Turn Clean-Base Lineage & $k$-Slot Pooling (`turing/core/lineage.py`, `turing/core/kslot_pooling.py`)
+- **`CleanBaseLineageBuffer`**: Stores frozen pristine receiver states (`peak_live_caches=2`) and recomputes residuals $\Delta C_R$ against that baseline every deliberation turn, maintaining bounded representation fidelity ($\|\Delta C_R\|_2 \approx 30.70$) and completely eliminating the exponential drift collapse of naive re-injection ($21,284.28$).
+- **`CacheLineage`**: Cryptographic append-only ledger computing deterministic BLAKE2b digests of Key-Value memory buffers for drift auditability and tamper protection.
+- **`KSlotCachePooler`**: Compresses $N$-token KV caches into $k=4$ learned summary slots per head/layer via multi-head query attention, delivering a **$3.1\times$ transfer speedup** and $2,048\times$ compression on long sequences ($N=8,192$).
+- **`GatedZeroIdentityHead`**: Combines sigmoid gating with zero-initialized linear projections, mathematically guaranteeing that an untrained translator produces exactly $\Delta C_R = 0$.
+
 ---
 
 ## 3. Layer 3: GPU Hardware & Triton Kernels (`turing/kernels/`)
@@ -139,21 +145,31 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 | **Fused Base + LoRA GEMV** | `triton_fused_lora.py` | Single-block Tensor Core fused Base GEMV + LoRA Rank-8 contraction for low-latency tokens. |
 | **1-Pass Outlier Reduction** | `triton_residual_outlier.py` | 1-Pass In-SRAM absolute max outlier reduction (2.02× speedup vs `torch.topk`). |
 | **Fused Gumbel Router** | `triton_fused_router.py` | Single-launch Mean Pool + RMSNorm + Gate GEMV + Bitonic Top-K tile mask. |
-
-
+| **Fused $k$-Slot Pooling + RoPE** | `triton_kslot_pool.py` | In-SRAM inverse RoPE rotation + softmax attention + weighted sum reduction (3.1× speedup). |
 
 ---
 
-## 4. Layer 4: Production Serving & Multi-Agent Deliberation
+## 4. Layer 4: Production Serving & AI Traffic Management
 
 ### 4.1 Continuous Batching Scheduler (`turing/serving/engine.py`)
-- **Chunked Prefill & Decode Interleaving**: Chunks long prefill sequences into 512-token segments interleaved with active decode steps to eliminate Time-To-First-Token (TTFT) latency spikes.
+- **Chunked Prefill & Decode Interleaving**: Chunks long prefill sequences into lane-specific segments (512 for Interactive, 256 for Batch, 128 for Background) interleaved with active decode steps.
 - **Dual API Gateway (`turing/serving/server.py`, `anthropic_api.py`)**:
-  - OpenAI `/v1/chat/completions` protocol.
+  - OpenAI `/v1/chat/completions` protocol with `X-Turing-Lane` extraction.
   - Anthropic `/v1/messages` protocol with SSE streaming, reasoning tags, and tool use support.
-- **Prometheus Telemetry (`/metrics`)**: Exposes real-time throughput, P50/P90/P99 latency, and active stream gauges.
+  - Response headers: `X-Turing-KV-Utilization`, `X-Turing-Queue-Depth`, and `Retry-After`.
+- **Prometheus Telemetry (`/metrics`)**: Exposes `turing_vram_utilization_ratio`, `turing_admission_shed_total`, and per-lane active request counts.
 
-### 4.2 Multi-Agent Deliberation Coordinator (`turing/demo/agent_system.py`)
-- **`MultiAgentCoordinator`**: Orchestrates proposal generation, environment constraint evaluation, and automated self-revision loops.
+### 4.2 AI Traffic Management & Admission Control (`turing/serving/traffic.py`)
+- **`KVMemoryEstimator`**: Calculates static analytical memory footprint for prompt and generation tokens under dense FP16 and SVD INT8 formats.
+- **`PrefixHashRouter`**: Computes deterministic 64-bit FNV-1a hashes over prompt token prefixes for consistent prefix-cache worker routing.
+- **`AdmissionController`**: Monitors real-time VRAM allocation against high watermark ($0.90$, queues with `Retry-After: 2.0s`) and shed watermark ($0.95$, rejects with HTTP 503) in $<42\,\mu\text{s}$.
+- **`LanePolicy`**: Enforces 3-lane QoS prioritization (`Interactive` > `Batch` > `Background`) with SLO-driven load shedding.
+
+### 4.3 Concurrency-Adaptive Speculation Gating (`turing/serving/spec_gate.py`)
+- **`SpeculationGatePolicy`**: Dynamically adjusts speculation tree width using a hysteresis band ($LOW=2, HIGH=4$), delivering $1.82\times$ speedup at single-stream concurrency while automatically falling back to plain batch decode at $c \ge 4$ to avoid serial verification lock contention.
+- **`SpecExactParityVerifier`**: Validates byte-exact token equality between speculative and plain autoregressive decoding under greedy conditions.
+
+### 4.4 Multi-Agent Deliberation Coordinator (`turing/demo/agent_system.py`)
+- **`MultiAgentCoordinator`**: Orchestrates proposal generation, environment constraint evaluation, and automated multi-turn self-revision loops with `clean_base` lineage isolation.
 - **`DynamicEnvironmentModel` (`turing/demo/world_model.py`)**: Computes real-time constraint penalties to guide multi-agent cloud and systems decisions.
 - **`EpistemicUncertaintyGate` (`turing/demo/epistemic_gate.py`)**: Evaluates token entropy to dynamically trigger verification loops or fast-path pass-throughs.
