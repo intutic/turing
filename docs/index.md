@@ -2,14 +2,14 @@
 
 **Serve 70B+ LLMs on a Single 24GB GPU or Mac with 75% Less Memory.**
 
-[![Release](https://img.shields.io/badge/Release-v0.3.5-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.3.5)
+[![Release](https://img.shields.io/badge/Release-v0.4.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.4.0)
 
 
 
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests](https://img.shields.io/badge/Tests-160%2F160%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-192%2F192%20Passing-brightgreen.svg)]()
 
 
 
@@ -28,6 +28,10 @@ Turing Engine is an open-source inference and serving runtime that allows you to
 
 * **57% Subspace Channel Pruning**: Skips dead intermediate neurons during token generation for a **2.32× per-layer speedup**.
 * **Latent Flash-Decode (SPECTRA Mode-B)**: Direct attention in rank-64 latent subspace against INT8 cached singular coordinates (**35.37× speedup on 32K context**).
+* **Multi-Turn Clean-Base Lineage**: Cryptographic BLAKE2b ledger preserving bounded representation fidelity ($\|\Delta C_R\|_2 \approx 30.70$) across multi-agent deliberations with zero drift.
+* **$k$-Slot Symmetric Pooling**: Compresses $N$-token KV caches into $k=4$ learned summary slots per head/layer via fused Triton kernels (**3.1× transfer speedup at $N=8,192$**).
+* **AI Traffic Management & 3-Lane QoS**: Sub-50µs VRAM admission control (HTTP 429 queuing with `Retry-After: 2.0s`), 64-bit FNV-1a prefix routing, and `Interactive`/`Batch`/`Background` priority scheduling.
+* **Concurrency-Adaptive Speculation Gating**: Dynamically throttles speculation tree width under load ($1.82\times$ at $c=1$, plain decode at $c \ge 4$), with byte-exact greedy decode parity.
 * **3:1 Hybrid Linear-Full Recurrence**: 75% linear recurrence layers + 25% chunk-scoring full attention, eliminating long-context OOM crashes up to 65K+ tokens.
 * **SVD INT8 KV Cache Paging**: Compresses 32K context memory from **10 GB down to 2.5 GB (-75%)**.
 * **Heterogeneous MoE Memory Management**: Runs 320B Mixture-of-Experts models on a single 24GB card by caching active experts in VRAM and streaming inactive experts from Host DRAM.
