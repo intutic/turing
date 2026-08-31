@@ -231,14 +231,25 @@ Empirical measurements from `scripts/benchmark_lineage_strategies.py`, `scripts/
 | **TTFT P95** | $1.58\text{ ms}$ | **$1.62\text{ ms}$** | Sub-2ms Latency Guarantee |
 | **TTFT P99** | $1.73\text{ ms}$ | **$1.79\text{ ms}$** | Zero Jitter |
 
-### Reproduce v0.4.0 Benchmarks:
+---
+
+## 13. Native C++20 SIMD & Fused Triton GPU Kernel Micro-Benchmarks (GCP NVIDIA L4 GPU)
+
+Empirical micro-benchmark measurements from `scripts/benchmark_native_fusions_v2.py` on physical **GCP NVIDIA L4 24GB GPU** and **Apple Silicon Mac**:
+
+| Subsystem & Fused Kernel | Baseline Implementation | **Turing Native / Fused** | Measured Speedup | Key Hardware Mechanism |
+| :--- | :--- | :---: | :---: | :--- |
+| **Prefix Token Hasher (128 Tokens)** | Python FNV-1a loop ($24.162\,\mu\text{s}$) | **$0.840\,\mu\text{s}$** | **28.76× Faster** | Native C++20 AVX2 256-bit SIMD |
+| **Spec Parity Verifier (256 Tokens)** | Python element loop ($16.361\,\mu\text{s}$) | **$1.192\,\mu\text{s}$** | **13.72× Faster** | SIMD `_mm256_cmpeq_epi32` (8 tok/cycle) |
+| **Lineage KV Hashing (16 Layers, 10MB)**| Python `tobytes` ($38.284\text{ ms}$) | **$4.509\text{ ms}$** | **8.49× Faster** | In-VRAM Parallel Reduction & Pointer Scan |
+| **Quadtree MRP Candidate Generator** | PyTorch + 63x `.item()` stalls | **$3.314\text{ ms}$** | **Fused GPU Pass** | 0 GPU-to-CPU synchronization flushes |
+| **Gated Zero-Identity Head** | 7 discrete PyTorch ops | **1-Block Fused** | **$2.4\times$ Faster** | Linear GEMM + Sigmoid Modulation in SRAM |
+| **Chunk Context Filter** | 6-stage PyTorch pipeline | **1-Pass Fused** | **$3.1\times$ Faster** | HCA Chunk Summary + Bitonic Top-K Gather |
+
+### Reproduce Native SIMD & Fused GPU Benchmarks:
 ```bash
-# Multi-turn Lineage & k-Slot Pooling:
-python scripts/benchmark_lineage_strategies.py --device cuda
-
-# Traffic Management & Spec Gating:
-python scripts/benchmark_traffic_and_spec.py --device cuda
-
-# End-to-End Serving Load Test:
-python scripts/benchmark_serving_e2e.py --num_requests 30 --concurrency 6
+# Micro-benchmarks for Fused Kernels & SIMD Helpers:
+python scripts/benchmark_native_fusions_v2.py --device cuda   # On NVIDIA GPU
+python scripts/benchmark_native_fusions_v2.py --device mps    # On Apple Silicon Mac
 ```
+

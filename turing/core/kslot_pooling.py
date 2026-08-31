@@ -97,6 +97,21 @@ class GatedZeroIdentityHead(nn.Module):
         Returns:
             Tuple of K and V updates (dk, dv).
         """
+        if decoded_features.is_cuda:
+            try:
+                from ..kernels.triton_gated_zero_identity import fused_gated_zero_identity_cuda
+                return fused_gated_zero_identity_cuda(
+                    decoded_features,
+                    self.gate.weight,
+                    self.gate.bias,
+                    self.key_head.weight,
+                    self.value_head.weight,
+                    self.num_kv_heads,
+                    self.head_dim
+                )
+            except Exception:
+                pass
+
         gate_values = torch.sigmoid(self.gate(decoded_features))
         gate_k, gate_v = torch.split(gate_values, self.num_kv_heads, dim=-1)
         

@@ -171,6 +171,15 @@ class ChunkContextScorer(nn.Module):
         if seq_len <= self.budget_tokens:
             return k, v
 
+        if k.is_cuda:
+            try:
+                from ..kernels.triton_chunk_filter import fused_chunk_context_filter_cuda
+                return fused_chunk_context_filter_cuda(
+                    k, v, q, chunk_size=self.chunk_size, budget_tokens=self.budget_tokens
+                )
+            except Exception:
+                pass
+
         batch, _, num_heads, head_dim = k.shape
         num_chunks = seq_len // self.chunk_size
         max_chunks = self.budget_tokens // self.chunk_size

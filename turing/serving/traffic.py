@@ -61,6 +61,14 @@ class PrefixHashRouter:
 
     def compute_prefix_hash(self, token_ids: List[int]) -> int:
         """Compute FNV-1a 64-bit hash over the prefix of tokens."""
+        try:
+            import turing.turing_csrc as turing_csrc
+            import numpy as np
+            tok_arr = np.array(token_ids[:self.window], dtype=np.int32)
+            return int(turing_csrc.compute_prefix_hash_fast(tok_arr, self.window))
+        except Exception:
+            pass
+
         offset_basis = 0xcbf29ce484222325
         prime = 0x100000001b3
         

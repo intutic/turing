@@ -382,6 +382,23 @@ class CrossModelKVPipeline:
             src_vals_formatted = [pooled_v[:, l].transpose(1, 2).contiguous() for l in range(self.source_config.num_layers)]
             seq_len = self.pooler.num_slots
 
+        # Fast Batched GPU Transfer path
+        if src_keys_formatted[0].is_cuda:
+            try:
+                from ..kernels.triton_cross_kv_batched import fused_batched_cross_model_kv_transfer_cuda
+                return fused_batched_cross_model_kv_transfer_cuda(
+                    src_keys_formatted,
+                    src_vals_formatted,
+                    self.layer_mappers_k,
+                    self.layer_mappers_v,
+                    self.select_source_layer_indices,
+                    self.target_config.num_layers,
+                    src_rope_base=self.source_config.rope_theta,
+                    tgt_rope_base=self.target_config.rope_theta,
+                )
+            except Exception:
+                pass
+
         # Step 1: Strip RoPE from all source key layers
         stripped_source_keys = [
             RoPEContentDecoupler.strip_rope(k, base=self.source_config.rope_theta)

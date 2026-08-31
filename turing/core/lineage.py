@@ -26,7 +26,13 @@ __all__ = [
 ]
 
 def _hash_kv_tensors(kv_tensors: List[torch.Tensor]) -> str:
-    """Computes deterministic BLAKE2b hex digest by iterating through tensors, moving to CPU, converting to contiguous bytes."""
+    """Computes deterministic hex digest over tensor buffers with fast In-VRAM and C++ pointer paths."""
+    try:
+        from ..kernels.triton_vram_hash import compute_fast_tensor_hash
+        return compute_fast_tensor_hash(kv_tensors)
+    except Exception:
+        pass
+
     h = hashlib.blake2b()
     for tensor in kv_tensors:
         tensor_bytes = tensor.detach().cpu().contiguous().numpy().tobytes()

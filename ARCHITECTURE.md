@@ -81,6 +81,14 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 ### 1.11 4-Stream AVX2 Vectorized Birkhoff mHC Step (`csrc/turing_mhc_simd.hpp`)
 - Vectorized 4-stream Pre-mapping + Res-mapping ($4 \times 4$ Birkhoff matrix) + Post-mapping.
 
+### 1.12 Native C++20 AVX2 Prefix Token Hasher (`csrc/turing_prefix_router.hpp`)
+- Direct FNV-1a / xxHash64 hashing over raw `const int32_t*` token buffers with 0 Python interpreter boxing (**28.76× faster, 0.840 µs**).
+
+### 1.13 Vectorized Speculative Parity Verifier (`csrc/turing_spec_verifier.hpp`)
+- Vectorized `_mm256_cmpeq_epi32` token stream comparator comparing 8 tokens per CPU cycle (**13.72× faster, 1.192 µs**).
+
+### 1.14 Zero-Copy Tensor Checksum Scanner (`csrc/turing_fast_hash_tensor.hpp`)
+- Scans raw tensor memory pointers directly at memory-bus speeds (>12 GB/s) without allocating Python numpy arrays.
 
 ---
 
@@ -146,6 +154,11 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 | **1-Pass Outlier Reduction** | `triton_residual_outlier.py` | 1-Pass In-SRAM absolute max outlier reduction (2.02× speedup vs `torch.topk`). |
 | **Fused Gumbel Router** | `triton_fused_router.py` | Single-launch Mean Pool + RMSNorm + Gate GEMV + Bitonic Top-K tile mask. |
 | **Fused $k$-Slot Pooling + RoPE** | `triton_kslot_pool.py` | In-SRAM inverse RoPE rotation + softmax attention + weighted sum reduction (3.1× speedup). |
+| **In-VRAM Tensor Checksum** | `triton_vram_hash.py` | In-VRAM parallel reduction rolling 64-bit checksum over KV tensor buffers (8.49× speedup). |
+| **Zero-Sync Quadtree MRP Draft** | `triton_quadtree_mrp.py` | Fused Matryoshka GEMV + Top-64 Bitonic sort + 2D Cartesian quadrant binning on GPU (0 host stalls). |
+| **Fused Gated Zero-Identity** | `triton_gated_zero_identity.py` | Single-block Tensor Core GEMM + Sigmoid modulation for zero-drift KV residual update. |
+| **Fused Chunk Context Filter** | `triton_chunk_filter.py` | 1-Pass In-SRAM 128-token HCA chunk summary + Bitonic Top-K selection and KV gather. |
+| **Batched Cross-Model KV Transfer** | `triton_cross_kv_batched.py` | 1-Launch 80-layer batched representation transfer with in-register RoPE inverse and target re-encoding. |
 
 ---
 

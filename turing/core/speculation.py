@@ -194,6 +194,28 @@ class QuadtreeMRPSpeculator(nn.Module):
             token_ids = [n.token_id for n in nodes]
             return nodes, dag_tree_mask, token_ids
 
+        # Zero-Sync GPU Fused Fast-Path for CUDA
+        if hidden.is_cuda and isinstance(self.draft_head, MatryoshkaDraftHead):
+            try:
+                from ..kernels.triton_quadtree_mrp import fused_quadtree_mrp_cuda
+                tok_tensor, p_tensor, dag_mask = fused_quadtree_mrp_cuda(
+                    hidden, self.draft_head.weight, self.spatial_proj.weight, slice_width
+                )
+                tok_list = tok_tensor.tolist()
+                p_list = p_tensor.tolist()
+
+                nodes = []
+                for i, (tok, p) in enumerate(zip(tok_list, p_list)):
+                    depth = 0 if p == -1 else (1 if p == 0 else 2)
+                    node = TreeNode(node_id=i, token_id=tok, parent_id=p, depth=depth)
+                    if p >= 0 and p < len(nodes):
+                        nodes[p].children_ids.append(i)
+                    nodes.append(node)
+
+                return nodes, dag_mask, tok_list
+            except Exception:
+                pass
+
         # Compute MRP Origin in 2D spatial coordinates
         mrp_origin = self.spatial_proj(hidden).squeeze(0) # [2]
 

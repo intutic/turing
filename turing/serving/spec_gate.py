@@ -96,6 +96,27 @@ class SpecExactParityVerifier:
     @staticmethod
     def verify_greedy_parity(spec_tokens: List[int], plain_tokens: List[int]) -> ParityReport:
         """Compares two sets of tokens to verify strict equality."""
+        try:
+            import turing.turing_csrc as turing_csrc
+            import numpy as np
+            s_arr = np.array(spec_tokens, dtype=np.int32)
+            p_arr = np.array(plain_tokens, dtype=np.int32)
+            passed, num_compared, div_idx = turing_csrc.verify_greedy_parity_fast(s_arr, p_arr)
+            if not passed:
+                return ParityReport(
+                    passed=False,
+                    num_tokens_compared=num_compared,
+                    divergence_index=div_idx if div_idx >= 0 else num_compared,
+                    spec_tokens=spec_tokens,
+                    plain_tokens=plain_tokens
+                )
+            return ParityReport(
+                passed=True,
+                num_tokens_compared=len(spec_tokens)
+            )
+        except Exception:
+            pass
+
         min_len = min(len(spec_tokens), len(plain_tokens))
         
         for i in range(min_len):

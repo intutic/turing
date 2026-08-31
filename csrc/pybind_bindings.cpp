@@ -43,6 +43,9 @@
 #include "turing_residual_outlier.hpp"
 #include "turing_elastic_budget.hpp"
 #include "turing_mhc_simd.hpp"
+#include "turing_prefix_router.hpp"
+#include "turing_spec_verifier.hpp"
+#include "turing_fast_hash_tensor.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -1367,6 +1370,44 @@ PYBIND11_MODULE(turing_csrc, m) {
 
         return py::make_tuple(l_in_arr, s_out_arr);
     }, "Native C++20 AVX2 4-Stream Birkhoff mHC Hyper-Connection Step");
+
+    // Native C++20 AVX2 Prefix Token Hasher
+    m.def("compute_prefix_hash_fast", [](
+        py::array_t<int32_t, py::array::c_style | py::array::forcecast> tokens_arr,
+        int window
+    ) -> uint64_t {
+        py::buffer_info buf = tokens_arr.request();
+        const int32_t* ptr = static_cast<const int32_t*>(buf.ptr);
+        size_t len = std::min(static_cast<size_t>(buf.size), static_cast<size_t>(window));
+        return turing::compute_prefix_hash_fnv1a_cpp(ptr, len);
+    }, py::arg("tokens"), py::arg("window") = 128, "Fast AVX2 SIMD FNV-1a Prefix Hasher");
+
+    // Native C++20 AVX2 Speculative Parity Verifier
+    m.def("verify_greedy_parity_fast", [](
+        py::array_t<int32_t, py::array::c_style | py::array::forcecast> spec_arr,
+        py::array_t<int32_t, py::array::c_style | py::array::forcecast> plain_arr
+    ) -> py::tuple {
+        py::buffer_info s_buf = spec_arr.request();
+        py::buffer_info p_buf = plain_arr.request();
+
+        size_t count = std::min(s_buf.size, p_buf.size);
+        const int32_t* s_ptr = static_cast<const int32_t*>(s_buf.ptr);
+        const int32_t* p_ptr = static_cast<const int32_t*>(p_buf.ptr);
+
+        auto res = turing::verify_greedy_parity_simd_cpp(s_ptr, p_ptr, count);
+        if (res.passed && s_buf.size != p_buf.size) {
+            return py::make_tuple(false, static_cast<int>(count), static_cast<int>(count));
+        }
+        return py::make_tuple(res.passed, static_cast<int>(res.num_compared), res.divergence_index);
+    }, py::arg("spec_tokens"), py::arg("plain_tokens"), "Fast AVX2 SIMD Speculative Parity Verifier");
+
+    // Native C++20 AVX2 Fast Tensor Pointer Checksum
+    m.def("hash_tensor_buffer_fast", [](uintptr_t data_ptr, size_t num_bytes) -> std::string {
+        if (data_ptr == 0 || num_bytes == 0) {
+            return "0000000000000000";
+        }
+        return turing::hash_tensor_buffer_hex(reinterpret_cast<const uint8_t*>(data_ptr), num_bytes);
+    }, py::arg("data_ptr"), py::arg("num_bytes"), "Fast AVX2 SIMD Tensor Memory Checksum");
 }
 
 

@@ -3,7 +3,7 @@
 **Serve Frontier 70B+ Models on a Single Consumer GPU (24GB) or Mac Workstation with 75% Less Memory.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v0.4.0](https://img.shields.io/badge/Release-v0.4.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.4.0)
+[![Release: v0.4.1](https://img.shields.io/badge/Release-v0.4.1-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.4.1)
 
 
 
@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 192/192 Passing](https://img.shields.io/badge/Tests-192%2F192%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 198/198 Passing](https://img.shields.io/badge/Tests-198%2F198%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 
 
