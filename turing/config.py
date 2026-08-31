@@ -40,14 +40,64 @@ class ModelConfig:
             self.router_layer_idx = max(1, self.num_layers // 3)
 
     @classmethod
+    def from_gguf_metadata(cls, metadata: Dict[str, Any], sparsity_ratio: float = 0.5) -> "ModelConfig":
+        """
+        Dynamically derives ModelConfig from parsed GGUF metadata dictionary.
+        """
+        arch = metadata.get("general.architecture", "llama")
+        name = metadata.get("general.name", f"gguf-{arch}")
+        
+        hidden_dim = int(metadata.get(f"{arch}.embedding_length", 2048))
+        num_layers = int(metadata.get(f"{arch}.block_count", 16))
+        num_heads = int(metadata.get(f"{arch}.attention.head_count", 16))
+        num_kv_heads = int(metadata.get(f"{arch}.attention.head_count_kv", num_heads))
+        head_dim = int(metadata.get(f"{arch}.attention.key_length", hidden_dim // num_heads))
+        ffn_dim = int(metadata.get(f"{arch}.feed_forward_length", hidden_dim * 4))
+        
+        vocab_size = 32000
+        if "tokenizer.ggml.tokens" in metadata:
+            vocab_size = len(metadata["tokenizer.ggml.tokens"])
+        elif f"{arch}.vocab_size" in metadata:
+            vocab_size = int(metadata[f"{arch}.vocab_size"])
+            
+        max_pos = int(metadata.get(f"{arch}.context_length", 4096))
+        rope_theta = float(metadata.get(f"{arch}.rope.freq_base", 10000.0))
+        
+        tile_size = 64 if ffn_dim <= 4096 else 256
+        total_tiles = ffn_dim // tile_size
+        active_tiles = max(1, int(total_tiles * (1.0 - sparsity_ratio)))
+        
+        return cls(
+            name=name,
+            hidden_dim=hidden_dim,
+            ffn_dim=ffn_dim,
+            num_heads=num_heads,
+            num_kv_heads=num_kv_heads,
+            head_dim=head_dim,
+            num_layers=num_layers,
+            vocab_size=vocab_size,
+            tile_size=tile_size,
+            active_tiles=active_tiles,
+            rank_sub=64 if hidden_dim >= 768 else 32,
+            max_position_embeddings=max_pos,
+            rope_theta=rope_theta
+        )
+
+    @classmethod
     def from_pretrained(cls, model_name_or_id: str, sparsity_ratio: float = 0.5, token: Optional[str] = None) -> "ModelConfig":
         """
-        Dynamically extracts ModelConfig architecture geometry from any Hugging Face Hub repository
-        or local directory containing a config.json file. Zero hardcoding required.
+        Dynamically extracts ModelConfig architecture geometry from any Hugging Face Hub repository,
+        local directory containing a config.json file, or local .gguf binary file. Zero hardcoding required.
         """
         try:
+            import os
+            if model_name_or_id.endswith(".gguf") and os.path.isfile(model_name_or_id):
+                from .models.gguf_loader import GGUFReader
+                reader = GGUFReader(model_name_or_id)
+                return cls.from_gguf_metadata(reader.metadata, sparsity_ratio=sparsity_ratio)
+
             from transformers import AutoConfig
-            import os, huggingface_hub
+            import huggingface_hub
             hf_token = token or os.environ.get("HF_TOKEN") or huggingface_hub.get_token()
             hf_cfg = AutoConfig.from_pretrained(model_name_or_id, token=hf_token)
             hidden_dim = getattr(hf_cfg, "hidden_size", getattr(hf_cfg, "n_embd", 768))

@@ -48,7 +48,11 @@ turing serve --model huggingface/meta-llama/Llama-3.1-8B-Instruct
 # 5. Local Checkpoint Directory:
 turing serve --model /path/to/custom/finetuned/weights/
 
-# 6. Ergonomic CLI Shortcuts:
+# 6. Local Quantized .gguf File (Zero-copy binary reader):
+turing chat --model ./models/llama-3.3-70b-q4_k_m.gguf
+turing serve --model ./models/qwen2.5-coder-32b-q8_0.gguf
+
+# 7. Ergonomic CLI Shortcuts:
 turing chat --model deepseek-r1-1.5b
 ```
 

@@ -26,7 +26,7 @@ python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
 # Run quick quiet validation
 python -W error -m pytest -q
 ```
-> **Invariant**: All 235 automated tests MUST pass with 0 warnings. Any newly introduced warning or test regression must be resolved immediately.
+> **Invariant**: All 274 automated tests MUST pass with 0 warnings. Any newly introduced warning or test regression must be resolved immediately.
 
 
 
@@ -36,11 +36,12 @@ python -W error -m pytest -q
 ## 🏗️ Architecture & Codebase Invariants
 
 ### 1. Core Directories & Responsibilities
-- **`csrc/`**: Bare-metal C++20 AVX2 SIMD headers and PyBind11 bindings (`pybind_bindings.cpp`). All allocations must be 64-byte aligned (`posix_memalign` / `aligned_alloc`). Native code must compile with `-fvisibility=hidden` and LTO.
+- **`csrc/`**: Bare-metal C++20 AVX2 SIMD headers, PyBind11 bindings (`pybind_bindings.cpp`), standalone GGUF parser (`turing_gguf_cpp.hpp`), BPE tokenizer (`turing_tokenizer_cpp.hpp`), forward pass engine (`turing_model_cpp.hpp`), embedded socket server (`turing_http_server.hpp`), and `turing-cli` binary. All allocations must be 64-byte aligned (`posix_memalign` / `aligned_alloc`). Native code must compile with `-fvisibility=hidden` and LTO.
 - **`turing/core/`**: Algorithmic & mathematical primitives (closed-form $W^*$ KV transfer, `lineage.py` multi-turn clean-base controller, `kslot_pooling.py` $k$-slot attention summaries & gated zero-identity heads, Birkhoff hyper-connections, heterogeneous MoE routing, SVD KV paging, quadtree MRP speculative decoding).
+- **`turing/dsl/`**: High-level programmatic workflow primitives (`@chain`, `gen`, `fork`, `join`, `select`, `constrain`) with prefix KV cache sharing and structured parsing executors.
 - **`turing/kernels/`**: Triton GPU kernels (`triton_swiglu.py`, `triton_flash_tree.py`, `triton_w4a16.py`, `triton_recirculation.py`, `triton_kslot_pool.py`) and CUDA dispatch wrappers.
-- **`turing/models/`**: Subspace model architectures (`causal_lm.py`), weight converters (`converter.py`), safetensors mmap loaders, and vLLM integration adapters.
-- **`turing/serving/`**: Production continuous batching engine (`engine.py`), dual OpenAI + Anthropic `/v1/messages` server (`server.py`), AI traffic management & 3-lane QoS scheduling (`traffic.py`), concurrency-adaptive speculation gating (`spec_gate.py`), and NIAH evaluator (`niah.py`).
+- **`turing/models/`**: Subspace model architectures (`causal_lm.py`), native binary GGUF reader & dequantizer (`gguf_loader.py`, `gguf_tokenizer.py`), tensor & pipeline parallelism (`tensor_parallel.py`), weight converters (`converter.py`), safetensors mmap loaders, and vLLM integration adapters.
+- **`turing/serving/`**: Production continuous batching engine (`engine.py`), distributed multi-GPU & multi-node driver (`distributed.py`), dual OpenAI + Anthropic `/v1/messages` server (`server.py`), AI traffic management & 3-lane QoS scheduling (`traffic.py`), concurrency-adaptive speculation gating (`spec_gate.py`), and NIAH evaluator (`niah.py`).
 - **`turing/demo/`**: Multi-agent deliberation coordinator (`agent_system.py`), dynamic environment model (`world_model.py`), epistemic uncertainty gate (`epistemic_gate.py`), and interactive CLI runner.
 
 ### 2. Coding Principles & Guidelines

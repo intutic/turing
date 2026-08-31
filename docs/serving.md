@@ -352,4 +352,40 @@ Turing Engine's continuous batch scheduler explicitly separates **Prefill (Compu
    - Measures real-time latency percentiles (TTFT P50/P95/P99 and ITL P50/P95/P99).
    - Guarantees **Inter-Token Latency (ITL) P99 $\le 18.23\text{ ms}$ on NVIDIA L4 GPU** and $\le 24.25\text{ ms}$ median on Apple Silicon Mac, completely eliminating prompt burst jitter.
 
+---
+
+## 11. Multi-GPU Tensor & Pipeline Parallel Distributed Serving
+
+Shard large models across multi-GPU nodes with native NCCL communicators:
+
+```bash
+# Launch on single node with 4 GPUs (TP=2, PP=2)
+turing serve \
+  --model meta-llama/Llama-3.3-70B-Instruct \
+  --tensor-parallel 2 \
+  --pipeline-parallel 2 \
+  --port 8000
+
+# Multi-Node cluster launch via torchrun
+./scripts/launch_distributed.sh meta-llama/Llama-3.3-70B-Instruct 4 2
+```
+
+- **Tensor Parallelism (TP)**: Splits self-attention and MLP matrices column-wise and row-wise across GPUs in the same server.
+- **Pipeline Parallelism (PP)**: Partitions transformer layers into sequential stages with 1F1B micro-batch scheduling to minimize bubble overhead.
+
+---
+
+## 12. Standalone C++20 HTTP Server (`turing-cli`)
+
+For edge deployments without a Python runtime:
+
+```bash
+# Build native binary
+cmake -B build && cmake --build build
+
+# Start embedded socket HTTP server
+./build/turing-cli serve --model ./models/llama-3.3-70b.gguf --host 0.0.0.0 --port 8000
+```
+Provides `/v1/chat/completions` and `/health` endpoints with bare-metal C++ SIMD inference performance.
+
 

@@ -8,6 +8,8 @@ from .registry import MODEL_REGISTRY, get_model_config
 from .converter import TuringConverter
 from .adapters import UncertaintyKnowledgeGate, TenantLoRAAdapter
 from .vllm_adapter import VLLMCustomModelRunnerHarness, VLLMSubspaceQuantWrapper
+from .gguf_loader import GGUFModelLoader, GGUFReader, GGUFDequantizer
+from .gguf_tokenizer import GGUFTokenizer
 
 __all__ = [
     "SubspaceCausalLM",
@@ -24,4 +26,8 @@ __all__ = [
     "TenantLoRAAdapter",
     "VLLMCustomModelRunnerHarness",
     "VLLMSubspaceQuantWrapper",
+    "GGUFModelLoader",
+    "GGUFReader",
+    "GGUFDequantizer",
+    "GGUFTokenizer",
 ]

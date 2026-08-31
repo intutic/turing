@@ -3,7 +3,7 @@
 **Serve Frontier 70B+ Models on a Single Consumer GPU (24GB) or Mac Workstation with 75% Less Memory.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v0.7.0](https://img.shields.io/badge/Release-v0.7.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.7.0)
+[![Release: v0.8.0](https://img.shields.io/badge/Release-v0.8.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.8.0)
 
 
 
@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 235/235 Passing](https://img.shields.io/badge/Tests-235%2F235%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 274/274 Passing](https://img.shields.io/badge/Tests-274%2F274%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -26,14 +26,14 @@ pip install turing-engine
 ```
 *(Or install locally with C++ SIMD optimizations: `git clone https://github.com/intutic/turing.git && cd turing && pip install -e .`)*
 
-### 2. Instant Terminal Chat (No Setup Needed!)
-Chat with real pretrained weights dynamically directly from Hugging Face Hub:
+### 2. Instant Terminal Chat (Hugging Face Hub & Local GGUF)
+Chat with real pretrained weights dynamically directly from Hugging Face Hub or local GGUF binaries:
 ```bash
 # Chat with any canonical Hugging Face Hub repository:
 turing chat --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B --reasoning-effort high
 
-# Chat using provider/model/effort namespace:
-turing chat --model deepseek-ai/DeepSeek-R1/medium
+# Chat directly with local quantized .gguf files (zero conversion needed!):
+turing chat --model ./models/llama-3.3-70b-q4_k_m.gguf
 
 # Ergonomic shortcuts for popular checkpoints:
 turing chat --model smollm2
@@ -42,11 +42,51 @@ turing chat --model llama-3.3-70b
 
 ### 3. Launch Triple API Gateway (OpenAI, Anthropic & Ollama Compatible)
 ```bash
-# Serve any model dynamically on port 8000 (OpenAI /v1, Anthropic /v1/messages, Ollama /api):
+# Serve any HF or GGUF model dynamically on port 8000 (OpenAI /v1, Anthropic /v1/messages, Ollama /api):
 turing serve --model meta-llama/Llama-3.3-70B-Instruct --port 8000
-turing serve --model deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --port 8000 --reasoning-effort high
+turing serve --model ./models/qwen2.5-32b-q8_0.gguf --port 8000
 ```
 Point **Open WebUI**, **Continue.dev**, **Cursor**, **Chatbox**, or **Cline** directly to `http://localhost:8000`!
+
+### 4. Programmatic AI Workflows with Turing DSL
+Chain multi-step prompts, fork tree-of-thought reasoning branches with prefix KV cache sharing, and enforce JSON schemas in pure Python:
+```python
+import turing
+
+@turing.chain(model="smollm2", device="auto")
+def parallel_tree_of_thought(question: str):
+    # Step 1: Initial reasoning
+    prompt = turing.gen(f"Analyze question: {question}", max_tokens=64)
+    
+    # Step 2: Fork 3 concurrent branches sharing the prefix KV cache
+    branches = turing.fork(3, temperature=0.8)
+    for i, b in enumerate(branches):
+        b.gen(f"Perspective {i+1}: What is the optimal solution?", max_tokens=64)
+        
+    # Step 3: Majority vote or best log-prob merge
+    return turing.join(branches, strategy="best")
+```
+
+### 5. Standalone C++20 Executable (`turing-cli`)
+Deploy Turing Engine in embedded, edge, or containerized environments with **zero Python dependencies**:
+```bash
+# Build native binary with CMake
+cmake -B build && cmake --build build
+
+# Run bare-metal generation from GGUF binary
+./build/turing-cli generate --model ./models/llama-3.3-70b.gguf --prompt "Explain quantum computing:"
+./build/turing-cli serve --model ./models/llama-3.3-70b.gguf --port 8000
+```
+
+### 6. Distributed Multi-GPU & Pipeline Parallel Serving
+Serve large 70B+ models across multi-GPU nodes with Tensor Parallelism (TP) and Pipeline Parallelism (PP):
+```bash
+# Serve across 4 GPUs with TP=2, PP=2
+turing serve --model meta-llama/Llama-3.3-70B-Instruct --tensor-parallel 2 --pipeline-parallel 2 --port 8000
+
+# Or launch across cluster nodes via torchrun
+./scripts/launch_distributed.sh meta-llama/Llama-3.3-70B-Instruct 4 2
+```
 
 ---
 

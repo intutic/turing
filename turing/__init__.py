@@ -2,7 +2,7 @@
 Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Engine
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 
 __author__ = "Ishan Gupta"
@@ -17,6 +17,7 @@ from .core.router import SubspaceStructuredRouter, DynamicEntropyRouter
 from .core.paging import HierarchicalVirtualPageManager
 from .models.causal_lm import SubspaceCausalLM
 from .models.registry import MODEL_REGISTRY, get_model_config
+from .dsl import chain, gen, fork, join, select, constrain
 
 __all__ = [
     "ModelConfig",
@@ -29,4 +30,10 @@ __all__ = [
     "SubspaceCausalLM",
     "MODEL_REGISTRY",
     "get_model_config",
+    "chain",
+    "gen",
+    "fork",
+    "join",
+    "select",
+    "constrain",
 ]

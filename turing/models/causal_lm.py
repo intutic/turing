@@ -13,6 +13,7 @@ from ..core.router import SubspaceStructuredRouter
 from ..core.rope import NTKDynamicRoPEScaling, apply_rotary_pos_emb
 from ..core.hybrid_attention import ChunkContextScorer
 from ..kernels.dispatch import dispatch_swiglu
+from ..kernels.triton_fused_rmsnorm_swiglu import dispatch_fused_rmsnorm_swiglu
 
 
 class RMSNorm(nn.Module):
@@ -161,10 +162,23 @@ class SubspaceDecoderLayer(nn.Module):
         attn_out, k_out, v_out = self.self_attn(hidden_states, past_k=past_k, past_v=past_v, start_pos=start_pos)
         hidden_states = residual + attn_out
 
-        residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        mlp_out = self.mlp(hidden_states)
-        hidden_states = residual + mlp_out
+        # Fused RMSNorm + Subspace SwiGLU + Residual
+        orig_shape = hidden_states.shape
+        x_2d = hidden_states.view(-1, self.mlp.hidden_dim)
+        res_2d = hidden_states.view(-1, self.mlp.hidden_dim)
+
+        fused_out = dispatch_fused_rmsnorm_swiglu(
+            x=x_2d,
+            weight_norm=self.post_attention_layernorm.weight,
+            w_gate=self.mlp.gate_proj.weight.t(),
+            w_up=self.mlp.up_proj.weight.t(),
+            w_down=self.mlp.down_proj.weight.t(),
+            residual=res_2d,
+            active_tiles=self.mlp.active_tiles,
+            tile_size=self.mlp.tile_size,
+            eps=self.post_attention_layernorm.eps
+        )
+        hidden_states = fused_out.view(orig_shape)
 
         return hidden_states, k_out, v_out
 

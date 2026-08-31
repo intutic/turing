@@ -32,37 +32,10 @@ def run_all_gpu_architecture_tests(device_str: str = "auto"):
     print(f"   Silicon Target: {str(device).upper()} ({torch.cuda.get_device_name(0) if device.type == 'cuda' else 'Apple Silicon / CPU'})")
     print("=" * 95 + "\n")
 
-    models_to_test = [
-        "gpt-oss-20b",
-        "gpt-oss-120b",
-        "qwen-3.8-27b",
-        "qwen-3.8-max",
-        "muse-glimmer-30b",
-        "qwen3-coder-30b",
-        "qwen3-coder-80b",
-        "qwen3-coder-480b",
-        "gemma-4-31b",
-        "gemma-4-26b",
-        "gemma-2-27b",
-        "llama-3.3-70b",
-        "llama-4-scout",
-        "llama-4-maverick",
-        "mistral-large-3",
-        "mistral-small-4",
-        "nemotron-3-super",
-        "nemotron-3-ultra",
-        "kimi-k3",
-        "kimi-k2.6",
-        "deepseek-v4-flash-284b",
-        "deepseek-v4-pro",
-        "minimax-m3",
-        "inkling-975b",
-        "glm-5.3-flash",
-        "glm-5.3-730b",
-    ]
+    models_to_test = [k for k in MODEL_REGISTRY.keys() if k != "test-tiny"]
 
-    print(f"{'Model Key':<24} | {'Architecture Name':<32} | {'Dims (H x FFN -> Sub)':<22} | {'GPU Layer Pass':<14} | {'Status'}")
-    print("-" * 105)
+    print(f"{'Model Key':<28} | {'Architecture Name':<32} | {'Dims (H x FFN -> Sub)':<22} | {'GPU Layer Pass':<14} | {'Status'}")
+    print("-" * 110)
 
     passed_count = 0
 

@@ -192,6 +192,70 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
   - **In-SRAM Fused Batched GPU Sampler (`triton_fused_sample.py`)**: Fuses Softmax, Top-$K$ truncation, and Gumbel-Max perturbation directly in SRAM, eliminating all CPU synchronization flushes and increasing batched decode speed from $141.14 \to \mathbf{168.60\text{ tok/s}}$ ($B=1$) and **$2,576.57\text{ tok/s}$** ($B=16$).
   - **Native C++20 AVX2 SIMD Sampler & Fast JSON Scanner (`csrc/turing_sampler.hpp` & `csrc/turing_json_fast_scan.hpp`)**: Employs 256-bit `_mm256_cmpeq_epi8` vector comparisons to scan syntax characters at memory-bus speeds, dropping truncated JSON bracket auto-repair latency to **$4.74\,\mu\text{s}$**.
 
+---
+
+## 19. 📦 Native GGUF File Loader & Quantization Engine
+
+* **The Problem**: Running quantized models typically required external C++ runtimes or heavy conversion pipelines.
+* **How It Works**:
+  - **Zero-Copy GGUF Reader (`gguf_loader.py`)**: Direct memory-mapped binary reader for GGUF v2/v3 files.
+  - **Multi-Quant Dequantizers**: Vectorized dequantization for `Q4_0`, `Q4_1`, `Q8_0`, `Q4_K_M`, `Q5_K_M`, `F16`, `F32`, and `BF16`.
+  - **GGUF Tokenizer (`gguf_tokenizer.py`)**: Extracts vocabulary tokens, merges, and chat templates directly from binary metadata.
+  - **Auto-Resolution**: Transparently ingests `.gguf` files in CLI `chat` and `serve` commands.
+
+---
+
+## 20. 🧬 Turing Programmatic DSL (`@turing.chain`)
+
+* **The Problem**: Building agentic tree-of-thought workflows often requires complex boilerplate, repeated prompt re-prefills, and separate validation layers.
+* **How It Works**:
+  - **`@turing.chain`**: Decorator binding multi-step prompt workflows to an active inference runtime.
+  - **Zero-Overhead `fork(n)`**: Spawns parallel context branches that share the frozen prefix KV cache (`CleanBaseLineageBuffer`).
+  - **Flexible `join()`**: Merges parallel branch hypotheses using `best` (highest log-prob score), `vote` (majority consensus), or custom aggregators.
+  - **Constrained Decoding (`select`, `constrain`)**: Enforces choices over discrete option sets or JSON schemas.
+
+---
+
+## 21. ⚙️ Standalone C++20 Executable (`turing-cli`)
+
+* **The Problem**: Deploying models in resource-constrained edge or embedded devices where Python environments are unavailable.
+* **How It Works**:
+  - **Pure C++20 GGUF Parser (`csrc/turing_gguf_cpp.hpp`)**: Standalone binary metadata and tensor loader.
+  - **Bare-Metal Transformer Engine (`csrc/turing_model_cpp.hpp`)**: 64-byte aligned SIMD feed-forward and attention forward pass.
+  - **Embedded Socket HTTP Server (`csrc/turing_http_server.hpp`)**: Lightweight POSIX/Win32 HTTP socket server supporting `/v1/chat/completions` and `/health`.
+
+---
+
+## 23. 🛡️ Multi-Turn Clean-Base Lineage Control & $k$-Slot Cache Pooling
+
+* **The Problem**: In multi-agent deliberation and conversational workflows, translating and re-injecting KV residuals onto previously translated caches causes rapid representation drift and catastrophic quality collapse by turn 3.
+* **How It Works**:
+  - **`CleanBaseLineageBuffer` (`turing/core/lineage.py`)**: Freezes the original pristine base KV representation (`peak_live_caches=2`) and recomputes delta residuals $\Delta C_R$ strictly against that frozen baseline on every turn, bounding residual norm at $\|\Delta C_R\|_2 \approx 30.70$.
+  - **`CacheLineage` Cryptographic Audit Trail**: Computes deterministic BLAKE2b digests of memory buffers to guarantee auditability and tamper protection across turns.
+  - **`KSlotCachePooler` & Gated Zero-Identity (`turing/core/kslot_pooling.py`, `triton_kslot_pool.py`)**: Compresses $N$-token KV sequences into $k=4$ learned summary slots via multi-head query attention ($O(1)$ transfer complexity), combined with zero-initialized linear projection heads guaranteeing exact $\Delta C_R = 0$ initialization.
+
+---
+
+## 24. 🚥 AI Traffic Management, 3-Lane QoS & Speculation Gating
+
+* **The Problem**: Serving engines under bursty concurrent traffic suffer out-of-memory crashes from unconstrained batching, and speculative decoding degrades performance under high concurrency due to serial verification lock contention.
+* **How It Works**:
+  - **`KVMemoryEstimator` & `AdmissionController` (`turing/serving/traffic.py`)**: Predicts analytical VRAM utilization and enforces admission decisions ($<42\,\mu\text{s}$) with 90% queuing and 95% load-shedding watermarks.
+  - **3-Lane QoS Scheduling (`LanePolicy`)**: Prioritizes `Interactive` ($P_0$) over `Batch` ($P_1$) and `Background` ($P_2$), applying chunked prefill budgets and SLO-driven load shedding.
+  - **Concurrency-Adaptive Speculation Gating (`turing/serving/spec_gate.py`)**: Throttles speculation dynamically based on active stream concurrency ($LOW=2, HIGH=4$), running full tree speculation at $c \le 3$ and automatically demoting to plain batch decode at $c \ge 4$.
+  - **`SpecExactParityVerifier`**: Enforces non-negotiable byte-exact token identity between speculative and plain autoregressive decoding under greedy conditions.
+
+---
+
+## 25. ⚡ C++20 AVX2 SIMD Block Dequantization & In-SRAM Fused Layers
+
+* **The Problem**: Element-wise dequantization in Python/NumPy creates severe CPU latency bottlenecks during GGUF loading, while separate normalization and activation kernel launches cause excessive DRAM memory traffic on GPUs.
+* **How It Works**:
+  - **AVX2 SIMD Block Dequantizers (`csrc/turing_gguf_simd.hpp`)**: Hand-tuned 256-bit vector routines for `Q4_0`, `Q4_1`, `Q8_0`, `Q4_K_M`, `FP16`, and `BF16` with packed nibble processing and hardware `_mm256_cvtph_ps` instructions (**3.19× faster than NumPy, 724.57 M elem/s**).
+  - **In-SRAM Fused RMSNorm + Subspace SwiGLU (`turing/kernels/triton_fused_rmsnorm_swiglu.py`)**: Slices active subspace channels directly in GPU registers, executing RMSNorm, Swish gating, and residual accumulation in a single SRAM pass with zero intermediate global VRAM writes (-60% DRAM traffic).
+  - **Thread-Safe Radix-SVD Forest (`csrc/turing_radix_trie.hpp`)**: Concurrent `std::shared_mutex` index for semantic anchor registration and sub-millisecond prefix retrieval.
+
+
 
 
 

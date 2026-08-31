@@ -17,7 +17,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..config import ModelConfig
-from ..models.causal_lm import SubspaceCausalLM, SubspaceDecoderLayer
 from .cross_model_kv import RoPEContentDecoupler, ClosedFormRidgeMapper
 
 @dataclass
@@ -317,6 +316,7 @@ class CascadedPrefillAndDraftSpeculator:
             tile_size=min(target_cfg.tile_size, 256)
         )
 
+        from ..models.causal_lm import SubspaceCausalLM
         self.source_model = SubspaceCausalLM(compact_source).to(local_device).eval()
         self.target_model = SubspaceCausalLM(compact_target).to(remote_device).eval()
 

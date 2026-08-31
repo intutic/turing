@@ -333,4 +333,13 @@ class SpectralRadixSVDForest:
         token_ids, _ = anchor_data
         return self.match_prefix(token_ids, u_proj)
 
+    def get_prefix_kv_handle(self, token_ids: List[int], u_proj: torch.Tensor) -> Optional[Tuple[int, torch.Tensor, torch.Tensor]]:
+        """
+        Returns (matched_length, reconstructed_keys, reconstructed_values) for DSL fork() prefix sharing.
+        """
+        matched_len, k_recon, v_recon = self.match_prefix(token_ids, u_proj)
+        if matched_len > 0 and k_recon is not None and v_recon is not None:
+            return matched_len, k_recon, v_recon
+        return None
+
 

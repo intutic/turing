@@ -19,6 +19,7 @@ This document provides a comprehensive technical and architectural comparison be
 | Feature Category | Capability / Specification | **Turing Engine** | **vLLM** | **SGLang** | **Ollama** | **llama.cpp** |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Model Ingestion** | Direct Hugging Face Hub ID Streaming | ✅ **Universal** | ✅ Universal | ✅ Universal | ❌ (GGUF Hub) | ❌ (GGUF only) |
+| | Native Quantized GGUF File Loader | ✅ **Native (Q4/Q8/FP16)**| ❌ (Safetensors) | ❌ (Safetensors) | ✅ Native | ✅ Native |
 | | Offline GGUF Conversion Required | 🚀 **Zero Conversion** | 🚀 Zero Conversion | 🚀 Zero Conversion | ⚠️ Yes | ⚠️ Yes |
 | | Tri-Part Namespace (`provider/model/effort`) | ✅ **Native** | ❌ | ❌ | ❌ | ❌ |
 | | Zero Hardcoding (Dynamic AutoConfig) | ✅ **Yes** | ✅ Yes | ✅ Yes | ❌ | ❌ |
@@ -31,12 +32,16 @@ This document provides a comprehensive technical and architectural comparison be
 | | MoE Host Offload (320B Scale on 24GB GPU) | 🚀 **18–50 tok/s** | ⚠️ 1–3 tok/s | ⚠️ 1–3 tok/s | ⚠️ 1–5 tok/s | ⚠️ 1–5 tok/s |
 | | Fused C++20 AVX2 SIMD Micro-Kernels | ✅ **Native** | ❌ | ❌ | ✅ Native | ✅ Native |
 | | Triton 3.x Tensor Core GPU Kernels | ✅ **Native** | ✅ Native | ✅ Native | ❌ | ❌ |
+| **Programmatic Workflows**| Python DSL with `fork()` + `join()` | ✅ **@turing.chain** | ❌ | ✅ SGLang DSL | ❌ | ❌ |
+| | Prefix Cache Sharing across Branches | ✅ **Zero-Copy SVD** | ❌ | ✅ Radix | ❌ | ❌ |
 | **Serving & Gateway** | Continuous Batching Scheduler | ✅ **3-Lane QoS** | ✅ Iteration-level | ✅ Iteration-level | ❌ (FIFO) | ⚠️ Basic slot |
+| | Multi-Node Distributed (TP + PP) | ✅ **Native NCCL** | ✅ Native NCCL | ✅ Native NCCL | ❌ | ⚠️ RPC only |
 | | OpenAI API (`/v1/chat/completions`) | ✅ **Native** | ✅ Native | ✅ Native | ✅ Native | ✅ Native |
 | | Anthropic API (`/v1/messages` with SSE) | ✅ **Native** | ❌ (Proxy needed) | ⚠️ Partial | ❌ | ❌ |
 | | Ollama REST API (`/api/*` Endpoints) | ✅ **Native** | ❌ | ❌ | ✅ Native | ❌ |
 | | Kubernetes `llm-d` Router Token Render | ✅ `/render` + ZMQ | ❌ (Patch needed) | ❌ | ❌ | ❌ |
 | | AI Traffic Management & Memory Watermarks | ✅ **Sub-50µs** | ⚠️ Queue limits | ⚠️ Queue limits | ❌ | ❌ |
+| **Deployment & Binary** | Zero-Python Standalone Executable | ✅ **`turing-cli`** | ❌ (Python base) | ❌ (Python base) | ✅ Go/C++ daemon| ✅ `llama-cli` |
 | **Structured Output** | JSON Schema & JSON Mode Enforcement | ✅ **Native + Repair** | ✅ Outlines / FSM | ✅ `xGrammar` | ⚠️ Format string | ✅ GBNF Grammars |
 | | Native Tool & Function Calling | ✅ **Native** | ✅ Native | ✅ Native | ✅ Native | ⚠️ Custom parsing |
 | **Agentic & Speculation**| Cross-Model Representation Transfer ($W^*$)| 🚀 **Zero-Token ($O(1)$)**| ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) |

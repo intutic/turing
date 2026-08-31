@@ -108,13 +108,14 @@ class ModelResolver:
         is_alias = False
         provider = "huggingface"
 
-        # 1. Local path check
-        if is_local:
-            model_name = os.path.basename(os.path.normpath(raw))
+        # 1. Local path check (including GGUF binary files)
+        if is_local or raw.endswith(".gguf"):
+            model_name = os.path.basename(os.path.normpath(raw)).replace(".gguf", "")
+            provider_type = "gguf" if raw.endswith(".gguf") else "local"
             return ResolvedModelSpec(
                 raw_identifier=raw_identifier,
                 repo_id=raw,
-                provider="local",
+                provider=provider_type,
                 model_name=model_name,
                 reasoning_effort=None,
                 is_local_path=True,

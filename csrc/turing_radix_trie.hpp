@@ -5,11 +5,14 @@
 #include <memory>
 #include <cstdint>
 #include <algorithm>
+#include <string>
+#include <shared_mutex>
+#include <mutex>
 
 namespace turing {
 
 /**
- * Native C++20 Spectral Radix-SVD Trie Node & Matcher.
+ * Native C++20 Thread-Safe Spectral Radix-SVD Trie Node & Matcher.
  */
 struct RadixTrieNode {
     std::vector<int32_t> token_ids;
@@ -25,6 +28,7 @@ public:
     RadixTrieIndex() : root_(std::make_shared<RadixTrieNode>(std::vector<int32_t>{}, 0)), next_id_(1) {}
 
     int32_t match_longest_prefix(const std::vector<int32_t>& query_tokens, int32_t& matched_length) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
         matched_length = 0;
         if (query_tokens.empty()) return 0;
 
@@ -56,6 +60,7 @@ public:
     }
 
     int32_t insert(const std::vector<int32_t>& tokens) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
         if (tokens.empty()) return 0;
 
         auto curr = root_;
@@ -108,9 +113,30 @@ public:
         return curr->node_id;
     }
 
+    void set_anchor(const std::string& key, int32_t node_id) {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        anchors_[key] = node_id;
+    }
+
+    int32_t get_anchor(const std::string& key) const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        auto it = anchors_.find(key);
+        if (it != anchors_.end()) {
+            return it->second;
+        }
+        return -1;
+    }
+
+    size_t size() const {
+        std::shared_lock<std::shared_mutex> lock(mutex_);
+        return static_cast<size_t>(next_id_ - 1);
+    }
+
 private:
     std::shared_ptr<RadixTrieNode> root_;
     int32_t next_id_;
+    std::unordered_map<std::string, int32_t> anchors_;
+    mutable std::shared_mutex mutex_;
 };
 
 } // namespace turing

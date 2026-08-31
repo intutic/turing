@@ -2,14 +2,14 @@
 
 **Serve 70B+ LLMs on a Single 24GB GPU or Mac with 75% Less Memory.**
 
-[![Release](https://img.shields.io/badge/Release-v0.7.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.7.0)
+[![Release](https://img.shields.io/badge/Release-v0.8.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v0.8.0)
 
 
 
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests](https://img.shields.io/badge/Tests-235%2F235%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-274%2F274%20Passing-brightgreen.svg)]()
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -23,6 +23,10 @@ Turing Engine is an open-source inference and serving runtime that allows you to
 
 ## 🚀 Core Technologies
 
+* **Native GGUF Binary Loading**: Direct memory-mapped execution of quantized `.gguf` binaries (`Q4_0`, `Q4_K_M`, `Q8_0`, `FP16`) with zero offline conversion.
+* **Turing Programmatic DSL**: Python prompt programming with `@turing.chain`, parallel `fork()` with prefix KV sharing, majority `join()`, `select()`, and schema `constrain()`.
+* **Standalone C++20 Binary (`turing-cli`)**: Bare-metal C++20 runtime with zero Python runtime dependency, 64-byte aligned SIMD memory, and embedded HTTP server.
+* **Distributed Multi-GPU & Pipeline Parallelism**: Scalable Tensor Parallelism (TP) and Pipeline Parallelism (PP) with 1F1B micro-batch scheduling across multi-node GPU clusters.
 * **Triple API Gateway**: Unified drop-in endpoints for **OpenAI** (`/v1/chat/completions`), **Anthropic** (`/v1/messages`), and **Ollama** (`/api/*`).
 * **Structured Outputs & Tool Calling**: Native JSON Schema validation, JSON Mode auto-repair, and standardized OpenAI/Anthropic tool calling.
 * **57% Subspace Channel Pruning**: Skips dead intermediate neurons during token generation for a **2.32× per-layer speedup**.

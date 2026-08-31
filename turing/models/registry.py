@@ -22,24 +22,22 @@ def get_model_config(model_name_or_id: str) -> ModelConfig:
     2. Uses ModelResolver to parse provider namespaces, reasoning effort, and CLI aliases.
     3. Dynamically derives architecture parameters from Hugging Face Hub config.json (zero hardcoding).
     """
-    # 1. Parse model identifier
+    # 1. Check offline sizing catalog first (instant, zero network latency)
+    raw_key = model_name_or_id.lower().replace("_", "-")
+    if raw_key in SIZING_PROFILES:
+        return SIZING_PROFILES[raw_key]
+
+    # 2. Parse model identifier using ModelResolver
     spec = ModelResolver.parse(model_name_or_id)
     key = spec.repo_id.lower().replace("_", "-")
-
-    # 2. Check offline sizing profiles
     if key in SIZING_PROFILES:
         return SIZING_PROFILES[key]
     
-    # 3. Dynamic AutoConfig derivation
+    # 3. Dynamic AutoConfig derivation from Hugging Face Hub
     try:
         return ModelConfig.from_pretrained(spec.repo_id)
     except Exception:
         pass
-
-    # 4. Check if raw identifier matches an offline profile
-    raw_key = model_name_or_id.lower().replace("_", "-")
-    if raw_key in SIZING_PROFILES:
-        return SIZING_PROFILES[raw_key]
 
     raise ValueError(
         f"Could not resolve model '{model_name_or_id}'. "

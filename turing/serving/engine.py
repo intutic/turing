@@ -75,7 +75,8 @@ class ContinuousBatchEngine:
         tokenizer: Optional[Any] = None,
         admission: Optional[AdmissionController] = None,
         lane_policy: Optional[LanePolicy] = None,
-        spec_gate: Optional[SpeculationGatePolicy] = None
+        spec_gate: Optional[SpeculationGatePolicy] = None,
+        dist_driver: Optional[Any] = None
     ):
         self.model_config = model_config
         self.turing_config = turing_config or TuringConfig()
@@ -85,6 +86,7 @@ class ContinuousBatchEngine:
         self.admission = admission
         self.lane_policy = lane_policy
         self.spec_gate = spec_gate
+        self.dist_driver = dist_driver
 
         if model is not None:
             self.model = model.to(self.device).eval()
@@ -195,6 +197,31 @@ class ContinuousBatchEngine:
         self.waiting_queue.append(req)
         return req
 
+    async def submit_with_shared_prefix(
+        self,
+        prefix_kv: Any,
+        suffix_tokens_list: List[List[int]],
+        max_new_tokens: int = 32,
+        temperature: float = 0.7,
+        top_k: int = 50,
+        lane: Optional[Lane] = None
+    ) -> List[AsyncSequenceRequest]:
+        """
+        Submits N requests sharing a common prefix past_kv state (e.g. for DSL fork() branches).
+        """
+        requests = []
+        for suffix_tokens in suffix_tokens_list:
+            req = await self.add_request(
+                prompt_tokens=suffix_tokens,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_k=top_k,
+                lane=lane
+            )
+            req.past_kv = prefix_kv
+            requests.append(req)
+        return requests
+
     async def stream_generate(
         self,
         prompt_tokens: List[int],
@@ -270,7 +297,10 @@ class ContinuousBatchEngine:
                 chunk_tokens = req.prompt_tokens[req.prefill_offset:chunk_end]
                 chunk_input = torch.tensor([chunk_tokens], dtype=torch.long, device=self.device)
 
-                logits, new_kv = self.model(chunk_input, past_key_values=req.past_kv)
+                if self.dist_driver is not None:
+                    logits, new_kv = self.dist_driver.forward_distributed(chunk_input, past_key_values=req.past_kv)
+                else:
+                    logits, new_kv = self.model(chunk_input, past_key_values=req.past_kv)
                 req.past_kv = new_kv
                 req.prefill_offset = chunk_end
 
@@ -297,7 +327,10 @@ class ContinuousBatchEngine:
                 if req.state != RequestState.DECODING:
                     continue
 
-                logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
+                if self.dist_driver is not None:
+                    logits, new_kv = self.dist_driver.forward_distributed(req.current_input, past_key_values=req.past_kv)
+                else:
+                    logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
                 req.past_kv = new_kv
 
                 next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)

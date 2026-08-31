@@ -48,6 +48,7 @@
 #include "turing_fast_hash_tensor.hpp"
 #include "turing_sampler.hpp"
 #include "turing_json_fast_scan.hpp"
+#include "turing_gguf_simd.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -944,7 +945,11 @@ PYBIND11_MODULE(turing_csrc, m) {
             int32_t matched_len = 0;
             int32_t node_id = self.match_longest_prefix(tokens, matched_len);
             return std::make_pair(node_id, matched_len);
-        }, py::arg("tokens"));
+        }, py::arg("tokens"))
+        .def("set_anchor", &turing::RadixTrieIndex::set_anchor, py::arg("key"), py::arg("node_id"))
+        .def("get_anchor", &turing::RadixTrieIndex::get_anchor, py::arg("key"))
+        .def("size", &turing::RadixTrieIndex::size)
+        .def("__len__", &turing::RadixTrieIndex::size);
 
     py::class_<turing::TuringPagedAttentionEngine>(m, "TuringPagedAttentionEngine")
         .def(py::init<int, int, int, int>(),
@@ -1452,6 +1457,42 @@ PYBIND11_MODULE(turing_csrc, m) {
         d["repair_suffix"] = res.suggested_repair_suffix;
         return d;
     }, py::arg("text"), "Native AVX2 SIMD Fast JSON Syntax Scanner & Bracket Balancer");
+
+    // Native C++20 AVX2 SIMD GGUF Block Dequantizer
+    m.def("dequantize_gguf_simd", [](py::bytes data_bytes, int ggml_type, const std::vector<size_t>& shape) -> py::array_t<float> {
+        py::buffer_info in_buf = py::buffer(data_bytes).request();
+        const void* src_ptr = in_buf.ptr;
+        size_t total_elements = 1;
+        for (auto dim : shape) total_elements *= dim;
+
+        py::array_t<float> result(shape);
+        py::buffer_info buf = result.request();
+        float* dst_ptr = static_cast<float*>(buf.ptr);
+
+        if (ggml_type == 0) { // F32
+            std::memcpy(dst_ptr, src_ptr, total_elements * sizeof(float));
+        } else if (ggml_type == 1) { // F16
+            turing::dequantize_fp16(src_ptr, dst_ptr, total_elements);
+        } else if (ggml_type == 2) { // Q4_0
+            size_t num_blocks = total_elements / 32;
+            turing::dequantize_q4_0(src_ptr, dst_ptr, num_blocks);
+        } else if (ggml_type == 3) { // Q4_1
+            size_t num_blocks = total_elements / 32;
+            turing::dequantize_q4_1(src_ptr, dst_ptr, num_blocks);
+        } else if (ggml_type == 8) { // Q8_0
+            size_t num_blocks = total_elements / 32;
+            turing::dequantize_q8_0(src_ptr, dst_ptr, num_blocks);
+        } else if (ggml_type == 12) { // Q4_K
+            size_t num_blocks = total_elements / 256;
+            turing::dequantize_q4_k(src_ptr, dst_ptr, num_blocks);
+        } else if (ggml_type == 30) { // BF16
+            turing::dequantize_bf16(src_ptr, dst_ptr, total_elements);
+        } else {
+            throw std::runtime_error("Unsupported GGML type in SIMD dequantizer: " + std::to_string(ggml_type));
+        }
+
+        return result;
+    }, py::arg("data_bytes"), py::arg("ggml_type"), py::arg("shape"), "Native AVX2 SIMD GGUF Block Dequantizer");
 }
 
 

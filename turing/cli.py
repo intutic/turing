@@ -37,6 +37,8 @@ def main():
     serve_parser.add_argument("--kv-events-replay-port", type=int, default=5559, help="ZeroMQ ROUTER port for KV cache event replay (default: 5559)")
     serve_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights for isolated FLOP profiling")
     serve_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
+    serve_parser.add_argument("--tensor-parallel", "--tp", type=int, default=1, help="Tensor parallelism world size (default: 1)")
+    serve_parser.add_argument("--pipeline-parallel", "--pp", type=int, default=1, help="Pipeline parallelism stage count (default: 1)")
 
 
     # 2. Bench
@@ -155,6 +157,12 @@ def main():
             model = SubspaceCausalLM(cfg).to(dev).eval()
             tokenizer = None
             print(f"[*] Loaded mock architecture: {cfg.name}")
+        elif args.model.endswith(".gguf") and os.path.isfile(args.model):
+            from .models.gguf_loader import GGUFModelLoader
+            print(f"[*] Loading native GGUF weights from '{args.model}'...")
+            loader = GGUFModelLoader(args.model)
+            model, tokenizer = loader.load(sparsity_ratio=args.sparsity, device=str(dev))
+            print(f"[+] Loaded GGUF model: {model.config.name} (layers: {model.config.num_layers}, hidden: {model.config.hidden_dim})")
         else:
             from .models.hf_loader import RealHuggingFaceLoader
             try:
@@ -210,23 +218,43 @@ def main():
         jcfg = TuringConfig(device=args.device, max_batch_size=args.max_batch_size)
         dev = jcfg.resolve_device()
 
+        model_inst = None
+        tokenizer_inst = None
+
         if getattr(args, "mock", False) or args.model in ["test-tiny", "mock"]:
             cfg = get_model_config(args.model)
-            engine = ContinuousBatchEngine(cfg, jcfg)
+        elif args.model.endswith(".gguf") and os.path.isfile(args.model):
+            from .models.gguf_loader import GGUFModelLoader
+            print(f"[*] Loading native GGUF weights for server from '{args.model}'...")
+            loader = GGUFModelLoader(args.model)
+            model_inst, tokenizer_inst = loader.load(sparsity_ratio=args.sparsity, device=str(dev))
+            cfg = model_inst.config
         else:
             from .models.hf_loader import RealHuggingFaceLoader
             try:
-                model, tokenizer = RealHuggingFaceLoader.load_hf_model_into_turing(
+                model_inst, tokenizer_inst = RealHuggingFaceLoader.load_hf_model_into_turing(
                     hf_model_id=args.model,
                     sparsity_ratio=args.sparsity,
                     device=str(dev)
                 )
-                cfg = model.config
-                engine = ContinuousBatchEngine(cfg, jcfg, model=model, tokenizer=tokenizer)
+                cfg = model_inst.config
             except Exception as e:
                 print(f"[!] Notice: Could not load real HuggingFace weights for '{args.model}' ({e}). Falling back to architecture geometry.")
                 cfg = get_model_config(args.model)
-                engine = ContinuousBatchEngine(cfg, jcfg)
+
+        # Multi-GPU / Multi-Node Distributed Driver setup
+        tp_size = getattr(args, "tensor_parallel", 1)
+        pp_size = getattr(args, "pipeline_parallel", 1)
+        dist_driver = None
+        if tp_size > 1 or pp_size > 1:
+            from .serving.distributed import DistributedInferenceDriver, DistributedConfig
+            dist_cfg = DistributedConfig.from_env(tp_size=tp_size, pp_size=pp_size)
+            if model_inst is None:
+                model_inst = SubspaceCausalLM(cfg).to(dev).eval()
+            dist_driver = DistributedInferenceDriver(model=model_inst, config=cfg, dist_config=dist_cfg)
+            print(f"[+] Initialized DistributedInferenceDriver (TP: {tp_size}, PP: {pp_size})")
+
+        engine = ContinuousBatchEngine(cfg, jcfg, model=model_inst, tokenizer=tokenizer_inst, dist_driver=dist_driver)
 
         kv_pub = None
         import os

@@ -102,9 +102,15 @@ class AutoSubspaceModel:
         token: Optional[str] = None
     ) -> Tuple[SubspaceCausalLM, Any]:
         """
-        Dynamically loads pretrained weights from any Hugging Face repository
-        or local directory directly into Turing Engine Subspace format.
+        Dynamically loads pretrained weights from any Hugging Face repository,
+        local directory, or local .gguf binary file directly into Turing Engine Subspace format.
         """
+        import os
+        if model_name_or_id.endswith(".gguf") and os.path.isfile(model_name_or_id):
+            from .gguf_loader import GGUFModelLoader
+            loader = GGUFModelLoader(model_name_or_id)
+            return loader.load(sparsity_ratio=sparsity_ratio, device=device)
+
         from .hf_loader import RealHuggingFaceLoader
         return RealHuggingFaceLoader.load_hf_model_into_turing(
             hf_model_id=model_name_or_id,
