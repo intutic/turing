@@ -104,76 +104,98 @@ class RealHuggingFaceLoader:
 
         # Copy real embeddings and output head
         with torch.no_grad():
-            if hasattr(hf_model, "transformer"): # GPT-2 style
-                if hasattr(hf_model.transformer, "wte"):
-                    turing_model.embed_tokens.weight.copy_(hf_model.transformer.wte.weight.to(target_device))
-                if hasattr(hf_model.transformer, "ln_f"):
-                    turing_model.norm.weight.copy_(hf_model.transformer.ln_f.weight.to(target_device))
-                if hasattr(hf_model, "lm_head"):
-                    turing_model.lm_head.weight.copy_(hf_model.lm_head.weight.to(target_device))
-                elif hasattr(hf_model.transformer, "wte"):
-                    turing_model.lm_head.weight.copy_(hf_model.transformer.wte.weight.to(target_device))
-            elif hasattr(hf_model, "model"): # LLaMA / Qwen / DeepSeek / Mistral style
-                if hasattr(hf_model.model, "embed_tokens"):
-                    turing_model.embed_tokens.weight.copy_(hf_model.model.embed_tokens.weight.to(target_device))
-                if hasattr(hf_model.model, "norm"):
-                    turing_model.norm.weight.copy_(hf_model.model.norm.weight.to(target_device))
-                if hasattr(hf_model, "lm_head"):
-                    turing_model.lm_head.weight.copy_(hf_model.lm_head.weight.to(target_device))
+            # 1. Universal Embeddings
+            if hasattr(hf_model, "get_input_embeddings") and hf_model.get_input_embeddings() is not None:
+                turing_model.embed_tokens.weight.copy_(hf_model.get_input_embeddings().weight.to(target_device))
+            elif hasattr(hf_model, "transformer") and hasattr(hf_model.transformer, "wte"):
+                turing_model.embed_tokens.weight.copy_(hf_model.transformer.wte.weight.to(target_device))
+            elif hasattr(hf_model, "model") and hasattr(hf_model.model, "embed_tokens"):
+                turing_model.embed_tokens.weight.copy_(hf_model.model.embed_tokens.weight.to(target_device))
 
-            # Map real layers
-            for l_idx in range(num_layers):
-                j_layer = turing_model.layers[l_idx]
+            # 2. Universal Final Norm
+            if hasattr(hf_model, "transformer") and hasattr(hf_model.transformer, "ln_f"):
+                turing_model.norm.weight.copy_(hf_model.transformer.ln_f.weight.to(target_device))
+            elif hasattr(hf_model, "model") and hasattr(hf_model.model, "norm"):
+                turing_model.norm.weight.copy_(hf_model.model.norm.weight.to(target_device))
+            elif hasattr(hf_model, "model") and hasattr(hf_model.model, "final_layernorm"):
+                turing_model.norm.weight.copy_(hf_model.model.final_layernorm.weight.to(target_device))
 
-                if hasattr(hf_model, "transformer") and hasattr(hf_model.transformer, "h"):
-                    hf_layer = hf_model.transformer.h[l_idx]
-                    # GPT-2 c_attn contains [Q, K, V] concatenated in dim=-1
-                    qkv_w = hf_layer.attn.c_attn.weight.to(target_device) # [hidden, 3*hidden]
-                    qkv_w = qkv_w.t().contiguous() # [3*hidden, hidden]
-                    q_w, k_w, v_w = qkv_w.chunk(3, dim=0)
+            # 3. Universal LM Head
+            if hasattr(hf_model, "get_output_embeddings") and hf_model.get_output_embeddings() is not None:
+                turing_model.lm_head.weight.copy_(hf_model.get_output_embeddings().weight.to(target_device))
+            elif hasattr(hf_model, "lm_head"):
+                turing_model.lm_head.weight.copy_(hf_model.lm_head.weight.to(target_device))
 
-                    j_layer.self_attn.q_proj.weight.copy_(q_w)
-                    j_layer.self_attn.k_proj.weight.copy_(k_w)
-                    j_layer.self_attn.v_proj.weight.copy_(v_w)
-                    j_layer.self_attn.o_proj.weight.copy_(hf_layer.attn.c_proj.weight.to(target_device).t().contiguous())
+            # 4. Universal Layer Extraction
+            hf_layers = None
+            if hasattr(hf_model, "model") and hasattr(hf_model.model, "layers"):
+                hf_layers = hf_model.model.layers
+            elif hasattr(hf_model, "transformer") and hasattr(hf_model.transformer, "h"):
+                hf_layers = hf_model.transformer.h
+            elif hasattr(hf_model, "model") and hasattr(hf_model.model, "decoder") and hasattr(hf_model.model.decoder, "layers"):
+                hf_layers = hf_model.model.decoder.layers
+            elif hasattr(hf_model, "layers"):
+                hf_layers = hf_model.layers
 
-                    # GPT-2 MLP c_fc [hidden, ffn_dim], c_proj [ffn_dim, hidden]
-                    fc_w = hf_layer.mlp.c_fc.weight.to(target_device).t().contiguous() # [ffn_dim, hidden]
-                    proj_w = hf_layer.mlp.c_proj.weight.to(target_device).t().contiguous() # [hidden, ffn_dim]
+            if hf_layers is not None:
+                for l_idx in range(min(num_layers, len(hf_layers))):
+                    j_layer = turing_model.layers[l_idx]
+                    hf_layer = hf_layers[l_idx]
 
-                    # Saliency pruning on real MLP weights
-                    saliency = torch.norm(fc_w, dim=-1) * torch.norm(proj_w, dim=0)
-                    tile_scores = saliency.view(total_tiles, tile_size).mean(dim=-1)
-                    _, active_indices = torch.topk(tile_scores, k=active_tiles_count)
-                    active_indices = sorted(active_indices.tolist())
+                    # Extract Attention (separate vs fused QKV)
+                    attn = getattr(hf_layer, "self_attn", getattr(hf_layer, "attn", getattr(hf_layer, "self_attention", None)))
+                    if attn is not None:
+                        if hasattr(attn, "q_proj") and hasattr(attn, "k_proj") and hasattr(attn, "v_proj"):
+                            j_layer.self_attn.q_proj.weight.copy_(attn.q_proj.weight.to(target_device))
+                            j_layer.self_attn.k_proj.weight.copy_(attn.k_proj.weight.to(target_device))
+                            j_layer.self_attn.v_proj.weight.copy_(attn.v_proj.weight.to(target_device))
+                        elif hasattr(attn, "c_attn"): # GPT-2
+                            qkv_w = attn.c_attn.weight.to(target_device).t().contiguous()
+                            q_w, k_w, v_w = qkv_w.chunk(3, dim=0)
+                            j_layer.self_attn.q_proj.weight.copy_(q_w)
+                            j_layer.self_attn.k_proj.weight.copy_(k_w)
+                            j_layer.self_attn.v_proj.weight.copy_(v_w)
+                        elif hasattr(attn, "query_key_value") or hasattr(attn, "qkv_proj"):
+                            fused = getattr(attn, "query_key_value", getattr(attn, "qkv_proj")).weight.to(target_device)
+                            q_w, k_w, v_w = fused.chunk(3, dim=0)
+                            j_layer.self_attn.q_proj.weight.copy_(q_w)
+                            j_layer.self_attn.k_proj.weight.copy_(k_w)
+                            j_layer.self_attn.v_proj.weight.copy_(v_w)
 
-                    # Set weights and active tiles
-                    j_layer.mlp.gate_proj.weight.copy_(fc_w)
-                    j_layer.mlp.up_proj.weight.copy_(torch.ones_like(fc_w))
-                    j_layer.mlp.down_proj.weight.copy_(proj_w)
-                    j_layer.mlp.set_active_tiles(torch.tensor(active_indices, dtype=torch.int32, device=target_device))
+                        o_proj = getattr(attn, "o_proj", getattr(attn, "out_proj", getattr(attn, "dense", None)))
+                        if o_proj is not None:
+                            j_layer.self_attn.o_proj.weight.copy_(o_proj.weight.to(target_device))
+                        elif hasattr(attn, "c_proj"): # GPT-2
+                            j_layer.self_attn.o_proj.weight.copy_(attn.c_proj.weight.to(target_device).t().contiguous())
 
-                elif hasattr(hf_model, "model") and hasattr(hf_model.model, "layers"):
-                    hf_layer = hf_model.model.layers[l_idx]
-                    j_layer.self_attn.q_proj.weight.copy_(hf_layer.self_attn.q_proj.weight.to(target_device))
-                    j_layer.self_attn.k_proj.weight.copy_(hf_layer.self_attn.k_proj.weight.to(target_device))
-                    j_layer.self_attn.v_proj.weight.copy_(hf_layer.self_attn.v_proj.weight.to(target_device))
-                    j_layer.self_attn.o_proj.weight.copy_(hf_layer.self_attn.o_proj.weight.to(target_device))
+                    # Extract MLP (SwiGLU vs standard MLP)
+                    mlp = getattr(hf_layer, "mlp", getattr(hf_layer, "feed_forward", None))
+                    if mlp is not None:
+                        if hasattr(mlp, "gate_proj") and hasattr(mlp, "up_proj") and hasattr(mlp, "down_proj"):
+                            gate_w = mlp.gate_proj.weight.to(target_device)
+                            up_w = mlp.up_proj.weight.to(target_device)
+                            down_w = mlp.down_proj.weight.to(target_device)
+                        elif hasattr(mlp, "c_fc") and hasattr(mlp, "c_proj"): # GPT-2
+                            gate_w = mlp.c_fc.weight.to(target_device).t().contiguous()
+                            up_w = torch.ones_like(gate_w)
+                            down_w = mlp.c_proj.weight.to(target_device).t().contiguous()
+                        elif hasattr(mlp, "fc1") and hasattr(mlp, "fc2"): # OPT
+                            gate_w = mlp.fc1.weight.to(target_device)
+                            up_w = torch.ones_like(gate_w)
+                            down_w = mlp.fc2.weight.to(target_device)
+                        else:
+                            gate_w, up_w, down_w = None, None, None
 
-                    # Real SwiGLU FFN: gate, up, down
-                    gate_w = hf_layer.mlp.gate_proj.weight.to(target_device) # [ffn, hidden]
-                    up_w = hf_layer.mlp.up_proj.weight.to(target_device)
-                    down_w = hf_layer.mlp.down_proj.weight.to(target_device) # [hidden, ffn]
+                        if gate_w is not None and down_w is not None:
+                            saliency = torch.norm(gate_w, dim=-1) * torch.norm(up_w, dim=-1) * torch.norm(down_w, dim=0)
+                            tile_scores = saliency.view(total_tiles, tile_size).mean(dim=-1)
+                            _, active_indices = torch.topk(tile_scores, k=active_tiles_count)
+                            active_indices = sorted(active_indices.tolist())
 
-                    saliency = torch.norm(gate_w, dim=-1) * torch.norm(up_w, dim=-1) * torch.norm(down_w, dim=0)
-                    tile_scores = saliency.view(total_tiles, tile_size).mean(dim=-1)
-                    _, active_indices = torch.topk(tile_scores, k=active_tiles_count)
-                    active_indices = sorted(active_indices.tolist())
-
-                    j_layer.mlp.gate_proj.weight.copy_(gate_w)
-                    j_layer.mlp.up_proj.weight.copy_(up_w)
-                    j_layer.mlp.down_proj.weight.copy_(down_w)
-                    j_layer.mlp.set_active_tiles(torch.tensor(active_indices, dtype=torch.int32, device=target_device))
+                            j_layer.mlp.gate_proj.weight.copy_(gate_w)
+                            j_layer.mlp.up_proj.weight.copy_(up_w)
+                            j_layer.mlp.down_proj.weight.copy_(down_w)
+                            j_layer.mlp.set_active_tiles(torch.tensor(active_indices, dtype=torch.int32, device=target_device))
 
         del hf_model
         if target_device.type == "cuda":
