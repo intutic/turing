@@ -86,13 +86,33 @@ model_list:
 
 ---
 
-## 4. Open WebUI & LibreChat
+## 4. Open WebUI, Continue.dev & Ollama Frontends
 
-Connect your local web UI directly to Turing Engine:
-1. Open **Open WebUI Settings ➔ Connections ➔ OpenAI API**.
-2. Set **URL**: `http://localhost:8000/v1`
-3. Set **API Key**: `turing-local`
-4. Models like `deepseek-r1-7b` and `glm-5.3-flash` will automatically appear in your model dropdown.
+Turing Engine provides native support for both **Ollama** and **OpenAI** connection protocols:
+
+=== "Method A: Native Ollama Protocol (Open WebUI / Continue.dev / Raycast / Enchanted)"
+    1. In **Open WebUI**: Go to **Settings ➔ Connections ➔ Ollama API**.
+    2. Set **Ollama Base URL**: `http://localhost:8000`
+    3. Click **Verify Connection** — all loaded models will automatically sync via `/api/tags`.
+    4. In **Continue.dev** (`~/.continue/config.json`):
+    ```json
+    {
+      "models": [
+        {
+          "title": "Turing Engine DeepSeek-R1",
+          "provider": "ollama",
+          "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+          "apiBase": "http://localhost:8000"
+        }
+      ]
+    }
+    ```
+
+=== "Method B: OpenAI Compatible Protocol (LibreChat / Chatbox / Cursor / Cline)"
+    1. Open your chat UI Settings ➔ OpenAI API.
+    2. Set **Base URL**: `http://localhost:8000/v1`
+    3. Set **API Key**: `turing-local`
+    4. Models will automatically appear in your model selector dropdown.
 
 ---
 

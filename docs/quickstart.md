@@ -48,28 +48,52 @@ turing chat --model Qwen/Qwen2.5-Coder-7B-Instruct
 
 ---
 
-## 3. Launch Serving Server (Dual OpenAI & Anthropic API)
+## 3. Launch Triple Gateway Serving Server (OpenAI, Anthropic & Ollama API)
 
 ```bash
+# Serve any model dynamically on port 8000:
 turing serve --model deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --port 8000
 ```
 
-### Query with Python OpenAI SDK
-
+### A. Query with Python OpenAI SDK
 ```python
 from openai import OpenAI
 
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="turing-local")
 response = client.chat.completions.create(
     model="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-    messages=[{"role": "user", "content": "Write a quick Python script to calculate Fibonacci numbers:"}],
-    extra_body={"reasoning_effort": "high"}
+    messages=[{"role": "user", "content": "Write a quick binary search in Python:"}],
+    response_format={"type": "json_object"}
 )
 print(response.choices[0].message.content)
 ```
 
-### Python SDK Programmatic Usage
+### B. Query with Python Ollama SDK
+```python
+import ollama
 
+client = ollama.Client(host="http://localhost:8000")
+response = client.chat(
+    model="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    messages=[{"role": "user", "content": "Explain Subspace KV paging in 2 sentences."}]
+)
+print(response["message"]["content"])
+```
+
+### C. Query with Python Anthropic SDK
+```python
+import anthropic
+
+client = anthropic.Anthropic(base_url="http://localhost:8000", api_key="turing-local")
+message = client.messages.create(
+    model="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    max_tokens=128,
+    messages=[{"role": "user", "content": "Hello Turing Engine!"}]
+)
+print(message.content[0].text)
+```
+
+### D. Python SDK Programmatic Usage
 ```python
 from turing.models.architecture_registry import AutoSubspaceModel
 
@@ -84,8 +108,7 @@ output = model.generate(prompt_tokens, max_new_tokens=64)
 print(tokenizer.decode(output))
 ```
 
-### Query with LangChain
-
+### E. Query with LangChain
 ```python
 from turing.integrations.langchain import ChatTuring
 

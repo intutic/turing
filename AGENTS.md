@@ -26,7 +26,7 @@ python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
 # Run quick quiet validation
 python -W error -m pytest -q
 ```
-> **Invariant**: All 209 automated tests MUST pass with 0 warnings. Any newly introduced warning or test regression must be resolved immediately.
+> **Invariant**: All 226 automated tests MUST pass with 0 warnings. Any newly introduced warning or test regression must be resolved immediately.
 
 
 

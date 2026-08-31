@@ -9,10 +9,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests](https://img.shields.io/badge/Tests-209%2F209%20Passing-brightgreen.svg)]()
-
-
-
+[![Tests](https://img.shields.io/badge/Tests-226%2F226%20Passing-brightgreen.svg)]()
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -26,6 +23,8 @@ Turing Engine is an open-source inference and serving runtime that allows you to
 
 ## 🚀 Core Technologies
 
+* **Triple API Gateway**: Unified drop-in endpoints for **OpenAI** (`/v1/chat/completions`), **Anthropic** (`/v1/messages`), and **Ollama** (`/api/*`).
+* **Structured Outputs & Tool Calling**: Native JSON Schema validation, JSON Mode auto-repair, and standardized OpenAI/Anthropic tool calling.
 * **57% Subspace Channel Pruning**: Skips dead intermediate neurons during token generation for a **2.32× per-layer speedup**.
 * **Latent Flash-Decode (SPECTRA Mode-B)**: Direct attention in rank-64 latent subspace against INT8 cached singular coordinates (**35.37× speedup on 32K context**).
 * **Multi-Turn Clean-Base Lineage**: Cryptographic BLAKE2b ledger preserving bounded representation fidelity ($\|\Delta C_R\|_2 \approx 30.70$) across multi-agent deliberations with zero drift.
@@ -36,7 +35,6 @@ Turing Engine is an open-source inference and serving runtime that allows you to
 * **SVD INT8 KV Cache Paging**: Compresses 32K context memory from **10 GB down to 2.5 GB (-75%)**.
 * **Heterogeneous MoE Memory Management**: Runs 320B Mixture-of-Experts models on a single 24GB card by caching active experts in VRAM and streaming inactive experts from Host DRAM.
 * **Universal Hardware Support**: Native auto-discovery for **NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (XPU), Vulkan, and CPU (AVX2 SIMD)**.
-* **OpenAI & Anthropic Compatible**: Drop-in serving runtime for `/v1/chat/completions`, `/v1/completions`, and `/v1/messages`.
 
 
 ---

@@ -12,10 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 209/209 Passing](https://img.shields.io/badge/Tests-209%2F209%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
-
-
-
+[![Tests: 226/226 Passing](https://img.shields.io/badge/Tests-226%2F226%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -43,13 +40,13 @@ turing chat --model smollm2
 turing chat --model llama-3.3-70b
 ```
 
-### 3. Launch an OpenAI & Anthropic-Compatible Serving Server
+### 3. Launch Triple API Gateway (OpenAI, Anthropic & Ollama Compatible)
 ```bash
-# Serve any model dynamically on port 8000:
+# Serve any model dynamically on port 8000 (OpenAI /v1, Anthropic /v1/messages, Ollama /api):
 turing serve --model meta-llama/Llama-3.3-70B-Instruct --port 8000
 turing serve --model deepseek-ai/DeepSeek-R1-Distill-Qwen-7B --port 8000 --reasoning-effort high
 ```
-Point any chat UI (Open WebUI, LibreChat, Chatbox, Cursor, Cline) to `http://localhost:8000/v1` and you're chatting!
+Point **Open WebUI**, **Continue.dev**, **Cursor**, **Chatbox**, or **Cline** directly to `http://localhost:8000`!
 
 ---
 
@@ -156,21 +153,45 @@ python scripts/benchmark_serving_e2e.py
 
 ---
 
-## 🔌 Using with Python OpenAI SDK
+## 🔌 Drop-In Client SDK Support
 
+### 1. Python OpenAI SDK
 ```python
 from openai import OpenAI
 
-# Connect to local Turing Engine server
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="turing-live")
-
 response = client.chat.completions.create(
     model="deepseek-r1-7b",
-    messages=[{"role": "user", "content": "Explain quantum computing in two sentences."}],
-    temperature=0.7,
+    messages=[{"role": "user", "content": "Explain subspace channel pruning:"}],
+    response_format={"type": "json_object"},
     extra_headers={"X-Turing-Lane": "interactive"}
 )
 print(response.choices[0].message.content)
+```
+
+### 2. Python Ollama SDK
+```python
+import ollama
+
+client = ollama.Client(host="http://localhost:8000")
+response = client.chat(
+    model="deepseek-r1-7b",
+    messages=[{"role": "user", "content": "Write a quick Python binary search:"}]
+)
+print(response["message"]["content"])
+```
+
+### 3. Python Anthropic SDK
+```python
+import anthropic
+
+client = anthropic.Anthropic(base_url="http://localhost:8000", api_key="turing-live")
+message = client.messages.create(
+    model="deepseek-r1-7b",
+    max_tokens=128,
+    messages=[{"role": "user", "content": "Hello Turing!"}]
+)
+print(message.content[0].text)
 ```
 
 ---
