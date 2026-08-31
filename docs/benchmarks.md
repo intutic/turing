@@ -295,11 +295,11 @@ Empirical benchmark measurements from `scripts/benchmark_prefill_decode_duality.
 ### B. Decode (Decoder / Memory-Bandwidth-Bound) Batched Throughput
 | Concurrent Batch Size | Step Latency (NVIDIA L4) | Aggregate TPS (NVIDIA L4) | Per-Stream TPS (L4) | Aggregate TPS (Mac) | Scaling Factor |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **$B = 1$ Stream** | **$7.09\text{ ms}$** | **$141.14\text{ tok/s}$** | $141.14\text{ tok/s}$ | $40.48\text{ tok/s}$ | Baseline (Bandwidth constrained) |
-| **$B = 2$ Streams**| **$6.35\text{ ms}$** | **$314.90\text{ tok/s}$** | $157.45\text{ tok/s}$ | $117.61\text{ tok/s}$ | **$2.23\times$ Aggregate Scaling** |
-| **$B = 4$ Streams**| **$6.53\text{ ms}$** | **$613.03\text{ tok/s}$** | $153.26\text{ tok/s}$ | $214.93\text{ tok/s}$ | **$4.34\times$ Aggregate Scaling** |
-| **$B = 8$ Streams**| **$6.50\text{ ms}$** | **$1,230.46\text{ tok/s}$** | $153.81\text{ tok/s}$ | $631.65\text{ tok/s}$ | **$8.72\times$ Aggregate Scaling** |
-| **$B = 16$ Streams**| **$6.63\text{ ms}$**| **$2,413.36\text{ tok/s}$** | $150.83\text{ tok/s}$ | $1,331.69\text{ tok/s}$| **$17.10\times$ Aggregate Scaling** |
+| **$B = 1$ Stream** | **$6.09\text{ ms}$** | **$164.27\text{ tok/s}$** | $164.27\text{ tok/s}$ | $40.48\text{ tok/s}$ | Baseline (Fused Sampler) |
+| **$B = 2$ Streams**| **$6.21\text{ ms}$** | **$322.29\text{ tok/s}$** | $161.15\text{ tok/s}$ | $117.61\text{ tok/s}$ | **$1.96\times$ Aggregate Scaling** |
+| **$B = 4$ Streams**| **$6.15\text{ ms}$** | **$650.52\text{ tok/s}$** | $162.63\text{ tok/s}$ | $214.93\text{ tok/s}$ | **$3.96\times$ Aggregate Scaling** |
+| **$B = 8$ Streams**| **$6.24\text{ ms}$** | **$1,282.46\text{ tok/s}$** | $160.31\text{ tok/s}$ | $631.65\text{ tok/s}$ | **$7.81\times$ Aggregate Scaling** |
+| **$B = 16$ Streams**| **$6.37\text{ ms}$**| **$2,512.38\text{ tok/s}$** | $157.02\text{ tok/s}$ | $1,331.69\text{ tok/s}$| **$15.29\times$ Aggregate Scaling** |
 
 ### C. Prefill-Decode Interleaved Jitter Suppression (8K Prompt Burst)
 | Jitter Metric | NVIDIA L4 GPU Measurement | Apple Silicon Mac Measurement | Production SLO Target |
