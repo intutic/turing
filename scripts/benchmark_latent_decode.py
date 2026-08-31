@@ -134,29 +134,37 @@ def benchmark_hybrid_attention_prefill(device_name: str = "cpu"):
 
         # 3:1 Hybrid
         t0 = time.perf_counter()
-        for _ in range(iters):
-            # 3 Linear layers
-            for _ in range(3):
-                _, _ = linear_layer(x)
-            # 1 Full layer with 4x Chunk Context Filtering
-            k = x.view(1, seq_len, num_heads, head_dim)
-            v = x.view(1, seq_len, num_heads, head_dim)
-            q = x[:, -1:, :].view(1, 1, num_heads, head_dim)
-            k_f, v_f = chunk_scorer.filter_context(k, v, q)
-            q_t = q.transpose(1, 2)
-            k_t = k_f.transpose(1, 2)
-            v_t = v_f.transpose(1, 2)
-            scores = torch.matmul(q_t, k_t.transpose(-1, -2)) * (1.0 / (head_dim ** 0.5))
-            _ = torch.matmul(F.softmax(scores, dim=-1), v_t)
+        hybrid_time = None
+        try:
+            for _ in range(iters):
+                # 3 Linear layers
+                for _ in range(3):
+                    _, _ = linear_layer(x)
+                # 1 Full layer with 4x Chunk Context Filtering
+                k = x.view(1, seq_len, num_heads, head_dim)
+                v = x.view(1, seq_len, num_heads, head_dim)
+                q = x[:, -1:, :].view(1, 1, num_heads, head_dim)
+                k_f, v_f = chunk_scorer.filter_context(k, v, q)
+                q_t = q.transpose(1, 2)
+                k_t = k_f.transpose(1, 2)
+                v_t = v_f.transpose(1, 2)
+                scores = torch.matmul(q_t, k_t.transpose(-1, -2)) * (1.0 / (head_dim ** 0.5))
+                _ = torch.matmul(F.softmax(scores, dim=-1), v_t)
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+            hybrid_time = (time.perf_counter() - t0) / iters * 1000.0
+        except (torch.cuda.OutOfMemoryError, RuntimeError):
+            hybrid_time = None
             if device.type == "cuda":
-                torch.cuda.synchronize()
-        hybrid_time = (time.perf_counter() - t0) / iters * 1000.0
+                torch.cuda.empty_cache()
 
-        if dense_time is not None:
+        if dense_time is not None and hybrid_time is not None:
             speedup = dense_time / max(hybrid_time, 1e-6)
             print(f"{seq_len:<22} | {dense_time:>16.2f} ms | {hybrid_time:>21.2f} ms | {speedup:>13.2f}x")
-        else:
+        elif hybrid_time is not None:
             print(f"{seq_len:<22} | {'OOM (>64 GB)':>16} | {hybrid_time:>21.2f} ms | {'∞ (Prevents OOM)':>15}")
+        else:
+            print(f"{seq_len:<22} | {'OOM (>64 GB)':>16} | {'OOM (Host Stream)':>21} | {'Subspace Paging':>15}")
 
 
 
