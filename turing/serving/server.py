@@ -32,6 +32,7 @@ class ChatCompletionRequest(BaseModel):
     use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
     draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
     lane: Optional[str] = Field(default=None, description="QoS scheduling lane (interactive, batch, background)")
+    reasoning_effort: Optional[str] = Field(default=None, description="Constrains reasoning effort level: low, medium, high")
 
 class CompletionRequest(BaseModel):
     model: str
@@ -43,6 +44,7 @@ class CompletionRequest(BaseModel):
     use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
     draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
     lane: Optional[str] = Field(default=None, description="QoS scheduling lane (interactive, batch, background)")
+    reasoning_effort: Optional[str] = Field(default=None, description="Constrains reasoning effort level: low, medium, high")
 
 def create_app(
     engine: ContinuousBatchEngine,

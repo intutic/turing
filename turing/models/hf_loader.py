@@ -110,9 +110,39 @@ class RealHuggingFaceLoader:
     }
 
     @classmethod
+    def parse_model_identifier(cls, model_identifier: str) -> Tuple[str, Optional[str]]:
+        """
+        Parses model identifier strings into (resolved_repo_id, reasoning_effort).
+        Supports:
+        - Short aliases: 'deepseek-r1-1.5b' -> ('deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B', None)
+        - Provider/model: 'deepseek-ai/DeepSeek-R1' -> ('deepseek-ai/DeepSeek-R1', None)
+        - Provider/model/effort: 'deepseek-ai/DeepSeek-R1/high' -> ('deepseek-ai/DeepSeek-R1', 'high')
+        - Colon suffix: 'deepseek-ai/DeepSeek-R1:low' -> ('deepseek-ai/DeepSeek-R1', 'low')
+        """
+        raw = model_identifier.strip()
+        effort = None
+
+        # Check colon delimiter
+        if ":" in raw:
+            parts = raw.split(":", 1)
+            raw = parts[0].strip()
+            if parts[1].strip().lower() in ["high", "medium", "low", "default"]:
+                effort = parts[1].strip().lower()
+
+        # Check 3-part provider/model/effort pattern
+        slash_parts = raw.split("/")
+        if len(slash_parts) == 3 and slash_parts[2].lower() in ["high", "medium", "low", "default"]:
+            effort = slash_parts[2].lower()
+            raw = f"{slash_parts[0]}/{slash_parts[1]}"
+
+        key = raw.lower().strip()
+        resolved_repo = cls.MODEL_ALIASES.get(key, raw)
+        return resolved_repo, effort
+
+    @classmethod
     def resolve_model_id(cls, model_identifier: str) -> str:
-        key = model_identifier.lower().strip()
-        return cls.MODEL_ALIASES.get(key, model_identifier)
+        repo_id, _ = cls.parse_model_identifier(model_identifier)
+        return repo_id
 
     @staticmethod
     def load_hf_model_into_turing(

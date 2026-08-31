@@ -819,7 +819,17 @@ MODEL_REGISTRY: Dict[str, ModelConfig] = {
 }
 
 def get_model_config(model_name_or_id: str) -> ModelConfig:
-    key = model_name_or_id.lower().replace("_", "-")
+    # 1. Strip reasoning effort suffixes if present (e.g. :high, /low)
+    raw = model_name_or_id.strip()
+    if ":" in raw:
+        parts = raw.split(":", 1)
+        if parts[1].strip().lower() in ["high", "medium", "low", "default"]:
+            raw = parts[0].strip()
+    slash_parts = raw.split("/")
+    if len(slash_parts) == 3 and slash_parts[2].lower() in ["high", "medium", "low", "default"]:
+        raw = f"{slash_parts[0]}/{slash_parts[1]}"
+
+    key = raw.lower().replace("_", "-")
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]
 
@@ -857,5 +867,37 @@ def get_model_config(model_name_or_id: str) -> ModelConfig:
     }
     if key in alias_map and alias_map[key] in MODEL_REGISTRY:
         return MODEL_REGISTRY[alias_map[key]]
+
+    # 2. Dynamic AutoConfig Extraction for uncurated/future HuggingFace models
+    try:
+        from transformers import AutoConfig
+        hf_cfg = AutoConfig.from_pretrained(raw)
+        hidden_dim = getattr(hf_cfg, "hidden_size", getattr(hf_cfg, "n_embd", 768))
+        num_layers = getattr(hf_cfg, "num_hidden_layers", getattr(hf_cfg, "n_layer", 12))
+        num_heads = getattr(hf_cfg, "num_attention_heads", getattr(hf_cfg, "n_head", 12))
+        num_kv_heads = getattr(hf_cfg, "num_key_value_heads", num_heads)
+        head_dim = getattr(hf_cfg, "head_dim", hidden_dim // num_heads)
+        vocab_size = getattr(hf_cfg, "vocab_size", 32000)
+        ffn_dim = getattr(hf_cfg, "intermediate_size", hidden_dim * 4)
+        tile_size = 64 if ffn_dim <= 4096 else 256
+        active_tiles = max(1, int((ffn_dim // tile_size) * 0.5))
+
+        return ModelConfig(
+            name=f"Dynamic-{raw}",
+            hidden_dim=hidden_dim,
+            ffn_dim=ffn_dim,
+            num_heads=num_heads,
+            num_kv_heads=num_kv_heads,
+            head_dim=head_dim,
+            num_layers=num_layers,
+            vocab_size=vocab_size,
+            tile_size=tile_size,
+            active_tiles=active_tiles,
+            rank_sub=64 if hidden_dim >= 768 else 32,
+            max_position_embeddings=getattr(hf_cfg, "max_position_embeddings", 2048),
+            rope_theta=getattr(hf_cfg, "rope_theta", 10000.0),
+        )
+    except Exception:
+        pass
 
     raise ValueError(f"Unknown model identifier '{model_name_or_id}'. Available: {list(MODEL_REGISTRY.keys())}")

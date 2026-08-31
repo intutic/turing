@@ -36,6 +36,7 @@ def main():
     serve_parser.add_argument("--kv-events-pub-port", type=int, default=5556, help="ZeroMQ PUB port for live KV cache block events (default: 5556)")
     serve_parser.add_argument("--kv-events-replay-port", type=int, default=5559, help="ZeroMQ ROUTER port for KV cache event replay (default: 5559)")
     serve_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights for isolated FLOP profiling")
+    serve_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
 
 
     # 2. Bench
@@ -53,6 +54,7 @@ def main():
     gen_parser.add_argument("--sparsity", type=float, default=0.5, help="Subspace channel sparsity ratio")
     gen_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
     gen_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights")
+    gen_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
 
     # 4. Convert
     conv_parser = subparsers.add_parser("convert", help="Export weights into .tgate4 binary container")
@@ -119,6 +121,7 @@ def main():
     chat_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     chat_parser.add_argument("--max-new-tokens", type=int, default=128, help="Maximum new tokens per response")
     chat_parser.add_argument("--mock", action="store_true", help="Run with mock synthetic weights without downloading")
+    chat_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
 
     # 15. Info
     info_parser = subparsers.add_parser("info", help="Display system, hardware, and Turing Engine runtime information")
