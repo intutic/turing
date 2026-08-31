@@ -58,6 +58,7 @@ class ModelResolver:
         "gemma-2-27b": "google/gemma-2-27b-it",
         "llama-3.2-1b": "meta-llama/Llama-3.2-1B-Instruct",
         "llama-3.2-3b": "meta-llama/Llama-3.2-3B-Instruct",
+        "llama-3-8b": "meta-llama/Meta-Llama-3-8B-Instruct",
         "llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
         "llama-3.1-70b": "unsloth/Meta-Llama-3.1-70B-bnb-4bit",
         "llama-3.3": "meta-llama/Llama-3.3-70B-Instruct",
