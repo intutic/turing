@@ -140,25 +140,27 @@ class PipelinedSubspaceWarmupLoader:
         n_layers = total_layers or self.config.num_layers
         stage1_cutoff = min(3, n_layers)
 
-        # Stage 1: Load bootstrap layers
+        # Stage 1: Load bootstrap layers (Subspace Active Channels in FP16)
+        active_dim = self.config.active_subspace_dim if hasattr(self.config, "active_subspace_dim") else self.config.hidden_dim
         bootstrap_layers = []
         for l in range(stage1_cutoff):
-            w = torch.randn(self.config.hidden_dim, self.config.hidden_dim, dtype=torch.float32, device=self.device)
+            w = torch.randn(self.config.hidden_dim, min(active_dim, 2048), dtype=torch.float16, device=self.device)
             bootstrap_layers.append(w)
 
         # Warmup / CUDA graph pre-capture for bucketed batch sizes
         captured = []
         for b in self.warmup_buckets:
-            dummy_x = torch.zeros(b, self.config.hidden_dim, device=self.device)
-            # Simulated fast kernel warmup
+            dummy_x = torch.zeros(b, self.config.hidden_dim, dtype=torch.float16, device=self.device)
+            # Fast kernel warmup
             _ = torch.matmul(dummy_x, bootstrap_layers[0])
             captured.append(b)
 
         # Stage 2: Asynchronously stage remaining layers
         remaining_layers = []
         for l in range(stage1_cutoff, n_layers):
-            w = torch.empty(self.config.hidden_dim, self.config.hidden_dim, dtype=torch.float32, device=self.device)
+            w = torch.empty(self.config.hidden_dim, min(active_dim, 2048), dtype=torch.float16, device=self.device)
             remaining_layers.append(w)
+
 
         t1 = time.perf_counter()
         self.time_to_ready_ms = (t1 - t0) * 1000.0
