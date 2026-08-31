@@ -12,6 +12,36 @@ from ..config import ModelConfig
 
 SIZING_PROFILES: Dict[str, ModelConfig] = {
     # --- Frontier Dense & Distilled Models ---
+    "llama-3-8b": ModelConfig(
+        name="Meta-LLaMA-3-8B",
+        hidden_dim=4096,
+        ffn_dim=14336,
+        num_heads=32,
+        num_kv_heads=8,
+        head_dim=128,
+        num_layers=32,
+        vocab_size=128256,
+        tile_size=256,
+        active_tiles=24, # 57.1% pruned (6,144 active channels)
+        rank_sub=64,
+        max_position_embeddings=8192,
+        rope_theta=500000.0,
+    ),
+    "llama-3.1-8b": ModelConfig(
+        name="Meta-LLaMA-3.1-8B",
+        hidden_dim=4096,
+        ffn_dim=14336,
+        num_heads=32,
+        num_kv_heads=8,
+        head_dim=128,
+        num_layers=32,
+        vocab_size=128256,
+        tile_size=256,
+        active_tiles=24,
+        rank_sub=64,
+        max_position_embeddings=131072,
+        rope_theta=500000.0,
+    ),
     "llama-3.1-70b": ModelConfig(
         name="Meta-LLaMA-3.1-70B",
         hidden_dim=8192,
@@ -300,6 +330,21 @@ SIZING_PROFILES: Dict[str, ModelConfig] = {
     ),
     "kimi-k2.6": ModelConfig(
         name="Moonshot-Kimi-K2.6-1.04T-MoE",
+        hidden_dim=12288,
+        ffn_dim=49152,
+        num_heads=96,
+        num_kv_heads=16,
+        head_dim=128,
+        num_layers=96,
+        vocab_size=200000,
+        tile_size=256,
+        active_tiles=48,
+        rank_sub=64,
+        max_position_embeddings=2097152,
+        rope_theta=10000000.0,
+    ),
+    "turing-trillion-1t": ModelConfig(
+        name="Turing-Trillion-1T-MoE",
         hidden_dim=12288,
         ffn_dim=49152,
         num_heads=96,
