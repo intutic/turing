@@ -16,4 +16,4 @@ Turing Engine is licensed under the **Business Source License 1.1 (BSL 1.1)**.
 ## 🔄 Automatic Open-Source Conversion
 On **August 24, 2030** (or the fourth anniversary of the first public release), the licensed work converts automatically to the **Apache License, Version 2.0**.
 
-For enterprise licensing inquiries, contact [ishan@intutic.ai](mailto:ishan@intutic.ai).
+For enterprise licensing inquiries, contact [support@intutic.ai](mailto:support@intutic.ai).
