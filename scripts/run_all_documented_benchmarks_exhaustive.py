@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Exhaustive Master Benchmark Suite: Runs EVERY Documented Benchmark on Real Silicon (Zero Mocks).
-Executes across all 15 benchmark suites in scripts/ with live measurements.
+Executes across all 16 benchmark suites covering all 22 sections in docs/benchmarks.md with live measurements.
 """
 
 import sys
@@ -15,48 +15,52 @@ BENCHMARK_SUITES = [
     # 1. Real Weight GPU Ingestion & Storage Ladder
     ("6-Tier Storage Ingestion Speed Ladder", "scripts/benchmark_ingest_ladder_all_tiers.py", []),
     
-    # 2. Fused GPU Kernels & C++20 SIMD Subsystems
-    ("Fused GPU Kernels & C++20 SIMD Subsystems", "scripts/benchmark_fused_kernels_and_simd.py", []),
-    
-    # 3. Real Weight Model Prefill/Decode & 7-Architecture Matrix
+    # 2. Fused GPU Kernels & C++20 SIMD Subsystems (v5.0)
+    ("Fused GPU Kernels & C++20 SIMD Subsystems (v5.0)", "scripts/benchmark_fused_kernels_and_simd_v5.py", []),
+
+    # 3. Colibrì MoE Dynamic Placement & Systems Benchmark Suite
+    ("Colibrì MoE Placement, Pinning & Batch-Union Suite", "scripts/run_colibri_master_benchmarks.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
+
+    # 4. Real Weight Model Prefill/Decode & 7-Architecture Matrix
     ("Real Model Comprehensive Matrix (7 Architectures)", "scripts/benchmark_comprehensive_real_gpu.py", []),
     
-    # 4. Triple Serving Gateway & Microsecond Structured JSON
+    # 5. Triple Serving Gateway & Microsecond Structured JSON
     ("Triple Serving Gateway & Structured JSON Parser", "scripts/benchmark_triple_gateway_and_structured.py", []),
     
-    # 5. Multi-Turn Lineage Deliberation & k-Slot Pooling
+    # 6. Multi-Turn Lineage Deliberation & k-Slot Pooling
     ("Multi-Turn Clean-Base Lineage & Cache Pooling", "scripts/benchmark_lineage_strategies.py", []),
     
-    # 6. AI Traffic Management, 3-Lane QoS & Speculation Gating
+    # 7. AI Traffic Management, 3-Lane QoS & Speculation Gating
     ("AI Traffic Management & Adaptive Speculation Gating", "scripts/benchmark_traffic_and_spec.py", []),
     
-    # 7. Prefill-Decode Duality & Interleaved Scheduling Jitter
+    # 8. Prefill-Decode Duality & Interleaved Scheduling Jitter
     ("Prefill-Decode Duality & Interleaved Throughput", "scripts/benchmark_prefill_decode_duality.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
     
-    # 8. Latent Flash-Decode (SPECTRA Subspace Attention)
+    # 9. Latent Flash-Decode (SPECTRA Subspace Attention)
     ("Latent Flash-Decode & Hybrid Prefill Scaling", "scripts/benchmark_latent_decode.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
     
-    # 9. Matryoshka Parameter-Sliced Speculation & Semantic Anchors
+    # 10. Matryoshka Parameter-Sliced Speculation & Semantic Anchors
     ("Matryoshka Sliced Speculation & Semantic Anchors", "scripts/benchmark_freetoken_matryoshka.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
     
-    # 10. Native C++20 SIMD & Fused GPU Kernel Micro-benchmarks
+    # 11. Native C++20 SIMD & Fused GPU Kernel Micro-benchmarks
     ("Native C++20 SIMD & Fused Kernel Micro-benchmarks", "scripts/benchmark_native_fusions_v2.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
     
-    # 11. GGUF Q8_0 SIMD Dequantization & Fused RMSNorm+SwiGLU
+    # 12. GGUF Q8_0 SIMD Dequantization & Fused RMSNorm+SwiGLU
     ("C++20 SIMD Dequantizer & In-SRAM Fused FFN Layers", "scripts/benchmark_fused_layers.py", []),
     
-    # 12. Multi-Tenant LoRA Hot-Swapping & Speculative Drafting
+    # 13. Multi-Tenant LoRA Hot-Swapping & Speculative Drafting
     ("Multi-Tenant LoRA Hot-Swapping & Cold Starts", "scripts/benchmark_lora_and_speculation.py", []),
     
-    # 13. Long-Context NIAH Breaking Point Analysis
+    # 14. Long-Context NIAH Breaking Point Analysis
     ("Long-Context NIAH Depth & Rank Breaking-Point", "scripts/stress_test_niah_breaking_point.py", ["cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
     
-    # 14. Universal Architecture & Hardware Verification
+    # 15. Universal Architecture & Hardware Verification
     ("Universal Architecture & Hardware Verification", "scripts/test_all_gpu_architectures.py", []),
     
-    # 15. End-to-End Serving SLA Replay
+    # 16. End-to-End Serving SLA Replay
     ("End-to-End Serving SLA Concurrency Load Test", "scripts/benchmark_serving_e2e.py", [])
 ]
+
 
 def main():
     device_type = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
@@ -85,6 +89,9 @@ def main():
         print(f"    Command: {cmd_str}")
         print("-" * 90)
 
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         t0 = time.perf_counter()
         res = subprocess.run(cmd, capture_output=True, text=True)
         t1 = time.perf_counter()
@@ -99,45 +106,44 @@ def main():
         print(f"[*] Status: {status_icon} in {dur:.2f}s")
 
         summary_results.append({
-            "index": idx,
+            "suite_index": idx,
             "suite_name": suite_name,
-            "script_path": script_path,
+            "script": script_path,
             "passed": passed,
+            "returncode": res.returncode,
             "duration_seconds": dur,
             "stdout": res.stdout,
             "stderr": res.stderr
         })
 
-    total_duration = time.perf_counter() - total_start
+    total_dur = time.perf_counter() - total_start
+    all_passed = all(r["passed"] for r in summary_results)
 
     print("\n" + "=" * 90)
-    print(f"   📊 EXHAUSTIVE BENCHMARK SUITE EXECUTION SUMMARY ({device_name})")
+    print("   📊 EXHAUSTIVE BENCHMARK SUITE EXECUTION SUMMARY")
     print("=" * 90)
-    all_passed = True
+    print(f"{'Index':<6} | {'Benchmark Suite':<52} | {'Status':<10} | {'Duration':<10}")
+    print("-" * 90)
     for r in summary_results:
-        icon = "✅" if r["passed"] else "❌"
-        print(f"  {icon} [{r['index']:02d}/{len(BENCHMARK_SUITES):02d}] {r['suite_name']:<60} : {r['duration_seconds']:.2f}s")
-        if not r["passed"]:
-            all_passed = False
-
+        st = "✅ PASSED" if r["passed"] else "❌ FAILED"
+        print(f"{r['suite_index']:<6} | {r['suite_name']:<52} | {st:<10} | {r['duration_seconds']:>7.2f}s")
     print("=" * 90)
-    print(f"[*] Total Execution Time: {total_duration:.2f}s (~{total_duration/60.0:.1f} minutes)")
-    if all_passed:
-        print(f"🎉 ALL {len(summary_results)} BENCHMARK SUITES COMPLETED WITH 100% SUCCESS!")
-    else:
-        print("⚠️ SOME BENCHMARK SUITES REPORTED FAILURES.")
+    print(f"[*] Total Execution Time : {total_dur:.2f}s")
+    print(f"[*] Overall Suite Verdict: {'🏆 ALL SUITES PASSED' if all_passed else '⚠️ SOME SUITES FAILED'}")
     print("=" * 90)
 
-    # Save summary report JSON
     out_file = f"exhaustive_benchmark_results_{device_type}.json"
     with open(out_file, "w") as f:
         json.dump({
-            "device": device_name,
-            "device_type": device_type,
-            "total_duration_seconds": total_duration,
-            "suites": summary_results
+            "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            "device": device_type,
+            "device_name": device_name,
+            "total_duration_seconds": total_dur,
+            "all_passed": all_passed,
+            "results": summary_results
         }, f, indent=2)
-    print(f"[*] Results exported to: {out_file}")
+    print(f"[+] Detailed telemetry saved to: {out_file}")
+
 
 if __name__ == "__main__":
     main()

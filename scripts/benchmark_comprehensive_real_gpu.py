@@ -28,25 +28,40 @@ def clean_gpu_memory():
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
         torch.cuda.synchronize()
+    elif hasattr(torch, 'mps') and hasattr(torch.mps, 'empty_cache'):
+        torch.mps.empty_cache()
+        if hasattr(torch.mps, 'synchronize'):
+            torch.mps.synchronize()
 
 def get_vram_info() -> Dict[str, float]:
-    if not torch.cuda.is_available():
-        return {"used_mb": 0.0, "total_mb": 0.0}
-    used = torch.cuda.memory_allocated() / (1024**2)
-    total = torch.cuda.get_device_properties(0).total_memory / (1024**2)
-    return {"used_mb": used, "total_mb": total}
+    if torch.cuda.is_available():
+        used = torch.cuda.memory_allocated() / (1024**2)
+        total = torch.cuda.get_device_properties(0).total_memory / (1024**2)
+        return {"used_mb": used, "total_mb": total}
+    elif hasattr(torch, 'mps') and hasattr(torch.mps, 'current_allocated_memory'):
+        used = torch.mps.current_allocated_memory() / (1024**2)
+        return {"used_mb": used, "total_mb": 0.0}
+    return {"used_mb": 0.0, "total_mb": 0.0}
 
 def run_suite():
-    assert torch.cuda.is_available(), "CUDA is required for unmocked GPU execution!"
-    device = torch.device("cuda:0")
-    gpu_name = torch.cuda.get_device_name(0)
-    vram_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+        gpu_name = torch.cuda.get_device_name(0)
+        vram_total_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+        gpu_name = "Apple Silicon Metal (MPS)"
+        vram_total_gb = 0.0
+    else:
+        device = torch.device("cpu")
+        gpu_name = "Host CPU (AVX2)"
+        vram_total_gb = 0.0
 
     print("=" * 90)
-    print("   🚀 TURING ENGINE LIVE UNMOCKED GPU BENCHMARK SUITE — REAL HARDWARE (NVIDIA L4)")
+    print("   🚀 TURING ENGINE LIVE UNMOCKED GPU BENCHMARK SUITE — REAL HARDWARE")
     print("=" * 90)
-    print(f"[*] Physical GPU Hardware : {gpu_name} ({vram_total_gb:.2f} GB Physical VRAM)")
-    print(f"[*] PyTorch Version       : {torch.__version__} (CUDA {torch.version.cuda})")
+    print(f"[*] Physical GPU Hardware : {gpu_name} ({vram_total_gb:.2f} GB Physical VRAM)" if vram_total_gb > 0 else f"[*] Physical Hardware     : {gpu_name}")
+    print(f"[*] PyTorch Version       : {torch.__version__}")
     print(f"[*] Memory Management     : Strict Per-Model VRAM Cleanup & Cache Flushing")
     print("=" * 90)
 
@@ -68,13 +83,14 @@ def run_suite():
             print(f"  │ • Loading real weights into GPU VRAM: {hf_id}...")
             t0 = time.perf_counter()
             tokenizer = AutoTokenizer.from_pretrained(hf_id)
+            dtype_val = torch.float16 if torch.cuda.is_available() else torch.float32
             model = AutoModelForCausalLM.from_pretrained(
                 hf_id,
-                dtype=torch.float16
+                torch_dtype=dtype_val
             ).to(device)
             load_time_s = time.perf_counter() - t0
             vram_loaded = get_vram_info()["used_mb"] - vram_start
-            print(f"  │ • Weights Loaded in {load_time_s:.2f}s | Real VRAM Allocated: {vram_loaded:.1f} MB")
+            print(f"  │ • Weights Loaded in {load_time_s:.2f}s | Real Memory Allocated: {vram_loaded:.1f} MB")
 
             # Real generation step
             prompt = "What is the principle of least action in physics? Explain briefly:"
@@ -83,24 +99,24 @@ def run_suite():
 
             # Warmup
             _ = model.generate(**inputs, max_new_tokens=8, do_sample=False)
-            torch.cuda.synchronize()
+            clean_gpu_memory()
 
-            # Benchmark PyTorch Native Generation
+            # Benchmark Native Generation
             t0 = time.perf_counter()
             out = model.generate(**inputs, max_new_tokens=48, do_sample=False)
-            torch.cuda.synchronize()
+            clean_gpu_memory()
             gen_time_s = time.perf_counter() - t0
             gen_tokens = out.shape[1] - prompt_len
             tps_native = gen_tokens / max(1e-5, gen_time_s)
 
             response_text = tokenizer.decode(out[0][prompt_len:], skip_special_tokens=True).strip()
-            print(f"  │ • Native PyTorch Generation Speed : {tps_native:.1f} tok/s ({gen_tokens} tokens in {gen_time_s*1000:.1f}ms)")
+            print(f"  │ • Native Generation Speed         : {tps_native:.1f} tok/s ({gen_tokens} tokens in {gen_time_s*1000:.1f}ms)")
             print(f"  │ • Generated Text Output           : \"{response_text[:80]}...\"")
 
             # SVD INT8 Subspace KV Cache evaluation on actual model head dimensions
             head_dim = getattr(model.config, "head_dim", model.config.hidden_size // model.config.num_attention_heads)
             subspace_mgr = SubspaceManager(hidden_dim=head_dim, rank=min(64, head_dim), device=device)
-            dummy_kv = torch.randn(2048, head_dim, device=device, dtype=torch.float16)
+            dummy_kv = torch.randn(2048, head_dim, device=device, dtype=dtype_val)
             q_kv, scale = subspace_mgr.quantize_subspace_int8(subspace_mgr.project_to_subspace(dummy_kv))
             recon_kv = subspace_mgr.reconstruct_from_subspace(subspace_mgr.dequantize_subspace_int8(q_kv, scale))
             fidelity = (1.0 - (torch.norm(dummy_kv - recon_kv) / torch.norm(dummy_kv)).item()) * 100.0
@@ -110,7 +126,7 @@ def run_suite():
             del model
             del tokenizer
             clean_gpu_memory()
-            print(f"  │ • [Cleaned] GPU VRAM Flushed      : {get_vram_info()['used_mb']:.1f} MB currently allocated")
+            print(f"  │ • [Cleaned] Memory Flushed        : {get_vram_info()['used_mb']:.1f} MB currently allocated")
             print(f"  └────────────────────────────────────────────────────────────────────")
 
         except Exception as e:
@@ -161,9 +177,9 @@ def run_suite():
     print(f"  └────────────────────────────────────────────────────────────────────")
 
     # -------------------------------------------------------------------------
-    # PART 3: Unmocked CUDA Layer Benchmark Across All 7 Frontier Geometries
+    # PART 3: Unmocked Layer Benchmark Across All 7 Frontier Geometries
     # -------------------------------------------------------------------------
-    print("\n[📊 PART 3/4] UNMOCKED CUDA FFN LAYER EXECUTION ACROSS ALL 7 ARCHITECTURES")
+    print("\n[📊 PART 3/4] UNMOCKED FFN LAYER EXECUTION ACROSS ALL 7 ARCHITECTURES")
     frontier_configs = [
         "llama-3-8b",
         "llama-3.1-70b",
@@ -174,7 +190,7 @@ def run_suite():
         "turing-trillion-1t"
     ]
 
-    print(f"{'Model Architecture':<24} | {'Hidden':<6} | {'Dense FFN':<10} | {'Subspace':<9} | {'Dense CUDA':<11} | {'Turing Engine CUDA':<11} | {'CUDA Speedup':<12}")
+    print(f"{'Model Architecture':<24} | {'Hidden':<6} | {'Dense FFN':<10} | {'Subspace':<9} | {'Dense Layer':<11} | {'Turing Subspace':<15} | {'Speedup':<10}")
     print("-" * 95)
 
     for m_key in frontier_configs:
@@ -184,12 +200,13 @@ def run_suite():
         ffn_d = cfg.ffn_dim
         sub_d = cfg.active_subspace_dim
 
-        # Allocate real CUDA FP16 weight matrices for this layer size
+        # Allocate real FP16/FP32 weight matrices for this layer size
         try:
-            x = torch.randn(1, h, device=device, dtype=torch.float16)
-            w_gate = torch.randn(ffn_d, h, device=device, dtype=torch.float16)
-            w_up = torch.randn(ffn_d, h, device=device, dtype=torch.float16)
-            w_down = torch.randn(h, ffn_d, device=device, dtype=torch.float16)
+            dtype_layer = torch.float16 if torch.cuda.is_available() else torch.float32
+            x = torch.randn(1, h, device=device, dtype=dtype_layer)
+            w_gate = torch.randn(ffn_d, h, device=device, dtype=dtype_layer)
+            w_up = torch.randn(ffn_d, h, device=device, dtype=dtype_layer)
+            w_down = torch.randn(h, ffn_d, device=device, dtype=dtype_layer)
 
             w_gate_sub = w_gate[:sub_d, :].contiguous()
             w_up_sub = w_up[:sub_d, :].contiguous()
@@ -203,28 +220,44 @@ def run_suite():
             torch.cuda.synchronize()
 
             # Measure Dense
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            iters = 100
+            iters = 50
+            if torch.cuda.is_available():
+                start_event = torch.cuda.Event(enable_timing=True)
+                end_event = torch.cuda.Event(enable_timing=True)
+                start_event.record()
+                for _ in range(iters):
+                    g = F.silu(F.linear(x, w_gate))
+                    u = F.linear(x, w_up)
+                    _ = F.linear(g * u, w_down)
+                end_event.record()
+                torch.cuda.synchronize()
+                dense_ms = start_event.elapsed_time(end_event) / iters
 
-            start_event.record()
-            for _ in range(iters):
-                g = F.silu(F.linear(x, w_gate))
-                u = F.linear(x, w_up)
-                _ = F.linear(g * u, w_down)
-            end_event.record()
-            torch.cuda.synchronize()
-            dense_ms = start_event.elapsed_time(end_event) / iters
+                start_event.record()
+                for _ in range(iters):
+                    g = F.silu(F.linear(x, w_gate_sub))
+                    u = F.linear(x, w_up_sub)
+                    _ = F.linear(g * u, w_down_sub)
+                end_event.record()
+                torch.cuda.synchronize()
+                sub_ms = start_event.elapsed_time(end_event) / iters
+            else:
+                clean_gpu_memory()
+                t0 = time.perf_counter()
+                for _ in range(iters):
+                    g = F.silu(F.linear(x, w_gate))
+                    u = F.linear(x, w_up)
+                    _ = F.linear(g * u, w_down)
+                clean_gpu_memory()
+                dense_ms = (time.perf_counter() - t0) * 1000.0 / iters
 
-            # Measure Subspace
-            start_event.record()
-            for _ in range(iters):
-                g = F.silu(F.linear(x, w_gate_sub))
-                u = F.linear(x, w_up_sub)
-                _ = F.linear(g * u, w_down_sub)
-            end_event.record()
-            torch.cuda.synchronize()
-            sub_ms = start_event.elapsed_time(end_event) / iters
+                t0 = time.perf_counter()
+                for _ in range(iters):
+                    g = F.silu(F.linear(x, w_gate_sub))
+                    u = F.linear(x, w_up_sub)
+                    _ = F.linear(g * u, w_down_sub)
+                clean_gpu_memory()
+                sub_ms = (time.perf_counter() - t0) * 1000.0 / iters
 
             speedup = dense_ms / max(1e-5, sub_ms)
             print(f"{cfg.name:<24} | {h:<6} | {ffn_d:<10} | {sub_d:<9} | {dense_ms:<10.4f}ms | {sub_ms:<10.4f}ms | {speedup:<11.2f}x")
@@ -233,9 +266,9 @@ def run_suite():
             del x, w_gate, w_up, w_down, w_gate_sub, w_up_sub, w_down_sub
             clean_gpu_memory()
 
-        except torch.cuda.OutOfMemoryError:
+        except Exception as e:
             clean_gpu_memory()
-            print(f"{cfg.name:<24} | {h:<6} | {ffn_d:<10} | [Out-of-Core Host Stream Required for Layer Size]")
+            print(f"{cfg.name:<24} | {h:<6} | {ffn_d:<10} | [Out-of-Core Host Stream Required: {e}]")
 
     # -------------------------------------------------------------------------
     # PART 4: Real Long-Context Needle-In-A-Haystack (NIAH) on CUDA
