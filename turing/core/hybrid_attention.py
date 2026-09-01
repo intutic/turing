@@ -54,8 +54,19 @@ class LinearRecurrentAttention(nn.Module):
         if state is None:
             state = torch.zeros(batch, self.num_heads, self.head_dim, self.head_dim, device=x.device, dtype=x.dtype)
 
-        # 1. Native C++20 AVX2 single-step decode dispatch (L=1)
+        # 1. Native C++20 AVX2 or Triton single-step decode dispatch (L=1)
         if seq_len == 1:
+            if x.is_cuda:
+                try:
+                    from ..kernels.triton_linear_recurrence_step import fused_linear_recurrence_step_cuda
+                    out_t, next_state = fused_linear_recurrence_step_cuda(
+                        q[:, :, 0, :], k[:, :, 0, :], v[:, :, 0, :], state, float(self.decay)
+                    )
+                    out_seq = out_t.unsqueeze(2).transpose(1, 2).contiguous().view(batch, 1, self.num_heads * self.head_dim)
+                    return self.out_proj(out_seq), next_state
+                except Exception:
+                    pass
+
             try:
                 import turing.turing_csrc as turing_csrc
                 HAS_CSRC = True

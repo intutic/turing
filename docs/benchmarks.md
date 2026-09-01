@@ -455,3 +455,56 @@ Empirical measurements from `scripts/run_colibri_master_benchmarks.py` across **
 python scripts/run_colibri_master_benchmarks.py --device cuda   # On NVIDIA GPU
 python scripts/run_colibri_master_benchmarks.py --device mps    # On Apple Silicon Mac
 ```
+
+---
+
+## 22. Master GPU Benchmark Suite v5.0 (NVIDIA L4 Hardware Telemetry)
+
+Empirical measurements from `scripts/run_gcp_master_validation_and_benchmarks_v5.py` and `scripts/benchmark_fused_kernels_and_simd_v5.py` executed on physical **Google Cloud NVIDIA L4 GPU (24GB VRAM)**:
+
+### A. Batched Continuous Paged Decode Attention GEMV (`triton_paged_decode_gemv.py`)
+*Context Length: 2048 tokens, Head Dim: 128, Number of Heads: 8, Block Size: 16*
+
+| Batch Size ($B$) | Unpaged Baseline Latency | Fused Paged GEMV Latency | Measured Speedup | Decode Throughput |
+|:---:|:---:|:---:|:---:|:---:|
+| **$B = 1$** | 0.56 ms | 0.23 ms | **2.45×** | 4,406 tok/s |
+| **$B = 4$** | 1.16 ms | 0.18 ms | **6.34×** | 21,861 tok/s |
+| **$B = 8$** | 2.33 ms | 0.32 ms | **7.24×** | 24,892 tok/s |
+| **$B = 16$** | 4.67 ms | 0.55 ms | **8.51×** | 29,174 tok/s |
+| **$B = 32$** | 9.43 ms | 1.06 ms | **8.86×** | **30,057 tok/s** |
+
+### B. Single-Step Linear Recurrence Attention (`triton_linear_recurrence_step.py`)
+*Batch: 16, Heads: 8, Head Dim: 64, Decay: 0.95*
+
+| Operation | Baseline Multi-Op PyTorch | Fused In-SRAM Kernel | Measured Speedup |
+|:---|:---:|:---:|:---:|
+| **Single-Step Token Decode** | 296.23 µs | **57.76 µs** | **5.13× Faster** |
+
+### C. Direct Memory Pointer Tensor Hashing (`csrc/turing_fast_hash_tensor.hpp`)
+*64 MB Continuous Float32 Buffer*
+
+| Implementation | Latency (64MB) | Effective Bandwidth | Measured Speedup |
+|:---|:---:|:---:|:---:|
+| **NumPy `tobytes() + blake2b`** | 175.81 ms | 0.36 GB/s | 1.00× (Baseline) |
+| **C++20 AVX2 SIMD Direct Pointer** | **7.64 ms** | **8.18 GB/s** | **23.00× Faster** |
+
+### D. $O(1)$ AI Traffic Admission Manager (`csrc/turing_traffic_manager.hpp`)
+*100,000 Admission & Release Decisions*
+
+| Implementation | Latency (100k requests) | Admission Throughput | Measured Gain |
+|:---|:---:|:---:|:---:|
+| **Python Dynamic Sum Baseline** | 107.27 ms | 932,197 req/s | Baseline |
+| **C++20 Native Traffic Manager** | **84.67 ms** | **1,181,114 req/s** | **1.27× (+26.7% Throughput)** |
+
+### E. Live Real-Weight Model Inference Matrix (NVIDIA L4)
+* **GPT-2 (124M Parameters)**: **95.8 tok/s** | SVD INT8 KV Compression: **75.0% VRAM Savings**, **99.41% Signal Fidelity**.
+* **SmolLM2-1.7B-Instruct**: **29.3 tok/s** | SVD INT8 KV Compression: **75.0% VRAM Savings**, **99.40% Signal Fidelity**.
+* **Active vLLM EngineCore (Qwen2.5-7B)**: **17.60 tok/s** on NVIDIA L4.
+* **131k Long-Context Needle-In-A-Haystack (NIAH)**: **100% Top-1 Retrieval** across 32k, 64k, and 131,072 context lengths.
+
+### Reproduce Master GPU v5.0 Suite:
+```bash
+python scripts/run_gcp_master_validation_and_benchmarks_v5.py
+python scripts/benchmark_fused_kernels_and_simd_v5.py
+```
+

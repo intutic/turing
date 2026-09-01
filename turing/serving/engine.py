@@ -323,28 +323,52 @@ class ContinuousBatchEngine:
             # =========================================================================
             # Phase 2: Parallel Interleaved Autoregressive Decode (Bandwidth-Bound Slice)
             # =========================================================================
-            for req in decode_reqs:
-                if req.state != RequestState.DECODING:
-                    continue
-
-                if self.dist_driver is not None:
-                    logits, new_kv = self.dist_driver.forward_distributed(req.current_input, past_key_values=req.past_kv)
-                else:
+            active_decode = [r for r in decode_reqs if r.state == RequestState.DECODING]
+            if len(active_decode) > 1 and self.dist_driver is None:
+                # Multi-sequence batched forward and fused sampling
+                collected_logits = []
+                for req in active_decode:
                     logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
-                req.past_kv = new_kv
+                    req.past_kv = new_kv
+                    collected_logits.append(logits[:, -1, :])
 
-                next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)
-                if req.last_token_at is not None:
-                    self.recent_itl.append(now - req.last_token_at)
-                req.last_token_at = now
+                batched_logits = torch.cat(collected_logits, dim=0)
+                batched_temps = torch.tensor([r.temperature for r in active_decode], dtype=torch.float32, device=self.device)
+                sampled_tokens = batched_sample_tokens(batched_logits, batched_temps, top_k=50)
 
-                req.generated_tokens.append(next_token)
-                self.total_tokens_generated += 1
-                req.output_queue.put_nowait(next_token)
-                req.current_input = torch.tensor([[next_token]], dtype=torch.long, device=self.device)
+                for i, req in enumerate(active_decode):
+                    next_token = int(sampled_tokens[i].item())
+                    if req.last_token_at is not None:
+                        self.recent_itl.append(now - req.last_token_at)
+                    req.last_token_at = now
 
-                if len(req.generated_tokens) >= req.max_new_tokens:
-                    self._finish_request(req, now)
+                    req.generated_tokens.append(next_token)
+                    self.total_tokens_generated += 1
+                    req.output_queue.put_nowait(next_token)
+                    req.current_input = torch.tensor([[next_token]], dtype=torch.long, device=self.device)
+
+                    if len(req.generated_tokens) >= req.max_new_tokens:
+                        self._finish_request(req, now)
+            else:
+                for req in active_decode:
+                    if self.dist_driver is not None:
+                        logits, new_kv = self.dist_driver.forward_distributed(req.current_input, past_key_values=req.past_kv)
+                    else:
+                        logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
+                    req.past_kv = new_kv
+
+                    next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)
+                    if req.last_token_at is not None:
+                        self.recent_itl.append(now - req.last_token_at)
+                    req.last_token_at = now
+
+                    req.generated_tokens.append(next_token)
+                    self.total_tokens_generated += 1
+                    req.output_queue.put_nowait(next_token)
+                    req.current_input = torch.tensor([[next_token]], dtype=torch.long, device=self.device)
+
+                    if len(req.generated_tokens) >= req.max_new_tokens:
+                        self._finish_request(req, now)
 
         # Clean up finished requests from active running batch
         self.running_batch = [req for req in self.running_batch if req.state != RequestState.FINISHED]

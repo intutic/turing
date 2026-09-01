@@ -33,6 +33,18 @@ def _hash_kv_tensors(kv_tensors: List[torch.Tensor]) -> str:
     except Exception:
         pass
 
+    try:
+        import turing.turing_csrc as turing_csrc
+        combined_hash = 0xcbf29ce484222325
+        for tensor in kv_tensors:
+            t_cpu = tensor.detach().cpu().contiguous()
+            num_bytes = t_cpu.numel() * t_cpu.element_size()
+            hex_str = turing_csrc.hash_tensor_buffer_fast(t_cpu.data_ptr(), num_bytes)
+            combined_hash ^= int(hex_str, 16)
+        return f"{combined_hash:016x}"
+    except Exception:
+        pass
+
     h = hashlib.blake2b()
     for tensor in kv_tensors:
         tensor_bytes = tensor.detach().cpu().contiguous().numpy().tobytes()

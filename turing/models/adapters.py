@@ -93,9 +93,9 @@ class GPULRUAdapterCache:
         self.capacity = capacity
         self.device = torch.device(device)
 
-        # On-GPU resident active slots
-        self.gpu_slots: Dict[str, TenantLoRAAdapter] = {}
-        self.access_order: List[str] = []
+        # On-GPU resident active slots: tenant_id -> TenantLoRAAdapter (OrderedDict for O(1) LRU)
+        from collections import OrderedDict
+        self.gpu_slots: OrderedDict[str, TenantLoRAAdapter] = OrderedDict()
 
         # Pinned host DRAM backing store: tenant_id -> (weight_a_pinned, weight_b_pinned)
         self.host_store: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
@@ -131,22 +131,19 @@ class GPULRUAdapterCache:
 
     def get_adapter(self, tenant_id: str) -> TenantLoRAAdapter:
         """
-        Retrieves adapter from on-GPU LRU cache.
+        Retrieves adapter from on-GPU LRU cache in O(1) time.
         If cache miss, evicts LRU adapter and pages in from pinned host DRAM in <0.8ms.
         """
         if tenant_id in self.gpu_slots:
             self.hits += 1
-            # Move to end (most recently used)
-            self.access_order.remove(tenant_id)
-            self.access_order.append(tenant_id)
+            self.gpu_slots.move_to_end(tenant_id)
             return self.gpu_slots[tenant_id]
 
         self.misses += 1
 
-        # Check if eviction needed
+        # Check if eviction needed (O(1) popitem)
         if len(self.gpu_slots) >= self.capacity:
-            evict_tenant = self.access_order.pop(0)
-            del self.gpu_slots[evict_tenant]
+            evicted_tenant, _ = self.gpu_slots.popitem(last=False)
             self.evictions += 1
 
         # Instantiate on GPU
@@ -170,7 +167,6 @@ class GPULRUAdapterCache:
             )
 
         self.gpu_slots[tenant_id] = adapter
-        self.access_order.append(tenant_id)
         return adapter
 
     def apply_adapter(self, x: torch.Tensor, tenant_id: str) -> torch.Tensor:

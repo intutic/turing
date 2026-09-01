@@ -59,18 +59,40 @@ class ReasoningStreamFilter:
         self.thinking_content = ""
         self.final_content = ""
 
+        try:
+            import turing.turing_csrc as turing_csrc
+            self._native_filter = turing_csrc.NativeReasoningFilter()
+            self._has_native = True
+        except ImportError:
+            try:
+                import turing_csrc
+                self._native_filter = turing_csrc.NativeReasoningFilter()
+                self._has_native = True
+            except ImportError:
+                self._native_filter = None
+                self._has_native = False
+
     def process_token(self, token_text: str) -> Tuple[Optional[str], Optional[str]]:
         """
         Processes a chunk of newly generated text.
         Returns a tuple of (reasoning_chunk, content_chunk).
         """
+        if self._has_native and self._native_filter is not None:
+            r_chunk, c_chunk = self._native_filter.process_token(token_text)
+            self.in_thinking_block = self._native_filter.in_thinking_block
+            self.thinking_content = self._native_filter.thinking_content
+            self.final_content = self._native_filter.final_content
+            return r_chunk, c_chunk
+
         self.buffered_text += token_text
 
         # Check entry into <think>
         if "<think>" in self.buffered_text and not self.in_thinking_block:
             self.in_thinking_block = True
             before_think, self.buffered_text = self.buffered_text.split("<think>", 1)
-            return None, before_think if before_think else None
+            if before_think:
+                self.final_content += before_think
+            return None, (before_think if before_think else None)
 
         # Check exit from </think>
         if "</think>" in self.buffered_text and self.in_thinking_block:

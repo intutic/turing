@@ -117,12 +117,13 @@ class AdmissionController:
         self.high_watermark = high_watermark
         self.shed_watermark = shed_watermark
         self._allocated: Dict[str, int] = {}
+        self._allocated_total: int = 0
         self._shed_count: int = 0
         self._queue_count: int = 0
 
     def admit(self, request_id: str, estimated_bytes: int) -> AdmissionResult:
         """Admit, queue, or shed a request based on available VRAM budget."""
-        current_usage = sum(self._allocated.values())
+        current_usage = self._allocated_total
         utilization = (current_usage + estimated_bytes) / float(max(self.vram_budget_bytes, 1))
         
         if utilization >= self.shed_watermark:
@@ -140,24 +141,27 @@ class AdmissionController:
                 reason="VRAM usage exceeds high watermark."
             )
             
+        prev = self._allocated.get(request_id, 0)
         self._allocated[request_id] = estimated_bytes
+        self._allocated_total += (estimated_bytes - prev)
         return AdmissionResult(decision=AdmissionDecision.ADMIT)
 
     def release(self, request_id: str) -> None:
         """Release allocated budget for a request."""
-        self._allocated.pop(request_id, None)
+        freed = self._allocated.pop(request_id, 0)
+        self._allocated_total = max(0, self._allocated_total - freed)
 
     @property
     def utilization(self) -> float:
         """Current VRAM utilization ratio."""
-        return float(sum(self._allocated.values())) / max(self.vram_budget_bytes, 1)
+        return float(self._allocated_total) / max(self.vram_budget_bytes, 1)
 
     @property
     def stats(self) -> Dict[str, Any]:
         """Get statistics about the admission controller."""
         return {
             "utilization": self.utilization,
-            "allocated_bytes": sum(self._allocated.values()),
+            "allocated_bytes": self._allocated_total,
             "shed_count": self._shed_count,
             "queue_count": self._queue_count,
             "active_requests": len(self._allocated),

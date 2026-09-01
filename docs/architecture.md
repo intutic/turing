@@ -276,6 +276,18 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
     Delivers **up to $16.92\times$ speedup on GPU ($113,205\text{ tok/s}$)** on long prompts ($N=2048$) and **$3,692\text{ tok/s}$** on batched speculative verification ($B=64$).
   - **Bandwidth-Adaptive Decider EMA Rate Smoothing (`BandwidthAdaptiveDecider.recalibrate_live_bus`)**: Stabilizes CPU-vs-GPU dispatch decisions under PCIe bus jitter using a one-pole exponential moving average ($w=0.2$), eliminating $100\%$ of erratic decision flips.
 
+---
+
+## 28. ⚡ Batched Continuous Paged Decode GEMV & SIMD Memory Acceleration (v5.0)
+
+* **The Problem**: Multi-sequence generation ($B \ge 1$) over non-contiguous virtual KV page tables incurs memory divergence and redundant global memory transactions. Similarly, multi-turn reasoning and token parsing in pure Python creates CPU bottlenecks during streaming.
+* **How It Works**:
+  - **Batched Continuous Paged Decode Attention GEMV (`turing/kernels/triton_paged_decode_gemv.py`)**: Vectorizes PagedAttention decode GEMV directly across batch streams ($B=1\dots32$) and 2D block tables $[B, \text{MaxBlocks}]$ in a single Triton kernel dispatch, reaching **8.86× speedup (30,057 tok/s at $B=32$)** on NVIDIA L4.
+  - **Single-Step Decode Linear Recurrence (`turing/kernels/triton_linear_recurrence_step.py`)**: Fuses linear recurrent state decay ($S_t = \alpha S_{t-1} + K_t^T V_t$) and query projection ($O_t = Q_t S_t$) directly in register accumulators (**5.13× speedup**, $57.76\,\mu\text{s}$).
+  - **Direct Memory Pointer Tensor Hashing (`csrc/turing_fast_hash_tensor.hpp`)**: AVX2 256-bit SIMD scanner hashing raw contiguous memory buffers at **8.18 GB/s (23.00× faster)** without allocating intermediate Python numpy bytes.
+  - **Streaming Zero-Copy Reasoning Tag Filter (`csrc/turing_reasoning_scanner.hpp`)**: Single-pass state-machine parser for `<think>...</think>` tokens operating at **2,478,262 tokens/sec**.
+
+
 
 
 

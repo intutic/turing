@@ -97,6 +97,21 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 ### 1.16 Thread-Safe Radix-SVD Forest (`csrc/turing_radix_trie.hpp`)
 - Thread-safe `std::shared_mutex` read-write locked Radix Trie index supporting concurrent token lookup, prefix tree insertion, and immutable semantic anchor registration.
 
+### 1.17 Native LFRU Expert Cache Fast (`csrc/turing_lru_cache.hpp`)
+- Contiguous 64-byte aligned slots with composite scoring `(heat << 16) | (65535 - age)`, bitmask key pinning, and $25\%+4$ hysteresis promotion gate.
+
+### 1.18 Native Streaming Reasoning Tag Filter (`csrc/turing_reasoning_scanner.hpp`)
+- Zero-copy streaming state machine parsing `<think>...</think>` tokens into reasoning/content tuples at **2.47M tokens/sec**.
+
+### 1.19 Fast Safetensors Header Parser (`csrc/turing_safetensors_fast_header.hpp`)
+- Zero-allocation SIMD metadata scanner for fast Safetensors JSON header parsing and offset extraction.
+
+### 1.20 Direct Memory Pointer Tensor Hasher (`csrc/turing_fast_hash_tensor.hpp`)
+- 256-bit AVX2 SIMD pointer scanning at **8.18 GB/s (23.00× faster)** without allocating intermediate Python numpy bytes.
+
+### 1.21 Native O(1) AI Traffic Admission Manager (`csrc/turing_traffic_manager.hpp`)
+- Lock-free atomic byte tracking for sub-microsecond admission control and QoS lane backpressure (**1.18M requests/sec**).
+
 ---
 
 ## 2. Layer 2: Core Algorithmic Engines (`turing/core/`)
@@ -149,6 +164,11 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 
 | Kernel Module | Implementation File | Key Hardware Mechanism |
 | :--- | :--- | :--- |
+| **Batched Continuous Paged Decode GEMV** | `triton_paged_decode_gemv.py` | Multi-sequence ($B=1\dots32$) PagedAttention decode GEMV over 2D block tables (**8.86× speedup, 30,057 tok/s**). |
+| **Single-Step Linear Recurrence Attention** | `triton_linear_recurrence_step.py` | Single-step decode linear recurrence fusing state decay and output projection in SRAM (**5.13× speedup, 57.76 µs**). |
+| **In-SRAM Fused MoE Block-GEMM** | `triton_fused_moe_block_gemm.py` | Fused token routing, SwiGLU projection $\text{SiLU}(x W_g) \odot (x W_u) W_d$, and accumulation in $O(1)$ dispatches. |
+| **In-VRAM Speculative Verification** | `triton_spec_verify.py` | In-VRAM speculative token candidate verification without CPU `.item()` pipeline stalls. |
+| **Fused $k$-Slot Pooling + RoPE** | `triton_kslot_pool.py` | In-SRAM inverse RoPE rotation + softmax attention + weighted sum reduction (3.1× speedup). |
 | **SRAM-Fused SwiGLU** | `triton_swiglu.py` | Fused $M \times N \times K$ GEMM with on-the-fly Swish gating with zero intermediate DRAM writes. |
 | **Packed INT4 W4A16 GEMM** | `triton_w4a16.py` | Packs 8 INT4 nibbles into 32-bit words; dequantizes directly into GPU shared memory (SRAM). |
 | **Flash-Tree Attention** | `triton_flash_tree.py` | Verifies speculative candidate DAG trees in a single fused GPU attention pass. |
@@ -160,7 +180,6 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 | **Fused Base + LoRA GEMV** | `triton_fused_lora.py` | Single-block Tensor Core fused Base GEMV + LoRA Rank-8 contraction for low-latency tokens. |
 | **1-Pass Outlier Reduction** | `triton_residual_outlier.py` | 1-Pass In-SRAM absolute max outlier reduction (2.02× speedup vs `torch.topk`). |
 | **Fused Gumbel Router** | `triton_fused_router.py` | Single-launch Mean Pool + RMSNorm + Gate GEMV + Bitonic Top-K tile mask. |
-| **Fused $k$-Slot Pooling + RoPE** | `triton_kslot_pool.py` | In-SRAM inverse RoPE rotation + softmax attention + weighted sum reduction (3.1× speedup). |
 | **In-VRAM Tensor Checksum** | `triton_vram_hash.py` | In-VRAM parallel reduction rolling 64-bit checksum over KV tensor buffers (8.49× speedup). |
 | **Zero-Sync Quadtree MRP Draft** | `triton_quadtree_mrp.py` | Fused Matryoshka GEMV + Top-64 Bitonic sort + 2D Cartesian quadrant binning on GPU (0 host stalls). |
 | **Fused Gated Zero-Identity** | `triton_gated_zero_identity.py` | Single-block Tensor Core GEMM + Sigmoid modulation for zero-drift KV residual update. |

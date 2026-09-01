@@ -150,15 +150,21 @@ class GPULRUExpertCache:
         self.slot_up_weights = torch.empty(num_slots, hidden_dim, active_subspace_dim, device=device, dtype=dtype)
         self.slot_down_weights = torch.empty(num_slots, active_subspace_dim, hidden_dim, device=device, dtype=dtype)
 
-        # Fast C++20 LRU cache backend if available
+        # Fast C++20 LRU / LFRU cache backend if available
         try:
             import turing.turing_csrc as turing_csrc
-            self.csrc_cache = turing_csrc.LRUExpertCacheFast(num_slots)
+            if hasattr(turing_csrc, "LFRUExpertCacheFast"):
+                self.csrc_cache = turing_csrc.LFRUExpertCacheFast(num_slots)
+            else:
+                self.csrc_cache = turing_csrc.LRUExpertCacheFast(num_slots)
             self.has_csrc = True
         except ImportError:
             try:
                 import turing_csrc
-                self.csrc_cache = turing_csrc.LRUExpertCacheFast(num_slots)
+                if hasattr(turing_csrc, "LFRUExpertCacheFast"):
+                    self.csrc_cache = turing_csrc.LFRUExpertCacheFast(num_slots)
+                else:
+                    self.csrc_cache = turing_csrc.LRUExpertCacheFast(num_slots)
                 self.has_csrc = True
             except ImportError:
                 self.csrc_cache = None
@@ -187,6 +193,8 @@ class GPULRUExpertCache:
         """
         for k in keys:
             self.pinned_keys.add(k)
+            if self.has_csrc and self.csrc_cache is not None and hasattr(self.csrc_cache, "pin_key"):
+                self.csrc_cache.pin_key(k[0], k[1])
 
     def unpin_experts(self, keys: List[Tuple[int, int]]):
         """
@@ -194,6 +202,8 @@ class GPULRUExpertCache:
         """
         for k in keys:
             self.pinned_keys.discard(k)
+            if self.has_csrc and self.csrc_cache is not None and hasattr(self.csrc_cache, "unpin_key"):
+                self.csrc_cache.unpin_key(k[0], k[1])
 
     def resize_active_slots(self, new_num_slots: int) -> int:
         """

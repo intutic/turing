@@ -3,7 +3,7 @@
 **Serve Frontier 70B+ Models on a Single Consumer GPU (24GB) or Mac Workstation with 75% Less Memory.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v1.1.0](https://img.shields.io/badge/Release-v1.1.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.1.0)
+[![Release: v1.2.0](https://img.shields.io/badge/Release-v1.2.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.2.0)
 
 
 
@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 286/286 Passing](https://img.shields.io/badge/Tests-286%2F286%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 298/298 Passing](https://img.shields.io/badge/Tests-298%2F298%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -169,8 +169,13 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
 8. **🏎️ 6-Tier High-Velocity Cold Ingestion Engine (GPUDirect Storage & `io_uring`)**:
    Features a unified 6-tier storage hierarchy (`TuringIngestEngine`) spanning Linux `io_uring` multi-queue rings, kernel DMA readahead (`MADV_WILLNEED`), Subspace wire compression (-75% bytes), and NVIDIA GPUDirect Storage (`cuFile` PCIe DMA) with layer pipelining ($45.2\text{ ms}$ cold start Time-to-Ready).
 
-9. **⚡ Fused GPU Kernels & Bare-Metal C++20 SIMD Acceleration**:
-   Eliminates Python GIL contention and GPU-to-CPU `.item()` pipeline stalls with In-VRAM speculative candidate verification, fused $k$-slot attention gating ($-85\%$ DRAM traffic), C++20 SIMD Safetensors header parsing ($<100\,\mu\text{s}$), and sub-microsecond AI traffic QoS routing (**$8.80\times$ faster**, $2.77\,\mu\text{s}$).
+9. **⚡ Fused GPU Kernels & Bare-Metal C++20 SIMD Acceleration (v5.0)**:
+   Eliminates Python GIL contention and GPU-to-CPU `.item()` pipeline stalls with:
+   * **Batched Continuous Paged Decode GEMV (`triton_paged_decode_gemv.py`)**: Slashes memory traffic over 2D block tables, accelerating batched generation up to **8.86× (30,057 tok/s at $B=32$)**.
+   * **Single-Step Linear Recurrent Attention (`triton_linear_recurrence_step.py`)**: Fuses decay and output projection directly in SRAM (**5.13× speedup**, $57.76\,\mu\text{s}$).
+   * **Direct Pointer Memory Tensor Hashing (`csrc/turing_fast_hash_tensor.hpp`)**: 256-bit AVX2 SIMD pointer scanning at **8.18 GB/s (23.00× faster)** without intermediate byte copies.
+   * **C++20 Zero-Copy Streaming Reasoning Scanner (`csrc/turing_reasoning_scanner.hpp`)**: State-machine tag filter running at **2.47M tok/s**.
+   * **In-VRAM Speculative Verification & Sub-Microsecond AI Traffic QoS Routing**: $O(1)$ admission manager handling **1.18M requests/sec**.
 
 10. **🌐 Learned MoE Hot-Expert Pinning, LFRU Hysteresis & Vectorized Batch-Union**:
     Features persistent historical activation tracking (`RoutingHistoryTracker`) to eliminate cold-start misses (**$92.53\%$ vs $39.14\%$ hit rate**), LFRU eviction with $25\%+4$ hysteresis gating (**$95.10\%$ thrashing reduction**), PILOT one-layer-ahead PCIe streaming, and vectorized PyTorch `index_add_` batch-union accumulation (**up to $16.92\times$ prefill acceleration**, $113\text{k tok/s}$).
@@ -281,13 +286,13 @@ Explore the complete documentation at [**intutic.github.io/turing**](https://int
 
 ---
 
-## 📦 Pre-Built Binary Wheels (v1.1.0)
+## 📦 Pre-Built Binary Wheels (v1.2.0)
  
-Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v1.1.0](https://github.com/intutic/turing/releases/tag/v1.1.0):
+Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v1.2.0](https://github.com/intutic/turing/releases/tag/v1.2.0):
  
 ```bash
 # Install directly from release wheel:
-pip install https://github.com/intutic/turing/releases/download/v1.1.0/turing_engine-1.1.0-cp311-cp311-macosx_15_0_arm64.whl
+pip install https://github.com/intutic/turing/releases/download/v1.2.0/turing_engine-1.2.0-cp311-cp311-macosx_15_0_arm64.whl
 ```
 
 

@@ -53,6 +53,7 @@
 #include "turing_cufile.hpp"
 #include "turing_safetensors_fast_header.hpp"
 #include "turing_traffic_manager.hpp"
+#include "turing_reasoning_scanner.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -908,6 +909,30 @@ PYBIND11_MODULE(turing_csrc, m) {
         .def_property_readonly("misses", &turing::LRUExpertCacheFast::get_misses)
         .def_property_readonly("used_slots", &turing::LRUExpertCacheFast::get_used_slots);
 
+    // Fast C++20 LFRU Expert Slot Cache Class
+    py::class_<turing::LFRUExpertCacheFast>(m, "LFRUExpertCacheFast")
+        .def(py::init<int, double, int>(), py::arg("num_slots") = 32, py::arg("hysteresis_threshold") = 0.25, py::arg("hysteresis_min_access") = 4)
+        .def("contains", &turing::LFRUExpertCacheFast::contains, py::arg("layer_idx"), py::arg("expert_idx"))
+        .def("get_slot", &turing::LFRUExpertCacheFast::get_slot, py::arg("layer_idx"), py::arg("expert_idx"))
+        .def("allocate_or_evict_slot", [](turing::LFRUExpertCacheFast& self, int layer_idx, int expert_idx, uint32_t candidate_heat, bool force_promote) {
+            int evicted_layer = -1;
+            int evicted_expert = -1;
+            int slot = self.allocate_or_evict_slot(layer_idx, expert_idx, evicted_layer, evicted_expert, candidate_heat, force_promote);
+            return std::make_tuple(slot, evicted_layer, evicted_expert);
+        }, py::arg("layer_idx"), py::arg("expert_idx"), py::arg("candidate_heat") = 1, py::arg("force_promote") = false)
+        .def("pin_slot", &turing::LFRUExpertCacheFast::pin_slot, py::arg("slot_idx"))
+        .def("unpin_slot", &turing::LFRUExpertCacheFast::unpin_slot, py::arg("slot_idx"))
+        .def("pin_key", &turing::LFRUExpertCacheFast::pin_key, py::arg("layer_idx"), py::arg("expert_idx"))
+        .def("unpin_key", &turing::LFRUExpertCacheFast::unpin_key, py::arg("layer_idx"), py::arg("expert_idx"))
+        .def("decay", &turing::LFRUExpertCacheFast::decay, py::arg("factor") = 0.95)
+        .def("get_slot_heat", &turing::LFRUExpertCacheFast::get_slot_heat, py::arg("slot_idx"))
+        .def_property_readonly("hit_rate", &turing::LFRUExpertCacheFast::get_hit_rate)
+        .def_property_readonly("hits", &turing::LFRUExpertCacheFast::get_hits)
+        .def_property_readonly("misses", &turing::LFRUExpertCacheFast::get_misses)
+        .def_property_readonly("used_slots", &turing::LFRUExpertCacheFast::get_used_slots)
+        .def_property_readonly("num_slots", &turing::LFRUExpertCacheFast::get_num_slots)
+        .def_property_readonly("clock", &turing::LFRUExpertCacheFast::get_clock);
+
     // Hierarchical Virtual Memory Page Bitmap Allocator Class
     py::class_<turing::HierarchicalBitmapAllocator>(m, "HierarchicalBitmapAllocator")
         .def(py::init<int, int, int>(), py::arg("num_huge") = 64, py::arg("num_medium") = 128, py::arg("num_small") = 256)
@@ -1557,6 +1582,21 @@ PYBIND11_MODULE(turing_csrc, m) {
         .def_property_readonly("allocated_bytes", &turing::NativeTrafficManager::get_allocated_bytes)
         .def_property_readonly("shed_count", &turing::NativeTrafficManager::get_shed_count)
         .def_property_readonly("queue_count", &turing::NativeTrafficManager::get_queue_count);
+
+    // Native C++20 Streaming Reasoning & Tag Filter
+    py::class_<turing::NativeReasoningFilter>(m, "NativeReasoningFilter")
+        .def(py::init<>())
+        .def("process_token", [](turing::NativeReasoningFilter& self, const std::string& token_text) {
+            auto res = self.process_token(token_text);
+            return std::make_pair(
+                res.first.empty() ? py::none() : py::cast(res.first),
+                res.second.empty() ? py::none() : py::cast(res.second)
+            );
+        }, py::arg("token_text"), "Processes incoming token text chunk and returns (reasoning_chunk, content_chunk)")
+        .def("reset", &turing::NativeReasoningFilter::reset)
+        .def_property_readonly("thinking_content", &turing::NativeReasoningFilter::get_thinking_content)
+        .def_property_readonly("final_content", &turing::NativeReasoningFilter::get_final_content)
+        .def_property_readonly("in_thinking_block", &turing::NativeReasoningFilter::is_in_thinking_block);
 }
 
 
