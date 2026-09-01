@@ -128,9 +128,9 @@ inline QuadtreeResult generate_matryoshka_quadtree_cpp(
         }
     }
 
-    int total_nodes = static_cast<int>(token_ids.size());
+    size_t total_nodes = token_ids.size();
     std::vector<float> dag_mask(total_nodes * total_nodes);
-    build_dag_tree_mask_cpp(parent_indices.data(), dag_mask.data(), total_nodes);
+    build_dag_tree_mask_cpp(parent_indices.data(), dag_mask.data(), static_cast<int>(total_nodes));
 
     return QuadtreeResult{std::move(token_ids), std::move(parent_indices), std::move(dag_mask)};
 }

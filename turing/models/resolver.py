@@ -102,19 +102,35 @@ class ModelResolver:
         4. Provider prefix (LiteLLM / Gateway): `huggingface/meta-llama/Llama-3-8B`
         5. CLI convenience aliases: `deepseek-r1-1.5b` -> `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B`
         """
-        raw = raw_identifier.strip()
+        # Sanitize input: remove null bytes and strip whitespace
+        raw = raw_identifier.replace("\0", "").strip()
         effort: Optional[str] = None
-        is_local = os.path.exists(raw) or raw.startswith(("./", "/", "~"))
+        
+        # Check if the identifier is an explicit local path or model file
+        is_explicit_local_path = (
+            raw.startswith(("./", "../", "/", "~"))
+            or raw.endswith((".gguf", ".safetensors", ".bin", ".pt"))
+        )
+        
+        is_local = is_explicit_local_path
+        if not is_local and "/" not in raw and not raw.startswith("."):
+            try:
+                if os.path.exists(raw):
+                    is_local = True
+            except (ValueError, OSError):
+                is_local = False
+
         is_alias = False
         provider = "huggingface"
 
         # 1. Local path check (including GGUF binary files)
         if is_local or raw.endswith(".gguf"):
-            model_name = os.path.basename(os.path.normpath(raw)).replace(".gguf", "")
+            clean_path = os.path.normpath(raw)
+            model_name = os.path.basename(clean_path).replace(".gguf", "")
             provider_type = "gguf" if raw.endswith(".gguf") else "local"
             return ResolvedModelSpec(
                 raw_identifier=raw_identifier,
-                repo_id=raw,
+                repo_id=clean_path,
                 provider=provider_type,
                 model_name=model_name,
                 reasoning_effort=None,

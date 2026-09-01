@@ -1008,14 +1008,14 @@ PYBIND11_MODULE(turing_csrc, m) {
             slice_width
         );
 
-        int num_nodes = static_cast<int>(res.token_ids.size());
-        auto tok_arr = py::array_t<int32_t>(num_nodes);
-        auto parent_arr = py::array_t<int32_t>(num_nodes);
-        auto mask_arr = py::array_t<float>({num_nodes, num_nodes});
+        size_t num_nodes = res.token_ids.size();
+        auto tok_arr = py::array_t<int32_t>(static_cast<py::ssize_t>(num_nodes));
+        auto parent_arr = py::array_t<int32_t>(static_cast<py::ssize_t>(num_nodes));
+        auto mask_arr = py::array_t<float>({static_cast<py::ssize_t>(num_nodes), static_cast<py::ssize_t>(num_nodes)});
 
         std::memcpy(tok_arr.request().ptr, res.token_ids.data(), num_nodes * sizeof(int32_t));
         std::memcpy(parent_arr.request().ptr, res.parent_indices.data(), num_nodes * sizeof(int32_t));
-        std::memcpy(mask_arr.request().ptr, res.dag_mask.data(), num_nodes * num_nodes * sizeof(float));
+        std::memcpy(mask_arr.request().ptr, res.dag_mask.data(), res.dag_mask.size() * sizeof(float));
 
         return py::make_tuple(tok_arr, parent_arr, mask_arr);
     }, "Native C++20 Matryoshka Sliced GEMV & Quadtree Generator");
@@ -1156,15 +1156,16 @@ PYBIND11_MODULE(turing_csrc, m) {
         py::buffer_info v_buf = v_arr.request();
         py::buffer_info s_buf = state_arr.request();
 
-        int B = static_cast<int>(q_buf.shape[0]);
-        int H = static_cast<int>(q_buf.shape[1]);
-        int D = static_cast<int>(q_buf.shape[2]);
+        size_t B = static_cast<size_t>(q_buf.shape[0]);
+        size_t H = static_cast<size_t>(q_buf.shape[1]);
+        size_t D = static_cast<size_t>(q_buf.shape[2]);
 
-        auto out_arr = py::array_t<float>({B, H, D});
-        auto next_state_arr = py::array_t<float>({B, H, D, D});
+        auto out_arr = py::array_t<float>({static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(H), static_cast<py::ssize_t>(D)});
+        auto next_state_arr = py::array_t<float>({static_cast<py::ssize_t>(B), static_cast<py::ssize_t>(H), static_cast<py::ssize_t>(D), static_cast<py::ssize_t>(D)});
 
         // Copy current state into next_state_arr
-        std::memcpy(next_state_arr.request().ptr, s_buf.ptr, B * H * D * D * sizeof(float));
+        size_t total_state_elements = B * H * D * D;
+        std::memcpy(next_state_arr.request().ptr, s_buf.ptr, total_state_elements * sizeof(float));
 
         turing::linear_recurrence_step_avx2(
             static_cast<const float*>(q_buf.ptr),
@@ -1172,7 +1173,7 @@ PYBIND11_MODULE(turing_csrc, m) {
             static_cast<const float*>(v_buf.ptr),
             static_cast<float*>(next_state_arr.request().ptr),
             static_cast<float*>(out_arr.request().ptr),
-            B, H, D, decay
+            static_cast<int>(B), static_cast<int>(H), static_cast<int>(D), decay
         );
 
         return py::make_tuple(out_arr, next_state_arr);
