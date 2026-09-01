@@ -51,6 +51,8 @@
 #include "turing_gguf_simd.hpp"
 #include "turing_io_uring.hpp"
 #include "turing_cufile.hpp"
+#include "turing_safetensors_fast_header.hpp"
+#include "turing_traffic_manager.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -1525,6 +1527,35 @@ PYBIND11_MODULE(turing_csrc, m) {
         .def(py::init<>())
         .def("is_available", &turing::NativeGDSLoader::is_available)
         .def("get_status_info", &turing::NativeGDSLoader::get_status_info);
+
+    // Fast Safetensors Header Parser
+    py::class_<turing::FastTensorInfo>(m, "FastTensorInfo")
+        .def_readonly("dtype", &turing::FastTensorInfo::dtype)
+        .def_readonly("shape", &turing::FastTensorInfo::shape)
+        .def_readonly("start_offset", &turing::FastTensorInfo::start_offset)
+        .def_readonly("end_offset", &turing::FastTensorInfo::end_offset);
+
+    py::class_<turing::NativeSafetensorsHeaderParser>(m, "NativeSafetensorsHeaderParser")
+        .def_static("parse_header", &turing::NativeSafetensorsHeaderParser::parse_header, py::arg("json_str"));
+
+    // Native C++20 AI Traffic Manager
+    py::class_<turing::NativeAdmissionResult>(m, "NativeAdmissionResult")
+        .def_readonly("admitted", &turing::NativeAdmissionResult::admitted)
+        .def_readonly("decision", &turing::NativeAdmissionResult::decision)
+        .def_readonly("retry_after", &turing::NativeAdmissionResult::retry_after)
+        .def_readonly("reason", &turing::NativeAdmissionResult::reason);
+
+    py::class_<turing::NativeTrafficManager>(m, "NativeTrafficManager")
+        .def(py::init<uint64_t, double, double>(), py::arg("vram_budget_bytes"), py::arg("high_watermark") = 0.90, py::arg("shed_watermark") = 0.95)
+        .def_static("estimate_kv_bytes", &turing::NativeTrafficManager::estimate_kv_bytes, 
+                    py::arg("num_prompt_tokens"), py::arg("max_new_tokens"), py::arg("num_layers"), py::arg("num_kv_heads"), py::arg("head_dim"), py::arg("dtype_bytes") = 2, py::arg("svd_compression_ratio") = 0.0)
+        .def_static("compute_prefix_hash", &turing::NativeTrafficManager::compute_prefix_hash, py::arg("token_ids"), py::arg("window") = 128)
+        .def("admit", &turing::NativeTrafficManager::admit, py::arg("request_id"), py::arg("estimated_bytes"))
+        .def("release", &turing::NativeTrafficManager::release, py::arg("request_id"))
+        .def_property_readonly("utilization", &turing::NativeTrafficManager::get_utilization)
+        .def_property_readonly("allocated_bytes", &turing::NativeTrafficManager::get_allocated_bytes)
+        .def_property_readonly("shed_count", &turing::NativeTrafficManager::get_shed_count)
+        .def_property_readonly("queue_count", &turing::NativeTrafficManager::get_queue_count);
 }
 
 

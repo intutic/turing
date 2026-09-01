@@ -22,7 +22,10 @@ namespace turing {
  */
 class NativeGDSLoader {
 public:
-    NativeGDSLoader() : is_available_(false), cufile_lib_(nullptr) {
+    NativeGDSLoader() : is_available_(false) {
+#if defined(__linux__)
+        cufile_lib_ = nullptr;
+#endif
         init_cufile_symbols();
     }
 

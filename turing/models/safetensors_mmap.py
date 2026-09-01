@@ -43,7 +43,21 @@ class SafetensorsMmapReader:
 
         # Parse JSON header metadata
         header_json_bytes = self.mmap_obj[8 : 8 + self.header_size]
-        self.metadata = json.loads(header_json_bytes.decode("utf-8"))
+        header_str = header_json_bytes.decode("utf-8")
+        
+        try:
+            from turing.turing_csrc import NativeSafetensorsHeaderParser
+            fast_meta = NativeSafetensorsHeaderParser.parse_header(header_str)
+            self.metadata = {}
+            for k, v in fast_meta.items():
+                self.metadata[k] = {
+                    "dtype": v.dtype,
+                    "shape": v.shape,
+                    "data_offsets": [v.start_offset, v.end_offset]
+                }
+        except Exception:
+            self.metadata = json.loads(header_str)
+
         self.data_offset = 8 + self.header_size
 
     def get_tensor_names(self) -> List[str]:

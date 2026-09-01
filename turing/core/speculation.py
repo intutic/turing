@@ -522,6 +522,15 @@ class RidgeAssistedTreeSpeculator:
         if target_logits.dim() == 3:
             target_logits = target_logits.squeeze(0)
 
+        try:
+            from ..kernels.triton_spec_verify import fused_speculative_verify_cuda
+            accepted_t, num_accepted = fused_speculative_verify_cuda(draft_token_ids, target_logits, temperature)
+            self.total_drafted += len(draft_token_ids)
+            self.total_accepted += num_accepted
+            return accepted_t.tolist() if isinstance(accepted_t, torch.Tensor) else accepted_t, num_accepted
+        except Exception:
+            pass
+
         accepted = []
         for i, draft_tok in enumerate(draft_token_ids):
             if i >= target_logits.shape[0]:
