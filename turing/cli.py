@@ -657,7 +657,8 @@ def main():
         print("================================================================================")
         print("   ⚡ TURING ENGINE RUNTIME ENVIRONMENT & HARDWARE STATUS")
         print("================================================================================")
-        print(f"[*] Version          : 3.0.0 (Enterprise BSL 1.1)")
+        from turing import __version__
+        print(f"[*] Version          : v{__version__} (Enterprise BSL 1.1)")
         print(f"[*] Hardware Device  : {str(dev).upper()} ({torch.cuda.get_device_name(0) if dev.type == 'cuda' else ('Apple Silicon Metal (MPS)' if dev.type == 'mps' else 'Host CPU')})")
         print(f"[*] PyTorch Version  : {torch.__version__}")
         print(f"[*] Registered Models: {len(MODEL_REGISTRY)} frontier model architectures")
