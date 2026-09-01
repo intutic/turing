@@ -165,15 +165,21 @@ def dispatch_fused_rmsnorm_swiglu(
         except Exception:
             pass
 
+    if isinstance(active_tiles, int):
+        active_tiles = torch.arange(active_tiles, device=x.device)
+
     # Reference PyTorch fallback
     variance = x.pow(2).mean(-1, keepdim=True)
     x_normed = x * torch.rsqrt(variance + eps) * weight_norm
 
     # Sliced Subspace SwiGLU
+    max_idx = min(w_gate.shape[1], w_down.shape[0])
     indices = []
     for t in active_tiles.tolist():
-        start = t * tile_size
-        indices.extend(range(start, start + tile_size))
+        start = int(t) * tile_size
+        indices.extend([i for i in range(start, start + tile_size) if i < max_idx])
+    if not indices:
+        indices = list(range(max_idx))
     idx_tensor = torch.tensor(indices, dtype=torch.long, device=x.device)
 
     # Slice weights

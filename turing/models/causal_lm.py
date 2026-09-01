@@ -216,6 +216,8 @@ class SubspaceCausalLM(nn.Module):
         tenant_id: Optional[str] = None
     ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
         batch, seq_len = input_ids.shape
+        if past_key_values is not None and start_pos == 0 and len(past_key_values) > 0 and past_key_values[0][0] is not None:
+            start_pos = past_key_values[0][0].shape[2]
         hidden_states = self.embed_tokens(input_ids)
 
         new_key_values = []

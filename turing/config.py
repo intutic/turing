@@ -25,19 +25,23 @@ class ModelConfig:
 
     @property
     def total_tiles(self) -> int:
-        return self.ffn_dim // self.tile_size
+        return max(1, self.ffn_dim // max(1, self.tile_size))
 
     @property
     def active_subspace_dim(self) -> int:
-        return self.active_tiles * self.tile_size
+        return min(self.ffn_dim, self.active_tiles * self.tile_size)
 
     @property
     def sparsity_ratio(self) -> float:
-        return 1.0 - (self.active_subspace_dim / self.ffn_dim)
+        return 1.0 - (self.active_subspace_dim / max(1, self.ffn_dim))
 
     def __post_init__(self):
         if self.router_layer_idx is None:
             self.router_layer_idx = max(1, self.num_layers // 3)
+        if self.active_tiles > self.total_tiles:
+            self.active_tiles = self.total_tiles
+        if self.rank_sub > self.hidden_dim:
+            self.rank_sub = max(1, self.hidden_dim)
 
     @classmethod
     def from_gguf_metadata(cls, metadata: Dict[str, Any], sparsity_ratio: float = 0.5) -> "ModelConfig":

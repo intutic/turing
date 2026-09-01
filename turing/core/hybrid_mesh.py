@@ -108,6 +108,7 @@ class LocalPipelineStage(nn.Module):
     """
     def __init__(self, config: ModelConfig, layer_start: int, layer_end: int, device: torch.device):
         super().__init__()
+        from ..models.causal_lm import SubspaceDecoderLayer
         self.config = config
         self.layer_start = layer_start
         self.layer_end = layer_end
@@ -136,6 +137,7 @@ class RemotePipelineStage(nn.Module):
     """
     def __init__(self, config: ModelConfig, layer_start: int, layer_end: int, device: torch.device):
         super().__init__()
+        from ..models.causal_lm import SubspaceDecoderLayer
         self.config = config
         self.layer_start = layer_start
         self.layer_end = layer_end

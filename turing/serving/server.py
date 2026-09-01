@@ -23,6 +23,7 @@ from .structured import StructuredOutputParser
 from .tools import ToolCallingHandler
 from .kv_events import KVBlockEventPublisher
 from .traffic import AdmissionController, LanePolicy, Lane
+from .. import __version__
 
 class ChatMessage(BaseModel):
     role: str
@@ -80,7 +81,7 @@ def create_app(
                 kv_publisher.stop()
             await engine.stop()
 
-    app = FastAPI(title="Turing Engine High-Performance Inference Server", version="0.7.0", lifespan=lifespan)
+    app = FastAPI(title="Turing Engine High-Performance Inference Server", version=__version__, lifespan=lifespan)
 
     def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
         """
@@ -609,7 +610,7 @@ def create_app(
         """
         Returns server version in Ollama format.
         """
-        return {"version": "0.7.0"}
+        return {"version": __version__}
 
     @app.post("/api/show")
     async def ollama_show(req: OllamaShowRequest):

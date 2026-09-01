@@ -273,13 +273,13 @@ Explore the complete documentation at [**intutic.github.io/turing**](https://int
 
 ---
 
-## 📦 Pre-Built Binary Wheels (v0.7.0)
+## 📦 Pre-Built Binary Wheels (v0.8.0)
  
-Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.7.0](https://github.com/intutic/turing/releases/tag/v0.7.0):
+Pre-compiled binary wheels with native C++20 AVX2 SIMD optimizations are published on [GitHub Releases v0.8.0](https://github.com/intutic/turing/releases/tag/v0.8.0):
  
 ```bash
 # Install directly from release wheel:
-pip install https://github.com/intutic/turing/releases/download/v0.7.0/turing_engine-0.7.0-cp311-cp311-macosx_15_0_arm64.whl
+pip install https://github.com/intutic/turing/releases/download/v0.8.0/turing_engine-0.8.0-cp311-cp311-macosx_15_0_arm64.whl
 ```
 
 
