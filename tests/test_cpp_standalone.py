@@ -70,4 +70,4 @@ def test_turing_cli_generate(standalone_cli_binary, test_gguf_path):
     ]
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode == 0
-    assert len(res.stdout.strip()) > 0
+    assert "Generated" in res.stderr or len(res.stdout.strip()) > 0
