@@ -1,8 +1,8 @@
 """
-Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Engine
+Turing Engine: Edge-to-Cloud Distributed Subspace LLM Inference Runtime.
 """
 
-__version__ = "0.8.0"
+__version__ = "1.0.0"
 
 
 __author__ = "Ishan Gupta"

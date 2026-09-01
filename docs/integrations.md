@@ -141,7 +141,7 @@ spec:
       autoSelect: false
   containers:
     - name: kserve-container
-      image: ghcr.io/intutic/turing:v0.8.0-cuda
+      image: ghcr.io/intutic/turing:v1.0.0-cuda
 
 
 
