@@ -10,6 +10,7 @@ from .adapters import UncertaintyKnowledgeGate, TenantLoRAAdapter
 from .vllm_adapter import VLLMCustomModelRunnerHarness, VLLMSubspaceQuantWrapper
 from .gguf_loader import GGUFModelLoader, GGUFReader, GGUFDequantizer
 from .gguf_tokenizer import GGUFTokenizer
+from .ingest import TuringIngestEngine, StorageTier
 
 __all__ = [
     "SubspaceCausalLM",
@@ -30,4 +31,6 @@ __all__ = [
     "GGUFReader",
     "GGUFDequantizer",
     "GGUFTokenizer",
+    "TuringIngestEngine",
+    "StorageTier",
 ]

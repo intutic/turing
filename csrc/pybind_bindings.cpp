@@ -49,6 +49,8 @@
 #include "turing_sampler.hpp"
 #include "turing_json_fast_scan.hpp"
 #include "turing_gguf_simd.hpp"
+#include "turing_io_uring.hpp"
+#include "turing_cufile.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -1493,6 +1495,36 @@ PYBIND11_MODULE(turing_csrc, m) {
 
         return result;
     }, py::arg("data_bytes"), py::arg("ggml_type"), py::arg("shape"), "Native AVX2 SIMD GGUF Block Dequantizer");
+
+    // Tier 2: Native Async Ring Reader (io_uring / pread parallel queue)
+    py::class_<turing::NativeAsyncRingReader>(m, "NativeAsyncRingReader")
+        .def(py::init<int, size_t>(), py::arg("num_workers") = 8, py::arg("queue_depth") = 64)
+        .def("read_exact", [](turing::NativeAsyncRingReader& self, const std::string& filepath, uint64_t file_offset, uint64_t num_bytes) -> py::bytes {
+            std::vector<uint8_t> buffer(num_bytes);
+            self.read_exact(filepath, file_offset, num_bytes, buffer.data());
+            return py::bytes(reinterpret_cast<const char*>(buffer.data()), num_bytes);
+        }, py::arg("filepath"), py::arg("file_offset"), py::arg("num_bytes"))
+        .def("read_segments_parallel", [](turing::NativeAsyncRingReader& self, const std::string& filepath, 
+                                          const std::vector<uint64_t>& file_offsets, 
+                                          const std::vector<uint64_t>& byte_lengths) -> py::bytes {
+            uint64_t total_bytes = 0;
+            std::vector<uint64_t> dest_offsets(file_offsets.size());
+            for (size_t i = 0; i < file_offsets.size(); ++i) {
+                dest_offsets[i] = total_bytes;
+                total_bytes += byte_lengths[i];
+            }
+            std::vector<uint8_t> buffer(total_bytes);
+            self.read_segments_parallel(filepath, file_offsets, byte_lengths, dest_offsets, buffer.data());
+            return py::bytes(reinterpret_cast<const char*>(buffer.data()), total_bytes);
+        }, py::arg("filepath"), py::arg("file_offsets"), py::arg("byte_lengths"))
+        .def_property_readonly("num_workers", &turing::NativeAsyncRingReader::get_num_workers)
+        .def_property_readonly("queue_depth", &turing::NativeAsyncRingReader::get_queue_depth);
+
+    // Tier 4: Native GDS Loader (GPUDirect Storage cuFile dynamic driver)
+    py::class_<turing::NativeGDSLoader>(m, "NativeGDSLoader")
+        .def(py::init<>())
+        .def("is_available", &turing::NativeGDSLoader::is_available)
+        .def("get_status_info", &turing::NativeGDSLoader::get_status_info);
 }
 
 
