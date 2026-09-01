@@ -115,21 +115,24 @@ def benchmark_hybrid_attention_prefill(device_name: str = "cpu"):
         # Dense 4 layers
         t0 = time.perf_counter()
         dense_time = None
-        try:
-            for _ in range(iters):
-                for _ in range(4):
-                    q = x.view(1, seq_len, num_heads, head_dim).transpose(1, 2)
-                    k = x.view(1, seq_len, num_heads, head_dim).transpose(1, 2)
-                    v = x.view(1, seq_len, num_heads, head_dim).transpose(1, 2)
-                    scores = torch.matmul(q, k.transpose(-1, -2)) * (1.0 / (head_dim ** 0.5))
-                    _ = torch.matmul(F.softmax(scores, dim=-1), v)
+        if seq_len < 32768 or device.type == "cuda":
+            try:
+                for _ in range(iters):
+                    for _ in range(4):
+                        q = x.view(1, seq_len, num_heads, head_dim).transpose(1, 2)
+                        k = x.view(1, seq_len, num_heads, head_dim).transpose(1, 2)
+                        v = x.view(1, seq_len, num_heads, head_dim).transpose(1, 2)
+                        scores = torch.matmul(q, k.transpose(-1, -2)) * (1.0 / (head_dim ** 0.5))
+                        _ = torch.matmul(F.softmax(scores, dim=-1), v)
+                    if device.type == "cuda":
+                        torch.cuda.synchronize()
+                dense_time = (time.perf_counter() - t0) / iters * 1000.0
+            except (torch.cuda.OutOfMemoryError, RuntimeError):
+                dense_time = None
                 if device.type == "cuda":
-                    torch.cuda.synchronize()
-            dense_time = (time.perf_counter() - t0) / iters * 1000.0
-        except (torch.cuda.OutOfMemoryError, RuntimeError):
-            dense_time = None
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
+                    torch.cuda.empty_cache()
+        else:
+            dense_time = None # OOM (>64GB) on Host Workstation
 
 
         # 3:1 Hybrid

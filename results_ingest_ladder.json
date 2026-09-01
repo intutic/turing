@@ -1,38 +1,38 @@
 [
   {
     "tier": "Tier 0: Naive Demand-Paging",
-    "latency_ms": 46.45091699785553,
-    "bw_gb_s": 5.3820596797756535,
+    "latency_ms": 105.31349999996564,
+    "bw_gb_s": 2.3738799628048195,
     "speedup": 1.0
   },
   {
     "tier": "Tier 1: MADV_WILLNEED Readahead",
-    "latency_ms": 41.120083988062106,
-    "bw_gb_s": 6.079793210912305,
-    "speedup": 1.1296406157959469
+    "latency_ms": 19.05175000001691,
+    "bw_gb_s": 13.122238506307394,
+    "speedup": 5.527759917061276
   },
   {
     "tier": "Tier 2: C++ io_uring Ring",
-    "latency_ms": 97.52149999258108,
-    "bw_gb_s": 2.5635537546262372,
-    "speedup": 0.4763146280706231
+    "latency_ms": 45.92333400000825,
+    "bw_gb_s": 5.443890625683206,
+    "speedup": 2.293245956400873
   },
   {
     "tier": "Tier 3: Subspace Compression",
-    "latency_ms": 24.38037499814527,
-    "bw_gb_s": 10.254215018504949,
-    "speedup": 1.9052585122824923
+    "latency_ms": 11.480833500002063,
+    "bw_gb_s": 21.775562502732825,
+    "speedup": 9.172983825603492
   },
   {
     "tier": "Tier 4: GDS & Layer Pipelining",
-    "latency_ms": 14.628224998887163,
-    "bw_gb_s": 17.090358364174914,
-    "speedup": 3.1754308538041536
+    "latency_ms": 6.888500100001238,
+    "bw_gb_s": 36.29260417122138,
+    "speedup": 15.288306376005819
   },
   {
     "tier": "Tier 5: Warm / Unified Memory",
-    "latency_ms": 0.30787500145379454,
-    "bw_gb_s": 812.0230817125426,
-    "speedup": 150.8758969663434
+    "latency_ms": 0.24929200003498408,
+    "bw_gb_s": 1002.8464909731565,
+    "speedup": 422.4503794152504
   }
 ]
