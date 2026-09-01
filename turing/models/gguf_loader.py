@@ -236,6 +236,11 @@ class GGUFReader:
         self.file_size = os.path.getsize(filepath)
         self.file_obj = open(filepath, "rb")
         self.mmap_obj = mmap.mmap(self.file_obj.fileno(), 0, access=mmap.ACCESS_READ)
+        if hasattr(self.mmap_obj, "madvise") and hasattr(mmap, "MADV_WILLNEED"):
+            try:
+                self.mmap_obj.madvise(mmap.MADV_WILLNEED)
+            except Exception:
+                pass
         
         self.header: Optional[GGUFHeader] = None
         self.metadata: Dict[str, Any] = {}

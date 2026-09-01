@@ -224,6 +224,9 @@ private:
         file_size = sb.st_size;
         mmap_data = static_cast<uint8_t*>(mmap(nullptr, file_size, PROT_READ, MAP_SHARED, fd, 0));
         if (mmap_data == MAP_FAILED) throw std::runtime_error("mmap failed for GGUF file");
+#if defined(MADV_WILLNEED)
+        madvise(mmap_data, file_size, MADV_WILLNEED);
+#endif
 #endif
     }
 
