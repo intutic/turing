@@ -134,12 +134,16 @@ class BandwidthAdaptiveDecider:
         gpu_total_ms = transfer_ms + gpu_compute_ms
         return gpu_total_ms < cpu_compute_ms
 
-    def recalibrate_live_bus(self) -> float:
+    def recalibrate_live_bus(self, ema_weight: float = 0.2) -> float:
         """
-        Executes a rapid 8MB host-to-device transfer micro-probe to refresh
-        the real-time PCIe bus bandwidth under active system load.
+        Executes a rapid host-to-device transfer micro-probe to refresh
+        the real-time PCIe bus bandwidth under active system load using EMA smoothing.
         """
-        self.pcie_bandwidth_gb_s = self._calibrate_pcie_bandwidth()
+        new_sample = self._calibrate_pcie_bandwidth()
+        if self.pcie_bandwidth_gb_s <= 0.0:
+            self.pcie_bandwidth_gb_s = new_sample
+        else:
+            self.pcie_bandwidth_gb_s = (1.0 - ema_weight) * self.pcie_bandwidth_gb_s + ema_weight * new_sample
         return self.pcie_bandwidth_gb_s
 
     def get_telemetry(self) -> Dict[str, Any]:
@@ -207,19 +211,22 @@ class HostExpertBank:
 class HeterogeneousMoERunner(nn.Module):
     """
     Orchestrates bandwidth-adaptive concurrent execution across CPU AVX2 and GPU Tensor Cores.
+    Features vectorized batch-union accumulation and optional one-layer-ahead prefetch (PILOT).
     """
     def __init__(
         self,
         config: ModelConfig,
         host_bank: HostExpertBank,
         decider: BandwidthAdaptiveDecider,
-        device: torch.device
+        device: torch.device,
+        prefetcher: Optional[Any] = None
     ):
         super().__init__()
         self.config = config
         self.host_bank = host_bank
         self.decider = decider
         self.device = device
+        self.prefetcher = prefetcher
         self.hidden_dim = config.hidden_dim
         self.ffn_dim = config.ffn_dim
 
@@ -281,15 +288,20 @@ class HeterogeneousMoERunner(nn.Module):
         hidden_states: torch.Tensor, # [Batch, SeqLen, HiddenDim]
         router_logits: torch.Tensor,  # [Batch, SeqLen, NumExperts]
         layer_idx: int,
-        top_k: int = 2
+        top_k: int = 2,
+        next_layer_predicted_experts: Optional[Union[List[int], torch.Tensor]] = None
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
         """
-        Top-k routing + Bandwidth-Adaptive Heterogeneous CPU/GPU Execution.
+        Top-k routing + Bandwidth-Adaptive Heterogeneous CPU/GPU Execution with Vectorized Batch-Union Accumulation.
         """
         orig_shape = hidden_states.shape
         batch, seq_len, _ = orig_shape
         x_flat = hidden_states.view(-1, self.hidden_dim) # [N, HiddenDim]
         n_tokens = x_flat.shape[0]
+
+        # Trigger async one-layer-ahead prefetch if available (PILOT)
+        if self.prefetcher is not None and next_layer_predicted_experts is not None:
+            self.prefetcher.prefetch_layer_experts_async(layer_idx + 1, next_layer_predicted_experts)
 
         # Top-k routing weights & indices
         topk_probs, topk_indices = torch.topk(F.softmax(router_logits.view(-1, router_logits.shape[-1]), dim=-1), k=top_k, dim=-1)
@@ -299,7 +311,7 @@ class HeterogeneousMoERunner(nn.Module):
         gpu_dispatched = 0
         cpu_dispatched = 0
 
-        # Unique active experts in this batch
+        # Unique active experts in this batch (Batch-Union)
         unique_experts = torch.unique(topk_indices).tolist()
 
         for exp_id in unique_experts:
@@ -327,13 +339,12 @@ class HeterogeneousMoERunner(nn.Module):
                 expert_out = self.forward_expert_cpu(sub_x, layer_idx, exp_id)
                 cpu_dispatched += 1
 
-            # Accumulate weighted output
-            # Find weight for each token
-            for i, tok_idx in enumerate(token_sub_indices):
-                # Check whether exp_id is at top-k rank 0 or 1
-                ranks = (topk_indices[tok_idx] == exp_id).nonzero(as_tuple=True)[0]
-                weight = topk_probs[tok_idx, ranks[0]]
-                final_output[tok_idx] += weight * expert_out[i]
+            # Vectorized Batch-Union Accumulation
+            # Find the routing weight for each routed token for this expert
+            expert_match_mask = (topk_indices[token_sub_indices] == exp_id)
+            sub_weights = topk_probs[token_sub_indices][expert_match_mask].view(-1, 1)
+            weighted_expert_out = expert_out * sub_weights.to(dtype=expert_out.dtype)
+            final_output.index_add_(0, token_sub_indices, weighted_expert_out)
 
         stats = {
             "total_active_experts": len(unique_experts),
@@ -343,3 +354,4 @@ class HeterogeneousMoERunner(nn.Module):
         }
 
         return final_output.view(orig_shape), stats
+

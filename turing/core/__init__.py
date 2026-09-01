@@ -17,8 +17,8 @@ from .hierarchical_compression import HCAChunkCompressor, CSAChunkCompressor, Cr
 from .cca import LayerwiseHeadBudgeter, CompressedConvolutionalAttention
 from .hybrid_attention import LinearRecurrentAttention, ChunkContextScorer, HybridAttentionLayerRouter
 from .heterogeneous_moe import BandwidthAdaptiveDecider, HostExpertBank, HeterogeneousMoERunner
-
-from .expert_cache import GPULRUExpertCache
+from .expert_cache import GPULRUExpertCache, RoutingHistoryTracker
+from .expert_prefetch import OneLayerAheadExpertPrefetcher
 from .elastic_memory import ElasticMemoryBudgetManager
 from .hybrid_mesh import (
     HybridMeshConfig,
@@ -69,6 +69,8 @@ __all__ = [
     "HostExpertBank",
     "HeterogeneousMoERunner",
     "GPULRUExpertCache",
+    "RoutingHistoryTracker",
+    "OneLayerAheadExpertPrefetcher",
     "ElasticMemoryBudgetManager",
     "HybridMeshConfig",
     "HybridMeshCoordinator",
@@ -78,4 +80,5 @@ __all__ = [
     "CascadedPrefillAndDraftSpeculator",
     "DistributedMoEExpertMesh",
 ]
+
 
