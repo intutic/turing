@@ -194,14 +194,16 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
 
 ---
 
-## 19. 📦 Native GGUF File Loader & Quantization Engine
+## 19. 📦 Native Zero-Copy Memory-Mapped Loaders & Proactive Kernel Readahead
 
-* **The Problem**: Running quantized models typically required external C++ runtimes or heavy conversion pipelines.
+* **The Problem**: On cold nodes with zero OS page cache, naive `mmap()` suffers from demand-paging latency (random 4KB page fault stalls during inference), while reading uncompressed 140GB weights off an SSD bounds startup to 40+ seconds.
 * **How It Works**:
-  - **Zero-Copy GGUF Reader (`gguf_loader.py`)**: Direct memory-mapped binary reader for GGUF v2/v3 files.
+  - **Proactive Kernel Readahead (`madvise(MADV_WILLNEED)`)**: Immediately upon memory-mapping `.safetensors`, `.gguf`, or `.tgate` binary weights in C++ and Python, Turing Engine issues `madvise(MADV_WILLNEED)` hints to instruct the OS kernel to pre-populate pages asynchronously in contiguous 2MB/64MB DMA bursts rather than stalling on demand-paging faults during inference.
+  - **Zero-Copy GGUF Reader (`gguf_loader.py` & `csrc/turing_gguf_cpp.hpp`)**: Direct memory-mapped binary reader for GGUF v2/v3 files with zero userspace memory duplication.
   - **Multi-Quant Dequantizers**: Vectorized dequantization for `Q4_0`, `Q4_1`, `Q8_0`, `Q4_K_M`, `Q5_K_M`, `F16`, `F32`, and `BF16`.
   - **GGUF Tokenizer (`gguf_tokenizer.py`)**: Extracts vocabulary tokens, merges, and chat templates directly from binary metadata.
-  - **Auto-Resolution**: Transparently ingests `.gguf` files in CLI `chat` and `serve` commands.
+  - **Physical Disk Wire Compression**: Slicing weights down to Subspace W4A16 / INT8 formats cuts on-disk size by 75%, slashing physical SSD read time from ~40s to ~5s on cold starts.
+  - **Auto-Resolution**: Transparently ingests `.gguf` and `.safetensors` files in CLI `chat` and `serve` commands.
 
 ---
 
