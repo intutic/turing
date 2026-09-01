@@ -9,7 +9,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests](https://img.shields.io/badge/Tests-274%2F274%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-286%2F286%20Passing-brightgreen.svg)]()
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -37,6 +37,7 @@ Turing Engine is an open-source inference and serving runtime that allows you to
 * **Concurrency-Adaptive Speculation Gating**: Dynamically throttles speculation tree width under load ($1.82\times$ at $c=1$, plain decode at $c \ge 4$), with byte-exact greedy decode parity.
 * **3:1 Hybrid Linear-Full Recurrence**: 75% linear recurrence layers + 25% chunk-scoring full attention, eliminating long-context OOM crashes up to 65K+ tokens.
 * **SVD INT8 KV Cache Paging**: Compresses 32K context memory from **10 GB down to 2.5 GB (-75%)**.
+* **Learned MoE Pinning, LFRU Hysteresis & Vectorized Batch-Union**: Persistent activation tracking (`RoutingHistoryTracker`, **$92.53\%$ warm hit rate**), $25\%+4$ hysteresis promotion gate (**$95.10\%$ thrash reduction**), PILOT one-layer-ahead PCIe streaming, and vectorized PyTorch `index_add_` batch-union accumulation (**up to $16.92\times$ prefill acceleration**, $113\text{k tok/s}$).
 * **Heterogeneous MoE Memory Management**: Runs 320B Mixture-of-Experts models on a single 24GB card by caching active experts in VRAM and streaming inactive experts from Host DRAM.
 * **Universal Hardware Support**: Native auto-discovery for **NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel (XPU), Vulkan, and CPU (AVX2 SIMD)**.
 

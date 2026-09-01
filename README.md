@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 280/280 Passing](https://img.shields.io/badge/Tests-280%2F280%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 286/286 Passing](https://img.shields.io/badge/Tests-286%2F286%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -171,6 +171,9 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
 
 9. **⚡ Fused GPU Kernels & Bare-Metal C++20 SIMD Acceleration**:
    Eliminates Python GIL contention and GPU-to-CPU `.item()` pipeline stalls with In-VRAM speculative candidate verification, fused $k$-slot attention gating ($-85\%$ DRAM traffic), C++20 SIMD Safetensors header parsing ($<100\,\mu\text{s}$), and sub-microsecond AI traffic QoS routing (**$8.80\times$ faster**, $2.77\,\mu\text{s}$).
+
+10. **🌐 Learned MoE Hot-Expert Pinning, LFRU Hysteresis & Vectorized Batch-Union**:
+    Features persistent historical activation tracking (`RoutingHistoryTracker`) to eliminate cold-start misses (**$92.53\%$ vs $39.14\%$ hit rate**), LFRU eviction with $25\%+4$ hysteresis gating (**$95.10\%$ thrashing reduction**), PILOT one-layer-ahead PCIe streaming, and vectorized PyTorch `index_add_` batch-union accumulation (**up to $16.92\times$ prefill acceleration**, $113\text{k tok/s}$).
 
 ---
 

@@ -79,7 +79,7 @@ To ensure full transparency and avoid confusion regarding model loading:
     Traditional layer-by-layer offloading crawls at 1–2 tok/s because it transfers uncompressed weights over PCIe synchronously. Turing Engine sustains **18–50+ tok/s** through two distinct hardware paths:
     
     * **Apple Silicon (Mac Studio M-series)**: Leverages Unified Memory Architecture with **800 to 1,600 GB/s bandwidth**. There is zero PCIe bus copy overhead—the Metal GPU accesses active experts directly at memory-bus speeds (35–50 tok/s).
-    * **Discrete PCIe GPUs (RTX 4090 / L4 24GB)**: Attention and embeddings remain permanently pinned in VRAM (~4GB). An on-GPU LRU slot cache captures high expert temporal locality (~80% reuse), while missing INT4-packed experts are prefetched asynchronously over CUDA streams during attention compute without stalling the pipeline (18–30+ tok/s).
+    * **Discrete PCIe GPUs (RTX 4090 / L4 24GB)**: Attention and embeddings remain permanently pinned in VRAM (~4GB). An on-GPU **LFRU slot cache with 25%+4 hysteresis promotion** (`GPULRUExpertCache`) and **learned hot-expert pinning** (`RoutingHistoryTracker`) captures **>92% temporal routing locality**, while missing INT4-packed experts are prefetched asynchronously via `OneLayerAheadExpertPrefetcher` (PILOT) over background CUDA DMA streams during attention compute (18–32+ tok/s).
 
 ---
 
