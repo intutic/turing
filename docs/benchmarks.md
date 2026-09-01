@@ -366,4 +366,23 @@ Measurements from `scripts/benchmark_traffic_and_spec.py` on **GCP NVIDIA L4 GPU
   - $c = 3\text{ streams}$: `full_spec` ($183.0\text{ tok/s}$ vs $150.0\text{ tok/s}$ plain)
   - $c \ge 4\text{ streams}$: Auto-demote to `plain` batch decode ($200\text{--}800\text{ tok/s}$, avoiding lock contention).
 
+---
+
+## 19. Real Model Weight Ingestion & Kernel Readahead (`MADV_WILLNEED`) on GCP NVMe/SSD
+
+Empirical measurements from `scripts/benchmark_cold_readahead_gcp.py` on real 3.76GB `Qwen2.5-7B` checkpoint files on **physical Google Cloud NVIDIA L4 GPU VM NVMe SSD**:
+
+| Ingestion Strategy | Model Shard Scale | Ingestion + 10 Layers Read | Physical SSD Throughput | Speedup vs Lazy Demand-Paging |
+| :--- | :--- | :---: | :---: | :---: |
+| **Lazy Demand-Paging `mmap`** | 3,762.67 MB (3.67 GB) | $8,925.73\text{ ms}$ | $0.41\text{ GB/s}$ | 1.00× (Baseline) |
+| **Turing `MADV_WILLNEED` Readahead** | 3,762.67 MB (3.67 GB) | **$1,848.12\text{ ms}$** | **$1.99\text{ GB/s}$** | **$4.83\times$ FASTER (-79.3% Latency)** |
+
+### Key Systems Takeaways:
+1. **Asynchronous OS DMA Bursts**: Proactively notifying the kernel with `madvise(MADV_WILLNEED)` converts random 4KB demand-paging page faults into sequential 2MB/64MB DMA burst transfers across NVMe PCIe lanes.
+2. **Deterministic Parity**: 100% exact numerical match across all extracted layer tensor slices with zero memory corruption.
+3. **Reproduce on Your Hardware**:
+```bash
+python scripts/benchmark_cold_readahead_gcp.py
+```
+
 
