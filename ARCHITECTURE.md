@@ -10,7 +10,8 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
  ┌───────────────────────────────────────────────────────────────────────────────────┐
  │                                PRODUCTION SERVING LAYER                           │
  │  • Continuous Batching Scheduler (16–64 streams)                                  │
- │  • Dual API Gateway: OpenAI (/v1/chat/completions) & Anthropic (/v1/messages)     │
+ │  • Triple API Gateway: OpenAI (/v1), Anthropic (/v1/messages), Ollama (/api/*)    │
+ │  • Kubernetes llm-d Prefix-Cache Aware Router Integration & ZMQ Cache Events       │
  │  • Multi-Agent Deliberation Coordinator & Dynamic Environment Model               │
  └────────────────────────────────────────┬──────────────────────────────────────────┘
                                           │
@@ -175,9 +176,10 @@ This document provides an in-depth architectural blueprint of the **Turing Engin
 
 ### 4.1 Continuous Batching Scheduler (`turing/serving/engine.py`)
 - **Chunked Prefill & Decode Interleaving**: Chunks long prefill sequences into lane-specific segments (512 for Interactive, 256 for Batch, 128 for Background) interleaved with active decode steps.
-- **Dual API Gateway (`turing/serving/server.py`, `anthropic_api.py`)**:
+- **Triple API Gateway (`turing/serving/server.py`, `anthropic_api.py`, `ollama_api.py`)**:
   - OpenAI `/v1/chat/completions` protocol with `X-Turing-Lane` extraction.
   - Anthropic `/v1/messages` protocol with SSE streaming, reasoning tags, and tool use support.
+  - Ollama REST API (`/api/generate`, `/api/chat`, `/api/tags`, `/api/show`, `/api/ps`).
   - Response headers: `X-Turing-KV-Utilization`, `X-Turing-Queue-Depth`, and `Retry-After`.
 - **Prometheus Telemetry (`/metrics`)**: Exposes `turing_vram_utilization_ratio`, `turing_admission_shed_total`, and per-lane active request counts.
 
