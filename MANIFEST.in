@@ -1,0 +1,7 @@
+include csrc/*.hpp
+include csrc/*.cpp
+include LICENSE
+include README.md
+include pyproject.toml
+include setup.py
+recursive-include turing *.py
