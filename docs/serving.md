@@ -1,6 +1,6 @@
 # 🚀 Serving & API Reference
 
-Turing Engine features a production-grade continuous batching engine with dual drop-in compatibility for both **OpenAI** and **Anthropic** API endpoints.
+Turing Engine features a production-grade continuous batching engine with triple drop-in compatibility for **OpenAI**, **Anthropic**, and **Ollama** API endpoints.
 
 ---
 
@@ -128,7 +128,7 @@ Key Prometheus metrics exported:
 
 ---
 
-## 4. Native Ollama REST API (`/api/*`)
+## 7. Native Ollama REST API (`/api/*`)
 
 Turing Engine provides full native compatibility with the **Ollama REST API**, allowing drop-in connection from **Open WebUI**, **Continue.dev**, **Cursor Ollama backend**, **Enchanted**, and the official **Ollama Python / JavaScript SDKs**.
 
@@ -182,7 +182,7 @@ curl http://localhost:8000/api/generate \
 
 ---
 
-## 5. Structured Outputs & JSON Mode (`response_format`)
+## 8. Structured Outputs & JSON Mode (`response_format`)
 
 Enforce strict JSON syntax adherence or full **JSONSchema / Pydantic validation** during generation:
 
@@ -229,7 +229,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 ---
 
-## 6. Native Tool & Function Calling (`tools` & `tool_calls`)
+## 9. Native Tool & Function Calling (`tools` & `tool_calls`)
 
 Standardized OpenAI and Anthropic tool calling enables autonomous agents to invoke external functions:
 
@@ -292,7 +292,7 @@ Response format with extracted `tool_calls`:
 
 ---
 
-## 7. Subspace Pruning & Performance Headers
+## 10. Subspace Pruning & Performance Headers
 
 You can dynamically tune compression and routing parameters per-request via HTTP headers:
 
@@ -306,7 +306,7 @@ You can dynamically tune compression and routing parameters per-request via HTTP
 
 ---
 
-## 8. Multi-Tenant LoRA Dynamic Routing
+## 11. Multi-Tenant LoRA Dynamic Routing
 
 Serve 100+ fine-tuned task adapters off a single shared base model with zero weight duplication:
 
@@ -324,7 +324,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 ---
 
-## 9. AI Traffic Management, 3-Lane QoS & Admission Control
+## 12. AI Traffic Management, 3-Lane QoS & Admission Control
 
 Turing Engine treats requests as heterogeneous token-budget workloads rather than uniform HTTP calls:
 
@@ -340,7 +340,7 @@ Turing Engine treats requests as heterogeneous token-budget workloads rather tha
 
 ---
 
-## 10. 2-Phase Prefill & Parallel Batched Decode Scheduling
+## 13. 2-Phase Prefill & Parallel Batched Decode Scheduling
 
 Turing Engine's continuous batch scheduler explicitly separates **Prefill (Compute-Bound FLOPs)** from **Decode (Memory-Bandwidth GB/s)**:
 
@@ -354,7 +354,7 @@ Turing Engine's continuous batch scheduler explicitly separates **Prefill (Compu
 
 ---
 
-## 11. Multi-GPU Tensor & Pipeline Parallel Distributed Serving
+## 14. Multi-GPU Tensor & Pipeline Parallel Distributed Serving
 
 Shard large models across multi-GPU nodes with native NCCL communicators:
 
@@ -375,7 +375,7 @@ turing serve \
 
 ---
 
-## 12. Standalone C++20 HTTP Server (`turing-cli`)
+## 15. Standalone C++20 HTTP Server (`turing-cli`)
 
 For edge deployments without a Python runtime:
 

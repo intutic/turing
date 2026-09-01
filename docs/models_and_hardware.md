@@ -17,15 +17,22 @@ Turing Engine features a **Universal Dynamic Model Resolver** (`ModelResolver`) 
 | **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` | 14.0B Dense | 28.0 GB | **4.1 GB** | 1x 8GB GPU / Mac |
 | **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B` | 32.0B Dense | 64.0 GB | **8.5 GB** | 1x 12GB GPU / Mac |
 | **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Llama-70B` | 70.0B Dense | 140.0 GB | **15.7 GB** | **1x 24GB GPU (RTX 3090/4090, L4)** |
+| **Meta AI** | `meta-llama/Llama-3.1-8B-Instruct` | 8.0B Dense | 16.0 GB | **2.5 GB** | 1x 6GB GPU / Mac |
 | **Meta AI** | `meta-llama/Llama-3.3-70B-Instruct` | 70.6B Dense | 141.2 GB | **15.7 GB** | **1x 24GB GPU (RTX 3090/4090, L4)** |
 | **Meta AI** | `meta-llama/Llama-4-Scout-17B-16E` | 109B MoE (17B act) | 218.0 GB | **4.2 GB VRAM + 24 GB RAM** | 1x 16GB GPU / Mac Studio |
 | **Alibaba** | `Qwen/Qwen2.5-Coder-32B-Instruct` | 32.5B Dense | 65.0 GB | **8.5 GB** | 1x 12GB GPU / Mac |
 | **Alibaba** | `Qwen/Qwen2.5-72B-Instruct` | 72.7B Dense | 145.4 GB | **16.1 GB** | **1x 24GB GPU (RTX 3090/4090, L4)** |
+| **Mistral AI** | `mistralai/Mistral-Small-24B-Instruct-2501` | 24.0B Dense | 48.0 GB | **6.1 GB** | 1x 12GB GPU / Mac |
+| **Mistral AI** | `mistralai/Mistral-Large-Instruct-2407` | 123B Dense | 246.0 GB | **18.2 GB** | **1x 24GB GPU (RTX 3090/4090, L4)** |
 | **Google** | `google/gemma-2-27b-it` | 27.0B Dense | 54.0 GB | **6.8 GB** | 1x 12GB GPU / Mac |
 | **Google** | `google/gemma-4-26B-A4B` | 26B MoE (4B act) | 52.0 GB | **2.5 GB VRAM + 8 GB RAM** | 1x 8GB GPU / Mac |
+| **Zhipu** | `zai-org/GLM-5.2-753B` | 753B MoE (32B act) | 1,400 GB | **4.5 GB VRAM + 96 GB RAM** | **1x 24GB GPU + 128GB RAM** |
 | **Zhipu** | `zai-org/GLM-5.3-Flash` | 320B MoE (18B act) | 596.0 GB | **3.5 GB VRAM + 42 GB RAM** | **1x 24GB GPU + 64GB RAM / Mac Studio** |
+| **DeepSeek** | `deepseek-ai/DeepSeek-V3` | 671B MoE (37B act) | 1,342 GB | **4.8 GB VRAM + 80 GB RAM** | **1x 24GB GPU + 128GB RAM** |
 | **DeepSeek** | `deepseek-ai/DeepSeek-V4-Flash` | 284B MoE (13B act) | 528.9 GB | **2.5 GB VRAM + 35 GB RAM** | **1x 24GB GPU + 64GB RAM / Mac Studio** |
+| **Moonshot**| `moonshotai/Kimi-K2.6` | 1.04T MoE (48B act) | 2,080 GB | **4.2 GB VRAM + 128 GB RAM** | 1x 24GB GPU + 128GB RAM |
 | **Moonshot**| `moonshotai/Kimi-K3` | 2.8T MoE (104B act) | 5,200 GB | **5.0 GB VRAM + 240 GB RAM** | 1x 24GB GPU + 256GB RAM |
+| **Turing** | `turing/turing-trillion-1t` | 1.0T MoE (48B act) | 2,000 GB | **4.5 GB VRAM + 128 GB RAM** | 1x 24GB GPU + 128GB RAM |
 
 ### B. Universal Model Identification & Tri-Part Namespaces
 
