@@ -116,6 +116,8 @@ def fused_rmsnorm_swiglu_cuda(
     """
     Fused RMSNorm + Subspace SwiGLU + Residual on CUDA via Triton.
     """
+    if isinstance(active_tiles, int):
+        active_tiles = torch.arange(active_tiles, device=x.device)
     M, K = x.shape
     active_count = active_tiles.numel()
     out = torch.empty((M, K), device=x.device, dtype=x.dtype)
