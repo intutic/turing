@@ -413,5 +413,45 @@ Empirical measurements from `scripts/benchmark_fused_kernels_and_simd.py` and `s
 python scripts/run_gcp_master_validation_and_benchmarks.py
 ```
 
+---
 
+## 21. Empirical MoE Dynamic Placement & Colibrì Systems Benchmarks (GCP NVIDIA L4 & Apple Silicon Mac)
 
+Empirical measurements from `scripts/run_colibri_master_benchmarks.py` across **Google Cloud NVIDIA L4 GPU (24GB VRAM)** and **Apple Silicon Mac (MPS & CPU SIMD)**:
+
+### A. Multi-Token Prefill (Encoder) Vectorized Batch-Union Speedup
+
+| Sequence Length ($N$) | Hardware Platform | Vectorized Latency | Vectorized Throughput | Python Loop Latency | Measured Speedup |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| **128 tokens** | NVIDIA L4 GPU | $17.72\text{ ms}$ | $7,224\text{ tok/s}$ | $33.39\text{ ms}$ | **$1.88\times$ Faster** |
+| **512 tokens** | NVIDIA L4 GPU | $18.17\text{ ms}$ | $28,171\text{ tok/s}$ | $86.13\text{ ms}$ | **$4.74\times$ Faster** |
+| **1,024 tokens** | NVIDIA L4 GPU | $17.85\text{ ms}$ | $57,354\text{ tok/s}$ | $158.91\text{ ms}$ | **$8.90\times$ Faster** |
+| **2,048 tokens** | NVIDIA L4 GPU | $18.09\text{ ms}$ | **$113,205\text{ tok/s}$** | $306.16\text{ ms}$ | **$16.92\times$ Faster** |
+| **128 tokens** | Apple Silicon MPS | $81.62\text{ ms}$ | $1,568\text{ tok/s}$ | $104.62\text{ ms}$ | **$1.28\times$ Faster** |
+| **512 tokens** | Apple Silicon MPS | $119.36\text{ ms}$ | $4,289\text{ tok/s}$ | $164.02\text{ ms}$ | **$1.37\times$ Faster** |
+| **1,024 tokens** | Apple Silicon MPS | $117.88\text{ ms}$ | $8,687\text{ tok/s}$ | $216.09\text{ ms}$ | **$1.83\times$ Faster** |
+| **2,048 tokens** | Apple Silicon MPS | $102.84\text{ ms}$ | **$19,914\text{ tok/s}$** | $250.19\text{ ms}$ | **$2.43\times$ Faster** |
+
+### B. Batched Speculative Decode Verification Throughput
+
+| Speculative Batch Size ($B$) | NVIDIA L4 Latency | NVIDIA L4 Throughput | Apple Silicon MPS Latency | Apple Silicon MPS Throughput |
+|:---:|:---:|:---:|:---:|:---:|
+| **$B = 4$ Drafts** | $15.16\text{ ms}$ | $264\text{ tok/s}$ | $70.59\text{ ms}$ | $57\text{ tok/s}$ |
+| **$B = 16$ Drafts** | $23.76\text{ ms}$ | $673\text{ tok/s}$ | $85.91\text{ ms}$ | $186\text{ tok/s}$ |
+| **$B = 32$ Drafts** | $19.39\text{ ms}$ | $1,650\text{ tok/s}$ | $127.66\text{ ms}$ | $251\text{ tok/s}$ |
+| **$B = 64$ Drafts** | $17.34\text{ ms}$ | **$3,692\text{ tok/s}$** | $74.43\text{ ms}$ | **$860\text{ tok/s}$** |
+
+### C. MoE Routing History, Learned Pinning & Cache Thrashing Reduction
+
+| Metric / Optimizations | Baseline (Cold Start / Plain LRU) | Turing + Colibrì Optimizations | Verified Improvement |
+|:---|:---:|:---:|:---:|
+| **Mean Hit Rate (100-Turn Conversational Stream)** | $39.14\%$ (Un-seeded) | **$92.53\%$** (`RoutingHistoryTracker` Pins) | **$+53.39\%$ Hit Rate Gain** |
+| **LFRU Cache Evictions (2,000 Bursty Steps)** | $1,142$ evictions | **$56$ evictions** ($25\%+4$ Hysteresis Gate) | **$95.10\%$ Thrash Reduction** |
+| **Dispatch Decision Flips (100 Cycles @ Jitter)** | $22\text{ flips / 100 cycles}$ | **$0\text{ flips}$** (One-Pole EMA Decider) | **$+100.0\%$ Dispatch Stability** |
+
+### Reproduce Colibrì Benchmarks:
+```bash
+# Run master Colibri-inspired benchmark suite:
+python scripts/run_colibri_master_benchmarks.py --device cuda   # On NVIDIA GPU
+python scripts/run_colibri_master_benchmarks.py --device mps    # On Apple Silicon Mac
+```

@@ -1,0 +1,106 @@
+{
+  "timestamp": "2026-09-01T12:08:56Z",
+  "telemetry": {
+    "platform": "darwin",
+    "python_version": "3.11.9",
+    "torch_version": "2.9.1",
+    "device": "mps",
+    "cuda_available": false,
+    "mps_available": true,
+    "device_type": "Apple Silicon Metal Performance Shaders"
+  },
+  "suites": {
+    "routing_history_and_pinning": {
+      "suite": "routing_history_and_pinning",
+      "cold_initial_hit_rate_pct": 42.97,
+      "warm_initial_hit_rate_pct": 42.97,
+      "cold_avg_hit_rate_pct": 39.14,
+      "warm_avg_hit_rate_pct": 92.53,
+      "hit_rate_improvement_pct": 53.39,
+      "cold_time_ms": 4.62,
+      "warm_time_ms": 59.13,
+      "top_pinned_count": 8
+    },
+    "pilot_expert_prefetch": {
+      "suite": "pilot_expert_prefetch",
+      "sync_itl_ms": 2.192,
+      "pilot_itl_ms": 2.18,
+      "speedup_x": 1.01,
+      "latency_hiding_pct": 0.8,
+      "prefetch_hit_rate_pct": 100.0
+    },
+    "lfru_eviction_hysteresis": {
+      "suite": "lfru_eviction_hysteresis",
+      "lru_hit_rate_pct": 42.5,
+      "lfru_hit_rate_pct": 94.0,
+      "hit_rate_gain_pct": 51.5,
+      "lru_evictions": 1142,
+      "lfru_evictions": 56,
+      "thrashing_reduction_pct": 95.1
+    },
+    "vectorized_batch_union": {
+      "suite": "vectorized_batch_union",
+      "prefill_matrix": [
+        {
+          "seq_len": 128,
+          "vectorized_ms": 81.62,
+          "loop_ms": 104.62,
+          "tokens_per_sec": 1568.0,
+          "speedup_x": 1.28
+        },
+        {
+          "seq_len": 512,
+          "vectorized_ms": 119.36,
+          "loop_ms": 164.02,
+          "tokens_per_sec": 4289.0,
+          "speedup_x": 1.37
+        },
+        {
+          "seq_len": 1024,
+          "vectorized_ms": 117.88,
+          "loop_ms": 216.09,
+          "tokens_per_sec": 8687.0,
+          "speedup_x": 1.83
+        },
+        {
+          "seq_len": 2048,
+          "vectorized_ms": 102.84,
+          "loop_ms": 250.19,
+          "tokens_per_sec": 19914.0,
+          "speedup_x": 2.43
+        }
+      ],
+      "batched_spec_matrix": [
+        {
+          "batch_size": 4,
+          "latency_ms": 70.588,
+          "throughput_tok_s": 57.0
+        },
+        {
+          "batch_size": 16,
+          "latency_ms": 85.911,
+          "throughput_tok_s": 186.0
+        },
+        {
+          "batch_size": 32,
+          "latency_ms": 127.655,
+          "throughput_tok_s": 251.0
+        },
+        {
+          "batch_size": 64,
+          "latency_ms": 74.433,
+          "throughput_tok_s": 860.0
+        }
+      ],
+      "max_speedup_x": 2.43
+    },
+    "bandwidth_adaptive_ema": {
+      "suite": "bandwidth_adaptive_ema",
+      "raw_flips": 22,
+      "ema_flips": 0,
+      "flips_avoided": 22,
+      "stability_gain_pct": 100.0
+    }
+  },
+  "total_benchmark_duration_seconds": 35.1
+}
