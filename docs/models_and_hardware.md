@@ -35,7 +35,18 @@ Turing Engine features a **Universal Dynamic Model Resolver** (`ModelResolver`) 
 | **Alibaba & NVIDIA** | [`nvidia/Qwen3.8-2.4T-A95B-NVFP4`](qwen_2_4t_nvfp4_guide.md) | 2.4T MoE (95B act) | 1,440 GB | **4.2 GB VRAM + NVMe Tier** | **1x 24GB GPU (L4/4090) + NVMe / Mac** |
 | **Turing** | `turing/turing-trillion-1t` | 1.0T MoE (48B act) | 2,000 GB | **4.5 GB VRAM + 128 GB RAM** | 1x 24GB GPU + 128GB RAM |
 
-### B. Universal Model Identification & Tri-Part Namespaces
+### B. Multi-Model Pipeline Co-Residency Models
+
+| Pipeline Role | Supported Model Architectures | Target Task | Single-GPU Memory |
+| :--- | :--- | :--- | :---: |
+| **Vector Embeddings** | `BAAI/bge-m3`, `BAAI/bge-large-en-v1.5`, `sentence-transformers/*` | `POST /v1/embeddings` | **~1.1 GB** |
+| **Cross-Encoder Reranking**| `BAAI/bge-reranker-large`, `BAAI/bge-reranker-base` | `POST /v1/rerank` | **~1.3 GB** |
+| **Zero-Shot Span Extraction**| `urchade/gliner_base`, `urchade/gliner_large` | `POST /v1/extract` | **~0.6 GB** |
+| **Document OCR Parsing** | `DS4SD/docling-parse`, `facebook/nougat-base` | `POST /v1/extract` | **~1.2 GB** |
+| **Generative LLM Engine** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`, `meta-llama/Llama-3.1-8B` | `POST /v1/chat/completions`| **~3.2 GB** |
+| **Full 5-Stage Agent Pipeline**| **All 5 Models Co-Resident on 1 GPU** | **End-to-End Pipeline** | **7.42 GB Total VRAM** |
+
+### C. Universal Model Identification & Tri-Part Namespaces
 
 Turing Engine's `ModelResolver` seamlessly parses all industry-standard model naming patterns:
 

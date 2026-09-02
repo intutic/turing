@@ -14,7 +14,7 @@ Get Turing Engine running locally in under 30 seconds.
 === "Pre-Built Binary Wheel"
     ```bash
     # Direct wheel download for macOS Apple Silicon (arm64):
-    pip install https://github.com/intutic/turing/releases/download/v1.3.0/turing_engine-1.3.0-cp311-cp311-macosx_15_0_arm64.whl
+    pip install https://github.com/intutic/turing/releases/download/v1.4.0/turing_engine-1.4.0-cp311-cp311-macosx_15_0_arm64.whl
     ```
 
 
@@ -152,4 +152,22 @@ from turing.integrations.langchain import ChatTuring
 
 llm = ChatTuring(model="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", base_url="http://localhost:8000/v1")
 print(llm.invoke("Explain KV cache compression in 2 sentences:")["content"])
+```
+
+### I. Multi-Model Pipeline Serving (5 Models on 1 GPU)
+```bash
+# Launch multi-model server hosting Embedder, Reranker, Extractor, and LM:
+turing serve \
+  --model deepseek-ai/DeepSeek-R1-Distill-Qwen-7B \
+  --enable-multi-model \
+  --port 8000
+```
+
+### J. Hybrid Gated Softmax Anchoring (Lossless RAG Recall)
+```bash
+# Launch with hybrid linear recurrence and factual softmax anchors:
+turing serve \
+  --model deepseek-ai/DeepSeek-R1-Distill-Qwen-7B \
+  --memory-mode hybrid \
+  --port 8000
 ```
