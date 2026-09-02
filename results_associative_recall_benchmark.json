@@ -1,0 +1,40 @@
+{
+  "associative_recall_accuracy": {
+    "attn": {
+      "4": 28.12,
+      "8": 10.16,
+      "12": 7.03,
+      "16": 9.38
+    },
+    "linattn": {
+      "4": 2.34,
+      "8": 0.0,
+      "12": 0.0,
+      "16": 0.78
+    },
+    "decayattn": {
+      "4": 2.34,
+      "8": 0.0,
+      "12": 0.78,
+      "16": 1.56
+    },
+    "turing_hybrid": {
+      "4": 25.0,
+      "8": 14.84,
+      "12": 8.59,
+      "16": 4.69
+    }
+  },
+  "kernel_throughput": {
+    "batch_size": 4,
+    "num_heads": 8,
+    "head_dim": 64,
+    "seq_len": 1024,
+    "dense_pairwise_prefill_ms": 5.11,
+    "chunked_in_sram_prefill_ms": 3.167,
+    "prefill_speedup": 1.61,
+    "single_step_decode_us": 64.5,
+    "decode_throughput_tok_s": 62019.0
+  },
+  "device": "mps"
+}

@@ -48,6 +48,7 @@
 #include "turing_fast_hash_tensor.hpp"
 #include "turing_sampler.hpp"
 #include "turing_json_fast_scan.hpp"
+#include "turing_chunked_decay.hpp"
 #include "turing_gguf_simd.hpp"
 #include "turing_io_uring.hpp"
 #include "turing_cufile.hpp"
@@ -1695,6 +1696,36 @@ PYBIND11_MODULE(turing_csrc, m) {
         );
         return out_arr;
     }, py::arg("hidden"), py::arg("cu_seqlens"), "Fast SIMD variable-length segment CLS pooling");
+
+    // Fast SIMD Learned-Decay Recurrence Step
+    m.def("learned_decay_step_fast", [](
+        py::array_t<float, py::array::c_style | py::array::forcecast> q_arr,
+        py::array_t<float, py::array::c_style | py::array::forcecast> k_arr,
+        py::array_t<float, py::array::c_style | py::array::forcecast> v_arr,
+        py::array_t<float, py::array::c_style> state_arr,
+        float b_decay
+    ) {
+        py::buffer_info q_buf = q_arr.request();
+        py::buffer_info k_buf = k_arr.request();
+        py::buffer_info v_buf = v_arr.request();
+        py::buffer_info s_buf = state_arr.request();
+
+        int D = static_cast<int>(q_buf.shape[0]);
+        py::array_t<float> out_arr(D);
+        py::buffer_info o_buf = out_arr.request();
+
+        turing::NativeChunkedDecay::step_forward(
+            static_cast<const float*>(q_buf.ptr),
+            static_cast<const float*>(k_buf.ptr),
+            static_cast<const float*>(v_buf.ptr),
+            static_cast<float*>(s_buf.ptr),
+            static_cast<float*>(o_buf.ptr),
+            b_decay,
+            static_cast<size_t>(D)
+        );
+
+        return out_arr;
+    }, py::arg("q"), py::arg("k"), py::arg("v"), py::arg("state"), py::arg("b_decay"), "Fast SIMD learned-decay step recurrence");
 }
 
 
