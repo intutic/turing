@@ -508,3 +508,45 @@ python scripts/run_gcp_master_validation_and_benchmarks_v5.py
 python scripts/benchmark_fused_kernels_and_simd_v5.py
 ```
 
+---
+
+## 23. Next-Gen Encoder & Decoder Fusions & Micro-Scaling Suite (v6.0)
+
+Empirical telemetry collected on physical **Google Cloud NVIDIA L4 GPU (24GB VRAM, CUDA 13.0)** and **Apple Silicon Mac (Metal MPS)** with zero mocks (`results_nextgen_speedups_cuda.json` and `results_nextgen_speedups_mps.json`):
+
+### A. Split-K Paged Flash-Decode Attention GEMV
+
+*Evaluated across Batch Size $B=4$, 8 Heads, Head Dim 128 on NVIDIA L4 GPU:*
+
+| Context Length ($N$) | Standard Paged Decode Latency | Split-K Flash-Decode Latency | Measured Hardware Speedup | Measured Decode TPS |
+|:---:|:---:|:---:|:---:|:---:|
+| **$N = 1,024$** | $0.18\text{ ms}$ | $0.49\text{ ms}$ | *Standard Paged Optimal* | $8,140\text{ tok/s}$ |
+| **$N = 4,096$** | $0.39\text{ ms}$ | **$0.29\text{ ms}$** | **1.36× Faster** | **$13,966\text{ tok/s}$** |
+| **$N = 16,384$** | $1.22\text{ ms}$ | **$1.11\text{ ms}$** | **1.10× Faster** | **$3,589\text{ tok/s}$** |
+| **$N = 32,768$** | $2.35\text{ ms}$ | **$2.24\text{ ms}$** | **1.05× Faster** | **$1,785\text{ tok/s}$** |
+
+### B. Fused Short-Causal Conv + Delta State Recurrence (KDA Step)
+* **Step Latency**: **$2.61\text{ ms}$** on NVIDIA L4 ($766\text{ tok/s}$ across batch/heads).
+* **Fused Register Flow**: In-SRAM 1D causal convolution window ($k=4$), SiLU activation, L2 query/key normalization, and delta state recurrence $S_t = \text{Diag}(\alpha) S_{t-1} + K_t \delta^T$ without intermediate DRAM roundtrips.
+
+### C. Exact Fed-Token Prefix Cache Bypass on Multi-Turn Dialogue
+* **Conversational Scenario**: 2,048-token active dialogue history with 128 new prompt tokens (total 2,176 prompt tokens).
+* **SIMD Match Latency**: **$152.42\,\mu\text{s}$**.
+* **Bypassed Prompt Prefill Compute**: **$94.1\%$ bypassed** (zero re-prefill for turns $1\dots N-1$).
+
+### D. Two-Level Grouped Micro-Scaling (NVFP4 / GS-32 Pattern)
+* **Quantize + Dequantize Step**: $305.46\,\mu\text{s}$.
+* **Cosine Signal Fidelity**: **$99.999\%$** ($0.99999$).
+* **Physical Memory Savings**: **$-75.0\%$** vs FP16 KV tensors.
+
+### E. 2:4 Structured Sparse Subspace Prompt Prefill
+* **Dense FFN Baseline**: $15.54\text{ ms}$ ($M=512, K=4096, N=14336$).
+* **Sparse Subspace Prefill**: **$12.10\text{ ms}$** (**$1.28\times$ Faster**).
+
+### Reproduce Next-Gen Suite:
+```bash
+python scripts/benchmark_nextgen_speedups.py --device cuda
+python scripts/benchmark_nextgen_speedups.py --device mps
+```
+
+

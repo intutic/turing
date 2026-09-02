@@ -54,6 +54,8 @@
 #include "turing_safetensors_fast_header.hpp"
 #include "turing_traffic_manager.hpp"
 #include "turing_reasoning_scanner.hpp"
+#include "turing_prefix_match.hpp"
+#include "turing_kda_simd.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -1597,7 +1599,57 @@ PYBIND11_MODULE(turing_csrc, m) {
         .def_property_readonly("thinking_content", &turing::NativeReasoningFilter::get_thinking_content)
         .def_property_readonly("final_content", &turing::NativeReasoningFilter::get_final_content)
         .def_property_readonly("in_thinking_block", &turing::NativeReasoningFilter::is_in_thinking_block);
+
+    // Fast SIMD Common Token Prefix Matcher
+    m.def("find_common_prefix_fast", [](py::array_t<int32_t, py::array::c_style | py::array::forcecast> tokens_a,
+                                        py::array_t<int32_t, py::array::c_style | py::array::forcecast> tokens_b) -> int {
+        py::buffer_info buf_a = tokens_a.request();
+        py::buffer_info buf_b = tokens_b.request();
+        const int32_t* ptr_a = static_cast<const int32_t*>(buf_a.ptr);
+        const int32_t* ptr_b = static_cast<const int32_t*>(buf_b.ptr);
+        return turing::find_common_token_prefix(ptr_a, static_cast<int>(buf_a.size), ptr_b, static_cast<int>(buf_b.size));
+    }, py::arg("tokens_a"), py::arg("tokens_b"), "Fast SIMD common prefix matcher");
+
+    // Native C++20 AVX2 SIMD KDA (Kimi Delta Attention) Step
+    m.def("kda_step_fast", [](
+        py::array_t<float, py::array::c_style | py::array::forcecast> qkv_arr,
+        py::array_t<float, py::array::c_style> conv_state_arr,
+        py::array_t<float, py::array::c_style | py::array::forcecast> conv_weight_arr,
+        py::array_t<float, py::array::c_style> state_arr,
+        py::array_t<float, py::array::c_style | py::array::forcecast> gate_arr,
+        py::array_t<float, py::array::c_style | py::array::forcecast> beta_arr,
+        float norm_eps
+    ) {
+        py::buffer_info qkv_buf = qkv_arr.request();
+        py::buffer_info cs_buf = conv_state_arr.request();
+        py::buffer_info cw_buf = conv_weight_arr.request();
+        py::buffer_info s_buf = state_arr.request();
+        py::buffer_info g_buf = gate_arr.request();
+        py::buffer_info b_buf = beta_arr.request();
+
+        int B = static_cast<int>(qkv_buf.shape[0]);
+        int H = static_cast<int>(qkv_buf.shape[2]);
+        int D = static_cast<int>(qkv_buf.shape[3]);
+        int kernel_size = static_cast<int>(cw_buf.shape[3]);
+
+        py::array_t<float> out_arr({B, H, D});
+        py::buffer_info out_buf = out_arr.request();
+
+        turing::kda_step_avx2(
+            static_cast<const float*>(qkv_buf.ptr),
+            static_cast<float*>(cs_buf.ptr),
+            static_cast<const float*>(cw_buf.ptr),
+            static_cast<float*>(s_buf.ptr),
+            static_cast<const float*>(g_buf.ptr),
+            static_cast<const float*>(b_buf.ptr),
+            static_cast<float*>(out_buf.ptr),
+            B, H, D, kernel_size, norm_eps
+        );
+
+        return out_arr;
+    }, py::arg("qkv"), py::arg("conv_state"), py::arg("conv_weight"), py::arg("state"), py::arg("gate"), py::arg("beta"), py::arg("norm_eps") = 1e-5f);
 }
+
 
 
 

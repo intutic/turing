@@ -107,12 +107,53 @@ class CacheLineage:
 class CleanBaseLineageBuffer:
     peak_live_caches: ClassVar[int] = 2
     
-    def __init__(self, original_kv: List[torch.Tensor], use_svd_compression: bool = False):
+    def __init__(self, original_kv: List[torch.Tensor], use_svd_compression: bool = False, initial_token_ids: Optional[List[int]] = None):
         self._original_kv = [t.detach().clone() for t in original_kv]
         self.use_svd_compression = use_svd_compression
+        self._fed_tokens: List[int] = list(initial_token_ids) if initial_token_ids else []
+        self._is_tainted: bool = False
         
     def get_clean_base(self) -> List[torch.Tensor]:
         return [t.detach().clone() for t in self._original_kv]
+
+    def record_fed_tokens(self, token_ids: List[int]) -> None:
+        """Records token IDs that have been processed into this cache state."""
+        self._fed_tokens.extend(token_ids)
+
+    def mark_tainted(self) -> None:
+        """Marks the cache state as tainted (non-deterministic / modal input) preventing prefix reuse."""
+        self._is_tainted = True
+
+    @property
+    def is_tainted(self) -> bool:
+        return self._is_tainted
+
+    @property
+    def fed_tokens(self) -> List[int]:
+        return list(self._fed_tokens)
+
+    def find_common_prefix_length(self, new_prompt_token_ids: List[int]) -> int:
+        """
+        O(1) fast common prefix search.
+        Returns number of leading tokens that exactly match the already-fed token history.
+        """
+        if self._is_tainted or not self._fed_tokens or not new_prompt_token_ids:
+            return 0
+
+        try:
+            import turing.turing_csrc as turing_csrc
+            import numpy as np
+            arr1 = np.array(self._fed_tokens, dtype=np.int32)
+            arr2 = np.array(new_prompt_token_ids, dtype=np.int32)
+            return int(turing_csrc.find_common_prefix_fast(arr1, arr2))
+        except Exception:
+            pass
+
+        match_len = 0
+        limit = min(len(self._fed_tokens), len(new_prompt_token_ids))
+        while match_len < limit and self._fed_tokens[match_len] == new_prompt_token_ids[match_len]:
+            match_len += 1
+        return match_len
 
 @runtime_checkable
 class TurnStrategy(Protocol):

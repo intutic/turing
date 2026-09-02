@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 298/298 Passing](https://img.shields.io/badge/Tests-298%2F298%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 306/306 Passing](https://img.shields.io/badge/Tests-306%2F306%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 

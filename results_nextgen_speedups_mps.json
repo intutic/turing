@@ -1,0 +1,70 @@
+{
+  "timestamp": "2026-09-02T02:10:41Z",
+  "device": "mps",
+  "device_name": "Apple Silicon Metal (MPS)",
+  "total_duration_seconds": 11.82,
+  "results": [
+    {
+      "suite": "split_k_paged_decode",
+      "metrics": [
+        {
+          "seq_len": 1024,
+          "batch_size": 4,
+          "std_ms": 6.504,
+          "split_k_ms": 6.928,
+          "speedup": 0.94,
+          "tok_s": 577.3
+        },
+        {
+          "seq_len": 4096,
+          "batch_size": 4,
+          "std_ms": 21.908,
+          "split_k_ms": 21.849,
+          "speedup": 1.0,
+          "tok_s": 183.1
+        },
+        {
+          "seq_len": 16384,
+          "batch_size": 4,
+          "std_ms": 72.949,
+          "split_k_ms": 72.457,
+          "speedup": 1.01,
+          "tok_s": 55.2
+        },
+        {
+          "seq_len": 32768,
+          "batch_size": 4,
+          "std_ms": 123.691,
+          "split_k_ms": 125.22,
+          "speedup": 0.99,
+          "tok_s": 31.9
+        }
+      ]
+    },
+    {
+      "suite": "kda_recurrence",
+      "latency_us": 4567.14,
+      "tok_s": 437.9
+    },
+    {
+      "suite": "prefix_cache_bypass",
+      "history_tokens": 2048,
+      "matched_tokens": 2048,
+      "match_latency_us": 69.68,
+      "compute_reduction_pct": 94.12
+    },
+    {
+      "suite": "grouped_micro_scaling",
+      "latency_us": 51.31,
+      "cosine_fidelity_pct": 99.999,
+      "memory_savings_pct": 75.0
+    },
+    {
+      "suite": "sparse_subspace_prefill",
+      "tokens": 512,
+      "dense_ms": 1.502,
+      "sparse_ms": 1.012,
+      "speedup": 1.48
+    }
+  ]
+}

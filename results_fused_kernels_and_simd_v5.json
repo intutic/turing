@@ -1,0 +1,122 @@
+[
+  {
+    "name": "MoE Block-GEMM",
+    "baseline_ms": 0.34145396000894834,
+    "fused_ms": 2.901720205009042,
+    "speedup": 0.11767294428302207
+  },
+  {
+    "name": "Paged Decode GEMV",
+    "results": [
+      {
+        "batch": 1,
+        "baseline_ms": 0.5494983400058118,
+        "fused_ms": 0.8928962500067428,
+        "speedup": 0.615411185791924,
+        "tok_per_sec": 1119.9509461401012
+      },
+      {
+        "batch": 4,
+        "baseline_ms": 2.5636195900005987,
+        "fused_ms": 3.824277079984313,
+        "speedup": 0.6703540398310037,
+        "tok_per_sec": 1045.9493170448852
+      },
+      {
+        "batch": 8,
+        "baseline_ms": 4.4142037499841535,
+        "fused_ms": 7.674472919970867,
+        "speedup": 0.5751800541894296,
+        "tok_per_sec": 1042.4168647702218
+      },
+      {
+        "batch": 16,
+        "baseline_ms": 9.28708583000116,
+        "fused_ms": 15.310383750002075,
+        "speedup": 0.6065873972623255,
+        "tok_per_sec": 1045.042388307075
+      },
+      {
+        "batch": 32,
+        "baseline_ms": 19.1733904099965,
+        "fused_ms": 31.100204579997808,
+        "speedup": 0.6165036747805809,
+        "tok_per_sec": 1028.9321382979228
+      }
+    ]
+  },
+  {
+    "name": "Linear Recurrence Step",
+    "baseline_us": 292.80875000404194,
+    "fused_us": 326.1339179953211,
+    "speedup": 0.8978175339868905
+  },
+  {
+    "name": "k-Slot Pooling",
+    "results": [
+      {
+        "N": 1024,
+        "baseline_ms": 1.335080819990253,
+        "fused_ms": 1.3058558400371112,
+        "speedup": 1.0223799435260108
+      },
+      {
+        "N": 4096,
+        "baseline_ms": 4.526599160017213,
+        "fused_ms": 4.477519159991061,
+        "speedup": 1.0109614271368634
+      },
+      {
+        "N": 16384,
+        "baseline_ms": 16.51093166001374,
+        "fused_ms": 17.136626680003246,
+        "speedup": 0.9634878537256325
+      },
+      {
+        "N": 32768,
+        "baseline_ms": 40.672705820034025,
+        "fused_ms": 39.83058165998955,
+        "speedup": 1.0211426528297578
+      }
+    ]
+  },
+  {
+    "name": "Speculative Verify",
+    "baseline_us": 34.96570899733342,
+    "fused_us": 89.81612500065239,
+    "speedup": 0.3893032459046685
+  },
+  {
+    "name": "LFRU Cache",
+    "baseline_ms": 9.223375000146916,
+    "cpp_ms": 13.565124998422107,
+    "speedup": 0.679932916299686,
+    "ops_per_sec": 3685922.540766561
+  },
+  {
+    "name": "Reasoning Tag Filter",
+    "baseline_ms": 3.0430420010816306,
+    "cpp_ms": 6.664874999842141,
+    "speedup": 0.45657900578085947,
+    "tok_per_sec": 7502016.167022526
+  },
+  {
+    "name": "Pointer Tensor Hash",
+    "baseline_ms": 52.13851331995102,
+    "cpp_ms": 10.720994160001283,
+    "speedup": 4.863216278437445,
+    "bandwidth_gb_s": 5.829683242733203
+  },
+  {
+    "name": "Safetensors Header Parser",
+    "baseline_us": 67.68802100123139,
+    "cpp_us": 77.84779150097165,
+    "speedup": 0.8694918596423709
+  },
+  {
+    "name": "AI Traffic Manager",
+    "baseline_ms": 30.781875000684522,
+    "cpp_ms": 26.29745800004457,
+    "speedup": 1.1705266341953031
+  }
+]

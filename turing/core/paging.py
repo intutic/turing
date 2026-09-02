@@ -265,5 +265,111 @@ class StaticPagedKVPool:
         }
 
 
+class GroupedMicroScalePagedKVPool:
+    """
+    Paged KV Pool with Two-Level Micro-Scaling (NVFP4 / Colibrì GS pattern).
+    Stores INT8 / FP4 quantized coordinates alongside fine-grained sub-block scales
+    (e.g., 1 float16 scale per gs=32 channels), preventing outlier dilation.
+    """
+    def __init__(
+        self,
+        num_layers: int,
+        num_heads: int,
+        head_dim: int,
+        page_size: int = 16,
+        max_total_pages: int = 1024,
+        group_size: int = 32,
+        device: torch.device = torch.device("cpu"),
+    ):
+        self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.page_size = page_size
+        self.max_total_pages = max_total_pages
+        self.group_size = group_size
+        self.num_groups = (head_dim + group_size - 1) // group_size
+        self.device = device
+
+        self.k_q = torch.zeros(
+            (num_layers, max_total_pages, num_heads, page_size, head_dim),
+            dtype=torch.int8, device=device
+        )
+        self.v_q = torch.zeros(
+            (num_layers, max_total_pages, num_heads, page_size, head_dim),
+            dtype=torch.int8, device=device
+        )
+
+        self.k_scales = torch.zeros(
+            (num_layers, max_total_pages, num_heads, page_size, self.num_groups),
+            dtype=torch.float16, device=device
+        )
+        self.v_scales = torch.zeros(
+            (num_layers, max_total_pages, num_heads, page_size, self.num_groups),
+            dtype=torch.float16, device=device
+        )
+
+        self.free_page_indices: List[int] = list(range(max_total_pages))
+        self.allocated_pages: Dict[str, List[int]] = {}
+
+    def allocate_pages(self, request_id: str, num_pages: int) -> List[int]:
+        if len(self.free_page_indices) < num_pages:
+            raise MemoryError(f"Out of micro-scale KV pages: requested {num_pages}, available {len(self.free_page_indices)}")
+        pages = [self.free_page_indices.pop(0) for _ in range(num_pages)]
+        if request_id not in self.allocated_pages:
+            self.allocated_pages[request_id] = []
+        self.allocated_pages[request_id].extend(pages)
+        return pages
+
+    def free_pages(self, request_id: str):
+        pages = self.allocated_pages.pop(request_id, [])
+        for p in pages:
+            if p not in self.free_page_indices:
+                self.free_page_indices.append(p)
+        self.free_page_indices.sort()
+
+    def write_token(
+        self,
+        layer_idx: int,
+        page_id: int,
+        slot_idx: int,
+        k: torch.Tensor,
+        v: torch.Tensor
+    ):
+        k_g = k.view(self.num_heads, self.num_groups, self.group_size)
+        v_g = v.view(self.num_heads, self.num_groups, self.group_size)
+
+        k_amax = torch.amax(torch.abs(k_g), dim=-1, keepdim=True).clamp(min=1e-5)
+        v_amax = torch.amax(torch.abs(v_g), dim=-1, keepdim=True).clamp(min=1e-5)
+
+        k_scale = k_amax / 127.0
+        v_scale = v_amax / 127.0
+
+        k_quant = torch.clamp(torch.round(k_g / k_scale), -128, 127).to(torch.int8)
+        v_quant = torch.clamp(torch.round(v_g / v_scale), -128, 127).to(torch.int8)
+
+        self.k_q[layer_idx, page_id, :, slot_idx, :] = k_quant.view(self.num_heads, self.head_dim)
+        self.v_q[layer_idx, page_id, :, slot_idx, :] = v_quant.view(self.num_heads, self.head_dim)
+
+        self.k_scales[layer_idx, page_id, :, slot_idx, :] = k_scale.squeeze(-1).to(torch.float16)
+        self.v_scales[layer_idx, page_id, :, slot_idx, :] = v_scale.squeeze(-1).to(torch.float16)
+
+    def read_token(
+        self,
+        layer_idx: int,
+        page_id: int,
+        slot_idx: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        k_q = self.k_q[layer_idx, page_id, :, slot_idx, :].view(self.num_heads, self.num_groups, self.group_size).float()
+        v_q = self.v_q[layer_idx, page_id, :, slot_idx, :].view(self.num_heads, self.num_groups, self.group_size).float()
+
+        k_sc = self.k_scales[layer_idx, page_id, :, slot_idx, :].unsqueeze(-1).float()
+        v_sc = self.v_scales[layer_idx, page_id, :, slot_idx, :].unsqueeze(-1).float()
+
+        k_deq = (k_q * k_sc).view(self.num_heads, self.head_dim).to(torch.float16)
+        v_deq = (v_q * v_sc).view(self.num_heads, self.head_dim).to(torch.float16)
+        return k_deq, v_deq
+
+
+
 
 
