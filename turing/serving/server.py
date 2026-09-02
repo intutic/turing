@@ -22,8 +22,28 @@ from .ollama_api import (
 from .structured import StructuredOutputParser
 from .tools import ToolCallingHandler
 from .kv_events import KVBlockEventPublisher
-from .traffic import AdmissionController, LanePolicy, Lane
+from .traffic import AdmissionController, LanePolicy, Lane, AdaptiveComputeBatcher
+from .multi_model import ElasticMultiModelManager, TaskType
 from .. import __version__
+
+class EmbeddingRequest(BaseModel):
+    input: Union[str, List[str]]
+    model: Optional[str] = "turing-embed-default"
+    encoding_format: Optional[str] = "float"
+    dimensions: Optional[int] = None
+    user: Optional[str] = None
+
+class RerankRequest(BaseModel):
+    query: str
+    documents: List[str]
+    model: Optional[str] = "turing-reranker-default"
+    top_n: Optional[int] = None
+
+class ExtractRequest(BaseModel):
+    text: str
+    labels: List[str]
+    model: Optional[str] = "turing-extractor-default"
+    score_threshold: Optional[float] = 0.50
 
 class ChatMessage(BaseModel):
     role: str
@@ -82,6 +102,7 @@ def create_app(
             await engine.stop()
 
     app = FastAPI(title="Turing Engine High-Performance Inference Server", version=__version__, lifespan=lifespan)
+    multi_model_mgr = ElasticMultiModelManager(device=engine.device)
 
     def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
         """
@@ -231,6 +252,76 @@ def create_app(
                     "parent": None,
                 }
             ],
+        }
+
+    @app.post("/v1/embeddings")
+    async def create_embeddings(req: EmbeddingRequest):
+        """OpenAI-compatible embeddings endpoint powered by fused zero-sync segment pooling."""
+        inputs = [req.input] if isinstance(req.input, str) else req.input
+        if not inputs:
+            raise HTTPException(status_code=400, detail="Input text cannot be empty")
+
+        embeddings = multi_model_mgr.encode(model_id=req.model or "turing-embed", texts=inputs)
+
+        data = [
+            {
+                "object": "embedding",
+                "embedding": emb,
+                "index": i,
+            }
+            for i, emb in enumerate(embeddings)
+        ]
+
+        total_tokens = sum(len(t.split()) for t in inputs)
+        return {
+            "object": "list",
+            "data": data,
+            "model": req.model,
+            "usage": {
+                "prompt_tokens": total_tokens,
+                "total_tokens": total_tokens,
+            },
+        }
+
+    @app.post("/v1/rerank")
+    async def create_rerank(req: RerankRequest):
+        """Cross-encoder relevance scoring and document reranking endpoint."""
+        if not req.documents:
+            raise HTTPException(status_code=400, detail="Documents list cannot be empty")
+
+        ranked_results = multi_model_mgr.score(
+            model_id=req.model or "turing-rerank",
+            query=req.query,
+            candidates=req.documents,
+        )
+        if req.top_n is not None and req.top_n > 0:
+            ranked_results = ranked_results[:req.top_n]
+
+        return {
+            "model": req.model,
+            "results": ranked_results,
+            "meta": {
+                "total_documents": len(req.documents),
+                "top_n": len(ranked_results),
+            },
+        }
+
+    @app.post("/v1/extract")
+    async def create_extract(req: ExtractRequest):
+        """Structured entity and token span extraction endpoint."""
+        if not req.text or not req.labels:
+            raise HTTPException(status_code=400, detail="Text and labels must not be empty")
+
+        entities = multi_model_mgr.extract(
+            model_id=req.model or "turing-extract",
+            text=req.text,
+            labels=req.labels,
+            score_threshold=req.score_threshold or 0.50,
+        )
+        return {
+            "model": req.model,
+            "data": entities,
+            "count": len(entities),
         }
 
     @app.post("/v1/completions/render")

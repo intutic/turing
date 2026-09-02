@@ -56,6 +56,7 @@
 #include "turing_reasoning_scanner.hpp"
 #include "turing_prefix_match.hpp"
 #include "turing_kda_simd.hpp"
+#include "turing_segment_pool.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -1648,6 +1649,52 @@ PYBIND11_MODULE(turing_csrc, m) {
 
         return out_arr;
     }, py::arg("qkv"), py::arg("conv_state"), py::arg("conv_weight"), py::arg("state"), py::arg("gate"), py::arg("beta"), py::arg("norm_eps") = 1e-5f);
+
+    // Fast SIMD Variable-Length Segment Mean-Pool
+    m.def("segment_mean_pool_fast", [](
+        py::array_t<float, py::array::c_style | py::array::forcecast> hidden_arr,
+        py::array_t<int32_t, py::array::c_style | py::array::forcecast> cu_seqlens_arr
+    ) {
+        py::buffer_info h_buf = hidden_arr.request();
+        py::buffer_info s_buf = cu_seqlens_arr.request();
+
+        int hidden_dim = static_cast<int>(h_buf.shape[1]);
+        int num_seqs = static_cast<int>(s_buf.shape[0]) - 1;
+
+        py::array_t<float> out_arr({num_seqs, hidden_dim});
+        py::buffer_info o_buf = out_arr.request();
+
+        turing::segment_mean_pool_simd(
+            static_cast<const float*>(h_buf.ptr),
+            static_cast<const int32_t*>(s_buf.ptr),
+            static_cast<float*>(o_buf.ptr),
+            num_seqs, hidden_dim
+        );
+        return out_arr;
+    }, py::arg("hidden"), py::arg("cu_seqlens"), "Fast SIMD variable-length segment mean-pooling");
+
+    // Fast SIMD Variable-Length Segment CLS Extraction
+    m.def("segment_cls_pool_fast", [](
+        py::array_t<float, py::array::c_style | py::array::forcecast> hidden_arr,
+        py::array_t<int32_t, py::array::c_style | py::array::forcecast> cu_seqlens_arr
+    ) {
+        py::buffer_info h_buf = hidden_arr.request();
+        py::buffer_info s_buf = cu_seqlens_arr.request();
+
+        int hidden_dim = static_cast<int>(h_buf.shape[1]);
+        int num_seqs = static_cast<int>(s_buf.shape[0]) - 1;
+
+        py::array_t<float> out_arr({num_seqs, hidden_dim});
+        py::buffer_info o_buf = out_arr.request();
+
+        turing::segment_cls_pool_simd(
+            static_cast<const float*>(h_buf.ptr),
+            static_cast<const int32_t*>(s_buf.ptr),
+            static_cast<float*>(o_buf.ptr),
+            num_seqs, hidden_dim
+        );
+        return out_arr;
+    }, py::arg("hidden"), py::arg("cu_seqlens"), "Fast SIMD variable-length segment CLS pooling");
 }
 
 
