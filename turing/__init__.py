@@ -2,7 +2,7 @@
 Turing Engine: Edge-to-Cloud Distributed Subspace LLM Inference Runtime.
 """
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 
 __author__ = "Ishan Gupta"
