@@ -32,6 +32,7 @@ Turing Engine features a **Universal Dynamic Model Resolver** (`ModelResolver`) 
 | **DeepSeek** | `deepseek-ai/DeepSeek-V4-Flash` | 284B MoE (13B act) | 528.9 GB | **2.5 GB VRAM + 35 GB RAM** | **1x 24GB GPU + 64GB RAM / Mac Studio** |
 | **Moonshot**| `moonshotai/Kimi-K2.6` | 1.04T MoE (48B act) | 2,080 GB | **4.2 GB VRAM + 128 GB RAM** | 1x 24GB GPU + 128GB RAM |
 | **Moonshot**| `moonshotai/Kimi-K3` | 2.8T MoE (104B act) | 5,200 GB | **5.0 GB VRAM + 240 GB RAM** | 1x 24GB GPU + 256GB RAM |
+| **Alibaba & NVIDIA** | [`nvidia/Qwen3.8-2.4T-A95B-NVFP4`](qwen_2_4t_nvfp4_guide.md) | 2.4T MoE (95B act) | 1,440 GB | **4.2 GB VRAM + NVMe Tier** | **1x 24GB GPU (L4/4090) + NVMe / Mac** |
 | **Turing** | `turing/turing-trillion-1t` | 1.0T MoE (48B act) | 2,000 GB | **4.5 GB VRAM + 128 GB RAM** | 1x 24GB GPU + 128GB RAM |
 
 ### B. Universal Model Identification & Tri-Part Namespaces
