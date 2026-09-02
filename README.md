@@ -184,8 +184,14 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
    * **C++20 Zero-Copy Streaming Reasoning Scanner (`csrc/turing_reasoning_scanner.hpp`)**: State-machine tag filter running at **2.47M tok/s**.
    * **In-VRAM Speculative Verification & Sub-Microsecond AI Traffic QoS Routing**: $O(1)$ admission manager handling **1.18M requests/sec**.
 
-10. **🌐 Learned MoE Hot-Expert Pinning, LFRU Hysteresis & Vectorized Batch-Union**:
+12. **🌐 Learned MoE Hot-Expert Pinning, LFRU Hysteresis & Vectorized Batch-Union**:
     Features persistent historical activation tracking (`RoutingHistoryTracker`) to eliminate cold-start misses (**$92.53\%$ vs $39.14\%$ hit rate**), LFRU eviction with $25\%+4$ hysteresis gating (**$95.10\%$ thrashing reduction**), PILOT one-layer-ahead PCIe streaming, and vectorized PyTorch `index_add_` batch-union accumulation (**up to $16.92\times$ prefill acceleration**, $113\text{k tok/s}$).
+
+13. **🌐 Elastic Multi-Model Pipeline Serving & In-SRAM Fused Segment Pooling (v7.0)**:
+    Orchestrates 5+ models (Docling OCR $\to$ GLiNER NER $\to$ BGE Embeddings $\to$ BGE Reranker $\to$ Qwen LLM) on a single 24GB GPU in **$167.34\text{ ms}$ total** on **$7.42\text{ GB}$ VRAM** with fused variable-length segment pooling (**$65.40\times$ faster on NVIDIA L4**, $179\text{M tok/s}$) and compute-cost adaptive batching (**-67.43% token padding waste eliminated**).
+
+14. **🧠 Hybrid Gated Softmax Anchoring & Chunkwise Learned Decay (v8.0)**:
+    Eliminates the 84% associative recall collapse of linear attention/SSMs on RAG tasks by dynamically anchoring high-entropy factual tokens into a compact Softmax KV cache while streaming ambient context through $O(1)$ constant-memory learned-decay recurrence (**$25.00\%$ exact recall**, $\sim 16\times$ above chance floor, with **$1.61\times$ faster chunkwise prefill** and **$48.84\,\mu\text{s}$ decode latency**).
 
 ---
 

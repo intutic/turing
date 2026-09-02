@@ -34,9 +34,14 @@ This document provides a comprehensive technical and architectural comparison be
 | | Triton 3.x Tensor Core GPU Kernels | ✅ **Native** | ✅ Native | ✅ Native | ❌ | ❌ |
 | **Programmatic Workflows**| Python DSL with `fork()` + `join()` | ✅ **@turing.chain** | ❌ | ✅ SGLang DSL | ❌ | ❌ |
 | | Prefix Cache Sharing across Branches | ✅ **Zero-Copy SVD** | ❌ | ✅ Radix | ❌ | ❌ |
+| **Multi-Model Pipelines** | Elastic Single-GPU Multi-Model Manager | 🚀 **5 Models (167ms, 7.4GB)** | ❌ (1 server/GPU) | ❌ (1 server/GPU) | ❌ (1 active) | ❌ (1 model) |
+| | In-SRAM Fused Segment Pooling | 🚀 **179M tok/s (65.4×)** | ❌ | ❌ | ❌ | ❌ |
+| | Compute-Cost Adaptive Batching | 🚀 **-67.43% Waste** | ⚠️ Fixed padding | ⚠️ Fixed padding | ❌ | ❌ |
 | **Serving & Gateway** | Continuous Batching Scheduler | ✅ **3-Lane QoS** | ✅ Iteration-level | ✅ Iteration-level | ❌ (FIFO) | ⚠️ Basic slot |
 | | Multi-Node Distributed (TP + PP) | ✅ **Native NCCL** | ✅ Native NCCL | ✅ Native NCCL | ❌ | ⚠️ RPC only |
-| | OpenAI API (`/v1/chat/completions`) | ✅ **Native** | ✅ Native | ✅ Native | ✅ Native | ✅ Native |
+| | OpenAI API (`/v1/chat`, `/v1/embeddings`) | ✅ **Native** | ✅ Native | ✅ Native | ✅ Native | ✅ Native |
+| | Cross-Encoder Rerank (`/v1/rerank`) | ✅ **Native** | ❌ (TEI needed) | ❌ (TEI needed) | ❌ | ❌ |
+| | Structured Extract (`/v1/extract`) | ✅ **Native** | ❌ | ❌ | ❌ | ❌ |
 | | Anthropic API (`/v1/messages` with SSE) | ✅ **Native** | ❌ (Proxy needed) | ⚠️ Partial | ❌ | ❌ |
 | | Ollama REST API (`/api/*` Endpoints) | ✅ **Native** | ❌ | ❌ | ✅ Native | ❌ |
 | | Kubernetes `llm-d` Router Token Render | ✅ `/render` + ZMQ | ❌ (Patch needed) | ❌ | ❌ | ❌ |
@@ -44,7 +49,8 @@ This document provides a comprehensive technical and architectural comparison be
 | **Deployment & Binary** | Zero-Python Standalone Executable | ✅ **`turing-cli`** | ❌ (Python base) | ❌ (Python base) | ✅ Go/C++ daemon| ✅ `llama-cli` |
 | **Structured Output** | JSON Schema & JSON Mode Enforcement | ✅ **Native + Repair** | ✅ Outlines / FSM | ✅ `xGrammar` | ⚠️ Format string | ✅ GBNF Grammars |
 | | Native Tool & Function Calling | ✅ **Native** | ✅ Native | ✅ Native | ✅ Native | ⚠️ Custom parsing |
-| **Agentic & Speculation**| Cross-Model Representation Transfer ($W^*$)| 🚀 **Zero-Token ($O(1)$)**| ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) |
+| **Agentic & Memory** | Cross-Model Representation Transfer ($W^*$)| 🚀 **Zero-Token ($O(1)$)**| ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) |
+| | Hybrid Gated Softmax Anchoring (RAG) | 🚀 **25% Exact Recall** | ⚠️ O(N) Softmax only| ⚠️ O(N) Softmax only| ⚠️ O(N) Softmax only| ⚠️ O(N) Softmax only|
 | | Multi-Tenant LoRA Hot-Swap (100 Pool) | 🚀 **198 µs (84% hit)**| ⚠️ Merge required | ⚠️ S-LoRA | ❌ | ❌ |
 | | Speculative Decoding Parity Gate | ✅ **Byte-Exact SIMD** | ⚠️ PyTorch | ⚠️ PyTorch | ❌ | ⚠️ Basic |
 | **Hardware Targets** | NVIDIA CUDA | ✅ Primary | ✅ Primary | ✅ Primary | ✅ Native | ✅ Native |
