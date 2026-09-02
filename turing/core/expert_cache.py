@@ -34,17 +34,29 @@ class RoutingHistoryTracker:
         self.last_accessed: Dict[Tuple[int, int], int] = {}
         self.clock: int = 0
 
+        self._native = None
+        try:
+            import turing.turing_csrc as turing_csrc
+            self._native = turing_csrc.NativeRoutingHistoryTracker(num_layers, num_experts, decay_factor)
+        except Exception:
+            pass
+
     def record_route(self, layer_idx: int, expert_indices: Union[List[int], torch.Tensor, int]):
         """
         Records one or more expert activations for a given layer.
         """
         self.clock += 1
         if isinstance(expert_indices, int):
-            expert_indices = [expert_indices]
+            indices_list = [expert_indices]
         elif isinstance(expert_indices, torch.Tensor):
-            expert_indices = expert_indices.detach().cpu().view(-1).tolist()
+            indices_list = expert_indices.detach().cpu().view(-1).tolist()
+        else:
+            indices_list = expert_indices
+
+        if self._native is not None:
+            self._native.record_route(layer_idx, [int(x) for x in indices_list])
             
-        for e in expert_indices:
+        for e in indices_list:
             key = (layer_idx, int(e))
             self.counts[key] = self.counts.get(key, 0) + 1
             self.last_accessed[key] = self.clock
@@ -56,6 +68,10 @@ class RoutingHistoryTracker:
         d = factor if factor is not None else self.decay_factor
         if d <= 0.0 or d >= 1.0:
             return
+
+        if self._native is not None:
+            self._native.decay(d)
+
         for key in list(self.counts.keys()):
             new_val = int(self.counts[key] * d)
             if new_val <= 0:
@@ -67,6 +83,9 @@ class RoutingHistoryTracker:
         """
         Returns the top-k hottest expert keys (layer_idx, expert_idx) sorted by historical frequency.
         """
+        if self._native is not None:
+            return self._native.get_top_k_experts(k, layer_idx if layer_idx is not None else -1)
+
         if layer_idx is not None:
             items = [(k_pair, cnt) for k_pair, cnt in self.counts.items() if k_pair[0] == layer_idx]
         else:

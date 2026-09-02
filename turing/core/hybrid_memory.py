@@ -167,13 +167,25 @@ class HybridRecurrentAttention(nn.Module):
 
         b = torch.sigmoid(self.decay_gate(x)).squeeze(1)  # [B, H]
 
-        # Update recurrent state S_t = b_t S_{t-1} + K_t^T V_t
-        b_expanded = b.unsqueeze(-1).unsqueeze(-1)        # [B, H, 1, 1]
-        kv_outer = torch.matmul(k.unsqueeze(-1), v.unsqueeze(-2))  # [B, H, D, D]
-        next_s = b_expanded * state.state_matrix + kv_outer        # [B, H, D, D]
-
-        # Recurrent readout O_rec = Q_t S_t
-        out_rec = torch.matmul(q.unsqueeze(-2), next_s).squeeze(-2)  # [B, H, D]
+        # Auto-dispatch to fused in-SRAM Triton kernel on CUDA
+        if x.is_cuda:
+            try:
+                from ..kernels.triton_hybrid_anchor_fuse import fused_hybrid_step_anchor_cuda
+                out_rec, next_s = fused_hybrid_step_anchor_cuda(
+                    q, k, v, state.state_matrix, b, state.anchor_keys, state.anchor_values
+                )
+            except Exception:
+                b_expanded = b.unsqueeze(-1).unsqueeze(-1)        # [B, H, 1, 1]
+                kv_outer = torch.matmul(k.unsqueeze(-1), v.unsqueeze(-2))  # [B, H, D, D]
+                next_s = b_expanded * state.state_matrix + kv_outer        # [B, H, D, D]
+                out_rec = torch.matmul(q.unsqueeze(-2), next_s).squeeze(-2)  # [B, H, D]
+        else:
+            # Update recurrent state S_t = b_t S_{t-1} + K_t^T V_t
+            b_expanded = b.unsqueeze(-1).unsqueeze(-1)        # [B, H, 1, 1]
+            kv_outer = torch.matmul(k.unsqueeze(-1), v.unsqueeze(-2))  # [B, H, D, D]
+            next_s = b_expanded * state.state_matrix + kv_outer        # [B, H, D, D]
+            # Recurrent readout O_rec = Q_t S_t
+            out_rec = torch.matmul(q.unsqueeze(-2), next_s).squeeze(-2)  # [B, H, D]
 
         # If anchor pool exists, evaluate Softmax over anchors
         anchor_k, anchor_v = state.anchor_keys, state.anchor_values

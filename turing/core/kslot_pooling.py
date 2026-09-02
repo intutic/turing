@@ -108,11 +108,25 @@ class GatedZeroIdentityHead(nn.Module):
             except Exception:
                 pass
 
-        gate_values = torch.sigmoid(self.gate(decoded_features))
-        gate_k, gate_v = torch.split(gate_values, self.num_kv_heads, dim=-1)
-        
+        gate_raw = self.gate(decoded_features)
         raw_k = self.key_head(decoded_features).view(*decoded_features.shape[:-1], self.num_kv_heads, self.head_dim)
         raw_v = self.value_head(decoded_features).view(*decoded_features.shape[:-1], self.num_kv_heads, self.head_dim)
+
+        if not decoded_features.is_cuda and decoded_features.ndim == 3 and decoded_features.shape[0] == 1 and decoded_features.shape[1] == 1:
+            try:
+                import turing.turing_csrc as turing_csrc
+                g_np = gate_raw.squeeze(0).squeeze(0).detach().to(torch.float32).cpu().contiguous().numpy()
+                rk_np = raw_k.squeeze(0).squeeze(0).detach().to(torch.float32).cpu().contiguous().numpy()
+                rv_np = raw_v.squeeze(0).squeeze(0).detach().to(torch.float32).cpu().contiguous().numpy()
+                ok_np, ov_np = turing_csrc.gated_zero_identity_forward_fast(g_np, rk_np, rv_np)
+                dk = torch.from_numpy(ok_np).to(device=decoded_features.device, dtype=decoded_features.dtype).view(1, 1, self.num_kv_heads, self.head_dim)
+                dv = torch.from_numpy(ov_np).to(device=decoded_features.device, dtype=decoded_features.dtype).view(1, 1, self.num_kv_heads, self.head_dim)
+                return dk, dv
+            except Exception:
+                pass
+
+        gate_values = torch.sigmoid(gate_raw)
+        gate_k, gate_v = torch.split(gate_values, self.num_kv_heads, dim=-1)
         
         dk = gate_k.unsqueeze(-1) * raw_k
         dv = gate_v.unsqueeze(-1) * raw_v

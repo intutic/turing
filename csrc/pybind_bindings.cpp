@@ -58,6 +58,9 @@
 #include "turing_prefix_match.hpp"
 #include "turing_kda_simd.hpp"
 #include "turing_segment_pool.hpp"
+#include "turing_varlen_pack.hpp"
+#include "turing_routing_history.hpp"
+#include "turing_gated_zero_identity.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -1726,6 +1729,79 @@ PYBIND11_MODULE(turing_csrc, m) {
 
         return out_arr;
     }, py::arg("q"), py::arg("k"), py::arg("v"), py::arg("state"), py::arg("b_decay"), "Fast SIMD learned-decay step recurrence");
+
+    // Fast Zero-Copy Variable-Length Token Packing using Direct C-API
+    m.def("pack_varlen_tokens_fast", [](py::list token_lists) {
+        size_t num_seqs = token_lists.size();
+        std::vector<int32_t> cu_seqlens(num_seqs + 1, 0);
+        size_t total_len = 0;
+        
+        PyObject* lists_ptr = token_lists.ptr();
+        for (size_t i = 0; i < num_seqs; ++i) {
+            PyObject* item = PyList_GET_ITEM(lists_ptr, i);
+            size_t seq_len = PyList_Check(item) ? PyList_GET_SIZE(item) : 0;
+            total_len += seq_len;
+            cu_seqlens[i + 1] = static_cast<int32_t>(total_len);
+        }
+
+        std::vector<int32_t> flat_tokens(total_len);
+        int32_t* dest_ptr = flat_tokens.data();
+
+        for (size_t i = 0; i < num_seqs; ++i) {
+            PyObject* item = PyList_GET_ITEM(lists_ptr, i);
+            if (PyList_Check(item)) {
+                size_t seq_len = PyList_GET_SIZE(item);
+                for (size_t j = 0; j < seq_len; ++j) {
+                    *dest_ptr++ = static_cast<int32_t>(PyLong_AsLong(PyList_GET_ITEM(item, j)));
+                }
+            }
+        }
+
+        return py::make_tuple(flat_tokens, cu_seqlens);
+    }, py::arg("token_lists"), "Fast SIMD variable-length token packing and cu_seqlens generation");
+
+    // High-Concurrency Native Routing History Tracker
+    py::class_<turing::NativeRoutingHistoryTracker>(m, "NativeRoutingHistoryTracker")
+        .def(py::init<size_t, size_t, float>(), py::arg("num_layers") = 32, py::arg("num_experts") = 64, py::arg("decay_factor") = 0.99f)
+        .def("reset", &turing::NativeRoutingHistoryTracker::reset)
+        .def("record_route", &turing::NativeRoutingHistoryTracker::record_route, py::arg("layer_idx"), py::arg("expert_indices"))
+        .def("record_single", &turing::NativeRoutingHistoryTracker::record_single, py::arg("layer_idx"), py::arg("expert_idx"))
+        .def("decay", &turing::NativeRoutingHistoryTracker::decay, py::arg("factor") = -1.0f)
+        .def("get_top_k_experts", &turing::NativeRoutingHistoryTracker::get_top_k_experts, py::arg("k"), py::arg("layer_idx") = -1)
+        .def("get_count", &turing::NativeRoutingHistoryTracker::get_count, py::arg("layer_idx"), py::arg("expert_idx"))
+        .def("get_clock", &turing::NativeRoutingHistoryTracker::get_clock);
+
+    // Fast SIMD Gated Zero-Identity Head Forward Pass
+    m.def("gated_zero_identity_forward_fast", [](
+        py::array_t<float, py::array::c_style | py::array::forcecast> gate_arr,
+        py::array_t<float, py::array::c_style | py::array::forcecast> raw_k_arr,
+        py::array_t<float, py::array::c_style | py::array::forcecast> raw_v_arr
+    ) {
+        py::buffer_info g_buf = gate_arr.request();
+        py::buffer_info k_buf = raw_k_arr.request();
+        py::buffer_info v_buf = raw_v_arr.request();
+
+        int num_heads = static_cast<int>(k_buf.shape[0]);
+        int head_dim = static_cast<int>(k_buf.shape[1]);
+
+        py::array_t<float> out_k({num_heads, head_dim});
+        py::array_t<float> out_v({num_heads, head_dim});
+
+        py::buffer_info ok_buf = out_k.request();
+        py::buffer_info ov_buf = out_v.request();
+
+        turing::gated_zero_identity_simd(
+            static_cast<const float*>(g_buf.ptr),
+            static_cast<const float*>(k_buf.ptr),
+            static_cast<const float*>(v_buf.ptr),
+            static_cast<float*>(ok_buf.ptr),
+            static_cast<float*>(ov_buf.ptr),
+            static_cast<size_t>(num_heads),
+            static_cast<size_t>(head_dim)
+        );
+
+        return py::make_tuple(out_k, out_v);
+    }, py::arg("gate"), py::arg("raw_k"), py::arg("raw_v"), "Fast SIMD gated zero-identity head forward pass");
 }
 
 

@@ -347,6 +347,14 @@ class EntropyConfidenceTreePruner:
         Computes Shannon entropy H(P_t) in nats.
         logits: [VocabSize]
         """
+        if logits.is_cuda:
+            try:
+                from ..kernels.triton_spec_entropy import fused_entropy_argmax_gate_cuda
+                entropy, _, _ = fused_entropy_argmax_gate_cuda(logits, self.low_thresh, self.high_thresh)
+                return float(entropy.item() if hasattr(entropy, "item") else entropy)
+            except Exception:
+                pass
+
         probs = F.softmax(logits.float(), dim=-1)
         log_probs = F.log_softmax(logits.float(), dim=-1)
         entropy = -(probs * log_probs).sum().item()
@@ -375,7 +383,7 @@ class EntropyConfidenceTreePruner:
         token_ids: List[int] = []
 
         # Root node
-        root_token = torch.argmax(root_logits).item()
+        root_token = int(torch.argmax(root_logits).item())
         nodes.append(TreeNode(node_id=0, token_id=root_token, parent_id=-1, depth=0))
         token_ids.append(root_token)
 

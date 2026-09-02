@@ -357,6 +357,12 @@ class AdaptiveComputeBatcher:
         Returns:
             (flat_tokens, cu_seqlens)
         """
+        try:
+            import turing.turing_csrc as turing_csrc
+            return turing_csrc.pack_varlen_tokens_fast(token_lists)
+        except Exception:
+            pass
+
         flat_tokens: List[int] = []
         cu_seqlens: List[int] = [0]
         cumulative = 0
