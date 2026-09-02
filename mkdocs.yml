@@ -67,6 +67,7 @@ nav:
   - Architecture: architecture.md
   - Kubernetes & llm-d: llmd-integration.md
   - Integrations: integrations.md
+  - Qwen 2.4T (NVFP4) Serving: qwen_2_4t_nvfp4_guide.md
   - Benchmarks: benchmarks.md
   - Licensing: licensing.md
 
