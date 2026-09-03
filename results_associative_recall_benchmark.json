@@ -3,7 +3,7 @@
     "attn": {
       "4": 28.12,
       "8": 10.16,
-      "12": 7.03,
+      "12": 7.81,
       "16": 9.38
     },
     "linattn": {
@@ -30,11 +30,11 @@
     "num_heads": 8,
     "head_dim": 64,
     "seq_len": 1024,
-    "dense_pairwise_prefill_ms": 5.11,
-    "chunked_in_sram_prefill_ms": 3.167,
-    "prefill_speedup": 1.61,
-    "single_step_decode_us": 64.5,
-    "decode_throughput_tok_s": 62019.0
+    "dense_pairwise_prefill_ms": 15.11,
+    "chunked_in_sram_prefill_ms": 15.881,
+    "prefill_speedup": 0.95,
+    "single_step_decode_us": 155.8,
+    "decode_throughput_tok_s": 25673.5
   },
   "device": "mps"
 }

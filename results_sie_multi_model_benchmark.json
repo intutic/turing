@@ -3,10 +3,10 @@
     "num_seqs": 64,
     "total_tokens": 8644,
     "hidden_dim": 1024,
-    "sie_python_loop_ms": 32.171,
-    "turing_fused_pool_ms": 0.238,
-    "speedup": 135.35,
-    "throughput_tok_s": 36367207.1
+    "sie_python_loop_ms": 30.098,
+    "turing_fused_pool_ms": 0.359,
+    "speedup": 83.82,
+    "throughput_tok_s": 24073076.5
   },
   "adaptive_batching": {
     "num_requests": 128,
@@ -19,12 +19,12 @@
   },
   "full_agent_pipeline": {
     "device": "mps",
-    "stage1_doc_parse_ms": 5.714,
-    "stage2_ner_extract_ms": 0.175,
-    "stage3_embedding_ms": 88.351,
-    "stage4_rerank_ms": 0.135,
-    "stage5_gen_load_ms": 0.033,
-    "total_pipeline_latency_ms": 94.418,
+    "stage1_doc_parse_ms": 3.787,
+    "stage2_ner_extract_ms": 0.092,
+    "stage3_embedding_ms": 89.548,
+    "stage4_rerank_ms": 0.171,
+    "stage5_gen_load_ms": 0.054,
+    "total_pipeline_latency_ms": 93.659,
     "peak_vram_allocated_gb": 7.42,
     "models_resident": [
       "docling-parser",
