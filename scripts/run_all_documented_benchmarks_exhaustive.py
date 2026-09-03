@@ -58,7 +58,19 @@ BENCHMARK_SUITES = [
     ("Universal Architecture & Hardware Verification", "scripts/test_all_gpu_architectures.py", []),
     
     # 16. End-to-End Serving SLA Replay
-    ("End-to-End Serving SLA Concurrency Load Test", "scripts/benchmark_serving_e2e.py", [])
+    ("End-to-End Serving SLA Concurrency Load Test", "scripts/benchmark_serving_e2e.py", []),
+
+    # 17. Next-Gen Encoder & Decoder Fusions (v6.0)
+    ("Next-Gen Split-K Flash-Decode, KDA & Micro-Scaling (v6.0)", "scripts/benchmark_nextgen_speedups.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
+
+    # 18. Elastic Single-GPU Multi-Model Pipeline Serving (v7.0)
+    ("Elastic Single-GPU Multi-Model Pipeline Serving (v7.0)", "scripts/benchmark_sie_pipeline_speedups.py", []),
+
+    # 19. Associative Fact Recall & Chunkwise Learned Decay (v8.0)
+    ("Associative Fact Recall & Chunkwise Learned Decay (v8.0)", "scripts/benchmark_associative_recall_and_decay.py", []),
+
+    # 20. In-SRAM Fused GPU Kernels & C++20 Host Engine Master (v1.5.0)
+    ("In-SRAM Fused GPU Kernels & C++20 SIMD Engine Master (v1.5.0)", "scripts/run_gcp_master_validation_and_benchmarks_v8.py", [])
 ]
 
 
