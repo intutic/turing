@@ -2,7 +2,7 @@
 
 **Serve 70B+ LLMs on a Single 24GB GPU or Mac with 75% Less Memory.**
 
-[![Release](https://img.shields.io/badge/Release-v1.4.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.4.0)
+[![Release](https://img.shields.io/badge/Release-v1.5.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.5.0)
 
 
 
@@ -23,6 +23,8 @@ Turing Engine is an open-source inference and serving runtime that allows you to
 
 ## 🚀 Core Technologies
 
+* **In-SRAM Fused Triton GPU Kernels (v1.5.0)**: Eliminates DRAM round-trips by fusing step decode recurrence + anchor attention (**61.14× faster**, $138.88\,\mu\text{s}$ on L4), zero-sync speculative entropy + argmax reduction (**3.33× faster**, $89.32\,\mu\text{s}$), and register-indexed sliced Matryoshka GEMV.
+* **Bare-Metal C++20 AVX2 SIMD Host Extensions (v1.5.0)**: Zero-copy variable-length token packing, flat 2D atomic array L1-cache resident MoE routing history (`counts[64][64]`), and 256-bit AVX2/NEON SIMD gated zero-identity heads.
 * **Native GGUF Binary Loading**: Direct memory-mapped execution of quantized `.gguf` binaries (`Q4_0`, `Q4_K_M`, `Q8_0`, `FP16`) with zero offline conversion.
 * **Turing Programmatic DSL**: Python prompt programming with `@turing.chain`, parallel `fork()` with prefix KV sharing, majority `join()`, `select()`, and schema `constrain()`.
 * **Standalone C++20 Binary (`turing-cli`)**: Bare-metal C++20 runtime with zero Python runtime dependency, 64-byte aligned SIMD memory, and embedded HTTP server.

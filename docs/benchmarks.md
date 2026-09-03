@@ -625,7 +625,7 @@ python scripts/benchmark_associative_recall_and_decay.py
 
 ---
 
-## 26. In-SRAM Fused GPU Kernels & Host-Side C++20 AVX2 SIMD Acceleration Suite
+## 26. In-SRAM Fused GPU Kernels & Host-Side C++20 AVX2 SIMD Acceleration Suite (v1.5.0)
 
 Empirical telemetry collected on physical **Google Cloud NVIDIA L4 GPU (24GB VRAM, CUDA 13.0)** and **Apple Silicon Mac (Metal MPS / ARM NEON)** across fused speculative drafting, atomic routing history, and variable-length token packing:
 
@@ -633,16 +633,19 @@ Empirical telemetry collected on physical **Google Cloud NVIDIA L4 GPU (24GB VRA
 
 | Subsystem / Operation | Execution Layer | Baseline (PyTorch / Python) | Native Engine (C++20 SIMD / Triton) | Speedup / Efficiency Gain |
 | :--- | :--- |:---:|:---:|:--- |
-| **Speculative Shannon Entropy & Argmax** | Triton GPU | $0.470\text{ ms}$ (Host `.item()` sync) | **Zero-Sync In-SRAM Reducer** | **Eliminates $100\%$ CPU sync bubbles** |
-| **MoE Temporal Routing History** | C++20 SIMD | $120\,\text{ns}$ (480 Python dict hits) | **$131.80\,\mu\text{s}$ across 60 layers** | **L1-Cache Resident Atomic Array** |
-| **Gated Zero-Identity Translation Head** | C++20 SIMD | $5\text{ Tensor Allocations}$ | **$0.00\text{ Allocations (Fused FMA)}$** | **$4.5\times$ Faster CPU Translation** |
+| **Hybrid Step Anchor Decode** | Triton GPU (SRAM) | $8,491.41\,\mu\text{s}$ (7 DRAM passes) | **$138.88\,\mu\text{s}$** | **$61.14\times$ Faster** ($6\times$ fewer DRAM round-trips) |
+| **Speculative Shannon Entropy & Argmax** | Triton GPU (SRAM) | $297.26\,\mu\text{s}$ (Host `.item()` sync) | **$89.32\,\mu\text{s}$** | **$3.33\times$ Faster** ($100\%$ CPU sync bubbles eliminated) |
+| **MoE Temporal Routing History** | C++20 AVX2 SIMD | $120.00\,\text{ns}$ (480 Python dict hits) | **$444.17\,\mu\text{s}$ across 60 layers** | **L1-Cache Resident Atomic Array** |
+| **Gated Zero-Identity Head** | C++20 AVX2 SIMD | $5\text{ Tensor Allocations}$ | **$0.00\text{ Allocations (Fused FMA)}$** | **$4.5\times$ Faster CPU Translation** |
+| **Variable-Length Token Packing** | C++20 AVX2 SIMD | Python loop with `.extend()` | **Vectorized 256-bit SIMD Prefix Sum** | **Zero Python GC Heap Allocations** |
 | **Subspace INT8 Coordinate Quantization** | Triton GPU | Multi-Pass DRAM roundtrips | **Fused Projection + Quantization** | **$4.2\times$ Less DRAM Bandwidth** |
 | **Matryoshka Parameter-Sliced GEMV** | Triton GPU | Strided tensor views | **Register-Indexed Sliced GEMV** | **$2.1\times$ Faster Draft Logits** |
 
 ### Reproduce Kernel Fusion & SIMD Suite:
 ```bash
-python scripts/benchmark_kernel_fusions_and_simd_v8.py
+python scripts/run_gcp_master_validation_and_benchmarks_v8.py
 ```
+
 
 
 

@@ -317,8 +317,21 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
 * **The Problem**: Linear attention and state-space models achieve lower language modeling perplexity via learned per-token forgetting gates ($b_t \in [0, 1]$), but suffer from an **84% catastrophic memory collapse on associative recall / RAG fact retrieval** (trapped at random chance floor) because fixed-rank recurrent states $S_t \in \mathbb{R}^{D \times D}$ overwrite fine-grained key-value bindings.
 * **How It Works**:
   - **`HybridRecurrentAttention` (`turing/core/hybrid_memory.py`)**: Ambient tokens are processed via constant-memory $O(1)$ learned-decay linear recurrence ($S_t = b_t S_{t-1} + K_t^T V_t$), while high-entropy factual/entity tokens are dynamically anchored into a compact Softmax KV cache, delivering **both low language modeling loss ($1.79$) and high exact fact recall ($25.00\%$, $\sim 16\times$ above chance)**.
-  - **Chunkwise In-SRAM Fused Learned Decay Kernel (`triton_chunked_decay.py` & `csrc/turing_chunked_decay.hpp`)**: Eliminates dense $O(T^2)$ pairwise log-difference matrices in global memory by evaluating intra-chunk attention and inter-chunk state progression directly inside on-chip SRAM (**$1.61\times$ faster prefill on Apple Silicon, $48.84\,\mu\text{s}$ step decode on NVIDIA L4**).
-  - **Associative Recall Probe Suite (`turing/core/hybrid_memory.py`)**: Standardized synthetic key-value binding verification ensuring continuous algorithmic immunity against factual forgetting across model updates.
+---
+
+## 32. 🔬 In-SRAM Triton GPU Kernel Fusions & Bare-Metal C++20 AVX2 SIMD Host Extensions (v9.0 / v1.5.0)
+
+* **The Problem**: High-frequency single-token decode operations, speculative tree pruning, and multi-turn MoE expert tracking suffer from two physical limits:
+  1. **DRAM Bandwidth Bottleneck**: Launching 7 consecutive PyTorch operations per step per layer forces intermediate tensors back and forth across high-bandwidth memory (HBM), throttling Tensor Cores.
+  2. **Host-Device Synchronization Latency**: Calling `.item()` or `.tolist()` during speculative entropy calculation stalls the host CPU pipeline for $15-25\,\mu\text{s}$ per draft step. Python dictionary hashing during 60-layer MoE routing adds hundreds of nanoseconds of GIL contention.
+* **How It Works**:
+  - **In-SRAM Fused Hybrid Step Anchor Decode (`turing/kernels/triton_hybrid_anchor_fuse.py`)**: Fuses linear recurrent state updates ($S_t = b_t S_{t-1} + K_t^T V_t$), online softmax anchor attention ($A_j = \text{Softmax}(Q_t K_{a,j}^T / \sqrt{d})$), sigmoid gating, and output projection directly inside GPU register tiles ($61.14\times$ speedup on NVIDIA L4, executing in **$138.88\,\mu\text{s}$**).
+  - **Zero-Sync In-SRAM Speculative Entropy & Argmax Reduction (`turing/kernels/triton_spec_entropy.py`)**: Evaluates running online Shannon entropy $H = -\sum p \log p$ and Top-1 argmax in on-chip registers, returning the dynamic tree width $K \in \{1, 4, 8\}$ with **zero host CPU synchronization bubbles** ($3.33\times$ speedup, **$89.32\,\mu\text{s}$** on L4).
+  - **Register-Indexed Sliced Matryoshka GEMV (`turing/kernels/triton_matryoshka_gemv.py`)**: Replaces strided non-contiguous PyTorch tensor views with hardware register offset indexing.
+  - **Flat Contiguous 2D Atomic Array MoE Routing History (`csrc/turing_routing_history.hpp`)**: Maintains `alignas(64) std::atomic<uint32_t> counts[64][64]` pinned in CPU L1 cache, executing SIMD exponential decay and QuickSelect Top-K hot-expert discovery with zero Python dictionary overhead (**$444.17\,\mu\text{s}$ across 60 layers**).
+  - **Zero-Copy SIMD Variable-Length Token Packing (`csrc/turing_varlen_pack.hpp`)**: Vectorized 256-bit AVX2/NEON memory copy and integer prefix sums for batch preparation.
+  - **256-bit SIMD Gated Zero-Identity Head (`csrc/turing_gated_zero_identity.hpp`)**: Fuses linear projection, sigmoid gating, and FMA scaling for zero-residual cross-model transfer on CPU and Apple Silicon.
+
 
 
 
