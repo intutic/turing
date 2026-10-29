@@ -45,16 +45,30 @@ python scripts/run_all_documented_benchmarks_exhaustive.py
 ---
 
 ## ☁️ Remote GCP GPU Execution (NVIDIA L4 24GB, CUDA 13.0)
-- **Host**: `ishangupta@34.171.37.217` (VM: `neollm-l4`, zone: `us-central1-a`)
-- **SSH Command**: `ssh -i ~/.ssh/google_compute_engine ishangupta@34.171.37.217`
-- **Code Sync (Rsync)**:
+- **Host**: `ishangupta@neollm-l4` (zone: `us-central1-a`, machine: `g2-standard-4` Spot, 1x L4). The external IP is ephemeral and changes on every start — always address the VM by name.
+- **Access is IAP-only**: the firewall allows tcp:22 only from IAP (`35.235.240.0/20`), so direct `ssh <ip>` times out. Never open port 22 to `0.0.0.0/0`.
+- **GPU Quota (one slot, shared)**: the project has `GPUS_ALL_REGIONS = 1` and on-demand L4 quota `0` (Spot L4 only). The slot is normally held by `intutic-judge-l4` (Terraform-managed Spot judge VM). To run on `neollm-l4`, get the user's OK, stop the judge, start `neollm-l4`, and restart the judge afterwards:
   ```bash
-  rsync -avz --exclude '.git' --exclude '__pycache__' --exclude 'build' --exclude '*.so' -e "ssh -i ~/.ssh/google_compute_engine" ./ ishangupta@34.171.37.217:~/jflux/
+  gcloud compute instances stop intutic-judge-l4 --zone us-central1-a
+  gcloud compute instances start neollm-l4 --zone us-central1-a
+  # ... run tests / benchmarks ...
+  gcloud compute instances stop neollm-l4 --zone us-central1-a
+  gcloud compute instances start intutic-judge-l4 --zone us-central1-a
+  ```
+  Spot L4 capacity in `us-central1-a` stocks out and can preempt within seconds of boot — retry `start` and confirm `RUNNING` after ~90s before syncing.
+- **SSH Command**:
+  ```bash
+  gcloud compute ssh ishangupta@neollm-l4 --zone us-central1-a --tunnel-through-iap --ssh-key-file ~/.ssh/google_compute_engine
+  ```
+- **Code Sync (Rsync over IAP)**:
+  ```bash
+  rsync -avz --exclude '.git' --exclude '__pycache__' --exclude 'build' --exclude '*.so' -e "ssh -i ~/.ssh/google_compute_engine -o HostKeyAlias=neollm-l4 -o ProxyCommand='gcloud compute start-iap-tunnel neollm-l4 22 --listen-on-stdin --zone us-central1-a --verbosity=warning'" ./ ishangupta@neollm-l4:~/jflux/
   ```
 - **Remote Benchmark Execution**:
   ```bash
-  ssh -i ~/.ssh/google_compute_engine ishangupta@34.171.37.217 "cd ~/jflux && python3 scripts/run_all_documented_benchmarks_exhaustive.py"
+  gcloud compute ssh ishangupta@neollm-l4 --zone us-central1-a --tunnel-through-iap --ssh-key-file ~/.ssh/google_compute_engine --command "cd ~/jflux && python3 scripts/run_all_documented_benchmarks_exhaustive.py"
   ```
+- **Shared Host**: the VM also boots the `liberty` bots and `ollama` (CPU-only). They share the 4 vCPUs, so treat CPU-side timings as noisy.
 
 ---
 
@@ -114,7 +128,7 @@ python scripts/run_all_documented_benchmarks_exhaustive.py
    - Always use modern, explicit PyTorch APIs (`torch.amp.autocast('cuda')`, explicit meshgrid indexing) to prevent warning escalation failures.
 
 4. **Remote GCP GPU VRAM Leakage & Orphaned PIDs**:
-   - When terminating or interrupting remote benchmark scripts on the GCP VM (`34.171.37.217`), Python or PyTorch background worker processes occasionally hold onto VRAM allocations.
+   - When terminating or interrupting remote benchmark scripts on the GCP VM (`neollm-l4`), Python or PyTorch background worker processes occasionally hold onto VRAM allocations.
    - Before running memory-intensive benchmarks or elastic multi-model serving, always verify free VRAM via `ssh ... "nvidia-smi"` and terminate any orphaned Python processes (`kill -9 <PID>`).
 
 5. **Triple-File Version Alignment Invariant**:
