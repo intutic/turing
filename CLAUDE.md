@@ -96,3 +96,30 @@ python scripts/run_all_documented_benchmarks_exhaustive.py
 6. **Surgical Modifications**: Touch only what is strictly necessary. Never perform broad cosmetic reformats across unrelated files; preserve existing comments, docstrings, and contracts.
 7. **License Compliance**: Respect Business Source License 1.1 terms in [`LICENSE`](LICENSE).
 8. **Git Commit Sign-Off**: Always append `-m "Signed-off-by: Ishan Gupta <ishangupta.ds@gmail.com>"` to git commits.
+
+---
+
+## 🧠 Hard-Won Lessons & Low-Level Gotchas
+
+1. **Zero-Sync Drafter Rule (Never call `.item()` on GPU Tensors)**:
+   - In speculative drafting and entropy gating (`turing/core/speculation.py`), calling `.item()` (e.g., `entropy = -(probs * log_probs).sum().item()`) forces a synchronous device-to-host PCIe round-trip.
+   - This creates a 15–25µs CPU pipeline bubble on every draft step. Speculative entropy and argmax must remain inside the fused Triton kernel (`triton_spec_entropy.py`) or in on-device tensor registers without CPU sync.
+
+2. **Multi-Turn `clean_base` Invariant (Lineage Drift Collapse)**:
+   - In multi-turn deliberation loops (`turing/core/lineage.py`), naive re-injection of translated KV residuals onto an already-drifted receiver cache causes residual norms ($\|\Delta C_R\|_2$) to explode (>20,000 by turn 6), destroying associative recall.
+   - Always recompute residuals against the frozen, original receiver cache (`clean_base`). Never chain residual translations on mutated caches.
+
+3. **Strict PyTorch Deprecation Sensitivity (`-W error`)**:
+   - Because we enforce `python -W error -m pytest -v`, any modern PyTorch warning (e.g., omitting `indexing='ij'` in `torch.meshgrid`, using legacy `torch.cuda.amp.autocast()`, or NumPy scalar conversions) is treated as a fatal test failure.
+   - Always use modern, explicit PyTorch APIs (`torch.amp.autocast('cuda')`, explicit meshgrid indexing) to prevent warning escalation failures.
+
+4. **Remote GCP GPU VRAM Leakage & Orphaned PIDs**:
+   - When terminating or interrupting remote benchmark scripts on the GCP VM (`34.171.37.217`), Python or PyTorch background worker processes occasionally hold onto VRAM allocations.
+   - Before running memory-intensive benchmarks or elastic multi-model serving, always verify free VRAM via `ssh ... "nvidia-smi"` and terminate any orphaned Python processes (`kill -9 <PID>`).
+
+5. **Triple-File Version Alignment Invariant**:
+   - The release version string (e.g., `1.5.0`) must always be updated simultaneously across:
+     1. `setup.py` (`version="..."`)
+     2. `pyproject.toml` (`version = "..."`)
+     3. `turing/__init__.py` (`__version__ = "..."`)
+
