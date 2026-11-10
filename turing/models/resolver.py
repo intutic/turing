@@ -114,8 +114,11 @@ class ModelResolver:
         
         is_local = is_explicit_local_path
         if not is_local and "/" not in raw and not raw.startswith("."):
+            # Model names can come from HTTP requests: only probe inside the working directory.
             try:
-                if os.path.exists(raw):
+                base = os.path.realpath(os.getcwd())
+                candidate = os.path.realpath(os.path.join(base, raw))
+                if candidate.startswith(base + os.sep) and os.path.exists(candidate):
                     is_local = True
             except (ValueError, OSError):
                 is_local = False
