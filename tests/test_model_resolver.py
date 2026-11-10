@@ -2,6 +2,8 @@
 Unit and Integration Tests for Universal Model Resolver, Architecture Registry, and Reasoning Engine.
 """
 
+import os
+
 import pytest
 import torch
 from turing.models.resolver import ModelResolver, ResolvedModelSpec
@@ -44,7 +46,7 @@ def test_model_resolver_local_path():
     spec = ModelResolver.parse("/tmp/my_local_model")
     assert spec.provider == "local"
     assert spec.is_local_path
-    assert spec.repo_id == "/tmp/my_local_model"
+    assert spec.repo_id == os.path.normpath("/tmp/my_local_model")  # backslashes on Windows
 
 def test_architecture_registry_dispatch():
     cls_llama = ArchitectureRegistry.get_model_class("LlamaForCausalLM")
