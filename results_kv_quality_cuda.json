@@ -1,0 +1,428 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "args": {
+    "models": "HuggingFaceTB/SmolLM2-135M,HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B",
+    "arms": "hf_native,exact_forward,exact_decode,int8,int4,quest25,quest10,int8_quest25",
+    "context": 2048,
+    "decode": 128,
+    "windows": 16,
+    "device": "cuda",
+    "out": "results_kv_quality_cuda.json"
+  },
+  "text": "WikiText-2 raw test, consecutive windows",
+  "rows": [
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "hf_native",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.743814066052437,
+      "se": 0.10484971520173954,
+      "n": 16,
+      "seconds": 0.9474833690001105
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.7440662384033203,
+      "se": 0.1048785766029122,
+      "n": 16,
+      "seconds": 0.5811369759999252
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "exact_decode",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.743999019265175,
+      "se": 0.10490776777435624,
+      "n": 16,
+      "seconds": 76.61145491699995
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "int8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.7444645166397095,
+      "se": 0.10492013022447495,
+      "n": 16,
+      "seconds": 1.9898013150000224
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "int4",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.7686163038015366,
+      "se": 0.10661887090269902,
+      "n": 16,
+      "seconds": 2.211274122000077
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "quest25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.779430776834488,
+      "se": 0.10230742885192211,
+      "n": 16,
+      "seconds": 120.60652733300003
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "quest10",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.8912254571914673,
+      "se": 0.0966771256595847,
+      "n": 16,
+      "seconds": 120.51552731900006
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "int8_quest25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.782462179660797,
+      "se": 0.10198583466548582,
+      "n": 16,
+      "seconds": 151.23023706200001
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "hf_native",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -0.0002521723508834839,
+      "se": 0.00012865147444049806,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "exact_decode",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -6.721913814544678e-05,
+      "se": 0.00014212078882999167,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "int8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.00039827823638916016,
+      "se": 0.0003184266378319708,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "int4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.024550065398216248,
+      "se": 0.007228868418501814,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "quest25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.03543175756931305,
+      "se": 0.010487251713256244,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "quest10",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.14722643792629242,
+      "se": 0.02235814394578525,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "int8_quest25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.03846316039562225,
+      "se": 0.010292303360346268,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "hf_native",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.454934000968933,
+      "se": 0.10919684836289167,
+      "n": 16,
+      "seconds": 0.846642508000059
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.4549651965498924,
+      "se": 0.109231961348788,
+      "n": 16,
+      "seconds": 0.8663389910000205
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "exact_decode",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.4548225328326225,
+      "se": 0.10924884446367644,
+      "n": 16,
+      "seconds": 81.39675531800003
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.4548502787947655,
+      "se": 0.10899784952019251,
+      "n": 16,
+      "seconds": 2.101246981000031
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int4",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.473370738327503,
+      "se": 0.10758921952286417,
+      "n": 16,
+      "seconds": 2.361339189000091
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "quest25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.478372223675251,
+      "se": 0.10887230923947921,
+      "n": 16,
+      "seconds": 128.6231481760001
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "quest10",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.561029829084873,
+      "se": 0.10358255580557084,
+      "n": 16,
+      "seconds": 127.87569386099995
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int8_quest25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.4794204607605934,
+      "se": 0.10916140333481017,
+      "n": 16,
+      "seconds": 160.69963999799984
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "hf_native",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -3.119558095932007e-05,
+      "se": 0.00015194045929445236,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "exact_decode",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -0.00014266371726989746,
+      "se": 0.0001268119392332739,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -0.00011491775512695312,
+      "se": 0.00046122817240720174,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.01840554177761078,
+      "se": 0.004859579292468834,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "quest25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.02354969084262848,
+      "se": 0.00504182525598345,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "quest10",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.10620729625225067,
+      "se": 0.015628230724077197,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int8_quest25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.024597927927970886,
+      "se": 0.005298225595767773,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "hf_native",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.0785208716988564,
+      "se": 0.10548893193251177,
+      "n": 16,
+      "seconds": 2.745446771999923
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.0783166587352753,
+      "se": 0.10546998925007246,
+      "n": 16,
+      "seconds": 2.8245423289999962
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "exact_decode",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.078390382230282,
+      "se": 0.10551171426245744,
+      "n": 16,
+      "seconds": 64.62945979999995
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.0778539702296257,
+      "se": 0.10542029103926058,
+      "n": 16,
+      "seconds": 3.7775829970000814
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int4",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.102858327329159,
+      "se": 0.10293480722251258,
+      "n": 16,
+      "seconds": 3.8986750900003244
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "quest25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.0916403457522392,
+      "se": 0.10296593608580862,
+      "n": 16,
+      "seconds": 100.76961142299979
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "quest10",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.1233576983213425,
+      "se": 0.10198330742823757,
+      "n": 16,
+      "seconds": 100.10043383599987
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int8_quest25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.0916689559817314,
+      "se": 0.102922418873458,
+      "n": 16,
+      "seconds": 125.2741738030004
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "hf_native",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.0002042129635810852,
+      "se": 0.00015755899228473861,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "exact_decode",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 7.372349500656128e-05,
+      "se": 0.00011142651033179582,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -0.00046268850564956665,
+      "se": 0.0006628402695412677,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.024541668593883514,
+      "se": 0.005065057348959246,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "quest25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.013249963521957397,
+      "se": 0.006547376901584096,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "quest10",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.04496731609106064,
+      "se": 0.013913885482657653,
+      "n": 16
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int8_quest25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.013278573751449585,
+      "se": 0.006829051027754615,
+      "n": 16
+    }
+  ]
+}

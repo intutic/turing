@@ -127,10 +127,14 @@ def run_live_gpu_benchmark():
     )
     recon_error = torch.norm(k_flat - k_recon) / torch.norm(k_flat)
 
+    # bytes actually held by the compressed form against the dense K it replaces (measured, not assumed)
+    ratio = (q_int8.numel() * q_int8.element_size() + scale.numel() * scale.element_size()) / (
+        k_flat.numel() * k_flat.element_size())
     print(f"  • 32K Context Dense FP16 KV VRAM (70B Model) : {full_dense_kv_vram_gb:.2f} GB")
-    print(f"  • 32K Context Turing Engine SVD INT8 KV VRAM (70B)   : {full_dense_kv_vram_gb * 0.25:.2f} GB (75.0% VRAM Savings)")
+    print(f"  • 32K Context SVD INT8 KV VRAM (70B, measured ratio {ratio:.3f}) : {full_dense_kv_vram_gb * ratio:.2f} GB "
+          f"({(1 - ratio) * 100:.1f}% smaller)")
     print(f"  • Live SVD Compression Latency (32K tokens)   : {t_comp_ms:.2f} ms")
-    print(f"  • Measured Reconstruction Relative Error      : {recon_error.item():.4f} (99.2% Fidelity)")
+    print(f"  • Reconstruction Relative Error (random K, not a model's cache): {recon_error.item():.4f}")
 
     # -------------------------------------------------------------------------
     # 3. Real In-SRAM Sinkhorn Optimal Transport KV Pruning on GPU

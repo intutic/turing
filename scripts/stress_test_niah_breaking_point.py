@@ -36,7 +36,9 @@ def run_niah_stress_tests(device_name: str = "auto"):
     # =========================================================================
     # EXPERIMENT 1: Context Length Scaling (32K -> 1,000,000 tokens)
     # =========================================================================
-    print("\n--- [EXPERIMENT 1] Extreme Context Length Scaling (Rank-64, Page Size 512) ---")
+    print("\n--- [EXPERIMENT 1] Rank-64 SVD INT8 on one 512-token page of random vectors (Page Size 512) ---")
+    print("    NOTE: each row below builds the same single 512-token page; the context length only sets a label,")
+    print("    so this does NOT test retrieval at that context length, and the vectors are random, not a model's keys.")
     subspace_mgr_64 = SubspaceManager(hidden_dim=head_dim, rank=64, device=dev)
     context_lengths = [32768, 65536, 131072, 262144, 524288, 1048576] # Up to 1M tokens
     page_size = 512
@@ -63,7 +65,7 @@ def run_niah_stress_tests(device_name: str = "auto"):
         passed = (top_idx == mid_slot)
 
         status_str = "✅ 100% TOP-1 MATCH" if passed else "❌ FAILED"
-        print(f"Context: {ctx:>10,} tokens ({num_pages:>5} pages) | Needle at 50% depth | Status: {status_str}")
+        print(f"Label: {ctx:>10,} tokens ({num_pages:>5} pages, one built) | Needle mid-page | Status: {status_str}")
 
     # =========================================================================
     # EXPERIMENT 2: Ultra Fine-Grained Depth Sweep (0% to 100% in 5% Steps)
@@ -150,11 +152,7 @@ def run_niah_stress_tests(device_name: str = "auto"):
         print(f"Needle Norm: {norm_mult:<4}x Background | Retrieval Top-1: {acc:>5.1f}% | {status}")
 
     print("\n" + "=" * 95)
-    print("🎯 SUMMARY OF BREAKING CONDITIONS IDENTIFIED:")
-    print("1. Context Length: Stable up to 1,000,000 tokens (100% Top-1).")
-    print("2. Depth Position: Uniform 100% across all 0% to 100% depths (Zero 'Lost-in-Middle' degradation).")
-    print("3. Rank Boundary: Rank-64 & Rank-32 hold 100%. Rank-16 drops to ~96%, Rank-8 drops to ~80%, Rank-4 collapses.")
-    print("4. Adversarial Noise: Holds 100% down to 1.5x norm. Breaks at <0.75x where needle matches random background noise.")
+    print("Results are the measured lines above: random vectors, one page per row, no model in the loop.")
     print("=" * 95)
 
 if __name__ == "__main__":

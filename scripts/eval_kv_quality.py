@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""
+Quality of Turing Engine serving settings on real weights: next-token NLL against the exact model, paired per window.
+
+Method (after cift F6): consecutive windows of T tokens from WikiText-2 test. The first T - D tokens are the prompt;
+the last D positions are scored. Arms in "forward" mode score them in one teacher-forced pass; arms in "decode" mode
+prefill the prompt, then feed one token per step through the KV cache, exactly as serving does; arms in "chunk" mode
+prefill the prompt, then score the last D tokens in one pass over the cache. For a low-bit cache "chunk" equals
+"decode" (each query reads every key after quantization; tests/test_kv_cache.py checks this), and it is far faster.
+Quest page selection acts only on one-token steps, so its arms run in "decode" mode. Each arm's NLL is
+compared window by window against its reference arm (mean delta and its standard error over windows).
+
+Sanity rows: `exact_forward` vs HuggingFace's own model (`hf_native`), and `exact_decode` vs `exact_forward`.
+
+python scripts/eval_kv_quality.py --models HuggingFaceTB/SmolLM2-135M --arms exact_forward,served_default
+"""
+import argparse
+import json
+import math
+import platform
+import time
+
+import torch
+import torch.nn.functional as F
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from turing.models.hf_loader import RealHuggingFaceLoader
+
+# name -> (mode, loader settings, KV settings set on model.config, reference arm)
+ARMS = {
+    "hf_native": ("forward", None, {}, "exact_forward"),
+    "exact_forward": ("forward", dict(sparsity_ratio=0.0, enable_recirculation=False), {}, None),
+    "sparsity_50": ("forward", dict(sparsity_ratio=0.5, enable_recirculation=False), {}, "exact_forward"),
+    "recirculation": ("forward", dict(sparsity_ratio=0.0, enable_recirculation=True), {}, "exact_forward"),
+    "served_default": ("forward", dict(sparsity_ratio=0.5, enable_recirculation=True), {}, "exact_forward"),
+    "exact_decode": ("decode", dict(sparsity_ratio=0.0, enable_recirculation=False), {}, "exact_forward"),
+}
+_EXACT = dict(sparsity_ratio=0.0, enable_recirculation=False)
+ARMS |= {  # KV cache settings through the cache; low-bit arms vs exact_forward, Quest arms vs exact_decode
+    "int8": ("chunk", _EXACT, dict(kv_cache_dtype="int8"), "exact_forward"),
+    "int4": ("chunk", _EXACT, dict(kv_cache_dtype="int4"), "exact_forward"),
+    "quest25": ("decode", _EXACT, dict(kv_page_budget=0.25), "exact_decode"),
+    "quest10": ("decode", _EXACT, dict(kv_page_budget=0.10), "exact_decode"),
+    "int8_quest25": ("decode", _EXACT, dict(kv_cache_dtype="int8", kv_page_budget=0.25), "exact_decode"),
+}
+
+
+def windows(tokenizer, T, n):
+    text = "\n\n".join(load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")["text"])
+    ids = tokenizer(text, return_tensors="pt").input_ids[0]
+    n = min(n, len(ids) // T)
+    return ids[: n * T].view(n, T)
+
+
+def nll(logits, targets):
+    return F.cross_entropy(logits.float().reshape(-1, logits.shape[-1]), targets.reshape(-1)).item()
+
+
+@torch.inference_mode()
+def score(model, win, s, mode, hf=False):
+    """Mean NLL of targets s+1 .. T-1 for one window [1, T]."""
+    if mode == "forward":
+        logits = model(win).logits if hf else model(win)[0]
+        return nll(logits[:, s:-1], win[:, s + 1:])
+    _, past = model(win[:, :s])
+    if mode == "chunk":
+        logits, _ = model(win[:, s:-1], past_key_values=past)
+        return nll(logits, win[:, s + 1:])
+    out = []
+    for t in range(s, win.shape[1] - 1):
+        logits, past = model(win[:, t:t + 1], past_key_values=past)
+        out.append(logits[:, -1])
+    return nll(torch.stack(out, 1), win[:, s + 1:])
+
+
+def mean_se(v):
+    v = torch.tensor(v, dtype=torch.float64)
+    return v.mean().item(), (v.std().item() / math.sqrt(len(v)) if len(v) > 1 else None)
+
+
+def run_model(name, arms, T, D, n_win, device):
+    dtype = torch.float16 if device.type == "cuda" else torch.float32
+    tok = AutoTokenizer.from_pretrained(name)
+    hf = AutoModelForCausalLM.from_pretrained(name, dtype=dtype).to(device).eval()
+    wins = windows(tok, T, n_win).to(device)
+    s = T - D
+    per_arm, rows = {}, []
+    for arm in arms:
+        mode, load, kv, _ = ARMS[arm]
+        model = hf if load is None else RealHuggingFaceLoader.convert_hf_model(hf, device=str(device), **load)
+        for k, v in kv.items():
+            setattr(model.config, k, v)
+        t0 = time.perf_counter()
+        per_arm[arm] = [score(model, wins[i:i + 1], s, mode, hf=load is None) for i in range(len(wins))]
+        secs = time.perf_counter() - t0
+        m, se = mean_se(per_arm[arm])
+        rows.append(dict(model=name, arm=arm, mode=mode, metric="nll", value=m, se=se, n=len(wins), seconds=secs))
+        if model is not hf:
+            del model
+    for arm in arms:
+        ref = ARMS[arm][3]
+        if ref in per_arm:
+            d, se = mean_se([a - b for a, b in zip(per_arm[arm], per_arm[ref])])
+            rows.append(dict(model=name, arm=arm, metric="delta_nll_vs_" + ref, value=d, se=se, n=len(wins)))
+    print(f"\n{name}  ({len(wins)} windows of {T}, last {D} positions scored, {device}, {str(dtype)[6:]})")
+    for r in rows:
+        se = f" ± {r['se']:.5f}" if r.get("se") is not None else ""
+        print(f"  {r['arm']:<16} {r['metric']:<28} {r['value']:+.5f}{se}")
+    del hf
+    return rows
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--models", default="HuggingFaceTB/SmolLM2-135M")
+    ap.add_argument("--arms", default="hf_native,exact_forward,sparsity_50,recirculation,served_default")
+    ap.add_argument("--context", type=int, default=2048, help="window length T")
+    ap.add_argument("--decode", type=int, default=256, help="positions scored at the end of each window")
+    ap.add_argument("--windows", type=int, default=8)
+    ap.add_argument("--device", default="auto")
+    ap.add_argument("--out", default=None, help="results JSON (default results_kv_quality_<device>.json)")
+    a = ap.parse_args()
+    arms = [x for x in a.arms.split(",") if x]
+    unknown = [x for x in arms if x not in ARMS]
+    if unknown:
+        raise SystemExit(f"unknown arms {unknown}; known: {list(ARMS)}")
+    if a.device == "auto":
+        a.device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    device = torch.device(a.device)
+    rows = []
+    for name in [m for m in a.models.split(",") if m]:
+        rows += run_model(name, arms, a.context, a.decode, a.windows, device)
+    env = dict(device=a.device, torch=torch.__version__, platform=platform.platform(),
+               gpu=torch.cuda.get_device_name(0) if device.type == "cuda" else platform.processor())
+    out = a.out or f"results_kv_quality_{device.type}.json"
+    with open(out, "w") as f:
+        json.dump(dict(env=env, args=vars(a), text="WikiText-2 raw test, consecutive windows", rows=rows), f, indent=2)
+    print(f"\n[+] wrote {out}")
+
+
+if __name__ == "__main__":
+    main()

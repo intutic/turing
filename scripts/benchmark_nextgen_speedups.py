@@ -224,7 +224,9 @@ def benchmark_grouped_micro_scaling() -> dict:
     micro_scale_lat_us = ((time.perf_counter() - t0) / iters) * 1e6
 
     cos_sim = F.cosine_similarity(k_in.flatten().float(), k_out.flatten().float(), dim=0).item()
-    compression_ratio = 75.0  # INT8 + micro-scales vs FP16
+    # bytes the pool stores per value (int8 codes + fp16 scale per group) against fp16, measured from its tensors
+    stored = sum(t.numel() * t.element_size() for t in (pool.k_q, pool.v_q, pool.k_scales, pool.v_scales))
+    compression_ratio = (1.0 - stored / (2 * pool.k_q.numel() * 2)) * 100.0
 
     print(f"  • Quantize + Dequantize Step: {micro_scale_lat_us:6.2f} µs | Cosine Fidelity: {cos_sim * 100.0:6.3f}% | Savings: -{compression_ratio:.1f}%")
 

@@ -120,7 +120,10 @@ def run_suite():
             q_kv, scale = subspace_mgr.quantize_subspace_int8(subspace_mgr.project_to_subspace(dummy_kv))
             recon_kv = subspace_mgr.reconstruct_from_subspace(subspace_mgr.dequantize_subspace_int8(q_kv, scale))
             fidelity = (1.0 - (torch.norm(dummy_kv - recon_kv) / torch.norm(dummy_kv)).item()) * 100.0
-            print(f"  │ • Turing Engine SVD KV Compression       : 75.0% VRAM Savings | {fidelity:.2f}% Signal Fidelity")
+            saved = 100.0 * (1.0 - (q_kv.numel() * q_kv.element_size() + scale.numel() * scale.element_size())
+                             / (dummy_kv.numel() * dummy_kv.element_size()))
+            print(f"  │ • SVD INT8 KV (rank {subspace_mgr.rank}, head_dim {head_dim}): {saved:.1f}% smaller | "
+                  f"{fidelity:.2f}% reconstruction on random K (not this model's cache)")
 
             # Cleanup model
             del model

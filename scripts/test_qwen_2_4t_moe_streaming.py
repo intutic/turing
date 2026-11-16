@@ -82,9 +82,9 @@ def run_qwen_2_4t_streaming_simulation(device: torch.device, num_tokens: int = 1
     kv_bytes = KVMemoryEstimator.estimate_kv_bytes(
         num_prompt_tokens=context_len, max_new_tokens=num_tokens,
         num_layers=128, num_kv_heads=num_heads, head_dim=head_dim,
-        dtype_bytes=1, svd_compression_ratio=0.75
+        dtype_bytes=1
     )
-    print(f"  • Full 128-layer KV Cache footprint at 4k context: {kv_bytes / (1024**3):.2f} GB (75% VRAM saved)")
+    print(f"  • Full 128-layer int8 KV Cache footprint at 4k context (estimate): {kv_bytes / (1024**3):.2f} GB")
 
     # 3. Simulate High-Speed NVMe-to-VRAM Expert DMA Buffer
     print(f"[Step 3/5] Allocating Tier 4 GPUDirect Storage (GDS DMA) Staging Buffers...")
@@ -138,8 +138,8 @@ def run_qwen_2_4t_streaming_simulation(device: torch.device, num_tokens: int = 1
     print(f"\n[Step 5/5] Benchmark Results:")
     print(f"  • Mean Token Decode Latency : {avg_lat:6.2f} ms")
     print(f"  • Active Throughput         : {tok_s:6.1f} tok/s")
-    print(f"  • Peak VRAM Consumption     : < 4.2 GB (128-layer projection fits in 18.5 GB on 24GB GPU)")
-    print(f"  • KV Cache Compression      : 75.0% (SVD INT8 Paged)")
+    peak = f"{torch.cuda.max_memory_allocated() / 2**30:.2f} GB" if torch.cuda.is_available() else "not measured (no CUDA)"
+    print(f"  • Peak VRAM Allocated       : {peak}")
     print(f"  • Weight Storage Mode       : NVMe Tier Streaming via GDS DMA (0 VRAM thrashing)")
     print("=" * 80)
     print("   [+] Qwen 2.4T NVFP4 Streaming Harness PASSED successfully!")

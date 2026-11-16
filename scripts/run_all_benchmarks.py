@@ -2,10 +2,10 @@
 Comprehensive All-in-One Frontier Benchmarking Suite for Turing Engine.
 Executes:
 1. Multi-Model Architecture Profiler (8B to 1 Trillion Parameters)
-2. Multi-Backend Runtime Comparisons (vLLM, TensorRT-LLM, SGLang, Ollama, PyTorch FP16, FreeToken)
-3. Long-Context Needle-In-A-Haystack (NIAH) up to 1M tokens
-4. Downstream Quality & Reasoning Benchmarks (GSM8K, MMLU-Pro, HumanEval, ARC-Challenge)
-5. High-Concurrency Production Serving SLA Replay
+2. NIAH retrieval through the SVD INT8 evaluator (synthetic vectors)
+3. Pointers to the real-weight quality harness (scripts/eval_kv_quality.py)
+4. Pointers to the real-weight throughput benchmark (scripts/benchmark_kv_decode.py)
+5. HPC primitive micro-timings
 """
 
 import os
@@ -102,63 +102,19 @@ def run_all_frontier_benchmarks():
         status = res_item["retrieval_status"]
         status_icon = "✅" if "SUCCESS" in status else "❌"
         print(f"    - Context {ctx:>7,} tokens | Depth {depth_str:>4} : {status_icon} {status}")
-    print(f"    - Context 1,000,000 tokens (Extrapolated): 99.4% retrieval accuracy with Hierarchical HCA (128x compression)")
 
     # -------------------------------------------------------------------------
     # 3. Downstream Quality & Accuracy Benchmark Evaluation
     # -------------------------------------------------------------------------
-    print("\n[🧠 3/5] RUNNING DOWNSTREAM REASONING & ACCURACY BENCHMARK SUITE...")
-    benchmarks_data = {
-        "GSM8K (8-Shot CoT Math)": {
-            "Dense LLaMA-70B Baseline": 88.3,
-            "Standard INT4-AWQ": 83.7,
-            "Turing Engine 3.0 (Subspace+Recirc)": 88.1,
-            "Accuracy Delta": "-0.2% (Mathematically Preserved)"
-        },
-        "MMLU-Pro (Multi-discipline QA)": {
-            "Dense LLaMA-70B Baseline": 70.8,
-            "Standard INT4-AWQ": 66.4,
-            "Turing Engine 3.0 (Subspace+Recirc)": 70.5,
-            "Accuracy Delta": "-0.3% (Mathematically Preserved)"
-        },
-        "HumanEval (Python Pass@1)": {
-            "Dense LLaMA-70B Baseline": 82.3,
-            "Standard INT4-AWQ": 77.9,
-            "Turing Engine 3.0 (Subspace+Recirc)": 82.0,
-            "Accuracy Delta": "-0.3% (Mathematically Preserved)"
-        },
-        "ARC-Challenge (Reasoning)": {
-            "Dense LLaMA-70B Baseline": 91.4,
-            "Standard INT4-AWQ": 88.2,
-            "Turing Engine 3.0 (Subspace+Recirc)": 91.2,
-            "Accuracy Delta": "-0.2% (Mathematically Preserved)"
-        }
-    }
-
-    for b_name, b_scores in benchmarks_data.items():
-        print(f"  • {b_name}:")
-        print(f"    - Dense FP16 Baseline      : {b_scores['Dense LLaMA-70B Baseline']}%")
-        print(f"    - Standard INT4 (AWQ/GPTQ) : {b_scores['Standard INT4-AWQ']}%")
-        print(f"    - Turing Engine 3.0 Subspace W4A16: {b_scores['Turing Engine 3.0 (Subspace+Recirc)']}% [{b_scores['Accuracy Delta']}]")
+    print("\n[🧠 3/5] QUALITY: not run here. Measure it on real weights with scripts/eval_kv_quality.py")
+    print("  (paired NLL against the exact model; results in results_kv_quality_*.json).")
 
     # -------------------------------------------------------------------------
-    # 4. Multi-Backend SLA & Concurrency Throughput Scaling
+    # 4. Serving throughput
     # -------------------------------------------------------------------------
-    print("\n[⚡ 4/5] RUNNING MULTI-BACKEND CONCURRENCY & SERVING SLA REPLAY...")
-    concurrency_levels = [1, 4, 16, 64, 128, 256]
-    print(f"{'Concurrency':<12} | {'PyTorch FP16':<14} | {'vLLM Paged':<14} | {'TensorRT-LLM':<14} | {'SGLang':<12} | {'Ollama GGUF':<12} | {'Turing Engine 3.0':<14}")
-    print("-" * 105)
-
-    base_tps = 18.5
-    for c in concurrency_levels:
-        pytorch_tps = base_tps * min(c, 2) * 0.95
-        vllm_tps = base_tps * (c ** 0.65) * 1.35
-        trt_tps = base_tps * (c ** 0.67) * 1.45
-        sglang_tps = base_tps * (c ** 0.66) * 1.40
-        ollama_tps = base_tps * (c ** 0.50) * 1.10
-        turing_tps = base_tps * (c ** 0.72) * 2.35 # Compounded with Quadtree Speculative + Subspace FFN Pruning
-
-        print(f"{c:<12} | {pytorch_tps:<14.1f} | {vllm_tps:<14.1f} | {trt_tps:<14.1f} | {sglang_tps:<12.1f} | {ollama_tps:<12.1f} | {turing_tps:<14.1f}")
+    print("\n[⚡ 4/5] THROUGHPUT: not run here. Measure it on real weights with scripts/benchmark_kv_decode.py")
+    print("  (tokens/s by batch and context against HuggingFace transformers; results in results_kv_decode_*.json).")
+    print("  No other engine is run by this repository, so no comparison with vLLM, TensorRT-LLM, SGLang or Ollama is claimed.")
 
     # -------------------------------------------------------------------------
     # 5. HPC Primitives Verification (High-Performance Systems & Math Integration Benchmarks)

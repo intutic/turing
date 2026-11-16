@@ -1,0 +1,266 @@
+{
+  "env": {
+    "device": "mps",
+    "torch": "2.9.1",
+    "platform": "macOS-27.3-arm64-arm-64bit",
+    "gpu": "arm"
+  },
+  "args": {
+    "models": "HuggingFaceTB/SmolLM2-135M,HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B",
+    "arms": "hf_native,exact_forward,sparsity_50,recirculation,served_default",
+    "context": 2048,
+    "decode": 256,
+    "windows": 8,
+    "device": "mps",
+    "out": "results_serving_defaults_mps.json"
+  },
+  "text": "WikiText-2 raw test, consecutive windows",
+  "rows": [
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "hf_native",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.6059638410806656,
+      "se": 0.16990450740600216,
+      "n": 8,
+      "seconds": 4.610021749977022
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.605963960289955,
+      "se": 0.16990453930386018,
+      "n": 8,
+      "seconds": 3.8473175829276443
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "sparsity_50",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 18.38123047351837,
+      "se": 1.85852565619803,
+      "n": 8,
+      "seconds": 5.24470616702456
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "recirculation",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.6060421615839005,
+      "se": 0.16993197311039185,
+      "n": 8,
+      "seconds": 5.627324500004761
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "served_default",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 18.381553292274475,
+      "se": 1.8585477464885203,
+      "n": 8,
+      "seconds": 6.153917958959937
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "hf_native",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -1.1920928955078125e-07,
+      "se": 2.813801023254787e-07,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "sparsity_50",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 15.775266513228416,
+      "se": 1.731477790875903,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "recirculation",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 7.82012939453125e-05,
+      "se": 4.902219201080962e-05,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-135M",
+      "arm": "served_default",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 15.77558933198452,
+      "se": 1.7315056414101808,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "hf_native",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.3089905083179474,
+      "se": 0.1735512698395568,
+      "n": 8,
+      "seconds": 17.902101375046186
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.308990404009819,
+      "se": 0.17355108649974502,
+      "n": 8,
+      "seconds": 21.19618149998132
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "sparsity_50",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 11.228901267051697,
+      "se": 0.5408349708655965,
+      "n": 8,
+      "seconds": 19.37945624999702
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "recirculation",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.3098392337560654,
+      "se": 0.1734045441256298,
+      "n": 8,
+      "seconds": 18.79006358294282
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "served_default",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 11.232202410697937,
+      "se": 0.5404989790247842,
+      "n": 8,
+      "seconds": 16.99723624996841
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "hf_native",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 1.043081283569336e-07,
+      "se": 3.7524392091054083e-07,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "sparsity_50",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 8.919910863041878,
+      "se": 0.42981996371364223,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "recirculation",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.0008488297462463379,
+      "se": 0.0005768367813762951,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "served_default",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 8.923212006688118,
+      "se": 0.4291129370899107,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "hf_native",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 1.921245276927948,
+      "se": 0.15811986950621287,
+      "n": 8,
+      "seconds": 51.27640983299352
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 1.9212454706430435,
+      "se": 0.15811989933876058,
+      "n": 8,
+      "seconds": 60.977857375051826
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "sparsity_50",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 8.769040703773499,
+      "se": 0.32779604999701595,
+      "n": 8,
+      "seconds": 235.7328427080065
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "recirculation",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 1.9218481183052063,
+      "se": 0.1582466367554086,
+      "n": 8,
+      "seconds": 81.91201341606211
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "served_default",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 8.768587946891785,
+      "se": 0.32785230901149137,
+      "n": 8,
+      "seconds": 116.17509912501555
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "hf_native",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -1.9371509552001953e-07,
+      "se": 2.971171331085152e-07,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "sparsity_50",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 6.847795233130455,
+      "se": 0.21493029360296292,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "recirculation",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.0006026476621627808,
+      "se": 0.0009581323917537435,
+      "n": 8
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "served_default",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 6.847342476248741,
+      "se": 0.2150968268679257,
+      "n": 8
+    }
+  ]
+}

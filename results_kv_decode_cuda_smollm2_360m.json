@@ -1,0 +1,576 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "args": {
+    "model": "HuggingFaceTB/SmolLM2-360M",
+    "settings": "hf_transformers,native,int8,int4,int8_quest25",
+    "contexts": "2048,8192,32768",
+    "batches": "1,8,32,64",
+    "steps": 32,
+    "device": "cuda",
+    "out": "results_kv_decode_cuda_smollm2_360m.json"
+  },
+  "model_config": {
+    "name": "HF-model",
+    "hidden_dim": 960,
+    "ffn_dim": 2560,
+    "num_heads": 15,
+    "num_kv_heads": 5,
+    "head_dim": 64,
+    "num_layers": 32,
+    "vocab_size": 49152,
+    "tile_size": 64,
+    "active_tiles": 40,
+    "rank_sub": 64,
+    "max_position_embeddings": 8192,
+    "rope_theta": 100000.0,
+    "router_layer_idx": 10,
+    "rms_norm_eps": 1e-05,
+    "enable_recirculation": false,
+    "kv_cache_dtype": "int8",
+    "kv_page_budget": 0.25,
+    "kv_select_min_tokens": 1024
+  },
+  "rows": [
+    {
+      "setting": "hf_transformers",
+      "context": 2048,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 29.936781590856548,
+      "kv_cache_bytes": 85237760,
+      "fit": true
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 2048,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 230.8531404057809,
+      "kv_cache_bytes": 681902080,
+      "fit": true
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 2048,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 791.7667448427719,
+      "kv_cache_bytes": 2727608320,
+      "fit": true
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 2048,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 833.046780291058,
+      "kv_cache_bytes": 5455216640,
+      "fit": true
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 8192,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 30.070357664370796,
+      "kv_cache_bytes": 336896000,
+      "fit": true
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 8192,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 204.16637325393424,
+      "kv_cache_bytes": 2695168000,
+      "fit": true
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 8192,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 215.20309140888628,
+      "kv_cache_bytes": 10780672000,
+      "fit": true
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 8192,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "fit": false
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 32768,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 30.327632043678978,
+      "kv_cache_bytes": 1343528960,
+      "fit": true
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 32768,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 55.75746707750822,
+      "kv_cache_bytes": 10748231680,
+      "fit": true
+    },
+    {
+      "setting": "hf_transformers",
+      "context": 32768,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "fit": false
+    },
+    {
+      "setting": "native",
+      "context": 2048,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 25.167641977809634,
+      "kv_cache_bytes": 85237760,
+      "fit": true
+    },
+    {
+      "setting": "native",
+      "context": 2048,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 192.35279811408483,
+      "kv_cache_bytes": 681902080,
+      "fit": true
+    },
+    {
+      "setting": "native",
+      "context": 2048,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 704.7957923294468,
+      "kv_cache_bytes": 2727608320,
+      "fit": true
+    },
+    {
+      "setting": "native",
+      "context": 2048,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 1273.9064436887604,
+      "kv_cache_bytes": 5455216640,
+      "fit": true
+    },
+    {
+      "setting": "native",
+      "context": 8192,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 25.22261271074274,
+      "kv_cache_bytes": 336896000,
+      "fit": true
+    },
+    {
+      "setting": "native",
+      "context": 8192,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 190.9088967121711,
+      "kv_cache_bytes": 2695168000,
+      "fit": true
+    },
+    {
+      "setting": "native",
+      "context": 8192,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 359.76785299099157,
+      "kv_cache_bytes": 10780672000,
+      "fit": true
+    },
+    {
+      "setting": "native",
+      "context": 8192,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "fit": false
+    },
+    {
+      "setting": "native",
+      "context": 32768,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 25.194790630292474,
+      "kv_cache_bytes": 1343528960,
+      "fit": true
+    },
+    {
+      "setting": "native",
+      "context": 32768,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 88.9916054100426,
+      "kv_cache_bytes": 10748231680,
+      "fit": true
+    },
+    {
+      "setting": "native",
+      "context": 32768,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "fit": false
+    },
+    {
+      "setting": "int8",
+      "context": 2048,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 25.067344066100695,
+      "kv_cache_bytes": 45282560,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 2048,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 186.52409151758764,
+      "kv_cache_bytes": 362260480,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 2048,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 652.2696652997739,
+      "kv_cache_bytes": 1449041920,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 2048,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 1155.0548071616563,
+      "kv_cache_bytes": 2898083840,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 8192,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 24.973443747192725,
+      "kv_cache_bytes": 178976000,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 8192,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 187.56675476073804,
+      "kv_cache_bytes": 1431808000,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 8192,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 324.35997522505346,
+      "kv_cache_bytes": 5727232000,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 8192,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 349.142884742388,
+      "kv_cache_bytes": 11454464000,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 32768,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 24.963206846445466,
+      "kv_cache_bytes": 713749760,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 32768,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 79.48827749623872,
+      "kv_cache_bytes": 5709998080,
+      "fit": true
+    },
+    {
+      "setting": "int8",
+      "context": 32768,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "fit": false
+    },
+    {
+      "setting": "int4",
+      "context": 2048,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 25.554707470236075,
+      "kv_cache_bytes": 26636800,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 2048,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 195.2781557344535,
+      "kv_cache_bytes": 213094400,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 2048,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 690.2376608518192,
+      "kv_cache_bytes": 852377600,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 2048,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 1244.525958193883,
+      "kv_cache_bytes": 1704755200,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 8192,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 25.358101241675058,
+      "kv_cache_bytes": 105280000,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 8192,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 192.43691097569405,
+      "kv_cache_bytes": 842240000,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 8192,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 448.1599891387133,
+      "kv_cache_bytes": 3368960000,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 8192,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 471.6424142867379,
+      "kv_cache_bytes": 6737920000,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 32768,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 25.346892702165086,
+      "kv_cache_bytes": 419852800,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 32768,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 106.46752842629283,
+      "kv_cache_bytes": 3358822400,
+      "fit": true
+    },
+    {
+      "setting": "int4",
+      "context": 32768,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "fit": false
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 2048,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 9.251353720523175,
+      "kv_cache_bytes": 45282560,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 2048,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 18.964037216672036,
+      "kv_cache_bytes": 362260480,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 2048,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 20.222083195492402,
+      "kv_cache_bytes": 1449041920,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 2048,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 20.320382554381116,
+      "kv_cache_bytes": 2898083840,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 8192,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 9.16100168191398,
+      "kv_cache_bytes": 178976000,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 8192,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 19.070029618595544,
+      "kv_cache_bytes": 1431808000,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 8192,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 20.106569985405102,
+      "kv_cache_bytes": 5727232000,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 8192,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 20.195673269237663,
+      "kv_cache_bytes": 11454464000,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 32768,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 9.199003661202942,
+      "kv_cache_bytes": 713749760,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 32768,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 18.924378715860552,
+      "kv_cache_bytes": 5709998080,
+      "fit": true
+    },
+    {
+      "setting": "int8_quest25",
+      "context": 32768,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "fit": false
+    }
+  ]
+}
