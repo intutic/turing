@@ -53,10 +53,10 @@ def test_quant_linear_matches_dequantized_matmul_and_quantize_model_runs():
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for the Triton W4A16 kernel")
 @pytest.mark.parametrize("M", [1, 3, 16, 64])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-def test_triton_w4a16_matches_reference(M, dtype):
+@pytest.mark.parametrize("N,K", [(384, 512), (2048, 8192)])  # the second splits a long K across many programs
+def test_triton_w4a16_matches_reference(M, dtype, N, K):
     from turing.kernels.triton_w4a16 import w4a16_gemm
     torch.manual_seed(0)
-    N, K = 384, 512
     codes, scales, zeros = rtn_quantize(torch.randn(N, K))
     q, s, z = pack(codes).cuda(), scales.cuda(), zeros.cuda()
     x = torch.randn(M, K, device="cuda", dtype=dtype)

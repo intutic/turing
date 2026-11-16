@@ -1,9 +1,9 @@
 """
-TEAL-style training-free activation sparsity (opt-in): the input of every attention and dense-MLP projection is
-thresholded by magnitude so that a chosen fraction of its entries is zero, with one threshold per projection input
-calibrated on WikiText-2 activations. Quality cost is measured with scripts/eval_kv_quality.py (arms teal25/40/50);
-decode speed at batch 1 on CUDA comes from triton_sparse_gemv (zero inputs skip their weight rows). Larger batches
-gain nothing (a weight row is needed when any row's input is nonzero), so the sparse kernel runs only for one row.
+TEAL-style training-free activation sparsity (opt-in): in batch-1 decode on CUDA, the input of every attention and
+dense-MLP projection is thresholded by magnitude so that a chosen fraction of its entries is zero (one threshold per
+projection input, calibrated on WikiText-2 activations), and triton_sparse_gemv skips the weight rows of zero inputs.
+Everywhere else the model runs dense: larger batches gain nothing (a weight row is needed when any row's input is
+nonzero), and prefill gains nothing either. Quality cost: scripts/eval_kv_quality.py arms teal25/40/50 (decode mode).
 """
 
 from typing import Dict, List, Optional
@@ -31,12 +31,15 @@ class SparseInputLinear(nn.Module):
         return self.base.bias
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x * (x.abs() >= self.threshold)
+        # Sparsify only where it saves time: one row on CUDA, through the input-sparse GEMV. Everything else (prefill,
+        # batched decode, CPU/MPS) runs dense; sparsifying a prefill also breaks attention-sink tokens, whose
+        # normalized input is a few huge channels and many small ones (SmolLM2-1.7B: +6.4 nats at 40%).
         rows = x.numel() // self.in_features
         quant = type(self.base).__name__ == "QuantLinear"
         if x.is_cuda and rows == 1 and (isinstance(self.base, nn.Linear) or quant) and self.out_features % 64 == 0:
             from ..kernels.triton_sparse_gemv import HAS_TRITON, quantize_transposed_int4, sparse_gemv, sparse_gemv_int4
             if HAS_TRITON:
+                x = x * (x.abs() >= self.threshold)
                 if self._wt is None:  # int4: a transposed 4-bit copy (groups of 64 outputs per input row)
                     self._wt = quantize_transposed_int4(self.base.dequantized(torch.float32)) if quant \
                         else self.base.weight.t().contiguous()

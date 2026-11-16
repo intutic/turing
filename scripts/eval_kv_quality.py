@@ -50,10 +50,11 @@ ARMS |= {  # KV cache settings through the cache; low-bit arms vs exact_forward,
     # 4-bit weights (turing/models/quant.py): round to nearest, and GPTQ calibrated on 128 x 2048 WikiText-2 train tokens
     "rtn4": ("forward", dict(_EXACT, quant="rtn"), {}, "exact_forward"),
     "gptq4": ("forward", dict(_EXACT, quant="gptq"), {}, "exact_forward"),
-    # TEAL-style activation sparsity (turing/models/activation_sparsity.py), thresholds from WikiText-2 train
-    "teal25": ("forward", dict(_EXACT, teal=0.25), {}, "exact_forward"),
-    "teal40": ("forward", dict(_EXACT, teal=0.40), {}, "exact_forward"),
-    "teal50": ("forward", dict(_EXACT, teal=0.50), {}, "exact_forward"),
+    # TEAL-style activation sparsity (turing/models/activation_sparsity.py), thresholds from WikiText-2 train; it
+    # applies only to one-row CUDA decode, so it is scored token by token (and is a no-op off CUDA)
+    "teal25": ("decode", dict(_EXACT, teal=0.25), {}, "exact_decode"),
+    "teal40": ("decode", dict(_EXACT, teal=0.40), {}, "exact_decode"),
+    "teal50": ("decode", dict(_EXACT, teal=0.50), {}, "exact_decode"),
 }
 
 
