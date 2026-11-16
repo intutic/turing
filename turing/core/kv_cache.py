@@ -7,6 +7,8 @@ elementwise min and max of K over each 16-token page, from the values before qua
 same slot in every layer. Storage modes (`kv_cache_dtype`):
 - "native": the model's dtype (D' = D).
 - "int8":   asymmetric round-to-nearest per token and KV head, fp16 scale and zero (D' = D, G = 1).
+- native_layers: layers whose K and V a low-bit pool stores in the model dtype anyway (`k_hi`, `v_hi`
+  [len(native_layers), num_pages, Hkv, 16, D]); set when calibration finds a layer the low-bit format damages.
 - "int4":   asymmetric round-to-nearest per group of 32 values along D, fp16 scale and zero per group, two codes per
             byte (D' = D / 2, G = D / 32).
 K is stored after RoPE. A request (`KVCache`) owns a row of the pool's device page table and the pages it lists; a
@@ -17,7 +19,7 @@ The methods here are the reference path (any device). On CUDA, `turing/kernels/t
 writes the same layout with fused kernels.
 """
 
-from typing import List, Tuple
+from typing import Sequence, List, Tuple
 import math
 import torch
 
@@ -76,7 +78,8 @@ class KVPool:
     # (admission, page tables): its tensors are always created as normal tensors.
     @torch.inference_mode(False)
     def __init__(self, num_layers: int, num_kv_heads: int, head_dim: int, num_pages: int, dtype, device,
-                 kv_cache_dtype: str = "native", track_pages: bool = False, max_tokens_per_request: int = 131072):
+                 kv_cache_dtype: str = "native", track_pages: bool = False, max_tokens_per_request: int = 131072,
+                 native_layers: Sequence[int] = ()):
         if kv_cache_dtype not in KV_CACHE_DTYPES:
             raise ValueError(f"kv_cache_dtype must be one of {KV_CACHE_DTYPES}, not {kv_cache_dtype!r}")
         if kv_cache_dtype == "int4" and head_dim % INT4_GROUP:
@@ -96,6 +99,14 @@ class KVPool:
             self.k, self.v = (torch.empty(shape((width,)), dtype=torch.uint8, device=device) for _ in range(2))
             self.k_scale, self.k_zero, self.v_scale, self.v_zero = (
                 torch.empty(shape((groups,)), dtype=torch.float16, device=device) for _ in range(4))
+        # layers a low-bit pool keeps in the model dtype (their slots in the low-bit tensors stay unused)
+        self.native_layers = tuple(sorted(set(native_layers))) if kv_cache_dtype != "native" else ()
+        self._hi = {layer: i for i, layer in enumerate(self.native_layers)}
+        if self._hi:
+            self.k_hi, self.v_hi = (torch.empty((len(self._hi), P, H, PAGE, D), dtype=dtype, device=device)
+                                    for _ in range(2))
+        else:
+            self.k_hi = self.v_hi = None
         if track_pages:
             self.kmin = torch.full((L, P, H, D), float("inf"), dtype=torch.float16, device=device)
             self.kmax = torch.full((L, P, H, D), float("-inf"), dtype=torch.float16, device=device)
@@ -114,7 +125,9 @@ class KVPool:
         memory PyTorch has cached but not used), else 4 GiB off CUDA."""
         device = torch.device(device)
         D, H, L = config.head_dim, config.num_kv_heads, config.num_layers
+        native = tuple(getattr(config, "kv_native_layers", None) or ()) if config.kv_cache_dtype != "native" else ()
         page_bytes = PAGE * kv_bytes_per_token(L, H, D, config.kv_cache_dtype, torch.finfo(dtype).bits // 8)
+        page_bytes += PAGE * kv_bytes_per_token(len(native), H, D, "native", torch.finfo(dtype).bits // 8)
         track = config.kv_page_budget < 1.0
         if track:
             page_bytes += 2 * L * H * D * 2
@@ -125,7 +138,8 @@ class KVPool:
             budget = config.kv_pool_fraction * (free + torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device))
         else:
             budget = 4 * 2 ** 30
-        return cls(L, H, D, max(1, int(budget // page_bytes)), dtype, device, config.kv_cache_dtype, track)
+        return cls(L, H, D, max(1, int(budget // page_bytes)), dtype, device, config.kv_cache_dtype, track,
+                   native_layers=native)
 
     # ------------------------------------------------------------------ pages and slots
 
@@ -134,7 +148,31 @@ class KVPool:
         return len(self._free_pages)
 
     def fields(self) -> List[torch.Tensor]:
-        return [t for t in (self.k, self.v, self.k_scale, self.k_zero, self.v_scale, self.v_zero) if t is not None]
+        return [t for t in (self.k, self.v, self.k_scale, self.k_zero, self.v_scale, self.v_zero, self.k_hi, self.v_hi)
+                if t is not None]
+
+    def layer_fields(self, layer: int, which: str):
+        """(codes, scale, zero, storage) of one layer's K or V ("k" / "v"): tensors indexed [page, head, slot, ...],
+        scale and zero None for native storage; storage is "native", "int8" or "int4"."""
+        if layer in self._hi:
+            return (self.k_hi if which == "k" else self.v_hi)[self._hi[layer]], None, None, "native"
+        codes, scale, zero = ((self.k, self.k_scale, self.k_zero) if which == "k"
+                              else (self.v, self.v_scale, self.v_zero))
+        if self.kv_cache_dtype == "native":
+            return codes[layer], None, None, "native"
+        return codes[layer], scale[layer], zero[layer], self.kv_cache_dtype
+
+    def _store(self, layer: int, which: str, phys: torch.Tensor, slot: torch.Tensor, xt: torch.Tensor) -> None:
+        """xt [N, Hkv, D] into (page phys[n], slot slot[n]) of one layer's K or V."""
+        codes_t, scale_t, zero_t, storage = self.layer_fields(layer, which)
+        if storage == "native":
+            codes_t[phys, :, slot] = xt.to(codes_t.dtype)
+            return
+        bits, group = (8, self.head_dim) if storage == "int8" else (4, INT4_GROUP)
+        codes, scale, zero = _quantize(xt, bits, group)
+        codes_t[phys, :, slot] = codes if bits == 8 else _pack4(codes)
+        scale_t[phys, :, slot] = scale
+        zero_t[phys, :, slot] = zero
 
     def page_bytes(self) -> int:
         """K, V and scale bytes of one page across all layers (Quest metadata excluded)."""
@@ -161,7 +199,8 @@ class KVPool:
         used = self.used_pages
         return {"total_pages": self.page_limit, "max_physical_pages": self.num_pages, "used_pages": used,
                 "free_pages": max(0, self.page_limit - used), "page_size": PAGE,
-                "kv_cache_dtype": self.kv_cache_dtype, "bytes_per_page": self.page_bytes(),
+                "kv_cache_dtype": self.kv_cache_dtype, "native_layers": list(self.native_layers),
+                "bytes_per_page": self.page_bytes(),
                 "utilization_pct": round(used / self.page_limit * 100.0, 2)}
 
     def alloc_pages(self, n: int) -> List[int]:
@@ -220,17 +259,8 @@ class KVPool:
         pos = torch.arange(cache.length, cache.length + L, device=self.device)
         phys = self.page_table[cache.slot, pos // PAGE].long()
         slot = pos % PAGE
-        for x, codes_t, scale_t, zero_t in ((k, self.k, self.k_scale, self.k_zero),
-                                            (v, self.v, self.v_scale, self.v_zero)):
-            xt = x[0].transpose(0, 1)  # [L, Hkv, D]
-            if self.kv_cache_dtype == "native":
-                codes_t[layer][phys, :, slot] = xt.to(codes_t.dtype)
-                continue
-            bits, group = (8, self.head_dim) if self.kv_cache_dtype == "int8" else (4, INT4_GROUP)
-            codes, scale, zero = _quantize(xt, bits, group)
-            codes_t[layer][phys, :, slot] = codes if bits == 8 else _pack4(codes)
-            scale_t[layer][phys, :, slot] = scale
-            zero_t[layer][phys, :, slot] = zero
+        for which, x in (("k", k), ("v", v)):
+            self._store(layer, which, phys, slot, x[0].transpose(0, 1))  # [L, Hkv, D]
         if self.track_pages:
             kt = k[0].transpose(0, 1).half()
             idx = phys[:, None, None].expand_as(kt)
@@ -244,17 +274,8 @@ class KVPool:
         pos = starts.long()
         phys = self.page_table[slots.long(), pos // PAGE].long()
         slot = pos % PAGE
-        for x, codes_t, scale_t, zero_t in ((k, self.k, self.k_scale, self.k_zero),
-                                            (v, self.v, self.v_scale, self.v_zero)):
-            xt = x[:, :, 0]  # [B, Hkv, D]
-            if self.kv_cache_dtype == "native":
-                codes_t[layer][phys, :, slot] = xt.to(codes_t.dtype)
-                continue
-            bits, group = (8, self.head_dim) if self.kv_cache_dtype == "int8" else (4, INT4_GROUP)
-            codes, scale, zero = _quantize(xt, bits, group)
-            codes_t[layer][phys, :, slot] = codes if bits == 8 else _pack4(codes)
-            scale_t[layer][phys, :, slot] = scale
-            zero_t[layer][phys, :, slot] = zero
+        for which, x in (("k", k), ("v", v)):
+            self._store(layer, which, phys, slot, x[:, :, 0])  # [B, Hkv, D]
         if self.track_pages:
             kt = k[:, :, 0].half()
             idx = phys[:, None, None].expand_as(kt)
@@ -270,13 +291,12 @@ class KVPool:
         B = phys.shape[0]
         out = []
         for which in ("k", "v"):
-            codes_t, scale_t, zero_t = ((self.k, self.k_scale, self.k_zero) if which == "k"
-                                        else (self.v, self.v_scale, self.v_zero))
-            g = lambda t: t[layer][phys].permute(0, 2, 1, 3, 4).flatten(2, 3)  # [B, W, Hkv, 16, w] -> [B, Hkv, W*16, w]
+            codes_t, scale_t, zero_t, storage = self.layer_fields(layer, which)
+            g = lambda t: t[phys].permute(0, 2, 1, 3, 4).flatten(2, 3)  # [B, W, Hkv, 16, w] -> [B, Hkv, W*16, w]
             codes = g(codes_t)
-            if self.kv_cache_dtype != "native":
-                group = self.head_dim if self.kv_cache_dtype == "int8" else INT4_GROUP
-                if self.kv_cache_dtype == "int4":
+            if storage != "native":
+                group = self.head_dim if storage == "int8" else INT4_GROUP
+                if storage == "int4":
                     codes = _unpack4(codes)
                 codes = _dequantize(codes, g(scale_t), g(zero_t), group, self.dtype)
             out.append(codes)
@@ -285,24 +305,23 @@ class KVPool:
         k, v = (x.masked_fill(~valid[:, None, :, None], 0) for x in out)  # unwritten slots may hold NaN
         return k, v, valid
 
-    def _gather(self, t: torch.Tensor, layer: int, phys: torch.Tensor) -> torch.Tensor:
-        """phys [N] -> [Hkv, N * 16, width]; phys [Hkv, N] (one page list per KV head) -> the same."""
+    def _gather(self, t: torch.Tensor, phys: torch.Tensor) -> torch.Tensor:
+        """One layer's field t [pages, Hkv, 16, w]: phys [N] -> [Hkv, N * 16, w]; phys [Hkv, N] (one page list per KV
+        head) -> the same."""
         if phys.dim() == 1:
-            return t[layer][phys].transpose(0, 1).flatten(1, 2)          # [N, Hkv, 16, w] -> [Hkv, N * 16, w]
+            return t[phys].transpose(0, 1).flatten(1, 2)          # [N, Hkv, 16, w] -> [Hkv, N * 16, w]
         heads = torch.arange(phys.shape[0], device=self.device)[:, None]
-        return t[layer][phys, heads].flatten(1, 2)                        # [Hkv, N, 16, w] -> [Hkv, N * 16, w]
+        return t[phys, heads].flatten(1, 2)                        # [Hkv, N, 16, w] -> [Hkv, N * 16, w]
 
     def _decode_field(self, layer: int, phys: torch.Tensor, which: str) -> torch.Tensor:
-        codes_t, scale_t, zero_t = ((self.k, self.k_scale, self.k_zero) if which == "k"
-                                    else (self.v, self.v_scale, self.v_zero))
-        codes = self._gather(codes_t, layer, phys)
-        if self.kv_cache_dtype == "native":
+        codes_t, scale_t, zero_t, storage = self.layer_fields(layer, which)
+        codes = self._gather(codes_t, phys)
+        if storage == "native":
             return codes
-        group = self.head_dim if self.kv_cache_dtype == "int8" else INT4_GROUP
-        if self.kv_cache_dtype == "int4":
+        group = self.head_dim if storage == "int8" else INT4_GROUP
+        if storage == "int4":
             codes = _unpack4(codes)
-        return _dequantize(codes, self._gather(scale_t, layer, phys), self._gather(zero_t, layer, phys), group,
-                           self.dtype)
+        return _dequantize(codes, self._gather(scale_t, phys), self._gather(zero_t, phys), group, self.dtype)
 
     def read(self, layer: int, cache: "KVCache", length: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """K, V [1, Hkv, length, D] of one request, in the model dtype."""

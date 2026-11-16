@@ -68,6 +68,8 @@ class ModelConfig:
     cuda_graphs: bool = True           # replay decode steps as CUDA graphs (CUDA only; see DecodeGraphs)
     decode_attention: str = "kernel"   # CUDA decode: "kernel" (fused paged Triton) or "sdpa" (gather pages, then SDPA)
     kv_smoothing: bool = True          # int8/int4 KV: per-channel key smoothing (SubspaceCausalLM.calibrate_kv_smoothing)
+    kv_native_layers: Optional[Tuple[int, ...]] = None  # int8/int4 KV: layers kept in the model dtype; None = chosen
+                                                         # by calibration (calibrate_kv_smoothing), () = none
     rope_scaling: Optional[dict] = None  # HF rope-parameters dict ({"rope_type": "llama3", ...}); see hf_rope_scaling
     attention_bias: bool = False       # q/k/v projection biases (Qwen2, GPT-2, OPT, GPT-NeoX, Phi-2)
     qk_norm: bool = False              # per-head norm on q and k before RoPE (Qwen3, Gemma 3)

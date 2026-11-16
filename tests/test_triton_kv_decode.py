@@ -21,10 +21,14 @@ def _filled(pool, T, g):
 @pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
 @pytest.mark.parametrize("H,Hkv,D", [(9, 3, 64), (32, 8, 128)])
 @pytest.mark.parametrize("budget", [None, 0.25])
-def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget):
+@pytest.mark.parametrize("native", [False, True])
+def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, native):
     from turing.kernels.triton_kv_decode import triton_pool_decode
+    if native and kv_cache_dtype == "native":
+        pytest.skip("a native pool has no full-precision layers of its own")
     g = torch.Generator(device="cuda").manual_seed(1)
-    pool = KVPool(1, Hkv, D, 512, torch.float16, "cuda", kv_cache_dtype, track_pages=budget is not None)
+    pool = KVPool(1, Hkv, D, 512, torch.float16, "cuda", kv_cache_dtype, track_pages=budget is not None,
+                  native_layers=(0,) if native else ())
     lengths = (1, 255, 1000)  # 255 + 1 fills a page exactly; 1000 + 1 is mid-page
     fused = [_filled(pool, T, g) for T in lengths]
     ref = [c.clone(share=False) for c in fused]

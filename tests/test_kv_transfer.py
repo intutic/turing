@@ -123,3 +123,20 @@ def test_engine_with_remote_prefill_streams_the_same_tokens(kv_dtype):
     decode.remote_prefill = ("127.0.0.1", worker.port)
     assert _generate(decode, PROMPT, 8) == ref
     assert decode.kv_pool.used_pages == 0
+
+
+@torch.no_grad()
+def test_full_precision_layers_travel_with_the_pages():
+    src, dst, other = _model("int4"), _model("int4"), _model("int4")
+    for m in (src, dst):
+        m.config.kv_native_layers = (0,)
+    other.config.kv_native_layers = ()
+    _, cache = src(torch.tensor([PROMPT]))
+    header, blob = export_kv(cache)
+    assert header["native_layers"] == [0]
+    got = import_kv(dst.kv_pool(), header, blob)
+    for layer in range(src.config.num_layers):
+        for a, b in zip(src.kv_pool().read(layer, cache, cache.length), dst.kv_pool().read(layer, got, got.length)):
+            assert torch.equal(a, b)
+    with pytest.raises(ValueError, match="full precision"):
+        import_kv(other.kv_pool(), header, blob)

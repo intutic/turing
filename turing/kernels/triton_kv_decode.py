@@ -183,7 +183,7 @@ def pool_decode_supported(pool: KVPool, q: torch.Tensor) -> bool:
     """CUDA, a power-of-2 head_dim of at least 16, and a native pool dtype Triton can store."""
     D = pool.head_dim
     return (HAS_TRITON and q.is_cuda and D >= 16 and D & (D - 1) == 0
-            and (pool.kv_cache_dtype != "native" or pool.dtype in _ELEM))
+            and ((pool.kv_cache_dtype != "native" and not pool.native_layers) or pool.dtype in _ELEM))
 
 
 def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
@@ -196,9 +196,11 @@ def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tenso
     B, H, _, D = q.shape
     Hkv = pool.num_kv_heads
     G = H // Hkv
-    mode = _MODES[pool.kv_cache_dtype]
-    fields = [t[layer] for t in (pool.k, pool.v)]
-    scales = [t[layer] for t in (pool.k_scale, pool.k_zero, pool.v_scale, pool.v_zero)] if mode else fields * 2
+    kc, ks, kz, storage = pool.layer_fields(layer, "k")
+    vc, vs, vz, _ = pool.layer_fields(layer, "v")
+    mode = _MODES[storage]  # a layer the pool keeps in the model dtype runs as native
+    fields = [kc, vc]
+    scales = [ks, kz, vs, vz] if mode else fields * 2
     bounds = [pool.kmin[layer], pool.kmax[layer]] if pool.track_pages else fields
     kv = torch.stack((k, v)).reshape(2, B, Hkv, D)
     pt = pool.page_table

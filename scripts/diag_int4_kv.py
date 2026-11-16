@@ -103,6 +103,78 @@ def ablate(name, T, device, windows):
     return dict(model=name, ablation=res)
 
 
+@torch.no_grad()
+def sensitivity(name, T, device):
+    """Per layer: relative error of the attention output when K and V take an int4 / int8 round-trip, on the
+    random-token calibration batch (4 x 256, what calibrate_kv_smoothing sees) and on 1 x T tokens of real text."""
+    from datasets import load_dataset
+    model, tok = RealHuggingFaceLoader.load_hf_model_into_turing(name, device=device, dtype="fp32")
+    model.calibrate_kv_smoothing()
+    text = "\n\n".join(load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")["text"])
+    real = tok(text, return_tensors="pt").input_ids[:, :T].to(device)
+    rand = torch.randint(0, model.config.vocab_size, (4, 256), generator=torch.Generator().manual_seed(0)).to(device)
+    attns = [layer.self_attn for layer in model.layers]
+    errs = {}
+    for i, a in enumerate(attns):
+        orig = a._attend
+
+        def hook(q, k, v, mask, causal, _i=i, _orig=orig):
+            out = _orig(q, k, v, mask, causal=causal)
+            for bits, group in ((4, INT4_GROUP), (8, k.shape[-1])):
+                def rt(x):
+                    c, s, z = _quantize(x, bits, group)
+                    return _dequantize(c, s, z, group, x.dtype)
+                o2 = _orig(q, rt(k), rt(v), mask, causal=causal)
+                errs[(cur["src"], _i, bits)] = ((o2 - out).norm() / out.norm()).item()
+            return out
+        a._attend = hook
+    cur = {}
+    for src, ids in (("random", rand), ("real", real)):
+        cur["src"] = src
+        model._body(ids, 0, None, None)
+    rows = [dict(layer=i, **{f"{src}_int{b}": errs[(src, i, b)] for src in ("random", "real") for b in (4, 8)})
+            for i in range(len(attns))]
+    return dict(model=name, rows=rows)
+
+
+@torch.no_grad()
+def kl_select(name, T, device):
+    """Per layer: mean KL(exact || one layer's K and V int4 / int8 round-tripped) of the next-token distribution, on
+    random tokens (4 x 256) and on 1 x T tokens of real text: can calibration on random tokens find the fragile
+    layers the NLL ablation finds?"""
+    from datasets import load_dataset
+    import torch.nn.functional as F
+    model, tok = RealHuggingFaceLoader.load_hf_model_into_turing(name, device=device, dtype="fp32")
+    model.calibrate_kv_smoothing()
+    text = "\n\n".join(load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")["text"])
+    real = tok(text, return_tensors="pt").input_ids[:, :T].to(device)
+    rand = torch.randint(0, model.config.vocab_size, (4, 256), generator=torch.Generator().manual_seed(0)).to(device)
+    attns = [layer.self_attn for layer in model.layers]
+    cfg = {}
+    for i, a in enumerate(attns):
+        orig = a._attend
+
+        def hook(q, k, v, mask, causal, _i=i, _orig=orig):
+            if cfg.get("layer") == _i:
+                bits, group = cfg["bits"], (INT4_GROUP if cfg["bits"] == 4 else k.shape[-1])
+                rt = lambda x: _dequantize(*_quantize(x, bits, group), group, x.dtype)  # noqa: E731
+                k, v = rt(k), rt(v)
+            return _orig(q, k, v, mask, causal=causal)
+        a._attend = hook
+    rows = []
+    for src, ids in (("random", rand), ("real", real)):
+        cfg.clear()
+        ref = F.log_softmax(model._body(ids, 0, None, None).float(), -1)
+        for bits in (4, 8):
+            for i in range(len(attns)):
+                cfg.update(layer=i, bits=bits)
+                lp = F.log_softmax(model._body(ids, 0, None, None).float(), -1)
+                kl = (ref.exp() * (ref - lp)).sum(-1).mean().item()
+                rows.append(dict(src=src, bits=bits, layer=i, kl=kl))
+        print(src, "done", flush=True)
+    return dict(model=name, rows=rows)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", default="Qwen/Qwen2.5-0.5B,Qwen/Qwen2.5-1.5B")
@@ -111,7 +183,29 @@ def main():
     ap.add_argument("--out", default="diag_int4_kv.json")
     ap.add_argument("--ablate", action="store_true", help="per-layer / K-only / V-only / keep-token-0 NLL ablation")
     ap.add_argument("--windows", type=int, default=2)
+    ap.add_argument("--sensitivity", action="store_true", help="per-layer attention-output error, random vs real text")
+    ap.add_argument("--kl", action="store_true", help="per-layer KL of the next-token distribution, random vs real")
     a = ap.parse_args()
+    if a.kl:
+        res = [kl_select(m, a.tokens, a.device) for m in a.models.split(",")]
+        json.dump(res, open(a.out, "w"), indent=1)
+        for r in res:
+            print("==", r["model"])
+            for src in ("random", "real"):
+                for bits in (4, 8):
+                    xs = sorted(((x["kl"], x["layer"]) for x in r["rows"] if x["src"] == src and x["bits"] == bits),
+                                reverse=True)
+                    print(f"  {src} int{bits} top: " + ", ".join(f"L{l}={k:.4f}" for k, l in xs[:4])
+                          + f"  median={xs[len(xs) // 2][0]:.5f}")
+        return
+    if a.sensitivity:
+        res = [sensitivity(m, a.tokens, a.device) for m in a.models.split(",")]
+        json.dump(res, open(a.out, "w"), indent=1)
+        for r in res:
+            print("==", r["model"])
+            for x in r["rows"]:
+                print(" ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in x.items()))
+        return
     if a.ablate:
         res = [ablate(m, a.tokens, a.device, a.windows) for m in a.models.split(",")]
         json.dump(res, open(a.out, "w"), indent=1)

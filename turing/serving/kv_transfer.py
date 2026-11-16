@@ -22,7 +22,7 @@ from ..core.kv_cache import PAGE, KVCache, KVPool
 
 __all__ = ["export_kv", "import_kv", "send_msg", "recv_msg"]
 
-_FIELDS = ("k", "v", "k_scale", "k_zero", "v_scale", "v_zero")
+_FIELDS = ("k", "v", "k_scale", "k_zero", "v_scale", "v_zero", "k_hi", "v_hi")
 
 
 def export_kv(cache: KVCache) -> Tuple[dict, bytes]:
@@ -32,6 +32,7 @@ def export_kv(cache: KVCache) -> Tuple[dict, bytes]:
     names = [n for n in _FIELDS if getattr(pool, n) is not None] + (["kmin", "kmax"] if pool.track_pages else [])
     tensors = [getattr(pool, n)[:, pages].contiguous().cpu() for n in names]
     header = {"length": cache.length, "kv_cache_dtype": pool.kv_cache_dtype, "num_layers": pool.num_layers,
+              "native_layers": list(pool.native_layers),
               "num_kv_heads": pool.num_kv_heads, "head_dim": pool.head_dim,
               "tensors": [[n, str(t.dtype).replace("torch.", ""), list(t.shape)] for n, t in zip(names, tensors)]}
     return header, b"".join(t.view(torch.uint8).numpy().tobytes() for t in tensors)
@@ -40,6 +41,9 @@ def export_kv(cache: KVCache) -> Tuple[dict, bytes]:
 def import_kv(pool: KVPool, header: dict, blob: bytes) -> KVCache:
     """A new request cache in `pool` holding the exported pages (the pools must agree on layers, KV heads, head size
     and storage dtype)."""
+    if list(header.get("native_layers", [])) != list(pool.native_layers):
+        raise ValueError(f"KV payload keeps layers {header.get('native_layers', [])} in full precision, this pool "
+                         f"{list(pool.native_layers)}")
     for key in ("kv_cache_dtype", "num_layers", "num_kv_heads", "head_dim"):
         if header[key] != getattr(pool, key):
             raise ValueError(f"KV payload has {key}={header[key]!r}, this pool {getattr(pool, key)!r}")

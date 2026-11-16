@@ -281,3 +281,28 @@ def test_key_smoothing_is_exact_and_tames_outlier_channels_in_a_4bit_cache():
     exact = copy.deepcopy(base)
     exact.calibrate_kv_smoothing()
     torch.testing.assert_close(exact(ids)[0], ref, atol=1e-4, rtol=0)
+
+
+@pytest.mark.parametrize("dtype", ["int8", "int4"])
+def test_native_layers_store_exactly_and_others_quantize(dtype):
+    k, v = _kv(40)
+    pool = KVPool(2, 2, 64, 16, torch.float32, "cpu", dtype, native_layers=(0,))
+    c = KVCache(pool)
+    c.reserve(40)
+    for layer in (0, 1):
+        pool.append(layer, c, k, v)
+    c.length = 40
+    k0, v0 = pool.read(0, c, 40)
+    torch.testing.assert_close(k0, k, rtol=0, atol=0)
+    torch.testing.assert_close(v0, v, rtol=0, atol=0)
+    k1, _ = pool.read(1, c, 40)
+    assert not torch.equal(k1, k) and (k1 - k).abs().max() < 2.0  # quantized, within its step
+    slots = torch.tensor([c.slot])
+    kb, vb, _ = pool.read_batch(0, slots, [40])
+    torch.testing.assert_close(kb[:, :, :40], k, rtol=0, atol=0)
+    plain = KVPool(2, 2, 64, 16, torch.float32, "cpu", dtype)
+    assert pool.page_bytes() - plain.page_bytes() == 2 * 2 * PAGE * 64 * 4  # one layer's K and V in fp32
+    dst = pool.alloc_pages(1)[0]
+    pool.copy_page(c.pages[0], dst)
+    torch.testing.assert_close(pool.k_hi[0, dst], pool.k_hi[0, c.pages[0]], rtol=0, atol=0)
+    assert KVPool(2, 2, 64, 16, torch.float32, "cpu", "native", native_layers=(0,)).k_hi is None
