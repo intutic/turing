@@ -15,4 +15,5 @@ step parity2 python scripts/eval_parity.py --device cuda --dtype bf16 --models "
 step formats_1p7b2 python scripts/benchmark_weight_formats.py --model HuggingFaceTB/SmolLM2-1.7B --out results_weight_formats_cuda.json
 step formats_qwen2 python scripts/benchmark_weight_formats.py --model Qwen/Qwen2.5-1.5B --out results_weight_formats_qwen_cuda.json
 step quality2 python scripts/eval_kv_quality.py --models HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B,Qwen/Qwen2.5-1.5B --arms exact_forward,int8,int4,quest25,rtn4,gptq4,teal25,teal40,teal50 --context 2048 --decode 256 --windows 16 --out results_quality_cuda.json
+step decode_360m_32k python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M --settings native,int8,int4,int8_quest25,native_eager --contexts 32768 --batches 1,8,32 --out results_kv_decode_cuda_smollm2_360m_32k.json
 echo "PHASE2 DONE $(date -u +%H:%M:%S)" >> ~/l4_status.txt

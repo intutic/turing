@@ -261,8 +261,15 @@ class SubspaceAttention(nn.Module):
         with whatever `scale` the first call of that shape had, so a model whose scale differs from an earlier caller's
         (HF's OPT passes 1.0 after pre-scaling q) silently gets wrong attention."""
         if self.softcap is None and q.device.type != "mps":
+            gqa = self.num_kv_groups > 1
+            if gqa and mask is not None and q.is_cuda:
+                # SDPA has no memory-efficient kernel for enable_gqa with a mask: it would fall back to the math path
+                # and materialise [H, L, T] scores (GBs for a 2K chunk at 32K context). Repeating the KV heads costs
+                # [H, T, D] instead.
+                k, v = k.repeat_interleave(self.num_kv_groups, dim=1), v.repeat_interleave(self.num_kv_groups, dim=1)
+                gqa = False
             return F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=causal, scale=self.scale,
-                                                  enable_gqa=self.num_kv_groups > 1)
+                                                  enable_gqa=gqa)
         if self.num_kv_groups > 1:
             k, v = k.repeat_interleave(self.num_kv_groups, dim=1), v.repeat_interleave(self.num_kv_groups, dim=1)
         s = torch.matmul(q, k.transpose(2, 3)) * self.scale
