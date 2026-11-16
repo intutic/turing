@@ -164,3 +164,22 @@ def test_quest_cuda_graph_decode_matches_eager_quest(kv_cache_dtype):
         assert any(w is not None for _, w in model._graphs.graphs) == graphs
     for eager, graphed in zip(*outs):
         torch.testing.assert_close(graphed, eager, atol=1e-3, rtol=0)
+
+
+@torch.no_grad()
+def test_sdpa_decode_attention_matches_the_kernel():
+    import copy
+    from tests.test_hf_parity import _tiny_llama
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    base = RealHuggingFaceLoader.convert_hf_model(_tiny_llama(), device="cpu")
+    base.config.kv_pool_gib = 0.05
+    g = torch.Generator().manual_seed(9)
+    prompts = [torch.randint(0, 128, (1, n), generator=g).cuda() for n in (5, 33)]
+    nxt = torch.randint(0, 128, (2, 3), generator=g).cuda()
+    outs = []
+    for mode in ("kernel", "sdpa"):
+        model = copy.deepcopy(base).cuda()
+        model.config.decode_attention, model.config.cuda_graphs = mode, False
+        caches = [model(p)[1] for p in prompts]
+        outs.append(torch.cat([model(nxt[:, t:t + 1], past_key_values=caches)[0] for t in range(3)], 1))
+    torch.testing.assert_close(outs[1], outs[0], atol=1e-3, rtol=0)

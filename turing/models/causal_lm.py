@@ -300,7 +300,7 @@ class SubspaceAttention(nn.Module):
         row (append, attention over each row's pages, split reduction); elsewhere each row takes _attend_one."""
         batch = q.shape[0]
         pool, layer, cfg = step.pool, self.layer_idx, self.config
-        if not pool_decode_supported(pool, q):
+        if not pool_decode_supported(pool, q) or cfg.decode_attention == "sdpa":
             quest = (self.window is None and cfg.kv_page_budget < 1.0 and pool.track_pages
                      and max(step.starts) + 1 >= cfg.kv_select_min_tokens)
             if quest:  # page selection per row
@@ -402,6 +402,7 @@ class DecodeGraphs:
                 and not lora and not torch.is_grad_enabled()
                 and (not pool.track_pages or max(c.length for c in caches) + 1 <= self.CONTEXT_BUCKETS[-1] * 16)
                 and cfg.num_experts == 0  # MoE routing picks experts on the host
+                and cfg.decode_attention == "kernel"  # the SDPA path reads lengths on the host
                 and pool_decode_supported(pool, model.embed_tokens.weight))
 
     def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, caches: List[KVCache]) -> torch.Tensor:

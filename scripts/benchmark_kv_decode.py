@@ -28,6 +28,8 @@ from turing.models.hf_loader import RealHuggingFaceLoader
 
 PREFILL_CHUNK = 2048  # Turing prefills in chunks (the engine default is 512); HF prefills the prompt in one pass
 SETTINGS = {"native_eager": dict(kv_cache_dtype="native", kv_page_budget=1.0, cuda_graphs=False),
+            "native_sdpa": dict(kv_cache_dtype="native", kv_page_budget=1.0, cuda_graphs=False, decode_attention="sdpa"),
+            "int8_sdpa": dict(kv_cache_dtype="int8", kv_page_budget=1.0, cuda_graphs=False, decode_attention="sdpa"),
             "native": dict(kv_cache_dtype="native", kv_page_budget=1.0),
             "int8": dict(kv_cache_dtype="int8", kv_page_budget=1.0),
             "int4": dict(kv_cache_dtype="int4", kv_page_budget=1.0),
@@ -98,7 +100,7 @@ def main():
     print(f"{a.model} on {a.device} ({str(dtype)[6:]}), {cfg.num_layers} layers, {cfg.num_heads}/{cfg.num_kv_heads} "
           f"heads, head_dim {cfg.head_dim}, trained context {cfg.max_position_embeddings}")
     for name in [s for s in a.settings.split(",") if s]:
-        cfg.cuda_graphs = True
+        cfg.cuda_graphs, cfg.decode_attention = True, "kernel"
         for k, v in (SETTINGS[name] or {}).items():
             setattr(cfg, k, v)
         model._kv_pool = None  # each setting sizes its own pool from the memory the previous one leaves free

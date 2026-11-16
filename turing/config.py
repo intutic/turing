@@ -66,6 +66,7 @@ class ModelConfig:
     kv_pool_gib: Optional[float] = None  # KV pool size; None = kv_pool_fraction of free CUDA memory (4 GiB off CUDA)
     kv_pool_fraction: float = 0.6      # share of free CUDA memory the KV pool takes when kv_pool_gib is unset
     cuda_graphs: bool = True           # replay decode steps as CUDA graphs (CUDA only; see DecodeGraphs)
+    decode_attention: str = "kernel"   # CUDA decode: "kernel" (fused paged Triton) or "sdpa" (gather pages, then SDPA)
     rope_scaling: Optional[dict] = None  # HF rope-parameters dict ({"rope_type": "llama3", ...}); see hf_rope_scaling
     attention_bias: bool = False       # q/k/v projection biases (Qwen2, GPT-2, OPT, GPT-NeoX, Phi-2)
     qk_norm: bool = False              # per-head norm on q and k before RoPE (Qwen3, Gemma 3)
