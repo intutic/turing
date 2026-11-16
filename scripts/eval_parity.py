@@ -65,6 +65,7 @@ def run(name, device, dtype_name, T):
         torch.mps.empty_cache()
     row = dict(model=name, arch=arch, params=params, dtype=str(dtype)[6:], tokens=T,
                max_abs_diff_full=(full - ref).abs().max().item(), max_abs_diff_incremental=(inc - ref).abs().max().item(),
+               max_rel_diff=((inc - ref).abs().max() / ref.abs().max()).item(),  # diff relative to the largest logit
                top1_agreement=(inc.argmax(-1) == ref.argmax(-1)).float().mean().item(),
                nll_hf=nll(ref, ids), nll_turing=nll(inc, ids), seconds=round(time.perf_counter() - t0, 1))
     print(json.dumps(row), flush=True)
