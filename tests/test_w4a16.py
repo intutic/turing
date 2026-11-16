@@ -100,3 +100,12 @@ def test_triton_dequantize_matches_reference():
     q, s, z = pack(codes).cuda(), scales.cuda(), zeros.cuda()
     out = torch.empty(384, 512, device="cuda", dtype=torch.float16)
     torch.testing.assert_close(dequantize_cuda(q, s, z, out), dequantize(q, s, z, torch.float16), rtol=0, atol=1e-3)
+
+
+def test_dequantize_scratch_is_usable_inside_and_outside_inference_mode():
+    from turing.models.quant import _scratch
+    with torch.inference_mode():
+        a = _scratch(1 << 20, torch.device("cpu"), torch.float16)  # first use inside inference mode
+    a.copy_(torch.ones_like(a))  # then written outside it (GPTQ calibration runs under no_grad)
+    with torch.inference_mode():
+        _scratch(1 << 20, torch.device("cpu"), torch.float16).zero_()

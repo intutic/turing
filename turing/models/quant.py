@@ -108,7 +108,8 @@ def _scratch(numel: int, device: torch.device, dtype: torch.dtype) -> torch.Tens
     """One reusable buffer per device and dtype, as large as the largest layer dequantized so far."""
     buf = _SCRATCH.get((device, dtype))
     if buf is None or buf.numel() < numel:
-        buf = torch.empty(numel, device=device, dtype=dtype)
+        with torch.inference_mode(False):  # a normal tensor: written both inside and outside inference mode
+            buf = torch.empty(numel, device=device, dtype=dtype)
         _SCRATCH[(device, dtype)] = buf
     return buf[:numel]
 
