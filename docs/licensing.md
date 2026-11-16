@@ -9,7 +9,7 @@ Turing Engine is licensed under the **Business Source License 1.1 (BSL 1.1)**.
 | Usage Tier | Permissions & Scope | Commercial License Required? |
 | :--- | :--- | :---: |
 | **Community Free Tier** | Local developer testing, personal single-GPU workstations, academic research, non-production experimentation, and performance benchmarking. | **No (100% Free)** |
-| **Enterprise Commercial Tier** | Multi-GPU production clusters, commercial model hosting, and revenue-generating API traffic. | **Yes (`TURING_LICENSE_KEY`)** |
+| **Enterprise Commercial Tier** | Multi-GPU production clusters, commercial model hosting, and revenue-generating API traffic. | **Yes: a signed commercial agreement ([`LICENSE`](https://github.com/intutic/turing/blob/master/LICENSE) §2). The software has no license-key check.** |
 
 ---
 

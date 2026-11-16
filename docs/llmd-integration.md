@@ -1,6 +1,6 @@
 # Kubernetes Distributed Serving with llm-d
 
-This guide explains how to deploy **Turing Engine** in a **Kubernetes** cluster orchestrated by **llm-d** (CNCF Sandbox) for **precise prefix-cache aware routing**, **P/D disaggregation**, and **high-density multi-pod inference**.
+This guide explains how to deploy **Turing Engine** in a **Kubernetes** cluster orchestrated by [**llm-d**](https://llm-d.ai) for **prefix-cache aware routing** across replicas.
 
 ---
 
@@ -24,10 +24,18 @@ graph TD
 ```
 
 ### How Prefix-Cache Aware Routing Works
-1. **Real-Time KV Event Stream**: Each Turing Engine pod runs a background `KVBlockEventPublisher` emitting `BlockStored` and `BlockRemoved` events over ZeroMQ (port 5556) whenever prompt prefixes are inserted or evicted from the `SpectralRadixSVDForest`.
-2. **Deterministic Block Hashing**: Block hashes are calculated using deterministic 64-bit hashing across sequence chunks, guaranteed across all replicas.
-3. **EPP Cache Index**: The llm-d `precise-prefix-cache-producer` indexes active KV blocks per pod. When a new request arrives, llm-d routes it to the replica that already holds the maximum matching prefix tokens, skipping re-computation.
-4. **SVD-Compressed Wire Transfer**: In distributed and disaggregated topologies, Turing Engine transfers KV cache blocks using Rank-64 Subspace INT8 projection via `SVDNetworkKVWireCodec`, reducing network bandwidth by **~75%**.
+1. **Prefix cache**: each Turing Engine pod keeps an automatic prefix cache over its paged KV pool. Every full
+   16-token page of a finished prefill (and of a finished request) is indexed by a chained hash of its tokens, and
+   later requests that start with the same tokens reuse those pages instead of recomputing them.
+2. **KV events**: with `--enable-kv-events`, each pod publishes `BlockStored` (block hashes, parent hash, token ids,
+   block size 16), `BlockRemoved` and `AllBlocksCleared` events on a ZeroMQ PUB socket (port 5556), in vLLM's
+   msgpack KV-event format, on the topic `kv@<POD_IP>:<port>@<model>`. A ROUTER socket (port 5559) replays events
+   from a sequence number for subscribers that reconnect.
+3. **Routing**: llm-d's precise prefix-cache scorer indexes the blocks each pod holds and sends a request to the pod
+   with the longest matching prefix. Tokens for its index come from the render endpoints below.
+
+Prefill/decode disaggregation across pods is not part of this guide (see the serving guide for what the engine
+supports on one node).
 
 ---
 
@@ -59,7 +67,7 @@ helm install turing-llama deploy/helm/turing-serving/ \
   --set llmd.enabled=true \
   --set llmd.guide=optimized-baseline \
   --set llmd.engineType=turing \
-  --set model.name="meta-llama/Llama-3.1-70B-Instruct" \
+  --set model.name="Qwen/Qwen2.5-7B-Instruct" \
   --set model.device="cuda" \
   --set replicaCount=2
 ```
@@ -98,7 +106,9 @@ kubectl apply -f deploy/llmd/inferencepool.yaml -n llm-d-serving
 
 ## 📈 Monitoring & Telemetry
 
-Turing Engine exports Prometheus metrics on `GET /metrics` matching llm-d EPP scorer requirements:
+`GET /metrics` returns Prometheus text (JSON with `?format=json`); the Helm chart adds scrape annotations. The
+gauges llm-d's scorers read (the full output also has latency, prefix-cache hit rate, speculation and per-lane
+counters):
 
 ```
 # HELP turing_num_requests_waiting Number of requests queued in waiting backlog (llm-d TotalQueuedRequests)
@@ -122,7 +132,8 @@ turing_cache_config_info{block_size="16",num_gpu_blocks="1024"} 1.0
 
 ## 🔧 Token Render Endpoint for EPP
 
-llm-d's `token-producer` data plugin calls `/v1/completions/render` or `/v1/chat/completions/render` to extract token IDs for exact prefix cache indexing:
+llm-d's `token-producer` data plugin calls `/v1/completions/render` or `/v1/chat/completions/render`; they return
+exactly the token ids the generation endpoints feed the model (the chat template applied for chat):
 
 ```bash
 curl -X POST http://localhost:8000/v1/completions/render \
@@ -130,10 +141,10 @@ curl -X POST http://localhost:8000/v1/completions/render \
   -d '{"prompt": "Hello world!"}'
 ```
 
-Response:
+Response (SmolLM2's tokenizer):
 ```json
 {
-  "tokens": [15496, 995, 0],
+  "tokens": [19556, 905, 17],
   "count": 3
 }
 ```

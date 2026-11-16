@@ -21,18 +21,15 @@ Turing Engine provides native drop-in support via `langchain-openai` or built-in
     print(response.content)
     ```
 
-=== "Method B: Native ChatTuring (Subspace Controls)"
+=== "Method B: ChatTuring (a LangChain BaseChatModel, with tool calling)"
     ```python
-    from turing.integrations.langchain import ChatTuring
+    from turing.integrations.langchain import ChatTuring  # needs langchain-core
 
-    llm = ChatTuring(
-        model="deepseek-r1-7b",
-        base_url="http://localhost:8000/v1",
-        sparsity_ratio=0.0, # exact model; pruning costs quality
-        svd_rank=64          # Rank-64 SVD INT8 KV cache
-    )
-    print(llm.invoke("Write a quick C++ SIMD routine:")["content"])
+    llm = ChatTuring(model="deepseek-r1-7b", base_url="http://localhost:8000/v1")
+    print(llm.invoke("Write a quick C++ SIMD routine:").content)
     ```
+    `ChatTuring` supports `invoke`, `stream`, `batch` and `bind_tools` (OpenAI-style tool calls returned as
+    `AIMessage.tool_calls`). Pruning, KV cache format and quantization are chosen when the server starts, not per request.
 
 ---
 
@@ -48,47 +45,38 @@ model_list:
       api_base: http://localhost:8000/v1
       api_key: turing-local
       extra_headers:
-        X-Turing-Sparsity: "0.57"
-        X-Turing-SVD-Rank: "64"
+        X-Turing-Draft-Tokens: "4"   # optional: speculative draft tokens per step
 ```
+
+Requests carrying the removed `X-Turing-Sparsity` / `X-Turing-SVD-*` headers get HTTP 400.
 
 ---
 
 ## 3. LlamaIndex RAG & Agents
 
-=== "Method A: Native Turing LLM (`llama-index-llms-turing` or Built-In)"
-    ```python
-    from turing.integrations.llamaindex import Turing
+LlamaIndex talks to Turing Engine through its OpenAI-compatible API (`pip install llama-index-llms-openai-like`);
+there is no separate Turing package. A tested example is in
+[`integrations/llamaindex/openai_like_example.py`](https://github.com/intutic/turing/blob/master/integrations/llamaindex/openai_like_example.py).
 
-    llm = Turing(
-        model="deepseek-r1-7b",
-        api_base="http://localhost:8000/v1",
-        sparsity_ratio=0.0,  # exact model; pruning costs quality
-        svd_rank=64           # Calibrated SVD INT8 KV cache
-    )
-    response = llm.complete("Summarize the main architectural trade-offs of microservices:")
-    print(response.text)
-    ```
+```python
+from llama_index.llms.openai_like import OpenAILike
 
-=== "Method B: Drop-In OpenAILike (Zero Extra Dependencies)"
-    ```python
-    from llama_index.llms.openai_like import OpenAILike
-
-    llm = OpenAILike(
-        model="deepseek-r1-7b",
-        api_base="http://localhost:8000/v1",
-        api_key="turing-local",
-        is_chat_model=True
-    )
-    response = llm.complete("Summarize the main architectural trade-offs of microservices:")
-    print(response.text)
-    ```
+llm = OpenAILike(
+    model="deepseek-r1-7b",
+    api_base="http://localhost:8000/v1",
+    api_key="turing-local",
+    is_chat_model=True
+)
+response = llm.complete("Summarize the main architectural trade-offs of microservices:")
+print(response.text)
+```
 
 ---
 
 ## 4. Open WebUI, Continue.dev & Ollama Frontends
 
-Turing Engine provides native support for both **Ollama** and **OpenAI** connection protocols:
+Turing Engine serves the **Ollama** (`/api/*`) and **OpenAI** (`/v1/*`) protocols; the clients below are configured
+the way their docs describe for those protocols (we test the protocols, not each client application):
 
 === "Method A: Native Ollama Protocol (Open WebUI / Continue.dev / Raycast / Enchanted)"
     1. In **Open WebUI**: Go to **Settings ➔ Connections ➔ Ollama API**.
@@ -111,7 +99,7 @@ Turing Engine provides native support for both **Ollama** and **OpenAI** connect
 === "Method B: OpenAI Compatible Protocol (LibreChat / Chatbox / Cursor / Cline)"
     1. Open your chat UI Settings ➔ OpenAI API.
     2. Set **Base URL**: `http://localhost:8000/v1`
-    3. Set **API Key**: `turing-local`
+    3. Set **API Key**: anything, or the key given to `turing serve --api-key` (keys are not checked unless one is set)
     4. Models will automatically appear in your model selector dropdown.
 
 ---
@@ -121,7 +109,8 @@ Turing Engine provides native support for both **Ollama** and **OpenAI** connect
 Turing Engine provides production manifests for Kubernetes orchestration:
 
 * ☸️ **[Full llm-d & Kubernetes Distributed Serving Guide](llmd-integration.md)** — Prefix-cache aware routing, InferencePools, and P/D disaggregation.
-* 📦 **[Turing Serving Helm Chart](https://github.com/intutic/turing/tree/master/deploy/helm/turing-serving)** — Configurable deployment with Prometheus metrics and GPU limits.
+* 📦 **[Turing Serving Helm Chart](https://github.com/intutic/turing/tree/master/deploy/helm/turing-serving)** — deployment with Prometheus scrape annotations (`/metrics` is Prometheus text), GPU limits and optional llm-d KV events.
+* 🐳 **[Docker images](docker.md)** — CPU and CUDA images.
 * 🚀 **KServe `ServingRuntime`**:
 
 ```yaml
@@ -141,15 +130,11 @@ spec:
       autoSelect: false
   containers:
     - name: kserve-container
-      image: ghcr.io/intutic/turing:v1.5.0-cuda
+      image: ghcr.io/intutic/turing:v2.0.0-cuda
 
 
 
       command: ["python3", "-m", "turing.cli", "serve"]
-
-
-
-
       args: ["--model", "$(MODEL_NAME)", "--port", "8080", "--device", "cuda"]
       resources:
         limits:
