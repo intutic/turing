@@ -2,6 +2,7 @@
 OpenAI-Compatible FastAPI Asynchronous LLM Serving Server.
 """
 
+import asyncio
 import json
 import math
 import time
@@ -10,7 +11,7 @@ import torch
 from typing import List, Optional, Dict, Any, Union
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from ..config import ModelConfig, TuringConfig
@@ -24,14 +25,16 @@ from .ollama_api import (
 )
 from .structured import StructuredOutputParser
 from .tools import ToolCallingHandler
-from .kv_events import KVBlockEventPublisher
+from .kv_events import KVBlockEventPublisher, attach_kv_events
 from .traffic import AdmissionController, LanePolicy, Lane, AdaptiveComputeBatcher
-from .multi_model import ElasticMultiModelManager, TaskType
+from .embeddings import HFEmbedder, HFReranker, llm_embed, llm_yes_scores, shape_embeddings
+from .extract import ExtractionError, extract_spans
+from .pull import ndjson, pull_plan, pull_progress, repo_and_revision
 from .. import __version__
 
 class EmbeddingRequest(BaseModel):
     input: Union[str, List[str]]
-    model: Optional[str] = "turing-embed-default"
+    model: Optional[str] = None
     encoding_format: Optional[str] = "float"
     dimensions: Optional[int] = None
     user: Optional[str] = None
@@ -39,14 +42,31 @@ class EmbeddingRequest(BaseModel):
 class RerankRequest(BaseModel):
     query: str
     documents: List[str]
-    model: Optional[str] = "turing-reranker-default"
+    model: Optional[str] = None
     top_n: Optional[int] = None
+    return_documents: bool = True
 
 class ExtractRequest(BaseModel):
     text: str
     labels: List[str]
-    model: Optional[str] = "turing-extractor-default"
-    score_threshold: Optional[float] = 0.50
+    model: Optional[str] = None
+    score_threshold: Optional[float] = None
+    max_tokens: int = 512
+
+class OllamaEmbedRequest(BaseModel):
+    model: Optional[str] = None
+    input: Union[str, List[str]]
+    dimensions: Optional[int] = None
+
+class OllamaLegacyEmbedRequest(BaseModel):
+    model: Optional[str] = None
+    prompt: str
+
+class OllamaPullRequest(BaseModel):
+    model: Optional[str] = None
+    name: Optional[str] = None  # older Ollama clients
+    stream: bool = True
+    insecure: Optional[bool] = None
 
 class ChatMessage(BaseModel):
     role: str
@@ -85,8 +105,13 @@ def create_app(
     engine: ContinuousBatchEngine,
     kv_publisher: Optional[KVBlockEventPublisher] = None,
     admission_controller: Optional[AdmissionController] = None,
-    lane_policy: Optional[LanePolicy] = None
+    lane_policy: Optional[LanePolicy] = None,
+    embedding_model: Optional[str] = None,
+    rerank_model: Optional[str] = None,
 ) -> FastAPI:
+    """embedding_model / rerank_model: HuggingFace ids or local paths of a BERT-style embedding model and a
+    cross-encoder for /v1/embeddings, /api/embed and /v1/rerank; without them the served LLM does both. A
+    kv_publisher receives the engine's prefix-cache events (llm-d) and is started and stopped with the app."""
     if admission_controller is not None:
         engine.admission = admission_controller
     if lane_policy is not None:
@@ -119,7 +144,24 @@ def create_app(
             kind = {400: "invalid_request_error", 429: "rate_limit_exceeded"}.get(exc.status_code, "server_overloaded")
             body = {"error": {"message": str(exc), "type": kind, "code": exc.status_code}}
         return JSONResponse(status_code=exc.status_code, content=body, headers=headers)
-    multi_model_mgr = ElasticMultiModelManager(device=engine.device)
+    embedder = HFEmbedder(embedding_model, engine.device) if embedding_model else None
+    reranker = HFReranker(rerank_model, engine.device) if rerank_model else None
+    if kv_publisher is not None:
+        attach_kv_events(engine, kv_publisher)
+
+    def _embed(texts: List[str]):
+        """(L2-normalised vectors [N, D], tokens read, model name): the embedding model's, else the served LLM's
+        mean-pooled final hidden states."""
+        if not texts or any(not t for t in texts):
+            raise HTTPException(status_code=400, detail="input must be a non-empty string or list of non-empty strings")
+        if embedder is not None:
+            vecs, n = embedder(texts)
+            return vecs, n, embedder.name
+        toks = [engine.encode_prompt(t) for t in texts]
+        limit = engine.model_config.max_position_embeddings
+        if max(map(len, toks)) > limit:
+            raise HTTPException(status_code=400, detail=f"an input is longer than the model's {limit} tokens")
+        return llm_embed(engine.model, toks), sum(map(len, toks)), engine.model_config.name
 
     def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
         """
@@ -195,67 +237,70 @@ def create_app(
 
     @app.get("/metrics")
     async def metrics(request: Request):
+        """Prometheus text exposition (format 0.0.4); ?format=json returns the engine telemetry as JSON."""
         telem = engine.get_telemetry()
-        accept = request.headers.get("accept", "")
-        if "text/plain" in accept:
-            # Prometheus exposition format
-            llmd = engine.get_llmd_metrics()
-            lines = [
-                f"# HELP turing_serving_throughput_tok_per_sec Instantaneous generated tokens per second",
-                f"# TYPE turing_serving_throughput_tok_per_sec gauge",
-                f"turing_serving_throughput_tok_per_sec {telem['serving_throughput_tok_per_sec']}",
-                f"# HELP turing_total_tokens_generated Total count of tokens generated",
-                f"# TYPE turing_total_tokens_generated counter",
-                f"turing_total_tokens_generated {telem['total_tokens_generated']}",
-                f"# HELP turing_running_requests Number of requests currently executing in batch",
-                f"# TYPE turing_running_requests gauge",
-                f"turing_running_requests {telem['running_requests']}",
-                f"# HELP turing_waiting_queue_depth Number of requests queued in waiting backlog",
-                f"# TYPE turing_waiting_queue_depth gauge",
-                f"turing_waiting_queue_depth {telem['waiting_queue_depth']}",
-                f"# HELP turing_ttft_avg_ms Average Time-To-First-Token in milliseconds",
-                f"# TYPE turing_ttft_avg_ms gauge",
-                f"turing_ttft_avg_ms {_prom(telem['latency']['avg_ttft_ms'])}",
-                f"# HELP turing_ttft_p99_ms 99th percentile Time-To-First-Token in milliseconds",
-                f"# TYPE turing_ttft_p99_ms gauge",
-                f"turing_ttft_p99_ms {_prom(telem['latency']['p99_ttft_ms'])}",
-                f"# HELP turing_itl_avg_ms Average Inter-Token Latency in milliseconds",
-                f"# TYPE turing_itl_avg_ms gauge",
-                f"turing_itl_avg_ms {_prom(telem['latency']['avg_itl_ms'])}",
-                f"# HELP turing_num_requests_waiting Number of requests queued in waiting backlog (llm-d TotalQueuedRequests)",
-                f"# TYPE turing_num_requests_waiting gauge",
-                f"turing_num_requests_waiting {llmd['num_requests_waiting']}",
-                f"# HELP turing_num_requests_running Number of requests currently executing in batch (llm-d TotalRunningRequests)",
-                f"# TYPE turing_num_requests_running gauge",
-                f"turing_num_requests_running {llmd['num_requests_running']}",
-                f"# HELP turing_kv_cache_usage_perc Fraction of KV cache memory pool in use (llm-d KVCacheUtilization)",
-                f"# TYPE turing_kv_cache_usage_perc gauge",
-                f"turing_kv_cache_usage_perc {llmd['kv_cache_usage_perc']}",
-                f"# HELP turing_cache_config_info KV cache configuration info (llm-d BlockSize and NumGPUBlocks)",
-                f"# TYPE turing_cache_config_info gauge",
-                f'turing_cache_config_info{{block_size="{llmd["block_size"]}",num_gpu_blocks="{llmd["num_gpu_blocks"]}"}} 1.0',
-            ]
-            if "admission" in telem:
-                lines.extend([
-                    f"# HELP turing_vram_utilization_ratio Admission controller tracked VRAM utilization ratio",
-                    f"# TYPE turing_vram_utilization_ratio gauge",
-                    f"turing_vram_utilization_ratio {telem['admission']['utilization']}",
-                    f"# HELP turing_admission_shed_total Total requests shed by admission control",
-                    f"# TYPE turing_admission_shed_total counter",
-                    f"turing_admission_shed_total {telem['admission']['shed_count']}",
-                ])
-            from fastapi.responses import PlainTextResponse
-            return PlainTextResponse("\n".join(lines) + "\n")
+        llmd = engine.get_llmd_metrics()
+        if request.query_params.get("format") == "json":
+            return {
+                "model": engine.model_config.name,
+                "device": str(engine.device),
+                "total_tiles": engine.model_config.total_tiles,
+                "active_tiles": engine.model_config.active_tiles,
+                "subspace_dim": engine.model_config.active_subspace_dim,
+                "telemetry": telem,
+                "llmd_metrics": llmd,
+            }
 
-        return {
-            "model": engine.model_config.name,
-            "device": str(engine.device),
-            "total_tiles": engine.model_config.total_tiles,
-            "active_tiles": engine.model_config.active_tiles,
-            "subspace_dim": engine.model_config.active_subspace_dim,
-            "telemetry": telem,
-            "llmd_metrics": engine.get_llmd_metrics(),
-        }
+        lines = []
+
+        def metric(name, kind, help_text, value, labels=""):
+            lines.extend([f"# HELP {name} {help_text}", f"# TYPE {name} {kind}", f"{name}{labels} {_prom(value)}"])
+
+        metric("turing_serving_throughput_tok_per_sec", "gauge", "Generated tokens per second since start",
+               telem["serving_throughput_tok_per_sec"])
+        metric("turing_total_tokens_generated", "counter", "Total count of tokens generated",
+               telem["total_tokens_generated"])
+        metric("turing_running_requests", "gauge", "Number of requests currently executing in batch",
+               telem["running_requests"])
+        metric("turing_waiting_queue_depth", "gauge", "Number of requests queued in waiting backlog",
+               telem["waiting_queue_depth"])
+        metric("turing_ttft_avg_ms", "gauge", "Average Time-To-First-Token in milliseconds",
+               telem["latency"]["avg_ttft_ms"])
+        metric("turing_ttft_p99_ms", "gauge", "99th percentile Time-To-First-Token in milliseconds",
+               telem["latency"]["p99_ttft_ms"])
+        metric("turing_itl_avg_ms", "gauge", "Average Inter-Token Latency in milliseconds",
+               telem["latency"]["avg_itl_ms"])
+        metric("turing_num_requests_waiting", "gauge",
+               "Number of requests queued in waiting backlog (llm-d TotalQueuedRequests)", llmd["num_requests_waiting"])
+        metric("turing_num_requests_running", "gauge",
+               "Number of requests currently executing in batch (llm-d TotalRunningRequests)",
+               llmd["num_requests_running"])
+        metric("turing_kv_cache_usage_perc", "gauge",
+               "Fraction of KV cache memory pool in use (llm-d KVCacheUtilization)", llmd["kv_cache_usage_perc"])
+        metric("turing_cache_config_info", "gauge", "KV cache configuration info (llm-d BlockSize and NumGPUBlocks)",
+               1.0, f'{{block_size="{llmd["block_size"]}",num_gpu_blocks="{llmd["num_gpu_blocks"]}"}}')
+        pc = telem.get("prefix_cache")
+        if pc is not None:
+            metric("turing_prefix_cache_hit_rate", "gauge",
+                   "Prompt tokens served from the prefix cache over prompt tokens looked up", pc["hit_rate"])
+            metric("turing_prefix_cache_hit_tokens_total", "counter", "Prompt tokens served from the prefix cache",
+                   pc["hit_tokens"])
+            metric("turing_prefix_cache_queried_tokens_total", "counter", "Prompt tokens looked up in the prefix cache",
+                   pc["queried_tokens"])
+            metric("turing_prefix_cache_pages", "gauge", "KV pages held by the prefix cache", pc["cached_pages"])
+        spec = telem["speculation"]
+        metric("turing_spec_drafted_tokens_total", "counter", "Speculative draft tokens verified",
+               spec["drafted_tokens"])
+        metric("turing_spec_accepted_tokens_total", "counter", "Speculative draft tokens accepted",
+               spec["accepted_tokens"])
+        metric("turing_spec_acceptance_rate", "gauge", "Accepted over drafted speculative tokens",
+               spec["acceptance_rate"])
+        if "admission" in telem:
+            metric("turing_vram_utilization_ratio", "gauge", "Admission controller tracked VRAM utilization ratio",
+                   telem["admission"]["utilization"])
+            metric("turing_admission_shed_total", "counter", "Total requests shed by admission control",
+                   telem["admission"]["shed_count"])
+        return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
     @app.get("/v1/models")
     async def list_models():
@@ -276,72 +321,70 @@ def create_app(
 
     @app.post("/v1/embeddings")
     async def create_embeddings(req: EmbeddingRequest):
-        """OpenAI-compatible embeddings endpoint powered by fused zero-sync segment pooling."""
+        """OpenAI-compatible embeddings: the embedding model's (--embedding-model), else the served LLM's
+        mean-pooled final hidden states; L2-normalised, `dimensions` truncates (Matryoshka) and renormalises."""
         inputs = [req.input] if isinstance(req.input, str) else req.input
-        if not inputs:
-            raise HTTPException(status_code=400, detail="Input text cannot be empty")
-
-        embeddings = multi_model_mgr.encode(model_id=req.model or "turing-embed", texts=inputs)
-
-        data = [
-            {
-                "object": "embedding",
-                "embedding": emb,
-                "index": i,
-            }
-            for i, emb in enumerate(embeddings)
-        ]
-
-        total_tokens = sum(len(t.split()) for t in inputs)
+        vecs, n_tokens, name = _embed(inputs)
+        try:
+            vectors = shape_embeddings(vecs, req.dimensions, req.encoding_format or "float")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         return {
             "object": "list",
-            "data": data,
-            "model": req.model,
-            "usage": {
-                "prompt_tokens": total_tokens,
-                "total_tokens": total_tokens,
-            },
+            "data": [{"object": "embedding", "embedding": v, "index": i} for i, v in enumerate(vectors)],
+            "model": name,
+            "usage": {"prompt_tokens": n_tokens, "total_tokens": n_tokens},
         }
 
     @app.post("/v1/rerank")
     async def create_rerank(req: RerankRequest):
-        """Cross-encoder relevance scoring and document reranking endpoint."""
+        """Cohere / Jina-compatible reranking: a cross-encoder's sigmoid score (--rerank-model), else the served
+        LLM's probability of answering "yes" to whether the document is relevant. Results sorted best first."""
         if not req.documents:
-            raise HTTPException(status_code=400, detail="Documents list cannot be empty")
-
-        ranked_results = multi_model_mgr.score(
-            model_id=req.model or "turing-rerank",
-            query=req.query,
-            candidates=req.documents,
-        )
+            raise HTTPException(status_code=400, detail="documents must not be empty")
+        if reranker is not None:
+            scores, n_tokens = reranker(req.query, req.documents)
+            name, scorer = reranker.name, "cross-encoder: sigmoid of the relevance logit"
+        else:
+            scores, n_tokens = llm_yes_scores(engine, req.query, req.documents)
+            name = engine.model_config.name
+            scorer = ("llm-yes-probability: P(yes | yes or no) of the served model's next token after asking "
+                      "whether the document is relevant to the query")
+        order = sorted(range(len(scores)), key=lambda i: -scores[i])
         if req.top_n is not None and req.top_n > 0:
-            ranked_results = ranked_results[:req.top_n]
-
+            order = order[:req.top_n]
+        results = [{"index": i, "relevance_score": scores[i],
+                    **({"document": {"text": req.documents[i]}} if req.return_documents else {})} for i in order]
         return {
-            "model": req.model,
-            "results": ranked_results,
-            "meta": {
-                "total_documents": len(req.documents),
-                "top_n": len(ranked_results),
-            },
+            "id": f"rerank-{int(time.time() * 1000)}",
+            "model": name,
+            "results": results,
+            "meta": {"scorer": scorer, "total_documents": len(req.documents)},
+            "usage": {"total_tokens": n_tokens},
         }
 
     @app.post("/v1/extract")
     async def create_extract(req: ExtractRequest):
-        """Structured entity and token span extraction endpoint."""
+        """Spans of the requested labels, extracted by the served LLM (greedy, JSON output). Every span is located
+        in the text (start/end index it); spans the text does not contain are listed in `unmatched`, not returned.
+        Output that is not JSON is a 422 error carrying the model's raw output."""
         if not req.text or not req.labels:
-            raise HTTPException(status_code=400, detail="Text and labels must not be empty")
-
-        entities = multi_model_mgr.extract(
-            model_id=req.model or "turing-extract",
-            text=req.text,
-            labels=req.labels,
-            score_threshold=req.score_threshold or 0.50,
-        )
+            raise HTTPException(status_code=400, detail="text and labels must not be empty")
+        try:
+            r = await extract_spans(engine, req.text, req.labels, max_tokens=req.max_tokens)
+        except ExtractionError as e:
+            return JSONResponse(status_code=422, content={"error": {
+                "message": f"{e}; the served model could not extract spans", "type": "invalid_model_output",
+                "raw_output": e.raw_output}})
+        spans = [s for s in r["spans"] if req.score_threshold is None or (s["score"] or 0.0) >= req.score_threshold]
         return {
-            "model": req.model,
-            "data": entities,
-            "count": len(entities),
+            "model": engine.model_config.name,
+            "data": spans,
+            "count": len(spans),
+            "unmatched": r["unmatched"],
+            "raw_output": r["raw_output"],
+            "usage": {"prompt_tokens": r["prompt_tokens"], "completion_tokens": r["completion_tokens"],
+                      "total_tokens": r["prompt_tokens"] + r["completion_tokens"]},
         }
 
     @app.post("/v1/completions/render")
@@ -737,13 +780,28 @@ def create_app(
                                                      getattr(engine.tokenizer, "chat_template", None))
 
     @app.post("/api/pull")
-    async def ollama_pull(raw_req: Request):
+    async def ollama_pull(req: OllamaPullRequest):
         """
-        Simulates Ollama model pull / loading status.
+        Ollama model pull for a HuggingFace repo ("org/name", "hf.co/org/name[:revision]"): downloads its files into
+        the local HuggingFace cache, streaming Ollama progress lines (status, digest, total, completed per file).
         """
-        body = await raw_req.json() if raw_req.headers.get("content-type") == "application/json" else {}
-        model_name = body.get("model", engine.model_config.name)
-        return JSONResponse(content={"status": "success", "digest": f"sha256:turing{abs(hash(model_name)):016x}", "total": 100, "completed": 100})
+        from huggingface_hub.errors import RepositoryNotFoundError, RevisionNotFoundError
+        if not (req.model or req.name):
+            return JSONResponse(status_code=400, content={"error": "model is required"})
+        repo, revision = repo_and_revision(req.model or req.name)
+        try:
+            files = await asyncio.to_thread(pull_plan, repo, revision)
+        except (RepositoryNotFoundError, RevisionNotFoundError) as e:
+            return JSONResponse(status_code=404, content={"error": f"pull model manifest: {e}"})
+        except Exception as e:  # no network, hub errors
+            return JSONResponse(status_code=500, content={"error": f"pull model manifest: {e}"})
+        progress = pull_progress(repo, revision, files)
+        if not req.stream:
+            last = {}
+            async for last in progress:
+                pass
+            return JSONResponse(status_code=500 if "error" in last else 200, content=last)
+        return StreamingResponse(ndjson(progress), media_type="application/x-ndjson")
 
     @app.post("/api/generate")
     async def ollama_generate(req: OllamaGenerateRequest, raw_req: Request):
@@ -933,17 +991,27 @@ def create_app(
         return JSONResponse(content=response, headers=resp_headers)
 
     @app.post("/api/embed")
+    async def ollama_embed(req: OllamaEmbedRequest):
+        """
+        Ollama embeddings (/api/embed): `input` a string or a list of strings -> `embeddings`, L2-normalised.
+        """
+        t0 = time.time_ns()
+        inputs = [req.input] if isinstance(req.input, str) else req.input
+        vecs, n_tokens, name = _embed(inputs)
+        try:
+            vectors = shape_embeddings(vecs, req.dimensions, "float")
+        except ValueError as e:
+            return JSONResponse(status_code=400, content={"error": str(e)})
+        return {"model": req.model or name, "embeddings": vectors, "total_duration": time.time_ns() - t0,
+                "load_duration": 0, "prompt_eval_count": n_tokens}
+
     @app.post("/api/embeddings")
-    async def ollama_embeddings(raw_req: Request):
+    async def ollama_embeddings(req: OllamaLegacyEmbedRequest):
         """
-        Ollama embeddings endpoint.
+        Ollama's legacy embeddings endpoint: `prompt` -> `embedding`.
         """
-        body = await raw_req.json() if raw_req.headers.get("content-type") == "application/json" else {}
-        prompt = body.get("prompt", "")
-        prompt_tokens = engine.encode_prompt(prompt) or [1]
-        dim = engine.model_config.rank_sub or 64
-        embedding = [(float((t * 17) % 100) / 100.0) - 0.5 for t in range(dim)]
-        return JSONResponse(content={"embedding": embedding, "embeddings": [embedding]})
+        vecs, _, _ = _embed([req.prompt])
+        return {"embedding": shape_embeddings(vecs, None, "float")[0]}
 
     return app
 

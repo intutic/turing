@@ -68,3 +68,104 @@ def test_kv_block_event_publisher_lifecycle():
     # Stop cleanly
     pub.stop()
     assert not pub._started
+
+
+def _free_port():
+    import socket
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def test_engine_prefix_cache_events_reach_a_zmq_subscriber():
+    """Two requests sharing a 32-token prefix through the real engine: a ZMQ SUB socket receives vLLM-format
+    msgpack BlockStored events whose hashes, parents and tokens are the prefix cache's pages, then BlockRemoved on
+    eviction and AllBlocksCleared on clear; the ROUTER socket replays them."""
+    import asyncio
+    import msgpack
+    import zmq
+    from turing.config import TuringConfig
+    from turing.models.registry import get_model_config
+    from turing.serving.engine import ContinuousBatchEngine
+    from turing.serving.kv_events import attach_kv_events
+    from turing.serving.prefix_cache import page_hashes
+
+    engine = ContinuousBatchEngine(get_model_config("test-tiny"), TuringConfig(device="cpu"))
+    pub_port, replay_port = _free_port(), _free_port()
+    pub = KVBlockEventPublisher("test-tiny", pod_ip="127.0.0.1", pod_port=8000,
+                                pub_endpoint=f"tcp://127.0.0.1:{pub_port}",
+                                replay_endpoint=f"tcp://127.0.0.1:{replay_port}")
+    attach_kv_events(engine, pub)
+    pub.start()
+    ctx = zmq.Context()
+    sub = ctx.socket(zmq.SUB)
+    sub.connect(f"tcp://127.0.0.1:{pub_port}")
+    sub.setsockopt(zmq.SUBSCRIBE, b"kv@")
+    time.sleep(0.3)  # let the subscription reach the publisher
+
+    shared = list(range(100, 132))
+    p1, p2 = shared + list(range(200, 220)), shared + list(range(300, 320))
+
+    async def run():
+        await engine.start()
+        for p in (p1, p2):
+            async for _ in engine.stream_generate(p, max_new_tokens=2, temperature=0.0):
+                pass
+        await engine.stop()
+
+    asyncio.run(run())
+    engine.prefix_cache.evict(1)
+    engine.prefix_cache.clear()
+
+    events, seqs = [], []
+    while sub.poll(1000):
+        topic, seq, payload = sub.recv_multipart()
+        assert topic == b"kv@127.0.0.1:8000@test-tiny"
+        ts, batch = msgpack.unpackb(payload)
+        assert isinstance(ts, float)
+        events += batch
+        seqs.append(int.from_bytes(seq, "big"))
+    assert seqs == list(range(len(seqs)))
+
+    stored = [e for e in events if e[0] == "BlockStored"]
+    h1, h2 = page_hashes(p1), page_hashes(p2)
+    # request 1's prefill stores its 3 full pages from the root (parent None), 16 tokens each
+    assert stored[0][1:] == [h1, None, p1[:48], 16, None, "GPU", None]
+    # request 2 reuses the 2 shared pages: only its third page is stored, chained to the shared prefix's last page
+    second = next(e for e in stored if h2[2] in e[1])
+    assert second[1][0] == h2[2] and second[2] == h1[1] == h2[1] and second[3][:16] == p2[32:48]
+    assert all(len(e[3]) == 16 * len(e[1]) and e[4] == 16 for e in stored)
+    removed = [e for e in events if e[0] == "BlockRemoved"]
+    assert len(removed) == 1 and len(removed[0][1]) == 1 and removed[0][2] == "GPU"
+    assert events[-1] == ["AllBlocksCleared"]
+
+    # replay from sequence 1: everything after the first message, then the end marker
+    dealer = ctx.socket(zmq.DEALER)
+    dealer.connect(f"tcp://127.0.0.1:{replay_port}")
+    dealer.send_multipart([b"", (1).to_bytes(8, "big")])
+    replayed = []
+    while dealer.poll(2000):
+        frames = dealer.recv_multipart()
+        if frames[2] == KVBlockEventPublisher.END_SEQ:
+            break
+        replayed.append(int.from_bytes(frames[2], "big"))
+    assert replayed == seqs[1:]
+
+    for s in (sub, dealer):
+        s.close(linger=0)
+    ctx.term()
+    pub.stop()
+
+
+def test_attach_kv_events_needs_the_prefix_cache():
+    from turing.config import TuringConfig
+    from turing.models.registry import get_model_config
+    from turing.serving.engine import ContinuousBatchEngine
+    from turing.serving.kv_events import attach_kv_events
+
+    engine = ContinuousBatchEngine(get_model_config("test-tiny"), TuringConfig(device="cpu"), prefix_caching=False)
+    with pytest.raises(ValueError):
+        attach_kv_events(engine, KVBlockEventPublisher("m", pub_endpoint="tcp://127.0.0.1:0",
+                                                       replay_endpoint="tcp://127.0.0.1:0"))

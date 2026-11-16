@@ -43,5 +43,4 @@ llmd:
   kvEvents:
     enabled: true
     pubPort: 5556
-    replayPort: 5559
-    blockSize: 64
+    replayPort: 5559          # events describe the KV pool's 16-token pages

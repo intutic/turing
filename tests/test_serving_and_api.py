@@ -62,7 +62,7 @@ def test_fastapi_server_endpoints():
         assert "turing_total_tokens_generated" in res_metrics_txt.text
 
         # JSON metrics
-        res_metrics_json = client.get("/metrics", headers={"Accept": "application/json"})
+        res_metrics_json = client.get("/metrics?format=json")
         assert res_metrics_json.status_code == 200
         data_m = res_metrics_json.json()
         assert "telemetry" in data_m

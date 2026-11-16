@@ -52,9 +52,36 @@ def test_prometheus_llmd_metrics_exposition():
         assert 'block_size="16"' in text
 
         # 2. JSON metrics payload
-        json_resp = client.get("/metrics", headers={"Accept": "application/json"})
+        json_resp = client.get("/metrics?format=json")
         assert json_resp.status_code == 200
         data = json_resp.json()
         assert "llmd_metrics" in data
         assert data["llmd_metrics"]["num_requests_waiting"] == 0
         assert data["llmd_metrics"]["num_requests_running"] == 0
+
+
+def test_metrics_default_to_prometheus_text_with_prefix_cache_and_speculation():
+    """GET /metrics with no Accept header is Prometheus text that prometheus_client's parser reads; after two
+    requests sharing a 32-token prefix it reports the prefix cache's real hit rate."""
+    from prometheus_client.parser import text_string_to_metric_families
+
+    engine = ContinuousBatchEngine(get_model_config("test-tiny"), TuringConfig(device="cpu"))
+    with TestClient(create_app(engine)) as client:
+        shared = list(range(100, 132))
+        for tail in ([7] * 8, [9] * 8):
+            r = client.post("/v1/completions", json={"model": "m", "prompt": shared + tail, "max_tokens": 2,
+                                                     "temperature": 0.0})
+            assert r.status_code == 200
+        resp = client.get("/metrics")
+        assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/plain")
+        samples = {s.name: s for f in text_string_to_metric_families(resp.text) for s in f.samples}
+
+    pc = engine.get_telemetry()["prefix_cache"]
+    assert pc["hit_tokens"] == 32  # the second request reused the shared prefix's two pages
+    assert samples["turing_prefix_cache_hit_rate"].value == pytest.approx(pc["hit_rate"])
+    assert samples["turing_prefix_cache_hit_tokens_total"].value == 32
+    assert samples["turing_prefix_cache_pages"].value == pc["cached_pages"] > 0
+    assert samples["turing_spec_drafted_tokens_total"].value == engine.spec_drafted
+    assert samples["turing_kv_cache_usage_perc"].value == pytest.approx(engine.get_kv_cache_utilization())
+    assert samples["turing_cache_config_info"].labels == {"block_size": "16",
+                                                          "num_gpu_blocks": str(engine.kv_pool.page_limit)}

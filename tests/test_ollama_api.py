@@ -159,4 +159,5 @@ def test_ollama_embed_endpoint(test_app):
         assert resp.status_code == 200
         data = resp.json()
         assert "embedding" in data
-        assert len(data["embedding"]) == 32
+        assert len(data["embedding"]) == 256  # test-tiny's hidden size: the model's own final hidden states
+        assert abs(sum(x * x for x in data["embedding"]) - 1.0) < 1e-4
