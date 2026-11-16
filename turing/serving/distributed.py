@@ -152,7 +152,8 @@ class DistributedInferenceDriver:
         all_new_kvs = []
         
         for stage in self.stages:
-            activations, stage_kvs = stage(activations, past_key_values=past_key_values, start_pos=start_pos)
+            stage_past = past_key_values[len(all_new_kvs):len(all_new_kvs) + len(stage.layers)] if past_key_values else None
+            activations, stage_kvs = stage(activations, past_key_values=stage_past, start_pos=start_pos)
             if stage_kvs:
                 all_new_kvs.extend(stage_kvs)
 

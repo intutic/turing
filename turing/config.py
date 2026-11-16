@@ -3,13 +3,26 @@ Configuration dataclasses for Turing Engine model geometries and runtime paramet
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 import torch
 
 
 def hf_rope_theta(hf_cfg) -> float:
     """RoPE base of a HuggingFace config; transformers 5 moved it from `rope_theta` into `rope_parameters`."""
     return float(getattr(hf_cfg, "rope_theta", None) or (getattr(hf_cfg, "rope_parameters", None) or {}).get("rope_theta", 10000.0))
+
+
+def hf_rope_scaling(hf_cfg) -> Optional[Tuple[float, float, float, int]]:
+    """Llama-3.1 RoPE scaling of a HuggingFace config as (factor, low_freq_factor, high_freq_factor,
+    original_max_position_embeddings); None for plain RoPE. Other scaling types would serve wrong logits, so they raise."""
+    p = getattr(hf_cfg, "rope_parameters", None) or getattr(hf_cfg, "rope_scaling", None) or {}
+    kind = p.get("rope_type", p.get("type", "default"))
+    if kind == "default":
+        return None
+    if kind == "llama3":
+        return (float(p["factor"]), float(p["low_freq_factor"]), float(p["high_freq_factor"]),
+                int(p["original_max_position_embeddings"]))
+    raise ValueError(f"RoPE scaling type '{kind}' is not supported")
 
 
 @dataclass
@@ -33,6 +46,9 @@ class ModelConfig:
     kv_cache_dtype: str = "native"     # "native", "int8" or "int4" (see turing/core/kv_cache.py)
     kv_page_budget: float = 1.0        # Quest: share of 16-token pages a decode step reads; 1.0 reads all
     kv_select_min_tokens: int = 1024   # Quest selection only once the cache holds at least this many tokens
+    rope_scaling: Optional[Tuple[float, float, float, int]] = None  # llama3: see hf_rope_scaling
+    attention_bias: bool = False       # q/k/v projection biases (Qwen2)
+    qk_norm: bool = False              # per-head RMSNorm on q and k before RoPE (Qwen3)
 
     @property
     def total_tiles(self) -> int:

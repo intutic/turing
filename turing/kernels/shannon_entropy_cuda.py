@@ -1,4 +1,4 @@
-"""
+r"""
 Fused In-SRAM Shannon Entropy and Uncertainty Gating CUDA Triton Kernel.
 Computes H(P) = -\sum P_i \ln P_i directly in GPU registers from unnormalized logits
 using a 1-pass online normalizer.

@@ -20,6 +20,15 @@ from .serving.benchmark import TuringBenchmarkSuite
 from .serving.niah import LongContextNIAHEvaluator
 from .serving.comparative_bench import ComparativeBenchmarker
 
+def _load_hf_or_exit(args, dev):
+    """Real HuggingFace weights, or stop: random weights served for a mistyped name would only produce gibberish."""
+    from .models.hf_loader import RealHuggingFaceLoader
+    try:
+        return RealHuggingFaceLoader.load_hf_model_into_turing(hf_model_id=args.model, sparsity_ratio=args.sparsity,
+                                                              device=str(dev))
+    except Exception as e:
+        raise SystemExit(f"[!] Could not load weights for '{args.model}': {e}\n    Pass --mock to run on synthetic weights.")
+
 def main():
     parser = argparse.ArgumentParser(prog="turing", description="Turing Engine: Subspace-Compressed LLM Serving Runtime")
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
@@ -169,19 +178,8 @@ def main():
             model, tokenizer = loader.load(sparsity_ratio=args.sparsity, device=str(dev))
             print(f"[+] Loaded GGUF model: {model.config.name} (layers: {model.config.num_layers}, hidden: {model.config.hidden_dim})")
         else:
-            from .models.hf_loader import RealHuggingFaceLoader
-            try:
-                model, tokenizer = RealHuggingFaceLoader.load_hf_model_into_turing(
-                    hf_model_id=args.model,
-                    sparsity_ratio=args.sparsity,
-                    device=str(dev)
-                )
-                print(f"[+] Loaded real pretrained weights from '{args.model}'")
-            except Exception as e:
-                print(f"[!] Could not load weights for '{args.model}' ({e}). Falling back to mock model.")
-                cfg = get_model_config("test-tiny")
-                model = SubspaceCausalLM(cfg).to(dev).eval()
-                tokenizer = None
+            model, tokenizer = _load_hf_or_exit(args, dev)
+            print(f"[+] Loaded real pretrained weights from '{args.model}'")
 
         print("\nType your message and press Enter. Type 'exit' or 'quit' to end.\n")
         while True:
@@ -235,18 +233,9 @@ def main():
             model_inst, tokenizer_inst = loader.load(sparsity_ratio=args.sparsity, device=str(dev))
             cfg = model_inst.config
         else:
-            from .models.hf_loader import RealHuggingFaceLoader
-            try:
-                model_inst, tokenizer_inst = RealHuggingFaceLoader.load_hf_model_into_turing(
-                    hf_model_id=args.model,
-                    sparsity_ratio=args.sparsity,
-                    device=str(dev)
-                )
-                cfg = model_inst.config
-                cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
-            except Exception as e:
-                print(f"[!] Notice: Could not load real HuggingFace weights for '{args.model}' ({e}). Falling back to architecture geometry.")
-                cfg = get_model_config(args.model)
+            model_inst, tokenizer_inst = _load_hf_or_exit(args, dev)
+            cfg = model_inst.config
+            cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
 
         # Multi-GPU / Multi-Node Distributed Driver setup
         tp_size = getattr(args, "tensor_parallel", 1)
@@ -306,26 +295,13 @@ def main():
             output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
             out_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in output_tokens])
         else:
-            from .models.hf_loader import RealHuggingFaceLoader
-            try:
-                model, tokenizer = RealHuggingFaceLoader.load_hf_model_into_turing(
-                    hf_model_id=args.model,
-                    sparsity_ratio=args.sparsity,
-                    device=str(dev)
-                )
-                cfg = model.config
-                cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
-                prompt_tokens = tokenizer.encode(args.prompt)
-                print(f"[*] Generating from prompt: '{args.prompt}' on {cfg.name} ({len(prompt_tokens)} input tokens)...")
-                output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
-                out_text = tokenizer.decode(output_tokens, skip_special_tokens=True)
-            except Exception as e:
-                print(f"[!] Notice: Could not load real weights for '{args.model}' ({e}). Falling back to architecture geometry.")
-                cfg = get_model_config(args.model)
-                model = SubspaceCausalLM(cfg).to(dev).eval()
-                prompt_tokens = [ord(c) % cfg.vocab_size for c in args.prompt] or [1]
-                output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
-                out_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in output_tokens])
+            model, tokenizer = _load_hf_or_exit(args, dev)
+            cfg = model.config
+            cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
+            prompt_tokens = tokenizer.encode(args.prompt)
+            print(f"[*] Generating from prompt: '{args.prompt}' on {cfg.name} ({len(prompt_tokens)} input tokens)...")
+            output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
+            out_text = tokenizer.decode(output_tokens, skip_special_tokens=True)
 
         print(f"\n[+] Generated Output:\n{out_text}\n")
 
