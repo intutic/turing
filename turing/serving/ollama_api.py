@@ -1,29 +1,33 @@
 """
 Native Ollama REST API (/api/*) Adapter for Turing Engine.
-Provides full drop-in compatibility for Open WebUI, Continue.dev, Cursor Ollama backend,
+Provides drop-in compatibility for Open WebUI, Continue.dev, Cursor Ollama backend,
 Ollama Python SDK, Chatbox, and Ollama CLI.
 """
 
-import json
+import re
 import time
 import datetime
 from typing import List, Dict, Any, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ..config import ModelConfig
 from ..models.resolver import ModelResolver
+from .generation import bad_request
 
 
 class OllamaMessage(BaseModel):
     role: str
-    content: str
+    content: Optional[str] = ""
     images: Optional[List[str]] = None
     tool_calls: Optional[List[Dict[str, Any]]] = None
+    tool_name: Optional[str] = None
+    thinking: Optional[str] = None
 
 
 class OllamaGenerateRequest(BaseModel):
     model: str
-    prompt: str
+    prompt: Optional[str] = ""
+    suffix: Optional[str] = None
     system: Optional[str] = None
     template: Optional[str] = None
     context: Optional[List[int]] = None
@@ -31,8 +35,9 @@ class OllamaGenerateRequest(BaseModel):
     raw: Optional[bool] = False
     format: Optional[Union[str, Dict[str, Any]]] = None
     options: Optional[Dict[str, Any]] = None
-    keep_alive: Optional[str] = None
+    keep_alive: Optional[Union[str, int]] = None
     images: Optional[List[str]] = None
+    think: Optional[bool] = None
 
 
 class OllamaChatRequest(BaseModel):
@@ -41,8 +46,9 @@ class OllamaChatRequest(BaseModel):
     stream: Optional[bool] = True
     format: Optional[Union[str, Dict[str, Any]]] = None
     options: Optional[Dict[str, Any]] = None
-    keep_alive: Optional[str] = None
+    keep_alive: Optional[Union[str, int]] = None
     tools: Optional[List[Dict[str, Any]]] = None
+    think: Optional[bool] = None
 
 
 class OllamaShowRequest(BaseModel):
@@ -106,144 +112,126 @@ def _model_facts(model_config: ModelConfig, model=None) -> Dict[str, Any]:
             "parameter_size": size}
 
 
+_GO_IF = re.compile(r"\{\{-?\s*if\s+\.(\w+)\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}", re.S)
+_GO_VAR = re.compile(r"\{\{-?\s*\.(\w+)\s*-?\}\}")
+
+
+def render_go_template(template: str, values: Dict[str, str]) -> str:
+    """The subset of Ollama's Go templates a /api/generate `template` uses: {{ .System }}, {{ .Prompt }},
+    {{ .Response }} and {{ if .X }}...{{ end }} around them. Anything else is refused rather than rendered wrong."""
+    def var(m):
+        if m.group(1) not in values:
+            raise bad_request(f"template variable .{m.group(1)} is not supported (System, Prompt, Response)")
+        return values[m.group(1)]
+
+    out = _GO_IF.sub(lambda m: m.group(2) if values.get(m.group(1)) else "", template)
+    out = _GO_VAR.sub(var, out)
+    if "{{" in out:
+        raise bad_request("template uses Go template constructs beyond .System/.Prompt/.Response and if/end")
+    return out
+
+
+def ollama_options(options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Ollama options as generation parameters (Ollama's own defaults where a request leaves one out)."""
+    o = options or {}
+    stop = o.get("stop") or []
+    return {"max_tokens": o.get("num_predict", 128), "temperature": float(o.get("temperature", 0.8)),
+            "top_k": int(o.get("top_k", 40)), "top_p": float(o.get("top_p", 0.9)),
+            "stop": [stop] if isinstance(stop, str) else list(stop)}
+
+
+def ollama_format(fmt: Any) -> Optional[Dict[str, Any]]:
+    """`format`: "json" (any JSON object) or a JSON schema."""
+    if fmt in (None, ""):
+        return None
+    if fmt == "json":
+        return {"type": "object"}
+    if isinstance(fmt, dict):
+        return fmt
+    raise bad_request('format must be "json" or a JSON schema object')
+
+
+def _ns(seconds: Optional[float]) -> int:
+    return max(0, int((seconds or 0.0) * 1e9))
+
+
+def timings(gen, t0: float) -> Dict[str, Any]:
+    """Ollama's counters and durations (ns) of a finished generation, measured."""
+    req, now = gen.req, time.time()
+    first = req.first_token_at or now
+    return {"total_duration": _ns(now - t0), "load_duration": 0,
+            "prompt_eval_count": gen.prompt_tokens, "prompt_eval_duration": _ns(first - req.created_at),
+            "eval_count": gen.completion_tokens, "eval_duration": _ns((req.finished_at or now) - first)}
+
+
+def _now() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _done_reason(gen) -> str:
+    return "length" if gen.finish_reason == "length" else "stop"
+
+
 class OllamaAPIHandler:
     """
     Transforms Ollama /api/* requests and responses into Turing Engine representations.
     """
 
     @staticmethod
-    def extract_prompt_from_generate_request(req: OllamaGenerateRequest) -> str:
-        parts = []
-        if req.system:
-            parts.append(f"System: {req.system}")
-        parts.append(f"User: {req.prompt}")
-        parts.append("Assistant:")
-        return "\n\n".join(parts)
-
-    @staticmethod
-    def extract_prompt_from_chat_request(req: OllamaChatRequest) -> str:
-        parts = []
+    def to_chat_messages(req: OllamaChatRequest) -> List[Dict[str, Any]]:
+        """Ollama messages as chat-template messages (tool calls carry dict arguments, as Ollama sends them)."""
+        out = []
         for m in req.messages:
-            role = "System" if m.role == "system" else ("User" if m.role == "user" else "Assistant")
-            parts.append(f"{role}: {m.content}")
-        parts.append("Assistant:")
-        return "\n\n".join(parts)
+            if m.images:
+                raise bad_request("images are not supported by this server (text only)")
+            if m.role not in ("system", "user", "assistant", "tool"):
+                raise bad_request(f"unknown message role '{m.role}'")
+            msg: Dict[str, Any] = {"role": m.role, "content": m.content or ""}
+            if m.tool_calls:
+                msg["tool_calls"] = [{"type": "function", "function": {
+                    "name": tc.get("function", {}).get("name"),
+                    "arguments": tc.get("function", {}).get("arguments") or {}}} for tc in m.tool_calls]
+            if m.role == "tool" and m.tool_name:
+                msg["name"] = m.tool_name
+            out.append(msg)
+        return out
 
     @staticmethod
-    def format_non_streaming_generate(
-        req: OllamaGenerateRequest,
-        response_text: str,
-        context_tokens: List[int],
-        prompt_tokens: int,
-        completion_tokens: int,
-        total_duration_ns: int = 0,
-        eval_duration_ns: int = 0
-    ) -> Dict[str, Any]:
-        iso_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        return {
-            "model": req.model,
-            "created_at": iso_now,
-            "response": response_text,
-            "done": True,
-            "done_reason": "stop",
-            "context": context_tokens,
-            "total_duration": total_duration_ns or 50_000_000,
-            "load_duration": 1_000_000,
-            "prompt_eval_count": prompt_tokens,
-            "prompt_eval_duration": 10_000_000,
-            "eval_count": completion_tokens,
-            "eval_duration": eval_duration_ns or 40_000_000,
-        }
+    def tool_calls(gen) -> List[Dict[str, Any]]:
+        """Parsed calls in Ollama's shape: {function: {name, arguments: {...}}}."""
+        from .anthropic_api import tool_input
+        return [{"function": {"name": tc["function"]["name"], "arguments": tool_input(tc["function"]["arguments"])}}
+                for tc in gen.tool_calls]
 
     @staticmethod
-    def format_streaming_generate_chunk(
-        req: OllamaGenerateRequest,
-        token_text: str,
-        done: bool = False,
-        context_tokens: Optional[List[int]] = None,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0
-    ) -> str:
-        iso_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        payload = {
-            "model": req.model,
-            "created_at": iso_now,
-            "response": token_text,
-            "done": done
-        }
+    def generate_chunk(req: OllamaGenerateRequest, text: str = "", thinking: str = "", done: bool = False,
+                       gen=None, t0: float = 0.0, context: Optional[List[int]] = None) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"model": req.model, "created_at": _now(), "response": text, "done": done}
+        if thinking:
+            payload["thinking"] = thinking
         if done:
-            payload.update({
-                "done_reason": "stop",
-                "context": context_tokens or [],
-                "total_duration": 50_000_000,
-                "load_duration": 1_000_000,
-                "prompt_eval_count": prompt_tokens,
-                "prompt_eval_duration": 10_000_000,
-                "eval_count": completion_tokens,
-                "eval_duration": 40_000_000,
-            })
-        return json.dumps(payload) + "\n"
+            payload["done_reason"] = _done_reason(gen)
+            payload["context"] = context or []
+            payload.update(timings(gen, t0))
+            if gen.schema_error:
+                payload["schema_error"] = gen.schema_error
+        return payload
 
     @staticmethod
-    def format_non_streaming_chat(
-        req: OllamaChatRequest,
-        message_content: str,
-        prompt_tokens: int,
-        completion_tokens: int,
-        tool_calls: Optional[List[Dict[str, Any]]] = None,
-        total_duration_ns: int = 0
-    ) -> Dict[str, Any]:
-        iso_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        msg: Dict[str, Any] = {
-            "role": "assistant",
-            "content": message_content
-        }
-        if tool_calls:
-            msg["tool_calls"] = tool_calls
-            
-        return {
-            "model": req.model,
-            "created_at": iso_now,
-            "message": msg,
-            "done": True,
-            "done_reason": "stop",
-            "total_duration": total_duration_ns or 50_000_000,
-            "load_duration": 1_000_000,
-            "prompt_eval_count": prompt_tokens,
-            "prompt_eval_duration": 10_000_000,
-            "eval_count": completion_tokens,
-            "eval_duration": 40_000_000,
-        }
-
-    @staticmethod
-    def format_streaming_chat_chunk(
-        req: OllamaChatRequest,
-        delta_text: str,
-        done: bool = False,
-        prompt_tokens: int = 0,
-        completion_tokens: int = 0
-    ) -> str:
-        iso_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        payload = {
-            "model": req.model,
-            "created_at": iso_now,
-            "message": {
-                "role": "assistant",
-                "content": delta_text
-            },
-            "done": done
-        }
+    def chat_chunk(req: OllamaChatRequest, text: str = "", thinking: str = "", done: bool = False, gen=None,
+                   t0: float = 0.0) -> Dict[str, Any]:
+        msg: Dict[str, Any] = {"role": "assistant", "content": text}
+        if thinking:
+            msg["thinking"] = thinking
+        payload: Dict[str, Any] = {"model": req.model, "created_at": _now(), "message": msg, "done": done}
         if done:
-            payload.update({
-                "done_reason": "stop",
-                "total_duration": 50_000_000,
-                "load_duration": 1_000_000,
-                "prompt_eval_count": prompt_tokens,
-                "prompt_eval_duration": 10_000_000,
-                "eval_count": completion_tokens,
-                "eval_duration": 40_000_000,
-            })
-        return json.dumps(payload) + "\n"
+            if gen.tool_calls:
+                msg["tool_calls"] = OllamaAPIHandler.tool_calls(gen)
+            payload["done_reason"] = _done_reason(gen)
+            payload.update(timings(gen, t0))
+            if gen.schema_error:
+                payload["schema_error"] = gen.schema_error
+        return payload
 
     @staticmethod
     def format_tags_response(active_model_name: str, model_config: ModelConfig, model=None) -> Dict[str, Any]:

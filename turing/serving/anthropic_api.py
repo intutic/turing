@@ -1,13 +1,16 @@
 """
 Anthropic Messages API (/v1/messages) Server Adapter (Turing Engine Integration).
-Provides full compatibility with Claude Code, Cursor, Cline, and Anthropic SDK.
+Provides compatibility with Claude Code, Cursor, Cline, and the Anthropic SDK: system prompts, text / tool_use /
+tool_result content blocks, tools and tool_choice, stop_sequences, extended thinking, and the SSE event stream.
 """
 
 import json
-import time
 import uuid
 from typing import List, Dict, Any, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+from .generation import bad_request, plain_prompt
+
 
 class AnthropicContentBlock(BaseModel):
     type: str = "text"
@@ -15,15 +18,14 @@ class AnthropicContentBlock(BaseModel):
     id: Optional[str] = None
     name: Optional[str] = None
     input: Optional[Dict[str, Any]] = None
+    thinking: Optional[str] = None
+    signature: Optional[str] = None
+
 
 class AnthropicMessage(BaseModel):
     role: str
-    content: Union[str, List[Union[AnthropicContentBlock, Dict[str, Any]]]]
+    content: Union[str, List[Dict[str, Any]]]
 
-class AnthropicTool(BaseModel):
-    name: str
-    description: Optional[str] = None
-    input_schema: Dict[str, Any]
 
 class AnthropicMessageRequest(BaseModel):
     model: str
@@ -34,14 +36,20 @@ class AnthropicMessageRequest(BaseModel):
     top_p: Optional[float] = 1.0
     top_k: Optional[int] = 50
     stream: Optional[bool] = False
-    tools: Optional[List[AnthropicTool]] = None
-    sparsity_ratio: Optional[float] = Field(default=None, description="Custom subspace sparsity ratio (0.0 to 0.9)")
-    use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
-    draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
+    stop_sequences: Optional[List[str]] = None
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Optional[Dict[str, Any]] = None
+    thinking: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    draft_tokens: Optional[int] = None
+    lane: Optional[str] = None
+
 
 class AnthropicUsage(BaseModel):
     input_tokens: int
     output_tokens: int
+    cache_read_input_tokens: int = 0
+
 
 class AnthropicMessageResponse(BaseModel):
     id: str
@@ -53,133 +61,172 @@ class AnthropicMessageResponse(BaseModel):
     stop_sequence: Optional[str] = None
     usage: AnthropicUsage
 
+
+def _block_text(block: Dict[str, Any]) -> str:
+    kind = block.get("type")
+    if kind == "text":
+        return block.get("text") or ""
+    raise bad_request(f"content block type '{kind}' is not supported here (text only)")
+
+
+def _result_text(content: Any) -> str:
+    if isinstance(content, str) or content is None:
+        return content or ""
+    return "\n".join(_block_text(b) for b in content)
+
+
+def _stop_reason(finish_reason: str, stop_sequence: Optional[str]) -> str:
+    if stop_sequence is not None:
+        return "stop_sequence"
+    return {"tool_calls": "tool_use", "length": "max_tokens"}.get(finish_reason, "end_turn")
+
+
+def _tool_use_id(call_id: str) -> str:
+    return "toolu_" + call_id.split("_", 1)[-1]
+
+
+def tool_input(arguments: str) -> Dict[str, Any]:
+    """A call's JSON-string arguments as the tool_use input object."""
+    try:
+        value = json.loads(arguments or "{}")
+    except ValueError:
+        return {"_raw": arguments}
+    return value if isinstance(value, dict) else {"_value": value}
+
+
 class AnthropicAPIHandler:
     """
-    Transforms Anthropic Messages format into Turing Engine engine prompts and yields Anthropic SSE events.
+    Converts Anthropic Messages requests into chat-template messages and generation results into Anthropic
+    responses and SSE events.
     """
+
+    @staticmethod
+    def to_chat_messages(req: AnthropicMessageRequest) -> List[Dict[str, Any]]:
+        """system + messages as chat-template messages: tool_use blocks become assistant tool_calls, tool_result
+        blocks become tool messages; image (or any other non-text) blocks are refused."""
+        out: List[Dict[str, Any]] = []
+        if req.system:
+            sys_text = req.system if isinstance(req.system, str) else "\n".join(_block_text(b) for b in req.system)
+            out.append({"role": "system", "content": sys_text})
+        for m in req.messages:
+            if m.role not in ("user", "assistant"):
+                raise bad_request(f"message role must be user or assistant, not '{m.role}'")
+            if isinstance(m.content, str):
+                out.append({"role": m.role, "content": m.content})
+                continue
+            text, calls, results = [], [], []
+            for b in m.content:
+                kind = b.get("type")
+                if kind == "tool_use" and m.role == "assistant":
+                    calls.append({"id": b.get("id"), "type": "function",
+                                  "function": {"name": b.get("name"), "arguments": b.get("input") or {}}})
+                elif kind == "tool_result" and m.role == "user":
+                    results.append({"role": "tool", "tool_call_id": b.get("tool_use_id"),
+                                    "content": _result_text(b.get("content"))})
+                elif kind in ("thinking", "redacted_thinking") and m.role == "assistant":
+                    continue  # earlier turns' thinking is not fed back (as the chat templates do)
+                else:
+                    text.append(_block_text(b))
+            out.extend(results)
+            if text or calls or not results:
+                msg: Dict[str, Any] = {"role": m.role, "content": "\n".join(text)}
+                if calls:
+                    msg["tool_calls"] = calls
+                out.append(msg)
+        return out
+
     @staticmethod
     def extract_prompt_from_request(req: AnthropicMessageRequest) -> str:
-        prompt_parts = []
+        """The plain prompt (models without a chat template)."""
+        return plain_prompt(AnthropicAPIHandler.to_chat_messages(req))
 
-        # System prompt
-        if req.system:
-            if isinstance(req.system, str):
-                prompt_parts.append(f"System: {req.system}")
-            elif isinstance(req.system, list):
-                sys_text = " ".join([b.get("text", "") for b in req.system if isinstance(b, dict)])
-                prompt_parts.append(f"System: {sys_text}")
-
-        # Messages
-        for m in req.messages:
-            role_label = "User" if m.role == "user" else "Assistant"
-            if isinstance(m.content, str):
-                prompt_parts.append(f"{role_label}: {m.content}")
-            elif isinstance(m.content, list):
-                text_blocks = []
-                for block in m.content:
-                    if isinstance(block, AnthropicContentBlock) and block.text:
-                        text_blocks.append(block.text)
-                    elif isinstance(block, dict) and "text" in block:
-                        text_blocks.append(block["text"])
-                prompt_parts.append(f"{role_label}: {' '.join(text_blocks)}")
-
-        prompt_parts.append("Assistant:")
-        return "\n\n".join(prompt_parts)
+    @staticmethod
+    def thinking(req: AnthropicMessageRequest):
+        """(thinking enabled, budget_tokens) from the request's thinking field."""
+        t = req.thinking
+        if not t:
+            return None, None
+        if t.get("type") == "disabled":
+            return False, 0
+        if t.get("type") == "enabled":
+            budget = t.get("budget_tokens")
+            if not isinstance(budget, int) or budget < 0:
+                raise bad_request("thinking.budget_tokens must be a non-negative integer")
+            return True, budget
+        raise bad_request("thinking.type must be enabled or disabled")
 
     @staticmethod
     def format_non_streaming_response(
         req: AnthropicMessageRequest,
         generated_text: str,
         input_tokens_count: int,
-        output_tokens_count: int
+        output_tokens_count: int,
+        reasoning: str = "",
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        finish_reason: str = "stop",
+        stop_sequence: Optional[str] = None,
+        cached_tokens: int = 0,
     ) -> AnthropicMessageResponse:
-        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+        content = []
+        if reasoning:
+            content.append(AnthropicContentBlock(type="thinking", thinking=reasoning, signature=""))
+        if generated_text or not (reasoning or tool_calls):
+            content.append(AnthropicContentBlock(type="text", text=generated_text))
+        for tc in tool_calls or []:
+            content.append(AnthropicContentBlock(type="tool_use", id=_tool_use_id(tc["id"]),
+                                                 name=tc["function"]["name"],
+                                                 input=tool_input(tc["function"]["arguments"])))
         return AnthropicMessageResponse(
-            id=msg_id,
-            role="assistant",
-            content=[AnthropicContentBlock(type="text", text=generated_text)],
+            id=f"msg_{uuid.uuid4().hex[:24]}",
+            content=content,
             model=req.model,
-            stop_reason="end_turn",
-            usage=AnthropicUsage(
-                input_tokens=input_tokens_count,
-                output_tokens=output_tokens_count
-            )
+            stop_reason=_stop_reason(finish_reason, stop_sequence),
+            stop_sequence=stop_sequence,
+            usage=AnthropicUsage(input_tokens=input_tokens_count, output_tokens=output_tokens_count,
+                                 cache_read_input_tokens=cached_tokens),
         )
 
     @staticmethod
-    async def stream_generator(
-        req: AnthropicMessageRequest,
-        token_stream,
-        input_tokens_count: int
-    ):
-        """
-        Yields official Anthropic Server-Sent Events (SSE).
-        """
-        msg_id = f"msg_{uuid.uuid4().hex[:24]}"
-        output_tokens = 0
+    async def stream_generator(req: AnthropicMessageRequest, gen):
+        """Anthropic SSE events for a Generation: thinking and text blocks as they stream, tool_use blocks at the
+        end, then message_delta with the stop reason and usage."""
+        def event(name: str, payload: Dict[str, Any]) -> str:
+            return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
 
-        # Event 1: message_start
-        message_start_payload = {
-            "type": "message_start",
-            "message": {
-                "id": msg_id,
-                "type": "message",
-                "role": "assistant",
-                "content": [],
-                "model": req.model,
-                "stop_reason": None,
-                "stop_sequence": None,
-                "usage": {
-                    "input_tokens": input_tokens_count,
-                    "output_tokens": 1
-                }
-            }
-        }
-        yield f"event: message_start\ndata: {json.dumps(message_start_payload)}\n\n"
+        yield event("message_start", {"type": "message_start", "message": {
+            "id": f"msg_{uuid.uuid4().hex[:24]}", "type": "message", "role": "assistant", "content": [],
+            "model": req.model, "stop_reason": None, "stop_sequence": None,
+            "usage": {"input_tokens": gen.prompt_tokens, "output_tokens": 0,
+                      "cache_read_input_tokens": gen.cached_tokens}}})
+        index, open_kind = -1, None
 
-        # Event 2: content_block_start
-        content_block_start_payload = {
-            "type": "content_block_start",
-            "index": 0,
-            "content_block": {
-                "type": "text",
-                "text": ""
-            }
-        }
-        yield f"event: content_block_start\ndata: {json.dumps(content_block_start_payload)}\n\n"
+        def close():
+            return event("content_block_stop", {"type": "content_block_stop", "index": index})
 
-        # Event 3: content_block_delta for each token
-        async for token_id, token_str in token_stream:
-            output_tokens += 1
-            delta_payload = {
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {
-                    "type": "text_delta",
-                    "text": token_str
-                }
-            }
-            yield f"event: content_block_delta\ndata: {json.dumps(delta_payload)}\n\n"
-
-        # Event 4: content_block_stop
-        content_block_stop_payload = {
-            "type": "content_block_stop",
-            "index": 0
-        }
-        yield f"event: content_block_stop\ndata: {json.dumps(content_block_stop_payload)}\n\n"
-
-        # Event 5: message_delta
-        message_delta_payload = {
-            "type": "message_delta",
-            "delta": {
-                "stop_reason": "end_turn",
-                "stop_sequence": None
-            },
-            "usage": {
-                "output_tokens": output_tokens
-            }
-        }
-        yield f"event: message_delta\ndata: {json.dumps(message_delta_payload)}\n\n"
-
-        # Event 6: message_stop
-        yield "event: message_stop\ndata: {\"type\": \"message_stop\"}\n\n"
+        async for kind, text in gen.events():
+            block = "thinking" if kind == "reasoning" else "text"
+            if block != open_kind:
+                if open_kind is not None:
+                    yield close()
+                index, open_kind = index + 1, block
+                start = {"type": "thinking", "thinking": "", "signature": ""} if block == "thinking" else \
+                    {"type": "text", "text": ""}
+                yield event("content_block_start", {"type": "content_block_start", "index": index,
+                                                    "content_block": start})
+            delta = {"type": "thinking_delta", "thinking": text} if block == "thinking" else \
+                {"type": "text_delta", "text": text}
+            yield event("content_block_delta", {"type": "content_block_delta", "index": index, "delta": delta})
+        if open_kind is not None:
+            yield close()
+        for tc in gen.tool_calls:
+            index += 1
+            yield event("content_block_start", {"type": "content_block_start", "index": index, "content_block": {
+                "type": "tool_use", "id": _tool_use_id(tc["id"]), "name": tc["function"]["name"], "input": {}}})
+            yield event("content_block_delta", {"type": "content_block_delta", "index": index, "delta": {
+                "type": "input_json_delta", "partial_json": tc["function"]["arguments"]}})
+            yield close()
+        delta = {"stop_reason": _stop_reason(gen.finish_reason, gen.stop_sequence),
+                 "stop_sequence": gen.stop_sequence}
+        yield event("message_delta", {"type": "message_delta", "delta": delta,
+                                      "usage": {"output_tokens": gen.completion_tokens}})
+        yield event("message_stop", {"type": "message_stop"})

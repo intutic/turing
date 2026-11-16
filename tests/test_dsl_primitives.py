@@ -4,6 +4,8 @@ Verifies @chain decorator, sequential gen(), parallel fork(), multi-branch join(
 constrained select(), and structured output constrain().
 """
 
+import json
+
 import pytest
 import torch
 from turing.dsl import (
@@ -94,27 +96,77 @@ def test_dsl_select_options():
 
 
 def test_dsl_constrain_json():
+    """constrain() is token-level constrained decoding: on a model with a tokenizer every gen() is schema-valid JSON;
+    a model without one (test-tiny) refuses instead of falling back to prompting."""
+    import jsonschema
+    from tests.test_generation_api import tiny_chat_model, tokenizer
+    from turing.serving.structured import StructuredOutputError
     schema = {
         "type": "object",
         "properties": {
-            "name": {"type": "string"},
-            "score": {"type": "integer"}
+            "name": {"type": "string", "maxLength": 8},
+            "score": {"type": "integer", "minimum": 0, "maximum": 100}
         },
-        "required": ["name", "score"]
+        "required": ["name", "score"],
+        "additionalProperties": False
     }
 
     @chain(model="test-tiny", device="cpu")
-    def structured_task() -> dict:
+    def synthetic() -> dict:
         constrain(schema)
-        # Verify schema is stored in active context
         from turing.dsl.context import get_active_context
-        ctx = get_active_context()
-        assert ctx.current_schema == schema
-        out = gen("Generate JSON:", max_tokens=4)
-        return ctx.current_schema
+        assert get_active_context().current_schema == schema
+        return gen("Generate JSON:", max_tokens=4)
 
-    ret_schema = structured_task()
-    assert ret_schema == schema
+    with pytest.raises(StructuredOutputError, match="tokenizer"):
+        synthetic()
+
+    tok = tokenizer("Qwen/Qwen3-0.6B")
+    executor = LocalExecutor(model=tiny_chat_model(tok), tokenizer=tok, device="cpu")
+
+    @chain(executor=executor)
+    def structured() -> list:
+        constrain(schema)
+        return [gen("A player:", max_tokens=48, temperature=1.0) for _ in range(3)]
+
+    try:
+        torch.manual_seed(0)
+        for out in structured():
+            jsonschema.validate(json.loads(out), schema)
+    finally:
+        executor.close()
+
+
+def test_fork_prefills_the_prefix_once_and_branches_equal_sequential_greedy():
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"))
+    model.config.kv_pool_gib = 0.01
+    executor = LocalExecutor(model=model, device="cpu")
+    prompts = [" alpha", " beta beta", " gamma!"]
+
+    @chain(executor=executor)
+    def workflow():
+        from turing.dsl.context import get_active_context
+        gen("A shared question that every branch continues:", max_tokens=6, temperature=0.0)
+        prefix = list(get_active_context().history_tokens)
+        branches = fork(len(prompts), temperature=0.0)
+        futures = [b.gen(p, max_tokens=10) for b, p in zip(branches, prompts)]
+        assert all(hasattr(f, "result") for f in futures)  # started, not finished: join() collects them
+        join(branches, strategy="concat")
+        return prefix, branches
+
+    try:
+        prefix, branches = workflow()
+        assert executor.prefix_prefills == 1
+        assert executor.engine.kv_pool.used_pages == 0  # the shared prefix was released at join()
+        for b, p in zip(branches, prompts):
+            suffix = [ord(c) % executor.vocab_size for c in p]
+            text, tokens, logprobs = executor.generate(prefix + suffix, max_tokens=10, temperature=0.0)
+            assert b.branch_tokens == suffix + tokens and b.branch_text == p + text
+            assert len(b.token_logprobs) == len(tokens) and all(lp <= 0 for lp in b.token_logprobs)
+    finally:
+        executor.close()
 
 
 def test_custom_executor_injection():

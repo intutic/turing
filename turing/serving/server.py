@@ -1,32 +1,40 @@
 """
-OpenAI-Compatible FastAPI Asynchronous LLM Serving Server.
+OpenAI-, Anthropic- and Ollama-compatible FastAPI inference server. Every generation endpoint goes through the shared
+core in generation.py: chat templates, constrained decoding, reasoning, tool calls, stop strings and real usage.
 """
 
+import hmac
 import json
 import math
 import time
+import uuid
 
 import torch
 from typing import List, Optional, Dict, Any, Union
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
-from ..config import ModelConfig, TuringConfig
+from ..core.kv_cache import PAGE
 from .engine import ContinuousBatchEngine, RequestRejected
 from .anthropic_api import AnthropicMessageRequest, AnthropicAPIHandler
 from .ollama_api import (
     OllamaGenerateRequest,
     OllamaChatRequest,
     OllamaShowRequest,
-    OllamaAPIHandler
+    OllamaAPIHandler,
+    ollama_format,
+    ollama_options,
+    render_go_template,
 )
-from .structured import StructuredOutputParser
-from .tools import ToolCallingHandler
+from . import generation
+from .generation import (GenerationParams, REMOVED_FIELDS, REMOVED_HEADERS, bad_request, effort_budget,
+                         normalize_tool_choice, openai_messages, render_chat, render_text, thinking_kwargs)
+from .tools import normalize_tools
 from .kv_events import KVBlockEventPublisher
-from .traffic import AdmissionController, LanePolicy, Lane, AdaptiveComputeBatcher
-from .multi_model import ElasticMultiModelManager, TaskType
+from .traffic import AdmissionController, LanePolicy, Lane
+from .multi_model import ElasticMultiModelManager
 from .. import __version__
 
 class EmbeddingRequest(BaseModel):
@@ -48,49 +56,108 @@ class ExtractRequest(BaseModel):
     model: Optional[str] = "turing-extractor-default"
     score_threshold: Optional[float] = 0.50
 
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
 class ChatCompletionRequest(BaseModel):
-    model: str
-    messages: List[ChatMessage]
+    model: Optional[str] = None
+    messages: List[Dict[str, Any]]
+    temperature: Optional[float] = 0.7
+    top_p: Optional[float] = 1.0
+    top_k: Optional[int] = 50
+    max_tokens: Optional[int] = None
+    max_completion_tokens: Optional[int] = None
+    n: Optional[int] = 1
+    stop: Optional[Union[str, List[str]]] = None
+    stream: Optional[bool] = False
+    stream_options: Optional[Dict[str, Any]] = None
+    draft_tokens: Optional[int] = Field(default=None, description="n-gram speculative draft tokens per step")
+    lane: Optional[str] = Field(default=None, description="QoS scheduling lane (interactive, batch, background)")
+    reasoning_effort: Optional[str] = Field(default=None, description="Thinking budget: none, low, medium, high")
+    response_format: Optional[Union[Dict[str, Any], str]] = Field(default=None, description="json_object or json_schema")
+    tools: Optional[List[Dict[str, Any]]] = Field(default=None, description="Tools the model may call")
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description="auto, none, required or a named tool")
+
+class CompletionRequest(BaseModel):
+    model: Optional[str] = None
+    prompt: Union[str, List[int]]
     temperature: Optional[float] = 0.7
     top_p: Optional[float] = 1.0
     top_k: Optional[int] = 50
     max_tokens: Optional[int] = 64
+    n: Optional[int] = 1
+    stop: Optional[Union[str, List[str]]] = None
     stream: Optional[bool] = False
-    sparsity_ratio: Optional[float] = Field(default=None, description="Custom subspace sparsity ratio (0.0 to 0.9)")
-    use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
-    draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
+    stream_options: Optional[Dict[str, Any]] = None
+    response_format: Optional[Union[Dict[str, Any], str]] = None
+    draft_tokens: Optional[int] = Field(default=None, description="n-gram speculative draft tokens per step")
     lane: Optional[str] = Field(default=None, description="QoS scheduling lane (interactive, batch, background)")
-    reasoning_effort: Optional[str] = Field(default=None, description="Constrains reasoning effort level: low, medium, high")
-    response_format: Optional[Union[Dict[str, Any], str]] = Field(default=None, description="Structured output format (json_object or json_schema)")
-    tools: Optional[List[Dict[str, Any]]] = Field(default=None, description="List of tools/functions available for invocation")
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description="Tool selection policy")
 
-class CompletionRequest(BaseModel):
-    model: str
-    prompt: Union[str, List[int]]
-    temperature: Optional[float] = 0.7
-    max_tokens: Optional[int] = 64
-    stream: Optional[bool] = False
-    sparsity_ratio: Optional[float] = Field(default=None, description="Custom subspace sparsity ratio (0.0 to 0.9)")
-    use_svd_kv: Optional[bool] = Field(default=None, description="Enable calibrated SVD INT8 KV cache paging")
-    draft_tokens: Optional[int] = Field(default=None, description="Number of speculative candidate draft tokens")
-    lane: Optional[str] = Field(default=None, description="QoS scheduling lane (interactive, batch, background)")
-    reasoning_effort: Optional[str] = Field(default=None, description="Constrains reasoning effort level: low, medium, high")
+
+def _error_body(path: str, status: int, message: str) -> Dict[str, Any]:
+    """An error in the shape of the API the path belongs to."""
+    if path.startswith("/v1/messages"):  # Anthropic
+        kind = {400: "invalid_request_error", 401: "authentication_error", 429: "rate_limit_error"}.get(
+            status, "overloaded_error")
+        return {"type": "error", "error": {"type": kind, "message": message}}
+    if path.startswith("/api/"):  # Ollama
+        return {"error": message}
+    kind = {400: "invalid_request_error", 401: "invalid_request_error", 429: "rate_limit_exceeded"}.get(
+        status, "server_overloaded")
+    return {"error": {"message": message, "type": kind, "code": "invalid_api_key" if status == 401 else status}}
+
+
+def _response_schema(fmt: Any) -> Optional[Dict[str, Any]]:
+    """OpenAI response_format as the JSON schema to constrain to (None for plain text)."""
+    if fmt is None:
+        return None
+    if isinstance(fmt, str):
+        fmt = {"type": fmt}
+    kind = fmt.get("type")
+    if kind in (None, "text"):
+        return None
+    if kind == "json_object":
+        return {"type": "object"}
+    if kind == "json_schema":
+        schema = (fmt.get("json_schema") or {}).get("schema")
+        if not isinstance(schema, dict):
+            raise bad_request("response_format json_schema needs json_schema.schema (an object)")
+        return schema
+    raise bad_request(f"response_format type must be text, json_object or json_schema, not '{kind}'")
+
+
+def _sse(payload: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _usage(gen) -> Dict[str, Any]:
+    return {"prompt_tokens": gen.prompt_tokens, "completion_tokens": gen.completion_tokens,
+            "total_tokens": gen.prompt_tokens + gen.completion_tokens,
+            "prompt_tokens_details": {"cached_tokens": gen.cached_tokens}}
+
 
 def create_app(
     engine: ContinuousBatchEngine,
     kv_publisher: Optional[KVBlockEventPublisher] = None,
     admission_controller: Optional[AdmissionController] = None,
-    lane_policy: Optional[LanePolicy] = None
+    lane_policy: Optional[LanePolicy] = None,
+    api_key: Optional[str] = None,
+    reasoning_effort: Optional[str] = None,
+    admission: bool = True,
+    lanes: bool = True,
 ) -> FastAPI:
+    """api_key: when set, every endpoint but /health needs `Authorization: Bearer <key>` or `x-api-key: <key>`.
+    reasoning_effort: the thinking budget for requests that do not set one (none, low, medium, high).
+    admission / lanes: build an AdmissionController sized to the engine's KV pool and the 3-lane LanePolicy when
+    the engine has none and none is passed (False leaves them off)."""
     if admission_controller is not None:
         engine.admission = admission_controller
+    elif admission and engine.admission is None:
+        st = engine.kv_pool.get_stats()
+        engine.admission = AdmissionController(st["total_pages"] * st["bytes_per_page"])
     if lane_policy is not None:
         engine.lane_policy = lane_policy
+    elif lanes and engine.lane_policy is None:
+        engine.lane_policy = LanePolicy()
+    if reasoning_effort is not None:
+        effort_budget(reasoning_effort)  # refuse a bad default at startup, not on every request
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -109,74 +176,106 @@ def create_app(
     @app.exception_handler(RequestRejected)
     async def request_rejected(request: Request, exc: RequestRejected):
         headers = {"Retry-After": str(max(1, math.ceil(exc.retry_after)))} if exc.retry_after else None
-        path = request.url.path
-        if path.startswith("/v1/messages"):  # Anthropic error shape
-            kind = {400: "invalid_request_error", 429: "rate_limit_error"}.get(exc.status_code, "overloaded_error")
-            body = {"type": "error", "error": {"type": kind, "message": str(exc)}}
-        elif path.startswith("/api/"):  # Ollama error shape
-            body = {"error": str(exc)}
-        else:  # OpenAI error shape
-            kind = {400: "invalid_request_error", 429: "rate_limit_exceeded"}.get(exc.status_code, "server_overloaded")
-            body = {"error": {"message": str(exc), "type": kind, "code": exc.status_code}}
-        return JSONResponse(status_code=exc.status_code, content=body, headers=headers)
+        return JSONResponse(status_code=exc.status_code, content=_error_body(request.url.path, exc.status_code,
+                                                                             str(exc)), headers=headers)
+
+    if api_key:
+        key = api_key.encode()
+
+        @app.middleware("http")
+        async def require_api_key(request: Request, call_next):
+            if request.url.path != "/health":
+                auth = request.headers.get("authorization", "")
+                bearer = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+                given = request.headers.get("x-api-key", "")
+                if not (hmac.compare_digest(bearer.encode(), key) or hmac.compare_digest(given.encode(), key)):
+                    return JSONResponse(status_code=401, headers={"WWW-Authenticate": "Bearer"},
+                                        content=_error_body(request.url.path, 401, "invalid or missing API key"))
+            return await call_next(request)
+
     multi_model_mgr = ElasticMultiModelManager(device=engine.device)
+    cfg = engine.model_config
+    lane_stats: Dict[str, Dict[str, int]] = {lane.value: {"admitted": 0, "finished": 0} for lane in Lane}
 
-    def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
-        """
-        Extracts dynamic per-request sparsity, SVD KV paging, QoS lane, and draft speculation knobs
-        from HTTP headers (X-Turing-*) or JSON request payload with fallback to model defaults.
-        """
+    def _controls(body: Dict[str, Any], raw_req: Request) -> Dict[str, Any]:
+        """Per-request engine controls from the body or X-Turing-* headers: draft tokens, lane, LoRA adapter."""
+        for k, why in REMOVED_FIELDS.items():
+            if k in body:
+                raise bad_request(f"'{k}' is not a request parameter: {why}")
+        for h, why in REMOVED_HEADERS.items():
+            if h in raw_req.headers:
+                raise bad_request(f"header {h} is not supported: {why}")
         headers = raw_req.headers
-
-        # 1. Sparsity Ratio
-        sparsity = getattr(req_obj, "sparsity_ratio", None)
-        if sparsity is None:
-            raw_hdr = headers.get("x-turing-sparsity") or headers.get("X-Turing-Sparsity")
-            if raw_hdr:
-                try:
-                    sparsity = float(raw_hdr)
-                except ValueError:
-                    pass
-        if sparsity is None:
-            sparsity = engine.model_config.sparsity_ratio
-
-        # 2. SVD KV Paging
-        svd_kv = getattr(req_obj, "use_svd_kv", None)
-        if svd_kv is None:
-            raw_hdr = headers.get("x-turing-svd-kv") or headers.get("X-Turing-SVD-KV")
-            if raw_hdr:
-                svd_kv = raw_hdr.strip().lower() in ("1", "true", "yes")
-        if svd_kv is None:
-            svd_kv = True
-
-        # 3. Draft Speculation Tokens
-        draft_toks = getattr(req_obj, "draft_tokens", None)
-        if draft_toks is None:
-            raw_hdr = headers.get("x-turing-draft-tokens") or headers.get("X-Turing-Draft-Tokens")
-            if raw_hdr:
-                try:
-                    draft_toks = int(raw_hdr)
-                except ValueError:
-                    pass
-
-        # 4. QoS Lane
-        lane_str = getattr(req_obj, "lane", None)
-        if lane_str is None:
-            lane_str = headers.get("x-turing-lane") or headers.get("X-Turing-Lane")
-
-        lane_obj = None
+        draft = body.get("draft_tokens")
+        if draft is None and headers.get("x-turing-draft-tokens") is not None:
+            try:
+                draft = int(headers["x-turing-draft-tokens"])
+            except ValueError:
+                raise bad_request("X-Turing-Draft-Tokens must be an integer")
+        if draft is not None and (not isinstance(draft, int) or draft < 0):
+            raise bad_request("draft_tokens must be a non-negative integer")
+        lane_str = body.get("lane") or headers.get("x-turing-lane")
+        lane = None
         if lane_str:
             try:
-                lane_obj = Lane(lane_str.lower())
+                lane = Lane(str(lane_str).lower())
             except ValueError:
-                pass
+                raise bad_request(f"lane must be one of {', '.join(l.value for l in Lane)}, not '{lane_str}'")
+        adapter = headers.get("x-turing-adapter")
+        model = body.get("model") or ""
+        if adapter is None and isinstance(model, str) and ":" in model:
+            suffix = model.rsplit(":", 1)[1]  # "base:adapter" names a LoRA adapter the server holds
+            if suffix in getattr(engine.model, "adapter_names", ()):
+                adapter = suffix
+        return {"draft_tokens": draft, "lane": lane, "adapter": adapter}
 
-        return {
-            "sparsity_ratio": float(sparsity),
-            "use_svd_kv": bool(svd_kv),
-            "draft_tokens": draft_toks,
-            "lane": lane_obj
+    async def _start(prompt_ids: List[int], params: GenerationParams, prompt_text: str = ""):
+        gen = await generation.start(engine, prompt_ids, params, prompt_text=prompt_text)
+        stats = lane_stats[gen.req.lane.value] if gen.req.lane is not None else None
+        if stats is not None:
+            stats["admitted"] += 1
+            gen.stats = stats
+        return gen
+
+    def _headers(gen) -> Dict[str, str]:
+        """What the server really did for this request."""
+        h = {
+            "X-Turing-Model": cfg.name,
+            "X-Turing-Device": str(engine.device),
+            "X-Turing-KV-Cache-Dtype": cfg.kv_cache_dtype,
+            "X-Turing-Cached-Tokens": str(gen.cached_tokens),
+            "X-Turing-Draft-Tokens": str(gen.draft_tokens),
+            "X-Turing-KV-Utilization": f"{engine.get_kv_cache_utilization():.4f}",
+            "X-Turing-Queue-Depth": str(len(engine.waiting_queue)),
         }
+        if gen.req.lane is not None:
+            h["X-Turing-Lane"] = gen.req.lane.value
+        if gen.params.adapter:
+            h["X-Turing-Adapter"] = gen.params.adapter
+        return h
+
+    def _max_tokens(requested: Optional[int], prompt_ids: List[int], default: int) -> int:
+        """requested, the default when unset, or (negative, as Ollama's num_predict -1) as many as fit."""
+        if requested is None:
+            return default
+        if requested < 0:
+            pool = engine.kv_pool
+            return max(1, min(pool.table_width, pool.page_limit) * PAGE - len(prompt_ids))
+        return requested
+
+    def _chat_prompt(req: ChatCompletionRequest):
+        """(token ids, text) the chat endpoints feed the model: the chat template with tools and thinking kwargs."""
+        if (req.n or 1) != 1:
+            raise bad_request("n > 1 is not supported")
+        try:
+            tools = normalize_tools(req.tools)
+        except ValueError as e:
+            raise bad_request(str(e))
+        choice = normalize_tool_choice(req.tool_choice)
+        enabled, budget = effort_budget(req.reasoning_effort or reasoning_effort)
+        ids, text = render_chat(engine, openai_messages(req.messages), tools if choice != "none" else None,
+                                **thinking_kwargs(engine, enabled))
+        return ids, text, tools, choice, budget
 
     @app.get("/health")
     async def health_check():
@@ -193,9 +292,18 @@ def create_app(
     def _prom(v):
         return "NaN" if v is None else v  # Prometheus' value for "no samples yet"
 
+    def _lane_metrics() -> Dict[str, Dict[str, int]]:
+        """Per lane: requests waiting and running now, admitted and finished since start."""
+        out = {}
+        for lane in Lane:
+            out[lane.value] = {"waiting": sum(r.lane == lane for r in engine.waiting_queue),
+                               "running": sum(r.lane == lane for r in engine.running_batch), **lane_stats[lane.value]}
+        return out
+
     @app.get("/metrics")
     async def metrics(request: Request):
         telem = engine.get_telemetry()
+        telem["lanes"] = _lane_metrics()
         accept = request.headers.get("accept", "")
         if "text/plain" in accept:
             # Prometheus exposition format
@@ -244,6 +352,12 @@ def create_app(
                     f"# TYPE turing_admission_shed_total counter",
                     f"turing_admission_shed_total {telem['admission']['shed_count']}",
                 ])
+            for kind, help_text in (("waiting", "Requests waiting"), ("running", "Requests running"),
+                                    ("admitted", "Requests admitted (total)"), ("finished", "Requests finished (total)")):
+                metric = f"turing_lane_requests_{kind}" + ("_total" if kind in ("admitted", "finished") else "")
+                lines += [f"# HELP {metric} {help_text} per QoS lane",
+                          f"# TYPE {metric} {'counter' if metric.endswith('_total') else 'gauge'}"]
+                lines += [f'{metric}{{lane="{lane}"}} {v[kind]}' for lane, v in telem["lanes"].items()]
             from fastapi.responses import PlainTextResponse
             return PlainTextResponse("\n".join(lines) + "\n")
 
@@ -344,355 +458,132 @@ def create_app(
             "count": len(entities),
         }
 
+
     @app.post("/v1/completions/render")
-    async def render_completions(req: Request):
-        """Tokenizes prompt for llm-d EPP token-producer prefix indexing."""
-        body = await req.json()
-        prompt = body.get("prompt", "")
-        if isinstance(prompt, list):
-            tokens = [int(t) for t in prompt]
-        else:
-            tokens = engine.encode_prompt(str(prompt))
-        if not tokens:
-            tokens = [1]
+    async def render_completions(raw_req: Request):
+        """The token ids /v1/completions feeds the model for this prompt (llm-d EPP prefix indexing)."""
+        body = await raw_req.json()
+        tokens = render_text(engine, body.get("prompt", ""))
         return JSONResponse(content={"tokens": tokens, "count": len(tokens)})
 
     @app.post("/v1/chat/completions/render")
-    async def render_chat_completions(req: Request):
-        """Tokenizes chat messages for llm-d EPP token-producer prefix indexing."""
-        body = await req.json()
-        messages = body.get("messages", [])
-        full_text = " ".join([m.get("content", "") for m in messages if isinstance(m, dict)])
-        tokens = engine.encode_prompt(full_text)
-        if not tokens:
-            tokens = [1]
+    async def render_chat_completions(raw_req: Request):
+        """The token ids /v1/chat/completions feeds the model for these messages (chat template, tools, thinking)."""
+        try:
+            req = ChatCompletionRequest.model_validate(await raw_req.json())
+        except ValidationError as e:
+            raise bad_request(str(e))
+        tokens = _chat_prompt(req)[0]
         return JSONResponse(content={"tokens": tokens, "count": len(tokens)})
 
     @app.post("/v1/completions")
     async def completions(req: CompletionRequest, raw_req: Request):
-        controls = _extract_turing_controls(req, raw_req)
-        resp_headers = {
-            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
-            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
-            "X-Turing-KV-Utilization": f"{engine.get_kv_cache_utilization():.4f}",
-            "X-Turing-Queue-Depth": str(len(engine.waiting_queue)),
-            "X-Turing-Model": engine.model_config.name,
-            "X-Turing-Device": str(engine.device),
-        }
+        ctl = _controls(await raw_req.json(), raw_req)
+        if (req.n or 1) != 1:
+            raise bad_request("n > 1 is not supported")
+        prompt_ids = render_text(engine, req.prompt)
+        params = GenerationParams(
+            max_tokens=_max_tokens(req.max_tokens, prompt_ids, 64), temperature=req.temperature,
+            top_p=req.top_p, top_k=req.top_k, stop=req.stop, schema=_response_schema(req.response_format),
+            reasoning=False, **ctl)
+        gen = await _start(prompt_ids, params)  # admitted before the response starts: a rejection is a 4xx/503
+        rid, created, model = f"cmpl-{uuid.uuid4().hex[:24]}", int(time.time()), req.model or cfg.name
 
-        if isinstance(req.prompt, list):
-            prompt_tokens = [int(t) for t in req.prompt]
-        else:
-            prompt_tokens = engine.encode_prompt(req.prompt or "")
-
-        if not prompt_tokens:
-            prompt_tokens = [1]
-
-        max_new_tokens = req.max_tokens or 32
-        temp = req.temperature if req.temperature is not None else 0.7
-        top_k = 50
-
-        req_id = f"cmpl-{int(time.time()*1000)}"
+        def body(text: str, finish: Optional[str]) -> Dict[str, Any]:
+            choice = {"text": text, "index": 0, "logprobs": None, "finish_reason": finish}
+            if finish and gen.schema_error:
+                choice["schema_error"] = gen.schema_error
+            return {"id": rid, "object": "text_completion", "created": created, "model": model, "choices": [choice]}
 
         if req.stream:
-            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
-            admitted = await engine.add_request(
-                prompt_tokens=prompt_tokens,
-                max_new_tokens=max_new_tokens,
-                temperature=temp,
-                top_k=top_k,
-                draft_tokens=controls["draft_tokens"],
-            )
-
             async def event_generator():
-                token_stream = engine.stream_request(admitted)
-                async for token_id in token_stream:
-                    char_repr = engine.decode_tokens([token_id])
-                    chunk_data = {
-                        "id": req_id,
-                        "object": "text_completion",
-                        "created": int(time.time()),
-                        "model": req.model,
-                        "choices": [
-                            {
-                                "text": char_repr,
-                                "index": 0,
-                                "logprobs": None,
-                                "finish_reason": None,
-                            }
-                        ],
-                    }
-                    yield f"data: {json.dumps(chunk_data)}\n\n"
-
-                done_chunk = {
-                    "id": req_id,
-                    "object": "text_completion",
-                    "created": int(time.time()),
-                    "model": req.model,
-                    "choices": [
-                        {
-                            "text": "",
-                            "index": 0,
-                            "logprobs": None,
-                            "finish_reason": "stop",
-                        }
-                    ],
-                }
-                yield f"data: {json.dumps(done_chunk)}\n\n"
+                async for _, text in gen.events():
+                    yield _sse(body(text, None))
+                yield _sse(body("", gen.finish_reason))
+                if (req.stream_options or {}).get("include_usage"):
+                    yield _sse({**body("", None), "choices": [], "usage": _usage(gen)})
                 yield "data: [DONE]\n\n"
 
-            return StreamingResponse(event_generator(), media_type="text/event-stream", headers=resp_headers)
+            return StreamingResponse(event_generator(), media_type="text/event-stream", headers=_headers(gen))
 
-        # Non-streaming
-        generated_tokens = []
-        token_stream = engine.stream_generate(
-            prompt_tokens=prompt_tokens,
-            max_new_tokens=max_new_tokens,
-            temperature=temp,
-            top_k=top_k,
-            draft_tokens=controls["draft_tokens"],
-        )
-        async for token_id in token_stream:
-            generated_tokens.append(token_id)
-
-        out_text = engine.decode_tokens(generated_tokens)
-
-        return JSONResponse(
-            content={
-                "id": req_id,
-                "object": "text_completion",
-                "created": int(time.time()),
-                "model": req.model,
-                "choices": [
-                    {
-                        "text": out_text,
-                        "index": 0,
-                        "logprobs": None,
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": len(prompt_tokens),
-                    "completion_tokens": len(generated_tokens),
-                    "total_tokens": len(prompt_tokens) + len(generated_tokens),
-                },
-            },
-            headers=resp_headers,
-        )
+        await gen.collect()
+        return JSONResponse(content={**body(gen.content, gen.finish_reason), "usage": _usage(gen)},
+                            headers=_headers(gen))
 
     @app.post("/v1/chat/completions")
     async def chat_completions(req: ChatCompletionRequest, raw_req: Request):
-        controls = _extract_turing_controls(req, raw_req)
-        resp_headers = {
-            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
-            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
-            "X-Turing-KV-Utilization": f"{engine.get_kv_cache_utilization():.4f}",
-            "X-Turing-Queue-Depth": str(len(engine.waiting_queue)),
-            "X-Turing-Model": engine.model_config.name,
-            "X-Turing-Device": str(engine.device)
-        }
+        ctl = _controls(await raw_req.json(), raw_req)
+        prompt_ids, prompt_text, tools, choice, budget = _chat_prompt(req)
+        params = GenerationParams(
+            max_tokens=_max_tokens(req.max_completion_tokens or req.max_tokens, prompt_ids, 64),
+            temperature=req.temperature, top_p=req.top_p, top_k=req.top_k, stop=req.stop, tools=tools,
+            tool_choice=choice, schema=_response_schema(req.response_format), thinking_budget=budget, **ctl)
+        gen = await _start(prompt_ids, params, prompt_text)
+        rid, created, model = f"chatcmpl-{uuid.uuid4().hex[:24]}", int(time.time()), req.model or cfg.name
 
-        # Encode messages using real tokenizer with ASCII fallback
-        full_text = " ".join([m.content for m in req.messages])
-
-        # Inject Tool Calling Instructions if tools are provided
-        if req.tools:
-            full_text = ToolCallingHandler.inject_tools_instruction(full_text, req.tools)
-
-        # Inject JSON Structured Output Instructions if requested
-        if req.response_format:
-            if isinstance(req.response_format, dict):
-                fmt_type = req.response_format.get("type")
-                if fmt_type == "json_schema":
-                    schema_data = req.response_format.get("json_schema", {})
-                    full_text = StructuredOutputParser.inject_json_instruction(
-                        full_text,
-                        schema=schema_data.get("schema"),
-                        schema_name=schema_data.get("name")
-                    )
-                elif fmt_type == "json_object":
-                    full_text = StructuredOutputParser.inject_json_instruction(full_text)
-            elif isinstance(req.response_format, str) and "json" in req.response_format.lower():
-                full_text = StructuredOutputParser.inject_json_instruction(full_text)
-
-        prompt_tokens = engine.encode_prompt(full_text)
-        if not prompt_tokens:
-            prompt_tokens = [1]
-
-        max_new_tokens = req.max_tokens or 32
-        temp = req.temperature if req.temperature is not None else 0.7
-        top_k = req.top_k or 50
-
-        req_id = f"chatcmpl-{int(time.time()*1000)}"
+        def chunk(delta: Dict[str, Any], finish: Optional[str] = None) -> Dict[str, Any]:
+            c = {"index": 0, "delta": delta, "logprobs": None, "finish_reason": finish}
+            if finish and gen.schema_error:
+                c["schema_error"] = gen.schema_error
+            return {"id": rid, "object": "chat.completion.chunk", "created": created, "model": model, "choices": [c]}
 
         if req.stream:
-            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
-            admitted = await engine.add_request(
-                prompt_tokens=prompt_tokens,
-                max_new_tokens=max_new_tokens,
-                temperature=temp,
-                top_k=top_k,
-                draft_tokens=controls["draft_tokens"]
-            )
-
             async def event_generator():
-                token_stream = engine.stream_request(admitted)
-                async for token_id in token_stream:
-                    char_repr = engine.decode_tokens([token_id])
-                    chunk_data = {
-                        "id": req_id,
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": req.model,
-                        "choices": [
-                            {
-                                "index": 0,
-                                "delta": {"content": char_repr},
-                                "finish_reason": None
-                            }
-                        ]
-                    }
-                    yield f"data: {json.dumps(chunk_data)}\n\n"
-
-                # Final termination event
-                done_chunk = {
-                    "id": req_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": req.model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {},
-                            "finish_reason": "stop"
-                        }
-                    ]
-                }
-                yield f"data: {json.dumps(done_chunk)}\n\n"
+                yield _sse(chunk({"role": "assistant", "content": ""}))
+                async for kind, text in gen.events():
+                    yield _sse(chunk({"reasoning_content": text} if kind == "reasoning" else {"content": text}))
+                if gen.tool_calls:
+                    yield _sse(chunk({"tool_calls": [{"index": i, **tc} for i, tc in enumerate(gen.tool_calls)]}))
+                yield _sse(chunk({}, gen.finish_reason))
+                if (req.stream_options or {}).get("include_usage"):
+                    yield _sse({**chunk({}), "choices": [], "usage": _usage(gen)})
                 yield "data: [DONE]\n\n"
 
-            return StreamingResponse(event_generator(), media_type="text/event-stream", headers=resp_headers)
+            return StreamingResponse(event_generator(), media_type="text/event-stream", headers=_headers(gen))
 
-        # Non-streaming
-        generated_tokens = []
-        token_stream = engine.stream_generate(
-            prompt_tokens=prompt_tokens,
-            max_new_tokens=max_new_tokens,
-            temperature=temp,
-            top_k=top_k,
-            draft_tokens=controls["draft_tokens"]
-        )
-        async for token_id in token_stream:
-            generated_tokens.append(token_id)
-
-        out_text = engine.decode_tokens(generated_tokens)
-        finish_reason = "stop"
-        tool_calls_extracted = None
-
-        if req.tools:
-            clean_text, tool_calls = ToolCallingHandler.extract_tool_calls(out_text)
-            if tool_calls:
-                tool_calls_extracted = tool_calls
-                finish_reason = "tool_calls"
-                out_text = clean_text or None
-
-        msg_payload: Dict[str, Any] = {
-            "role": "assistant",
-            "content": out_text
-        }
-        if tool_calls_extracted:
-            msg_payload["tool_calls"] = tool_calls_extracted
-
-        return JSONResponse(
-            content={
-                "id": req_id,
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": req.model,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": msg_payload,
-                        "finish_reason": finish_reason
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": len(prompt_tokens),
-                    "completion_tokens": len(generated_tokens),
-                    "total_tokens": len(prompt_tokens) + len(generated_tokens)
-                }
-            },
-            headers=resp_headers
-        )
+        await gen.collect()
+        message: Dict[str, Any] = {"role": "assistant", "content": gen.content or (None if gen.tool_calls else "")}
+        if gen.reasoning_text:
+            message["reasoning_content"] = gen.reasoning_text
+        if gen.tool_calls:
+            message["tool_calls"] = gen.tool_calls
+        out = {"index": 0, "message": message, "logprobs": None, "finish_reason": gen.finish_reason}
+        if gen.schema_error:
+            out["schema_error"] = gen.schema_error
+        return JSONResponse(content={"id": rid, "object": "chat.completion", "created": created, "model": model,
+                                     "choices": [out], "usage": _usage(gen)}, headers=_headers(gen))
 
     @app.post("/v1/messages")
     async def anthropic_messages(req: AnthropicMessageRequest, raw_req: Request):
         """
-        Official Anthropic Messages API Endpoint (/v1/messages).
+        Anthropic Messages API Endpoint (/v1/messages).
         """
-        controls = _extract_turing_controls(req, raw_req)
-        resp_headers = {
-            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
-            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
-            "X-Turing-Model": engine.model_config.name,
-            "X-Turing-Device": str(engine.device)
-        }
-
-        full_text = AnthropicAPIHandler.extract_prompt_from_request(req)
-        prompt_tokens = engine.encode_prompt(full_text)
-        if not prompt_tokens:
-            prompt_tokens = [1]
-
-        max_new_tokens = req.max_tokens or 32
-        temp = req.temperature if req.temperature is not None else 0.7
-        top_k = req.top_k or 50
+        ctl = _controls(await raw_req.json(), raw_req)
+        try:
+            tools = normalize_tools(req.tools)
+        except ValueError as e:
+            raise bad_request(str(e))
+        choice = normalize_tool_choice(req.tool_choice)
+        enabled, budget = AnthropicAPIHandler.thinking(req)
+        if enabled is None:
+            enabled, budget = effort_budget(reasoning_effort)
+        prompt_ids, prompt_text = render_chat(engine, AnthropicAPIHandler.to_chat_messages(req),
+                                              tools if choice != "none" else None, **thinking_kwargs(engine, enabled))
+        params = GenerationParams(
+            max_tokens=_max_tokens(req.max_tokens, prompt_ids, 1024), temperature=req.temperature, top_p=req.top_p,
+            top_k=req.top_k, stop=req.stop_sequences, tools=tools, tool_choice=choice, thinking_budget=budget, **ctl)
+        gen = await _start(prompt_ids, params, prompt_text)
 
         if req.stream:
-            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
-            admitted = await engine.add_request(
-                prompt_tokens=prompt_tokens,
-                max_new_tokens=max_new_tokens,
-                temperature=temp,
-                top_k=top_k,
-                draft_tokens=controls["draft_tokens"]
-            )
+            return StreamingResponse(AnthropicAPIHandler.stream_generator(req, gen), media_type="text/event-stream",
+                                     headers=_headers(gen))
 
-            async def anthropic_token_stream():
-                token_stream = engine.stream_request(admitted)
-                async for tok_id in token_stream:
-                    tok_str = engine.decode_tokens([tok_id])
-                    yield tok_id, tok_str
-
-            return StreamingResponse(
-                AnthropicAPIHandler.stream_generator(
-                    req=req,
-                    token_stream=anthropic_token_stream(),
-                    input_tokens_count=len(prompt_tokens)
-                ),
-                media_type="text/event-stream",
-                headers=resp_headers
-            )
-
-        # Non-streaming
-        generated_tokens = []
-        token_stream = engine.stream_generate(
-            prompt_tokens=prompt_tokens,
-            max_new_tokens=max_new_tokens,
-            temperature=temp,
-            top_k=top_k,
-            draft_tokens=controls["draft_tokens"]
-        )
-        async for token_id in token_stream:
-            generated_tokens.append(token_id)
-
-        out_text = engine.decode_tokens(generated_tokens)
+        await gen.collect()
         response = AnthropicAPIHandler.format_non_streaming_response(
-            req=req,
-            generated_text=out_text,
-            input_tokens_count=len(prompt_tokens),
-            output_tokens_count=len(generated_tokens)
-        )
-        return JSONResponse(content=response.model_dump(), headers=resp_headers)
+            req=req, generated_text=gen.content, input_tokens_count=gen.prompt_tokens,
+            output_tokens_count=gen.completion_tokens, reasoning=gen.reasoning_text, tool_calls=gen.tool_calls,
+            finish_reason=gen.finish_reason, stop_sequence=gen.stop_sequence, cached_tokens=gen.cached_tokens)
+        return JSONResponse(content=response.model_dump(exclude_none=True), headers=_headers(gen))
 
     # -------------------------------------------------------------------------
     # Native Ollama API Compatibility Layer (/api/*)
@@ -745,192 +636,88 @@ def create_app(
         model_name = body.get("model", engine.model_config.name)
         return JSONResponse(content={"status": "success", "digest": f"sha256:turing{abs(hash(model_name)):016x}", "total": 100, "completed": 100})
 
+
     @app.post("/api/generate")
     async def ollama_generate(req: OllamaGenerateRequest, raw_req: Request):
         """
-        Ollama single-prompt raw completion endpoint (/api/generate).
+        Ollama single-prompt completion endpoint (/api/generate): raw prompts, a `template` override, `system`,
+        `context` from an earlier response, `format`, `think`.
         """
-        controls = _extract_turing_controls(req, raw_req)
-        resp_headers = {
-            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
-            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
-            "X-Turing-Model": engine.model_config.name,
-            "X-Turing-Device": str(engine.device)
-        }
-
-        full_text = OllamaAPIHandler.extract_prompt_from_generate_request(req)
-
-        # Inject JSON Structured Output if requested
-        if req.format:
-            if isinstance(req.format, dict):
-                full_text = StructuredOutputParser.inject_json_instruction(full_text, schema=req.format)
-            elif isinstance(req.format, str) and req.format.lower() == "json":
-                full_text = StructuredOutputParser.inject_json_instruction(full_text)
-
-        prompt_tokens = engine.encode_prompt(full_text)
-        if not prompt_tokens:
-            prompt_tokens = [1]
-
-        opts = req.options or {}
-        max_new_tokens = opts.get("num_predict", 64)
-        temp = float(opts.get("temperature", 0.7))
-        top_k = int(opts.get("top_k", 50))
-
-        t0 = time.time_ns()
+        ctl = _controls(await raw_req.json(), raw_req)
+        t0 = time.time()
+        if req.images:
+            raise bad_request("images are not supported by this server (text only)")
+        if req.suffix:
+            raise bad_request("suffix (fill-in-the-middle) is not supported by this server")
+        if not req.prompt:  # Ollama loads the model and answers done
+            return JSONResponse(content={"model": req.model, "response": "", "done": True, "done_reason": "load",
+                                         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+        context = list(req.context or [])
+        if req.raw:
+            prompt_text = req.prompt
+            prompt_ids = context + engine.encode_prompt(prompt_text)
+        elif req.template:
+            prompt_text = render_go_template(req.template, {"System": req.system or "", "Prompt": req.prompt,
+                                                            "Response": ""})
+            prompt_ids = context + engine.encode_prompt(prompt_text)
+        else:
+            messages = ([{"role": "system", "content": req.system}] if req.system else []) + \
+                [{"role": "user", "content": req.prompt}]
+            ids, prompt_text = render_chat(engine, messages, **thinking_kwargs(engine, req.think))
+            prompt_ids = context + ids
+        opts = ollama_options(req.options)
+        opts["max_tokens"] = _max_tokens(opts["max_tokens"], prompt_ids, 128)
+        params = GenerationParams(**opts, schema=ollama_format(req.format), reasoning=not req.raw,
+                                  thinking_budget=0 if req.think is False else None, **ctl)
+        gen = await _start(prompt_ids, params, prompt_text)
 
         if req.stream:
-            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
-            admitted = await engine.add_request(
-                prompt_tokens=prompt_tokens,
-                max_new_tokens=max_new_tokens,
-                temperature=temp,
-                top_k=top_k,
-                draft_tokens=controls["draft_tokens"]
-            )
-
             async def ollama_generate_stream():
-                accumulated_tokens = []
-                token_stream = engine.stream_request(admitted)
-                async for tok_id in token_stream:
-                    accumulated_tokens.append(tok_id)
-                    tok_str = engine.decode_tokens([tok_id])
-                    yield OllamaAPIHandler.format_streaming_generate_chunk(req, tok_str, done=False)
+                async for kind, text in gen.events():
+                    piece = {"thinking": text} if kind == "reasoning" else {"text": text}
+                    yield json.dumps(OllamaAPIHandler.generate_chunk(req, **piece)) + "\n"
+                yield json.dumps(OllamaAPIHandler.generate_chunk(
+                    req, done=True, gen=gen, t0=t0, context=prompt_ids + gen.output_ids)) + "\n"
 
-                # Final chunk
-                yield OllamaAPIHandler.format_streaming_generate_chunk(
-                    req,
-                    token_text="",
-                    done=True,
-                    context_tokens=prompt_tokens + accumulated_tokens,
-                    prompt_tokens=len(prompt_tokens),
-                    completion_tokens=len(accumulated_tokens)
-                )
+            return StreamingResponse(ollama_generate_stream(), media_type="application/x-ndjson",
+                                     headers=_headers(gen))
 
-            return StreamingResponse(ollama_generate_stream(), media_type="application/x-ndjson", headers=resp_headers)
-
-        # Non-streaming
-        generated_tokens = []
-        token_stream = engine.stream_generate(
-            prompt_tokens=prompt_tokens,
-            max_new_tokens=max_new_tokens,
-            temperature=temp,
-            top_k=top_k,
-            draft_tokens=controls["draft_tokens"]
-        )
-        async for token_id in token_stream:
-            generated_tokens.append(token_id)
-
-        t_end = time.time_ns()
-        out_text = engine.decode_tokens(generated_tokens)
-
-        response = OllamaAPIHandler.format_non_streaming_generate(
-            req=req,
-            response_text=out_text,
-            context_tokens=prompt_tokens + generated_tokens,
-            prompt_tokens=len(prompt_tokens),
-            completion_tokens=len(generated_tokens),
-            total_duration_ns=t_end - t0,
-            eval_duration_ns=max(1, t_end - t0 - 10_000_000)
-        )
-        return JSONResponse(content=response, headers=resp_headers)
+        await gen.collect()
+        return JSONResponse(content=OllamaAPIHandler.generate_chunk(
+            req, text=gen.content, thinking=gen.reasoning_text, done=True, gen=gen, t0=t0,
+            context=prompt_ids + gen.output_ids), headers=_headers(gen))
 
     @app.post("/api/chat")
     async def ollama_chat(req: OllamaChatRequest, raw_req: Request):
         """
         Ollama chat completion endpoint (/api/chat).
         """
-        controls = _extract_turing_controls(req, raw_req)
-        resp_headers = {
-            "X-Turing-Sparsity": f"{controls['sparsity_ratio']:.3f}",
-            "X-Turing-SVD-KV": "1" if controls["use_svd_kv"] else "0",
-            "X-Turing-Model": engine.model_config.name,
-            "X-Turing-Device": str(engine.device)
-        }
-
-        full_text = OllamaAPIHandler.extract_prompt_from_chat_request(req)
-
-        # Inject Tool Calling Instructions if tools are provided
-        if req.tools:
-            full_text = ToolCallingHandler.inject_tools_instruction(full_text, req.tools)
-
-        # Inject JSON Structured Output if requested
-        if req.format:
-            if isinstance(req.format, dict):
-                full_text = StructuredOutputParser.inject_json_instruction(full_text, schema=req.format)
-            elif isinstance(req.format, str) and req.format.lower() == "json":
-                full_text = StructuredOutputParser.inject_json_instruction(full_text)
-
-        prompt_tokens = engine.encode_prompt(full_text)
-        if not prompt_tokens:
-            prompt_tokens = [1]
-
-        opts = req.options or {}
-        max_new_tokens = opts.get("num_predict", 64)
-        temp = float(opts.get("temperature", 0.7))
-        top_k = int(opts.get("top_k", 50))
-
-        t0 = time.time_ns()
+        ctl = _controls(await raw_req.json(), raw_req)
+        t0 = time.time()
+        try:
+            tools = normalize_tools(req.tools)
+        except ValueError as e:
+            raise bad_request(str(e))
+        prompt_ids, prompt_text = render_chat(engine, OllamaAPIHandler.to_chat_messages(req), tools,
+                                              **thinking_kwargs(engine, req.think))
+        opts = ollama_options(req.options)
+        opts["max_tokens"] = _max_tokens(opts["max_tokens"], prompt_ids, 128)
+        params = GenerationParams(**opts, tools=tools, schema=ollama_format(req.format),
+                                  thinking_budget=0 if req.think is False else None, **ctl)
+        gen = await _start(prompt_ids, params, prompt_text)
 
         if req.stream:
-            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
-            admitted = await engine.add_request(
-                prompt_tokens=prompt_tokens,
-                max_new_tokens=max_new_tokens,
-                temperature=temp,
-                top_k=top_k,
-                draft_tokens=controls["draft_tokens"]
-            )
-
             async def ollama_chat_stream():
-                accumulated_tokens = []
-                token_stream = engine.stream_request(admitted)
-                async for tok_id in token_stream:
-                    accumulated_tokens.append(tok_id)
-                    tok_str = engine.decode_tokens([tok_id])
-                    yield OllamaAPIHandler.format_streaming_chat_chunk(req, tok_str, done=False)
+                async for kind, text in gen.events():
+                    piece = {"thinking": text} if kind == "reasoning" else {"text": text}
+                    yield json.dumps(OllamaAPIHandler.chat_chunk(req, **piece)) + "\n"
+                yield json.dumps(OllamaAPIHandler.chat_chunk(req, done=True, gen=gen, t0=t0)) + "\n"
 
-                # Final chunk
-                yield OllamaAPIHandler.format_streaming_chat_chunk(
-                    req,
-                    delta_text="",
-                    done=True,
-                    prompt_tokens=len(prompt_tokens),
-                    completion_tokens=len(accumulated_tokens)
-                )
+            return StreamingResponse(ollama_chat_stream(), media_type="application/x-ndjson", headers=_headers(gen))
 
-            return StreamingResponse(ollama_chat_stream(), media_type="application/x-ndjson", headers=resp_headers)
-
-        # Non-streaming
-        generated_tokens = []
-        token_stream = engine.stream_generate(
-            prompt_tokens=prompt_tokens,
-            max_new_tokens=max_new_tokens,
-            temperature=temp,
-            top_k=top_k,
-            draft_tokens=controls["draft_tokens"]
-        )
-        async for token_id in token_stream:
-            generated_tokens.append(token_id)
-
-        t_end = time.time_ns()
-        out_text = engine.decode_tokens(generated_tokens)
-        tool_calls_extracted = None
-
-        if req.tools:
-            clean_text, tool_calls = ToolCallingHandler.extract_tool_calls(out_text)
-            if tool_calls:
-                tool_calls_extracted = tool_calls
-                out_text = clean_text
-
-        response = OllamaAPIHandler.format_non_streaming_chat(
-            req=req,
-            message_content=out_text,
-            prompt_tokens=len(prompt_tokens),
-            completion_tokens=len(generated_tokens),
-            tool_calls=tool_calls_extracted,
-            total_duration_ns=t_end - t0
-        )
-        return JSONResponse(content=response, headers=resp_headers)
+        await gen.collect()
+        return JSONResponse(content=OllamaAPIHandler.chat_chunk(
+            req, text=gen.content, thinking=gen.reasoning_text, done=True, gen=gen, t0=t0), headers=_headers(gen))
 
     @app.post("/api/embed")
     @app.post("/api/embeddings")

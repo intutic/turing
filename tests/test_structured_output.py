@@ -11,24 +11,6 @@ from turing.serving.server import create_app
 from turing.serving.structured import StructuredOutputParser
 
 
-def test_structured_output_json_injection():
-    prompt = "Give me user info."
-    injected = StructuredOutputParser.inject_json_instruction(prompt)
-    assert "IMPORTANT: You must respond ONLY with a valid JSON object" in injected
-
-    schema = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string"},
-            "age": {"type": "integer"}
-        },
-        "required": ["name", "age"]
-    }
-    injected_schema = StructuredOutputParser.inject_json_instruction(prompt, schema=schema, schema_name="UserProfile")
-    assert "UserProfile" in injected_schema
-    assert '"required": [' in injected_schema
-
-
 def test_structured_output_extract_json():
     # 1. Plain valid JSON
     valid, obj, _ = StructuredOutputParser.extract_json('{"key": "value", "count": 42}')
@@ -55,33 +37,6 @@ def test_structured_output_auto_repair_truncated():
     assert "hobbies" in obj
 
 
-def test_structured_output_schema_validation():
-    schema = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string"},
-            "age": {"type": "integer"},
-            "tags": {"type": "array", "items": {"type": "string"}}
-        },
-        "required": ["name", "age"]
-    }
-
-    # Valid
-    valid, err = StructuredOutputParser.validate_schema({"name": "Bob", "age": 30, "tags": ["admin", "dev"]}, schema)
-    assert valid is True
-    assert err is None
-
-    # Missing required property
-    valid, err = StructuredOutputParser.validate_schema({"name": "Bob"}, schema)
-    assert valid is False
-    assert "Missing required property 'age'" in err
-
-    # Wrong type
-    valid, err = StructuredOutputParser.validate_schema({"name": "Bob", "age": "thirty"}, schema)
-    assert valid is False
-    assert "Invalid property 'age'" in err
-
-
 def test_server_chat_completions_with_response_format():
     cfg = get_model_config("test-tiny")
     jcfg = TuringConfig(device="cpu", max_batch_size=4)
@@ -95,8 +50,8 @@ def test_server_chat_completions_with_response_format():
             "response_format": {"type": "json_object"},
             "max_tokens": 16
         }
+        # constrained decoding needs the tokenizer: refused, never silently prompt-only
+        # (constrained output on a real tokenizer is tested in test_generation_api.py)
         resp = client.post("/v1/chat/completions", json=payload)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "choices" in data
-        assert len(data["choices"]) == 1
+        assert resp.status_code == 400
+        assert "tokenizer" in resp.json()["error"]["message"]

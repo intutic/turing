@@ -115,17 +115,6 @@ def run_triple_gateway_and_structured_benchmarks():
         # ---------------------------------------------------------------------
         print("\n[📊 2/3] BENCHMARKING STRUCTURED OUTPUTS & JSON SCHEMA VALIDATION...")
 
-        # A. Prompt Injection Overhead
-        t0 = time.perf_counter()
-        for _ in range(1000):
-            StructuredOutputParser.inject_json_instruction("Extract person metadata", schema={
-                "type": "object",
-                "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
-                "required": ["name", "age"]
-            })
-        schema_inj_us = ((time.perf_counter() - t0) / 1000) * 1_000_000
-        print(f"  • JSONSchema Prompt Injection Overhead     : {schema_inj_us:.2f} µs")
-
         # B. JSON Extraction & Validation Speed
         test_json_str = '```json\n{"name": "Ishan", "age": 29, "active": true, "skills": ["AI", "SIMD", "CUDA"]}\n```'
         t0 = time.perf_counter()
@@ -143,21 +132,9 @@ def run_triple_gateway_and_structured_benchmarks():
         valid_repaired, rep_obj, _ = StructuredOutputParser.extract_json(repaired)
         print(f"  • Truncated JSON Auto-Repair Latency       : {repair_us:.2f} µs (Recovery: {'SUCCESS' if valid_repaired else 'FAILED'})")
 
-        # D. End-to-End Chat Completion in JSON Mode
-        t0 = time.perf_counter()
+        # JSON mode is token-level constrained decoding now (llguidance), which needs a model with a tokenizer;
+        # the synthetic test-tiny has none, so no end-to-end JSON-mode figure is measured here.
         json_req_iters = 10
-        json_tokens = 0
-        for _ in range(json_req_iters):
-            resp = client.post("/v1/chat/completions", json={
-                "model": "test-tiny",
-                "messages": [{"role": "user", "content": "Return server status."}],
-                "response_format": {"type": "json_object"},
-                "max_tokens": 32
-            })
-            assert resp.status_code == 200
-            json_tokens += resp.json()["usage"]["completion_tokens"]
-        json_e2e_time = time.perf_counter() - t0
-        print(f"  • E2E JSON Mode /v1/chat/completions Speed : {json_tokens / json_e2e_time:.2f} tok/s, random-init test-tiny model")
 
         # ---------------------------------------------------------------------
         # 3. Native Tool & Function Calling Benchmark

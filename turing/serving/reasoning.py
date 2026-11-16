@@ -1,16 +1,17 @@
 """
-Reasoning Effort & Thinking Token Budgeting Engine for Turing Engine.
-Handles OpenAI reasoning_effort ('low', 'medium', 'high'), Anthropic thinking budgets,
-and streaming token extraction for <think>...</think> sequences.
+Reasoning (thinking) support for models that emit <think>...</think> (Qwen3, DeepSeek-R1 distills):
+splitting the text stream into reasoning and content, and a thinking-token budget enforced while decoding.
 """
 
-from typing import Optional, Tuple, Dict, Any, List
-import re
+from typing import Optional, Tuple, List
+
+import torch
+
+OPEN, CLOSE = "<think>", "</think>"
+
 
 class ReasoningBudgetManager:
-    """
-    Manages max generation budgets and sampling dynamics based on reasoning effort constraints.
-    """
+    """Thinking-token budgets per OpenAI reasoning_effort (Anthropic passes budget_tokens directly)."""
     EFFORT_BUDGET_MAP = {
         "low": 1024,
         "medium": 4096,
@@ -32,7 +33,7 @@ class ReasoningBudgetManager:
         """
         if not effort or effort.lower() not in cls.EFFORT_BUDGET_MAP:
             return user_max_tokens or 2048
-        
+
         effort_budget = cls.EFFORT_BUDGET_MAP[effort.lower()]
         if user_max_tokens is not None:
             return max(user_max_tokens, effort_budget)
@@ -48,68 +49,120 @@ class ReasoningBudgetManager:
         return cls.EFFORT_TEMPERATURE_MAP[effort.lower()]
 
 
+def _partial(buf: str, tag: str) -> int:
+    """Length of the longest suffix of buf that is a proper prefix of tag (a tag possibly split across chunks)."""
+    for j in range(min(len(tag) - 1, len(buf)), 0, -1):
+        if buf.endswith(tag[:j]):
+            return j
+    return 0
+
+
 class ReasoningStreamFilter:
     """
-    Processes token streams and extracts <think>...</think> reasoning chains for SSE streaming.
-    Supports both OpenAI delta.reasoning_content and Anthropic thinking blocks.
+    Splits streamed text into (reasoning, content) at <think> / </think>. A tag split across chunks is held back
+    until it is complete; in_thinking=True starts inside a thinking block (templates that end the prompt with
+    <think>, as DeepSeek-R1's does). Newlines right after </think> are dropped from the content.
     """
-    def __init__(self):
-        self.in_thinking_block = False
+
+    def __init__(self, in_thinking: bool = False):
+        self.in_thinking_block = in_thinking
         self.buffered_text = ""
         self.thinking_content = ""
         self.final_content = ""
-
-        try:
-            import turing.turing_csrc as turing_csrc
-            self._native_filter = turing_csrc.NativeReasoningFilter()
-            self._has_native = True
-        except ImportError:
-            try:
-                import turing_csrc
-                self._native_filter = turing_csrc.NativeReasoningFilter()
-                self._has_native = True
-            except ImportError:
-                self._native_filter = None
-                self._has_native = False
+        self._after_close = False
 
     def process_token(self, token_text: str) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Processes a chunk of newly generated text.
-        Returns a tuple of (reasoning_chunk, content_chunk).
-        """
-        if self._has_native and self._native_filter is not None:
-            r_chunk, c_chunk = self._native_filter.process_token(token_text)
-            self.in_thinking_block = self._native_filter.in_thinking_block
-            self.thinking_content = self._native_filter.thinking_content
-            self.final_content = self._native_filter.final_content
-            return r_chunk, c_chunk
+        """Returns the (reasoning_chunk, content_chunk) this text completes; None for an empty chunk."""
+        buf, r, c = self.buffered_text + token_text, "", ""
+        while True:
+            tag = CLOSE if self.in_thinking_block else OPEN
+            i = buf.find(tag)
+            cut = i if i >= 0 else len(buf) - _partial(buf, tag)
+            if self.in_thinking_block:
+                r += buf[:cut]
+            else:
+                c += self._content(buf[:cut])
+            if i < 0:
+                self.buffered_text = buf[cut:]
+                break
+            buf = buf[i + len(tag):]
+            self.in_thinking_block = not self.in_thinking_block
+            self._after_close = not self.in_thinking_block
+        self.thinking_content += r
+        self.final_content += c
+        return r or None, c or None
 
-        self.buffered_text += token_text
-
-        # Check entry into <think>
-        if "<think>" in self.buffered_text and not self.in_thinking_block:
-            self.in_thinking_block = True
-            before_think, self.buffered_text = self.buffered_text.split("<think>", 1)
-            if before_think:
-                self.final_content += before_think
-            return None, (before_think if before_think else None)
-
-        # Check exit from </think>
-        if "</think>" in self.buffered_text and self.in_thinking_block:
-            self.in_thinking_block = False
-            think_part, content_part = self.buffered_text.split("</think>", 1)
-            self.thinking_content += think_part
-            self.final_content += content_part
-            self.buffered_text = ""
-            return think_part, (content_part if content_part else None)
-
+    def flush(self) -> Tuple[Optional[str], Optional[str]]:
+        """The held-back text at the end of the stream."""
+        rest, self.buffered_text = self.buffered_text, ""
         if self.in_thinking_block:
-            chunk = self.buffered_text
-            self.thinking_content += chunk
-            self.buffered_text = ""
-            return chunk, None
-        else:
-            chunk = self.buffered_text
-            self.final_content += chunk
-            self.buffered_text = ""
-            return None, chunk
+            self.thinking_content += rest
+            return rest or None, None
+        rest = self._content(rest)
+        self.final_content += rest
+        return None, rest or None
+
+    def _content(self, text: str) -> str:
+        if self._after_close and text:
+            text = text.lstrip("\n")
+            self._after_close = not text
+        return text
+
+
+def think_token_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:
+    """(<think> ids, </think> ids) when the tokenizer has both tags as tokens (a reasoning model), else None."""
+    if tokenizer is None:
+        return None
+    try:
+        vocab = tokenizer.get_vocab()
+    except Exception:
+        return None
+    if OPEN not in vocab or CLOSE not in vocab:
+        return None
+    return [vocab[OPEN]], [vocab[CLOSE]]
+
+
+class ThinkingBudget:
+    """
+    Logits processor that ends a thinking block after `budget` thinking tokens by forcing the </think> token
+    sequence (in order when it is several tokens). Also tells where the content starts in the generated ids:
+    content_start() is None while thinking, else the index after </think> (0 when the model never thinks).
+    """
+
+    def __init__(self, open_ids: List[int], close_ids: List[int], budget: Optional[int], in_thinking: bool = False):
+        self.open_ids, self.close_ids, self.budget = list(open_ids), list(close_ids), budget
+        self.start: Optional[int] = 0 if in_thinking else None
+        self.end: Optional[int] = None
+        self._seen = 0
+        self._forced = 0
+        self._decided = in_thinking  # whether the answer opened with <think> is known
+
+    def _scan(self, gen: List[int]) -> None:
+        if not self._decided and len(gen) >= len(self.open_ids):  # a thinking block opens the answer or never
+            self._decided = True
+            if gen[:len(self.open_ids)] == self.open_ids:
+                self.start = len(self.open_ids)
+        if self.start is not None and self.end is None:
+            k = len(self.close_ids)
+            for n in range(max(self._seen + 1, self.start + k), len(gen) + 1):
+                if gen[n - k:n] == self.close_ids:
+                    self.end = n
+                    break
+        self._seen = len(gen)
+
+    def content_start(self, gen: List[int]) -> Optional[int]:
+        self._scan(gen)
+        if self.start is None:
+            return 0
+        return self.end
+
+    def __call__(self, gen: List[int], logits: torch.Tensor) -> None:
+        self._scan(gen)
+        if self.budget is None or self.start is None or self.end is not None:
+            return
+        if len(gen) - self.start < self.budget:
+            return
+        tok = self.close_ids[min(self._forced, len(self.close_ids) - 1)]
+        self._forced += 1
+        logits.fill_(float("-inf"))
+        logits[tok] = 0.0
