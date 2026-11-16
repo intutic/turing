@@ -104,6 +104,7 @@ class ModelConfig:
     shared_expert_ffn_dim: int = 0     # Qwen2-MoE: a sigmoid-gated shared expert
     moe_layers: Optional[List[int]] = None  # indices of MoE layers; None = all layers when num_experts > 0
     quantization: Optional[str] = None  # None (fp16/bf16/fp32 weights), "w4a16-rtn" or "w4a16-gptq" (turing/models/quant.py)
+    activation_sparsity: float = 0.0   # TEAL-style input sparsity of every projection (turing/models/activation_sparsity.py)
 
     @property
     def total_tiles(self) -> int:

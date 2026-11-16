@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""
+Where the fused int4 GEMM beats dequantize + cuBLAS fp16, by row count M (decode is M = batch, prefill M = tokens).
+For each layer shape of the model and each M: the Triton W4A16 kernel, cuBLAS on fp16 weights, and QuantLinear's
+large-M path (dequantize into scratch + cuBLAS). Median of --iters CUDA-event timings. The crossover sets
+turing.models.quant.INT4_MAX_ROWS. Writes results_w4a16_crossover_cuda.json.
+
+python scripts/benchmark_w4a16.py --shapes 2048x2048,2048x8192,8192x2048
+"""
+import _bootstrap  # noqa: F401,E402
+import argparse
+import json
+import platform
+import statistics
+
+import torch
+import torch.nn.functional as F
+
+from turing.kernels.triton_w4a16 import w4a16_gemm
+from turing.models.quant import dequantize, pack, rtn_quantize
+
+
+def timed(fn, iters):
+    for _ in range(5):
+        fn()
+    ts = []
+    for _ in range(iters):
+        a, b = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+        a.record()
+        fn()
+        b.record()
+        torch.cuda.synchronize()
+        ts.append(a.elapsed_time(b) * 1000)
+    return statistics.median(ts)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--shapes", default="2048x2048,2048x8192,8192x2048,4096x4096,4096x14336,14336x4096",
+                    help="KxN of y = x W^T (in x out features)")
+    ap.add_argument("--rows", default="1,2,4,8,16,32,64,128,256,512")
+    ap.add_argument("--iters", type=int, default=50)
+    ap.add_argument("--out", default="results_w4a16_crossover_cuda.json")
+    a = ap.parse_args()
+    rows = []
+    for shape in a.shapes.split(","):
+        K, N = map(int, shape.split("x"))
+        codes, s, z = rtn_quantize(torch.randn(N, K))
+        q, s, z = pack(codes).cuda(), s.cuda(), z.cuda()
+        w16 = dequantize(q, s, z, torch.float16)
+        scratch = torch.empty_like(w16)
+        for M in map(int, a.rows.split(",")):
+            x = torch.randn(M, K, device="cuda", dtype=torch.float16)
+            r = dict(K=K, N=N, M=M,
+                     int4_kernel_us=timed(lambda: w4a16_gemm(x, q, s, z), a.iters),
+                     fp16_cublas_us=timed(lambda: F.linear(x, w16), a.iters),
+                     dequant_cublas_us=timed(lambda: F.linear(x, dequantize(q, s, z, torch.float16, out=scratch)), a.iters))
+            print(json.dumps(r), flush=True)
+            rows.append(r)
+    env = dict(torch=torch.__version__, gpu=torch.cuda.get_device_name(0), platform=platform.platform())
+    with open(a.out, "w") as f:
+        json.dump(dict(env=env, rows=rows), f, indent=2)
+    print(f"[+] wrote {a.out}")
+
+
+if __name__ == "__main__":
+    main()

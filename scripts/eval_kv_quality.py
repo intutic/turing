@@ -48,6 +48,10 @@ ARMS |= {  # KV cache settings through the cache; low-bit arms vs exact_forward,
     # 4-bit weights (turing/models/quant.py): round to nearest, and GPTQ calibrated on 128 x 2048 WikiText-2 train tokens
     "rtn4": ("forward", dict(_EXACT, quant="rtn"), {}, "exact_forward"),
     "gptq4": ("forward", dict(_EXACT, quant="gptq"), {}, "exact_forward"),
+    # TEAL-style activation sparsity (turing/models/activation_sparsity.py), thresholds from WikiText-2 train
+    "teal25": ("forward", dict(_EXACT, teal=0.25), {}, "exact_forward"),
+    "teal40": ("forward", dict(_EXACT, teal=0.40), {}, "exact_forward"),
+    "teal50": ("forward", dict(_EXACT, teal=0.50), {}, "exact_forward"),
 }
 
 
@@ -97,10 +101,15 @@ def run_model(name, arms, T, D, n_win, device):
         mode, load, kv, _ = ARMS[arm]
         load = dict(load) if load is not None else None
         quant = load.pop("quant", None) if load else None
+        teal = load.pop("teal", None) if load else None
         model = hf if load is None else RealHuggingFaceLoader.convert_hf_model(hf, device=str(device), **load)
         if quant:  # replaces modules only: the HF weights this model shares stay as they are for the other arms
             from turing.models.quant import calibration_windows, quantize_model
             model = quantize_model(model, quant, calibration_windows(tok) if quant == "gptq" else None)
+        if teal:
+            from turing.models.activation_sparsity import calibrate_and_apply
+            from turing.models.quant import calibration_windows
+            calibrate_and_apply(model, calibration_windows(tok, 16, 512), teal)
         for k, v in kv.items():
             setattr(model.config, k, v)
         t0 = time.perf_counter()

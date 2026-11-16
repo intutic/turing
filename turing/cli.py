@@ -44,12 +44,17 @@ def _load_weights(args, dev):
         model, tokenizer = GGUFModelLoader(args.model).load(sparsity_ratio=args.sparsity, device=str(dev))
     else:
         model, tokenizer = _load_hf_or_exit(args, dev)
+    sp = getattr(args, "activation_sparsity", 0.0)
     q = getattr(args, "quantization", "none")
     if q != "none" and model.config.quantization is None:
         method = q.split("-")[-1]
         print(f"[*] Quantizing weights to 4 bits ({method})...")
         calib = calibration_windows(tokenizer, args.calib_windows, 2048) if method == "gptq" else None
         quantize_model(model, method, calib)
+    if sp:
+        from .models.activation_sparsity import calibrate_and_apply
+        print(f"[*] Calibrating {sp:.0%} activation sparsity on WikiText-2 (16 windows of 512 tokens)...")
+        calibrate_and_apply(model, calibration_windows(tokenizer, 16, 512), sp)
     cfg = model.config
     if hasattr(args, "kv_cache_dtype"):
         cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
@@ -67,6 +72,7 @@ def main():
     serve_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, cpu, mps)")
+    serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
     serve_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     serve_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
@@ -102,6 +108,7 @@ def main():
     gen_parser.add_argument("--prompt", type=str, default="Artificial intelligence is", help="Input prompt")
     gen_parser.add_argument("--max-new-tokens", "--max-tokens", type=int, default=32, help="Tokens to generate")
     gen_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
+    gen_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     gen_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
     gen_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     gen_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
@@ -177,6 +184,7 @@ def main():
     chat_parser = subparsers.add_parser("chat", help="Start an instant interactive terminal chat session with real weights")
     chat_parser.add_argument("--model", type=str, default="smollm2", help="Model to chat with (e.g. smollm2, gpt2, qwen-2.5-7b, llama-3.1-8b)")
     chat_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
+    chat_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     chat_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
     chat_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     chat_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
