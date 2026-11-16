@@ -88,6 +88,7 @@ class AsyncSequenceRequest:
         self.adapter = adapter
         self.finish_reason: Optional[str] = None
         self.cached_prompt_tokens = 0  # prompt tokens served from the prefix cache
+        self.uncacheable = False  # continues a caller's KVCache (prefix_kv): its pages are not keyed by its tokens
         self.state = RequestState.WAITING
         self.generated_tokens: List[int] = []
         self.output_queue: asyncio.Queue[Optional[int]] = asyncio.Queue()
@@ -245,6 +246,7 @@ class ContinuousBatchEngine:
         try:
             if isinstance(prefix_kv, KVCache):
                 req.past_kv = prefix_kv.clone()
+                req.uncacheable = True  # its cache starts with tokens this request does not know: never index it
             elif self.prefix_cache is not None:  # reuse cached pages; at least one prompt token is prefilled
                 req.past_kv = self.prefix_cache.attach(req.prompt_tokens, adapter, limit=len(req.prompt_tokens) - 1)
                 req.prefill_offset = req.cached_prompt_tokens = req.past_kv.length
@@ -353,7 +355,7 @@ class ContinuousBatchEngine:
                 req.prefill_offset = end
                 if end >= len(req.prompt_tokens):
                     req.state = RequestState.DECODING
-                    if self.prefix_cache is not None and self.dist_driver is None:
+                    if self.prefix_cache is not None and self.dist_driver is None and not req.uncacheable:
                         self.prefix_cache.insert(req.prompt_tokens, req.past_kv, req.adapter)
                     token = self._sample([req], logits[:, -1])[0]
                     now = time.time()  # after the forward and the sample (which syncs), so TTFT includes prefill
@@ -503,7 +505,8 @@ class ContinuousBatchEngine:
         req.finished_at = finished_time
         req.finish_reason = req.finish_reason or reason
         if isinstance(req.past_kv, KVCache):
-            if self.prefix_cache is not None and self.dist_driver is None and reason != "cancelled":
+            if self.prefix_cache is not None and self.dist_driver is None and reason != "cancelled" \
+                    and not req.uncacheable:
                 self.prefix_cache.insert(req.prompt_tokens + req.generated_tokens, req.past_kv, req.adapter)
             req.past_kv.free()  # return its pages to the pool (cached pages keep the index's reference)
         req.past_kv = None

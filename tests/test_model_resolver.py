@@ -76,7 +76,7 @@ def test_reasoning_budget_manager():
 def test_reasoning_stream_filter():
     rf = ReasoningStreamFilter()
     r1, c1 = rf.process_token("Hello! <think>Let me calculate")
-    assert r1 is None and c1 == "Hello! "
+    assert r1 == "Let me calculate" and c1 == "Hello! "  # reasoning streams as soon as it arrives
     
     r2, c2 = rf.process_token(" 2+2=4</think> The answer is 4.")
     assert "2+2=4" in r2

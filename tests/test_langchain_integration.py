@@ -34,14 +34,14 @@ def test_invoke(turing_server):
     msg = _llm(turing_server).invoke("Explain KV cache paging:")
     assert isinstance(msg, AIMessage) and isinstance(msg.content, str) and msg.content
     assert msg.usage_metadata["output_tokens"] == 8
-    assert msg.response_metadata["finish_reason"] == "stop"
+    assert msg.response_metadata["finish_reason"] == "length"  # test-tiny has no EOS: max_tokens ends it
 
 
 def test_stream(turing_server):
     chunks = list(_llm(turing_server).stream("Write a haiku:"))
     assert len(chunks) >= 8  # one chunk per generated token, then the finish chunk
     assert "".join(c.content for c in chunks)
-    assert [c.response_metadata.get("finish_reason") for c in chunks if c.response_metadata] == ["stop"]
+    assert [c.response_metadata.get("finish_reason") for c in chunks if c.response_metadata] == ["length"]
 
 
 def test_batch(turing_server):

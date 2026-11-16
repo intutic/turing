@@ -85,13 +85,16 @@ def main():
     serve_parser.add_argument("--embedding-model", type=str, default=None, help="HF embedding model (e.g. BAAI/bge-small-en-v1.5) for /v1/embeddings; default: the served model's mean-pooled hidden states")
     serve_parser.add_argument("--rerank-model", type=str, default=None, help="HF cross-encoder (e.g. cross-encoder/ms-marco-MiniLM-L-6-v2) for /v1/rerank; default: the served model's yes/no likelihood")
     serve_parser.add_argument("--draft-tokens", type=int, default=4, help="Prompt-lookup speculative draft tokens per step while few requests decode (0 = off)")
+    serve_parser.add_argument("--api-key", type=str, default=os.getenv("TURING_API_KEY"), help="Require this key (Authorization: Bearer or x-api-key) on every endpoint but /health (default: $TURING_API_KEY; off when unset)")
+    serve_parser.add_argument("--no-admission-control", action="store_true", help="Do not reject requests the KV pool cannot hold soon (429/503)")
+    serve_parser.add_argument("--no-lanes", action="store_true", help="Disable the interactive/batch/background QoS lanes")
     serve_parser.add_argument("--no-prefix-caching", action="store_true", help="Disable automatic prefix caching")
     serve_parser.add_argument("--lora", action="append", default=[], metavar="NAME=PATH", help="Load a PEFT LoRA adapter (repeatable); select it per request with model 'base:NAME' or X-Turing-Adapter")
     serve_parser.add_argument("--enable-kv-events", action="store_true", help="Enable ZeroMQ KV block event publisher for llm-d EPP prefix cache routing")
     serve_parser.add_argument("--kv-events-pub-port", type=int, default=5556, help="ZeroMQ PUB port for live KV cache block events (default: 5556)")
     serve_parser.add_argument("--kv-events-replay-port", type=int, default=5559, help="ZeroMQ ROUTER port for KV cache event replay (default: 5559)")
     serve_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights for isolated FLOP profiling")
-    serve_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
+    serve_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["none", "minimal", "low", "medium", "high"], help="Default thinking-token budget for reasoning models when a request sets none (none disables thinking where the chat template allows)")
     serve_parser.add_argument("--tensor-parallel", "--tp", type=int, default=1, help="Tensor parallelism world size (default: 1)")
     serve_parser.add_argument("--pipeline-parallel", "--pp", type=int, default=1, help="Pipeline parallelism stage count (default: 1)")
 
@@ -117,7 +120,6 @@ def main():
     gen_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
     gen_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
     gen_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights")
-    gen_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
 
     # 4. Convert
     conv_parser = subparsers.add_parser("convert", help="Quantize a HuggingFace checkpoint to 4-bit .tgate4 (GPTQ or RTN), layer by layer")
@@ -192,7 +194,6 @@ def main():
     chat_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     chat_parser.add_argument("--max-new-tokens", "--max-tokens", type=int, default=128, help="Maximum new tokens per response")
     chat_parser.add_argument("--mock", action="store_true", help="Run with mock synthetic weights without downloading")
-    chat_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
 
     # 15. Info
     info_parser = subparsers.add_parser("info", help="Display system, hardware, and Turing Engine runtime information")
@@ -318,7 +319,9 @@ def main():
             )
             print(f"[+] Initialized llm-d KVBlockEventPublisher on {kv_pub.pub_endpoint} (topic: {kv_pub.topic})")
 
-        app = create_app(engine, kv_publisher=kv_pub, embedding_model=args.embedding_model, rerank_model=args.rerank_model)
+        app = create_app(engine, kv_publisher=kv_pub, embedding_model=args.embedding_model, rerank_model=args.rerank_model,
+                         api_key=args.api_key, reasoning_effort=args.reasoning_effort,
+                         admission=not args.no_admission_control, lanes=not args.no_lanes)
         print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} (Model: {cfg.name}, Device: {dev})")
         uvicorn.run(app, host=args.host, port=args.port)
 

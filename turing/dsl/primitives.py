@@ -65,7 +65,8 @@ def gen(
 
 def fork(n: int = 2, temperature: float = 0.7) -> List[BranchContext]:
     """
-    Forks the active context into n parallel child branches that share the parent's prefix KV cache.
+    Forks the active context into n branches: the context so far is prefilled once and every branch continues
+    that KV cache copy-on-write. Branch gen() calls run concurrently; join() collects them.
     """
     ctx = get_active_context()
     return ctx.fork(n=n, temperature=temperature)
@@ -84,6 +85,12 @@ def join(
     """
     if not branches:
         return ""
+
+    for b in branches:  # the branches decode concurrently; collect every one
+        b.wait()
+    ctx = branches[0].parent
+    for prefix in {id(b.prefix): b.prefix for b in branches if b.prefix}.values():
+        ctx.release(prefix)
 
     if callable(strategy):
         return strategy(branches)
@@ -133,10 +140,7 @@ def select(options: List[str], prompt: str = "") -> str:
         tokens=ctx.history_tokens,
         options=options
     )
-    if ctx.tokenizer is not None:
-        sel_tokens = ctx.tokenizer.encode(selected)
-    else:
-        sel_tokens = [ord(c) % ctx.vocab_size for c in selected]
+    sel_tokens = ctx.encode(selected)
 
     ctx.append_output(selected, sel_tokens, [0.0] * len(sel_tokens))
     return selected
@@ -144,7 +148,8 @@ def select(options: List[str], prompt: str = "") -> str:
 
 def constrain(schema: Dict[str, Any]):
     """
-    Applies JSON Schema validation constraints to subsequent gen() calls in this context.
+    Constrains subsequent gen() calls in this context to JSON valid against schema: token-level constrained
+    decoding (llguidance; `pip install turing-engine[structured]`), then a jsonschema check of the output.
     """
     ctx = get_active_context()
     ctx.current_schema = schema

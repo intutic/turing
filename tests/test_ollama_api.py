@@ -81,7 +81,7 @@ def test_ollama_generate_non_streaming(test_app):
         data = resp.json()
         assert data["model"] == "test-tiny"
         assert data["done"] is True
-        assert data["done_reason"] == "stop"
+        assert data["done_reason"] == "length"  # synthetic model, no EOS: num_predict ends it
         assert "response" in data
         assert "context" in data
         assert data["prompt_eval_count"] > 0
@@ -108,7 +108,7 @@ def test_ollama_generate_streaming(test_app):
             # Parse final chunk
             final_chunk = json.loads(lines[-1])
             assert final_chunk["done"] is True
-            assert final_chunk["done_reason"] == "stop"
+            assert final_chunk["done_reason"] == "length"
 
 
 def test_ollama_chat_non_streaming(test_app):

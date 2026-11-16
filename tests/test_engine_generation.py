@@ -128,3 +128,17 @@ def test_cancel_frees_pages():
             await engine.stop()
     req = asyncio.run(go())
     assert req.finish_reason == "cancelled" and engine.kv_pool.used_pages == 0
+
+
+def test_requests_continuing_a_prefix_kv_are_not_indexed_by_their_suffix():
+    """A request given prefix_kv holds pages for tokens it was not given; indexing them by its own tokens would let a
+    later request reuse wrong KV."""
+    engine = _engine()
+    with torch.no_grad():
+        _, prefix = engine.model(torch.tensor([list(range(60, 100))]))  # 40 tokens the request never sees
+    suffix = list(range(1, 40))
+    (_,), _ = _run(engine, dict(prompt_tokens=suffix, max_new_tokens=2, temperature=0.0, prefix_kv=prefix))
+    assert not engine.prefix_cache.entries
+    (req,), _ = _run(engine, dict(prompt_tokens=suffix, max_new_tokens=2, temperature=0.0))
+    assert req.cached_prompt_tokens == 0
+    prefix.free()

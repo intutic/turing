@@ -25,56 +25,50 @@ def test_client():
         yield client
 
 def test_chat_completions_with_turing_headers(test_client):
+    """X-Turing-Draft-Tokens is honoured; the response headers report what the server really did."""
     payload = {
         "model": "test-turing-model",
         "messages": [{"role": "user", "content": "Hello Turing"}],
         "max_tokens": 8,
         "temperature": 0.5
     }
-    headers = {
-        "X-Turing-Sparsity": "0.450",
-        "X-Turing-SVD-KV": "1",
-        "X-Turing-Draft-Tokens": "4"
-    }
-    resp = test_client.post("/v1/chat/completions", json=payload, headers=headers)
+    resp = test_client.post("/v1/chat/completions", json=payload, headers={"X-Turing-Draft-Tokens": "4"})
     assert resp.status_code == 200
-    assert "X-Turing-Sparsity" in resp.headers
-    assert resp.headers["X-Turing-Sparsity"] == "0.450"
-    assert resp.headers["X-Turing-SVD-KV"] == "1"
+    assert resp.headers["X-Turing-Draft-Tokens"] == "4"
+    assert resp.headers["X-Turing-KV-Cache-Dtype"] == "native"
     assert resp.headers["X-Turing-Model"] == "test-turing-model"
+    assert int(resp.headers["X-Turing-Cached-Tokens"]) >= 0
     data = resp.json()
     assert "choices" in data
     assert len(data["choices"]) > 0
 
-def test_chat_completions_with_body_parameters(test_client):
-    payload = {
-        "model": "test-turing-model",
-        "messages": [{"role": "user", "content": "Benchmark test"}],
-        "max_tokens": 4,
-        "sparsity_ratio": 0.625,
-        "use_svd_kv": False,
-        "draft_tokens": 2
-    }
+
+def test_removed_per_request_knobs_are_rejected(test_client):
+    """Sparsity and SVD KV were never applied per request: they are load-time settings, and saying so beats
+    echoing a value that changed nothing."""
+    payload = {"model": "test-turing-model", "messages": [{"role": "user", "content": "Benchmark test"}],
+               "max_tokens": 4, "draft_tokens": 2}
+    for body, headers, flag in [({"sparsity_ratio": 0.625}, {}, "--sparsity"),
+                                ({"use_svd_kv": False}, {}, "--kv-cache-dtype"),
+                                ({}, {"X-Turing-Sparsity": "0.450"}, "--sparsity"),
+                                ({}, {"X-Turing-SVD-KV": "1"}, "--kv-cache-dtype")]:
+        resp = test_client.post("/v1/chat/completions", json={**payload, **body}, headers=headers)
+        assert resp.status_code == 400 and flag in resp.json()["error"]["message"]
     resp = test_client.post("/v1/chat/completions", json=payload)
-    assert resp.status_code == 200
-    assert resp.headers["X-Turing-Sparsity"] == "0.625"
-    assert resp.headers["X-Turing-SVD-KV"] == "0"
+    assert resp.status_code == 200 and resp.headers["X-Turing-Draft-Tokens"] == "2"
+
 
 def test_anthropic_messages_with_turing_headers(test_client):
     payload = {
         "model": "test-turing-model",
         "messages": [{"role": "user", "content": "Anthropic prompt"}],
         "max_tokens": 6,
-        "sparsity_ratio": 0.500
     }
-    headers = {
-        "X-Turing-Sparsity": "0.500",
-        "X-Turing-SVD-KV": "1"
-    }
-    resp = test_client.post("/v1/messages", json=payload, headers=headers)
+    resp = test_client.post("/v1/messages", json=payload, headers={"X-Turing-Lane": "batch"})
     assert resp.status_code == 200
-    assert resp.headers["X-Turing-Sparsity"] == "0.500"
-    assert resp.headers["X-Turing-SVD-KV"] == "1"
+    assert resp.headers["X-Turing-Lane"] == "batch"
     data = resp.json()
     assert data["type"] == "message"
     assert data["role"] == "assistant"
+    resp = test_client.post("/v1/messages", json=payload, headers={"X-Turing-Sparsity": "0.500"})
+    assert resp.status_code == 400 and resp.json()["error"]["type"] == "invalid_request_error"

@@ -1,27 +1,34 @@
 """
 Execution backends for Turing Programmatic DSL.
-Supports zero-overhead in-process execution (LocalExecutor) with prefix KV sharing
-and remote network execution (RemoteExecutor) over OpenAI-compatible endpoints.
+LocalExecutor runs in process on the serving engine (ContinuousBatchEngine): gen() is one engine request, fork()
+prefills the shared prefix once into a KV cache that every branch continues copy-on-write, and the branches decode
+concurrently in one batch. RemoteExecutor talks to a running server over its OpenAI-compatible endpoints.
 """
 
+import asyncio
+import concurrent.futures
+import threading
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional, Tuple, Union
-import math
+from typing import List, Dict, Any, Optional, Tuple
 import torch
 import torch.nn.functional as F
 
-from ..config import TuringConfig, ModelConfig
+from ..config import TuringConfig
 from ..models.registry import get_model_config
 from ..models.causal_lm import SubspaceCausalLM
 from ..models.resolver import ModelResolver
-from ..serving.structured import StructuredOutputParser
+from ..serving import generation
+from ..serving.engine import ContinuousBatchEngine
+from ..serving.structured import StructuredOutputError
 
 __all__ = ["BaseExecutor", "LocalExecutor", "RemoteExecutor"]
+
+Result = Tuple[str, List[int], List[float]]
 
 
 class BaseExecutor(ABC):
     """Abstract interface for DSL execution backends."""
-    
+
     tokenizer: Any
     vocab_size: int
 
@@ -34,7 +41,7 @@ class BaseExecutor(ABC):
         top_k: int = 50,
         stop: Optional[List[str]] = None,
         schema: Optional[Dict[str, Any]] = None
-    ) -> Tuple[str, List[int], List[float]]:
+    ) -> Result:
         pass
 
     @abstractmethod
@@ -47,7 +54,7 @@ class BaseExecutor(ABC):
         top_k: int = 50,
         stop: Optional[List[str]] = None,
         schema: Optional[Dict[str, Any]] = None
-    ) -> Tuple[str, List[int], List[float]]:
+    ) -> Result:
         pass
 
     @abstractmethod
@@ -58,10 +65,46 @@ class BaseExecutor(ABC):
     ) -> str:
         pass
 
+    def prefill_prefix(self, tokens: List[int]) -> Any:
+        """A handle to tokens prefilled once for fork() branches (None: this backend re-sends the prefix)."""
+        return None
+
+    def release_prefix(self, handle: Any) -> None:
+        pass
+
+    def submit_branch(self, prefix_tokens: List[int], handle: Any, branch_tokens: List[int],
+                      **kw) -> "concurrent.futures.Future[Result]":
+        """Start a branch; the future holds (text, tokens, logprobs). This default runs it to completion now."""
+        fut: "concurrent.futures.Future[Result]" = concurrent.futures.Future()
+        fut.set_result(self.generate_branch(prefix_tokens, branch_tokens, **kw))
+        return fut
+
+
+class _LogProbs:
+    """Logits processor that records the model's log-probability of each sampled token (resolved one step later,
+    when the sampled token is known; the last one after the request ends)."""
+
+    def __init__(self):
+        self.values: List[float] = []
+        self._row: Optional[torch.Tensor] = None
+
+    def __call__(self, gen: List[int], logits: torch.Tensor) -> None:
+        self._resolve(gen)
+        self._row = F.log_softmax(logits.float(), -1)
+
+    def _resolve(self, gen: List[int]) -> None:
+        if self._row is not None and len(gen) > len(self.values):
+            self.values.append(float(self._row[gen[len(self.values)]]))
+        self._row = None
+
+    def finish(self, gen: List[int]) -> List[float]:
+        self._resolve(gen)
+        return self.values[:len(gen)]
+
 
 class LocalExecutor(BaseExecutor):
     """
-    In-process local executor with zero IPC overhead and automatic prefix KV caching.
+    In-process executor on a ContinuousBatchEngine driven by its own event-loop thread.
     """
 
     def __init__(
@@ -75,7 +118,7 @@ class LocalExecutor(BaseExecutor):
         self.jcfg = TuringConfig(device=device)
         self.device = self.jcfg.resolve_device()
         self.sparsity = sparsity
-        
+
         if model is not None:
             self.model = model.to(self.device).eval()
             self.config = model.config
@@ -84,12 +127,18 @@ class LocalExecutor(BaseExecutor):
             self._load_model(model_name_or_id)
 
         self.vocab_size = self.config.vocab_size
-        self.parser = StructuredOutputParser()
+        # prefix caching off: branch requests continue a shared prefix KV (prefix_kv=), which the engine's prefix
+        # index would record under the branch tokens alone
+        self.engine = ContinuousBatchEngine(self.config, self.jcfg, model=self.model, tokenizer=self.tokenizer,
+                                            prefix_caching=False)
+        self.prefix_prefills = 0  # shared prefixes prefilled by fork()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[threading.Thread] = None
 
     def _load_model(self, model_identifier: Optional[str]):
         name = model_identifier or "test-tiny"
         resolved = ModelResolver.parse(name)
-        
+
         if resolved.provider == "gguf" or name.endswith(".gguf"):
             from ..models.gguf_loader import GGUFModelLoader
             loader = GGUFModelLoader(resolved.repo_id)
@@ -115,10 +164,44 @@ class LocalExecutor(BaseExecutor):
                     "Pass model_name_or_id='test-tiny' (or 'mock') to run on synthetic weights."
                 ) from e
 
-    def _decode_tokens(self, tokens: List[int]) -> str:
-        if self.tokenizer is not None:
-            return self.tokenizer.decode(tokens, skip_special_tokens=True)
-        return "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in tokens])
+    # ------------------------------------------------------------------ the engine's loop
+
+    def _submit(self, coro) -> "concurrent.futures.Future":
+        """Run coro on the engine's event loop (started on first use)."""
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+            self._thread = threading.Thread(target=self._loop.run_forever, name="turing-dsl-engine", daemon=True)
+            self._thread.start()
+            asyncio.run_coroutine_threadsafe(self.engine.start(), self._loop).result()
+        return asyncio.run_coroutine_threadsafe(coro, self._loop)
+
+    def close(self) -> None:
+        """Stop the engine and its loop thread (the next call starts them again)."""
+        if self._loop is None:
+            return
+        asyncio.run_coroutine_threadsafe(self.engine.stop(), self._loop).result()
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join()
+        self._loop.close()
+        self._loop = self._thread = None
+
+    async def _run(self, prompt: List[int], max_tokens: int, temperature: float, top_k: int,
+                   stop: Optional[List[str]], schema: Optional[Dict[str, Any]], prefix_kv=None) -> Result:
+        lp = _LogProbs()
+        params = generation.GenerationParams(max_tokens=max_tokens, temperature=temperature, top_k=top_k,
+                                             stop=list(stop or []), schema=schema, reasoning=False,
+                                             logits_processor=lp)
+        try:
+            gen = await generation.start(self.engine, prompt, params, prefix_kv=prefix_kv)
+        except generation.RequestRejected as e:
+            raise StructuredOutputError(str(e)) if schema is not None and e.status_code == 400 else e
+        await gen.collect()
+        if gen.schema_error:
+            raise StructuredOutputError(f"constrained output does not satisfy the schema ({gen.schema_error}): "
+                                        f"{gen.content!r}")
+        return gen.content, gen.output_ids, lp.finish(gen.output_ids)
+
+    # ------------------------------------------------------------------ BaseExecutor
 
     def generate(
         self,
@@ -128,55 +211,10 @@ class LocalExecutor(BaseExecutor):
         top_k: int = 50,
         stop: Optional[List[str]] = None,
         schema: Optional[Dict[str, Any]] = None
-    ) -> Tuple[str, List[int], List[float]]:
+    ) -> Result:
         if not tokens:
-            tokens = [1]
-
-        prompt_len = len(tokens)
-        input_ids = torch.tensor([tokens], dtype=torch.long, device=self.device)
-        
-        # Generation loop with logprob tracking
-        generated: List[int] = []
-        logprobs: List[float] = []
-        
-        with torch.inference_mode():
-            logits, past_kv = self.model(input_ids)
-            next_logit = logits[0, -1, :]
-            
-            for step in range(max_tokens):
-                # Apply temperature and top_k
-                if temperature > 0:
-                    scaled_logits = next_logit / max(temperature, 1e-4)
-                    if top_k > 0 and top_k < scaled_logits.shape[-1]:
-                        val, _ = torch.topk(scaled_logits, top_k)
-                        scaled_logits[scaled_logits < val[-1]] = float("-inf")
-                    probs = F.softmax(scaled_logits, dim=-1)
-                    next_token = torch.multinomial(probs, num_samples=1).item()
-                    lp = float(torch.log(probs[next_token] + 1e-10).item())
-                else:
-                    next_token = torch.argmax(next_logit).item()
-                    probs = F.softmax(next_logit, dim=-1)
-                    lp = float(torch.log(probs[next_token] + 1e-10).item())
-
-                generated.append(next_token)
-                logprobs.append(lp)
-
-                # Check EOS token
-                eos_id = getattr(self.tokenizer, "eos_token_id", 2)
-                if next_token == eos_id:
-                    break
-
-                # Forward 1 token with KV cache
-                next_in = torch.tensor([[next_token]], dtype=torch.long, device=self.device)
-                start_pos = prompt_len + step
-                logits, past_kv = self.model(next_in, past_key_values=past_kv, start_pos=start_pos)
-                next_logit = logits[0, -1, :]
-
-        text = self._decode_tokens(generated)
-        if schema is not None:
-            text = self.parser.repair_truncated_json(text)
-
-        return text, generated, logprobs
+            tokens = [self.tokenizer.bos_token_id if getattr(self.tokenizer, "bos_token_id", None) is not None else 1]
+        return self._submit(self._run(tokens, max_tokens, temperature, top_k, stop, schema)).result()
 
     def generate_branch(
         self,
@@ -187,16 +225,39 @@ class LocalExecutor(BaseExecutor):
         top_k: int = 50,
         stop: Optional[List[str]] = None,
         schema: Optional[Dict[str, Any]] = None
-    ) -> Tuple[str, List[int], List[float]]:
-        full_tokens = prefix_tokens + branch_tokens
-        return self.generate(
-            tokens=full_tokens,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_k=top_k,
-            stop=stop,
-            schema=schema
-        )
+    ) -> Result:
+        return self.generate(prefix_tokens + branch_tokens, max_tokens, temperature, top_k, stop, schema)
+
+    def prefill_prefix(self, tokens: List[int]) -> Any:
+        """All but the last prefix token prefilled once into a KV cache of the engine's pool (each branch request
+        starts with the last one, so it has at least one token to prefill)."""
+        if len(tokens) < 2:
+            return None
+
+        async def run():
+            return generation.prefill(self.engine, tokens[:-1])
+
+        handle = self._submit(run()).result()
+        self.prefix_prefills += 1
+        return handle
+
+    def release_prefix(self, handle: Any) -> None:
+        if handle is not None:
+            async def run():
+                handle.free()
+
+            self._submit(run()).result()
+
+    def submit_branch(self, prefix_tokens: List[int], handle: Any, branch_tokens: List[int],
+                      max_tokens: int = 64, temperature: float = 0.7, top_k: int = 50,
+                      stop: Optional[List[str]] = None, schema: Optional[Dict[str, Any]] = None):
+        """Start a branch continuing the shared prefix (copy-on-write); branches submitted together decode in one
+        batch. The future holds (text, tokens, logprobs)."""
+        if handle is None:
+            prompt, kv = (prefix_tokens + branch_tokens) or [1], None
+        else:
+            prompt, kv = prefix_tokens[-1:] + branch_tokens, handle
+        return self._submit(self._run(prompt, max_tokens, temperature, top_k, stop, schema, prefix_kv=kv))
 
     def select_option(
         self,
@@ -219,7 +280,7 @@ class LocalExecutor(BaseExecutor):
         options_tokens = []
         for opt in options:
             if self.tokenizer is not None:
-                opt_toks = self.tokenizer.encode(opt)
+                opt_toks = self.tokenizer.encode(opt, add_special_tokens=False)
             else:
                 opt_toks = [ord(c) % self.vocab_size for c in opt]
             options_tokens.append(opt_toks if opt_toks else [1])

@@ -1,35 +1,120 @@
 """
-Structured Output & JSON Schema Validation Engine for Turing Engine.
-Enforces valid JSON object generation, JSONSchema adherence, and auto-bracket repair.
+Structured output for Turing Engine.
+
+GrammarConstraint is token-level constrained decoding with llguidance (MIT; `pip install turing-engine[structured]`):
+a logits processor that masks every token the JSON schema (or Lark grammar) does not allow next, so the output is
+valid by construction, and a final jsonschema check reports any output cut short by max_tokens.
+StructuredOutputParser holds client-side helpers for extracting and repairing JSON in free text.
 """
 
 import json
 import re
 from typing import Dict, Any, Optional, Tuple, Union, List
 
+import torch
+
+INSTALL_HINT = "structured output needs llguidance: pip install turing-engine[structured]"
+
+
+class StructuredOutputError(ValueError):
+    """A schema or grammar the server cannot enforce (the message says why); the API returns 400."""
+
+
+_LL_TOKENIZERS: Dict[Tuple[int, int, Tuple[int, ...]], Any] = {}
+
+
+def _ll_tokenizer(tokenizer, vocab_size: int, eos_ids):
+    """llguidance's view of an HF tokenizer (building one takes about a second, so it is kept per tokenizer)."""
+    try:
+        import llguidance.hf
+    except ImportError as e:
+        raise StructuredOutputError(INSTALL_HINT) from e
+    if tokenizer is None:
+        raise StructuredOutputError("structured output needs the model's tokenizer; this model has none")
+    eos = tuple(sorted(eos_ids)) or ((tokenizer.eos_token_id,) if tokenizer.eos_token_id is not None else ())
+    key = (id(tokenizer), vocab_size, eos)
+    if key not in _LL_TOKENIZERS:
+        try:
+            _LL_TOKENIZERS[key] = llguidance.hf.from_tokenizer(tokenizer, n_vocab=vocab_size, eos_token=list(eos))
+        except ValueError as e:
+            raise StructuredOutputError(f"structured output: {e}") from e
+    return _LL_TOKENIZERS[key]
+
+
+class GrammarConstraint:
+    """
+    Logits processor for the engine: before each sampled token, masks the logits to the tokens the grammar allows
+    after the tokens generated so far (once the grammar is complete, only end-of-sequence tokens). Built from a
+    JSON schema or a Lark grammar; an unsupported schema raises StructuredOutputError with llguidance's message.
+    """
+
+    def __init__(self, tokenizer, vocab_size: int, eos_ids, schema: Optional[Dict[str, Any]] = None,
+                 lark: Optional[str] = None):
+        from llguidance import LLMatcher
+        ll = _ll_tokenizer(tokenizer, vocab_size, eos_ids)
+        if lark is None:
+            if not isinstance(schema, dict):
+                raise StructuredOutputError("the JSON schema must be an object")
+            try:  # compact JSON: free whitespace would let a model pad forever
+                lark = LLMatcher.grammar_from_json_schema(schema, overrides={"whitespace_flexible": False})
+            except ValueError as e:
+                raise StructuredOutputError(f"invalid JSON schema: {e}") from e
+        else:
+            lark = LLMatcher.grammar_from_lark(lark)
+        self.matcher = LLMatcher(ll, lark, log_level=0)
+        if self.matcher.is_error():
+            raise StructuredOutputError(f"unsupported schema: {self.matcher.get_error()}")
+        self.vocab_size = vocab_size
+        self._mask = torch.full(((vocab_size + 31) // 32,), -1, dtype=torch.int32)
+        self._shifts = torch.arange(32, dtype=torch.int32)
+        self._consumed = 0
+
+    @property
+    def error(self) -> Optional[str]:
+        return self.matcher.get_error() if self.matcher.is_error() else None
+
+    def done(self) -> bool:
+        """The grammar is complete (or broken): only end-of-sequence can follow."""
+        return self.matcher.is_stopped()
+
+    def __call__(self, generated: List[int], logits: torch.Tensor) -> None:
+        for t in generated[self._consumed:]:
+            self.matcher.consume_token(t)
+        self._consumed = len(generated)
+        if self.matcher.is_error():  # never mask everything: the request ends normally and reports the error
+            return
+        self.matcher.unsafe_compute_mask_ptr(self._mask.data_ptr(), self._mask.numel() * 4)
+        allowed = ((self._mask.unsqueeze(1) >> self._shifts) & 1).reshape(-1)[:logits.shape[-1]]
+        logits[:allowed.numel()].masked_fill_(allowed.to(logits.device) == 0, float("-inf"))
+        if logits.shape[-1] > allowed.numel():
+            logits[allowed.numel():] = float("-inf")
+
+
+def validate_json(text: str, schema: Optional[Dict[str, Any]]) -> Optional[str]:
+    """None when text is JSON valid against schema, else what is wrong (jsonschema's message)."""
+    try:
+        obj = json.loads(text)
+    except ValueError as e:
+        return f"output is not valid JSON: {e}"
+    if schema:
+        try:
+            import jsonschema
+        except ImportError as e:
+            raise StructuredOutputError(INSTALL_HINT) from e
+        try:
+            jsonschema.validate(obj, schema)
+        except jsonschema.ValidationError as e:
+            return f"output does not match the schema: {e.message}"
+        except jsonschema.SchemaError as e:
+            return f"invalid JSON schema: {e.message}"
+    return None
+
 
 class StructuredOutputParser:
     """
-    Handles prompt schema injection, JSON parsing, validation, and truncation repair.
+    Client-side helpers: JSON extraction from free text and truncation repair.
     """
 
-    @staticmethod
-    def inject_json_instruction(prompt: str, schema: Optional[Dict[str, Any]] = None, schema_name: Optional[str] = None) -> str:
-        """
-        Injects JSON formatting instructions or schema constraints into the prompt.
-        """
-        instruction_parts = []
-        if schema:
-            schema_str = json.dumps(schema, indent=2)
-            name_str = f" for '{schema_name}'" if schema_name else ""
-            instruction_parts.append(
-                f"\n\nIMPORTANT: You must respond ONLY with a valid JSON object matching the following JSON Schema{name_str}:\n```json\n{schema_str}\n```\nDo not include any conversational filler, explanation, or markdown formatting outside the JSON object."
-            )
-        else:
-            instruction_parts.append(
-                "\n\nIMPORTANT: You must respond ONLY with a valid JSON object. Do not include markdown codeblocks or conversational text outside the JSON."
-            )
-        return prompt + "".join(instruction_parts)
 
     @staticmethod
     def extract_json(text: str) -> Tuple[bool, Optional[Any], str]:
@@ -143,56 +228,3 @@ class StructuredOutputParser:
                 s += "]"
 
         return s
-
-    @staticmethod
-    def validate_schema(obj: Any, schema: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-        """
-        Validates a parsed JSON object against a JSON schema.
-        Supports 'type', 'properties', 'required', and 'items'.
-        """
-        expected_type = schema.get("type")
-        if expected_type == "object":
-            if not isinstance(obj, dict):
-                return False, f"Expected object, got {type(obj).__name__}"
-            
-            # Check required fields
-            for req_key in schema.get("required", []):
-                if req_key not in obj:
-                    return False, f"Missing required property '{req_key}'"
-            
-            # Check property types
-            properties = schema.get("properties", {})
-            for key, prop_schema in properties.items():
-                if key in obj:
-                    val = obj[key]
-                    val_valid, val_err = StructuredOutputParser.validate_schema(val, prop_schema)
-                    if not val_valid:
-                        return False, f"Invalid property '{key}': {val_err}"
-
-        elif expected_type == "array":
-            if not isinstance(obj, list):
-                return False, f"Expected array, got {type(obj).__name__}"
-            item_schema = schema.get("items")
-            if item_schema:
-                for idx, item in enumerate(obj):
-                    item_valid, item_err = StructuredOutputParser.validate_schema(item, item_schema)
-                    if not item_valid:
-                        return False, f"Invalid item at index {idx}: {item_err}"
-
-        elif expected_type == "string":
-            if not isinstance(obj, str):
-                return False, f"Expected string, got {type(obj).__name__}"
-
-        elif expected_type == "number":
-            if not isinstance(obj, (int, float)):
-                return False, f"Expected number, got {type(obj).__name__}"
-
-        elif expected_type == "integer":
-            if not isinstance(obj, int) or isinstance(obj, bool):
-                return False, f"Expected integer, got {type(obj).__name__}"
-
-        elif expected_type == "boolean":
-            if not isinstance(obj, bool):
-                return False, f"Expected boolean, got {type(obj).__name__}"
-
-        return True, None
