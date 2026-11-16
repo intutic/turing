@@ -58,6 +58,12 @@ class SpeculationGatePolicy:
         
         return self._current_mode
 
+    def should_speculate(self, active_sessions: int) -> bool:
+        """Draft at this concurrency? Verification of drafts costs a serial forward per request, so speculation pays
+        only while few requests decode (on by default at <= low_threshold, off at >= high_threshold, hysteresis
+        between)."""
+        return self.gate_decision(active_sessions) != SpecGateDecision.PLAIN
+
     def tree_width(self) -> int:
         """Returns the current tree width based on mode."""
         if self._current_mode == SpecGateDecision.FULL_SPEC:

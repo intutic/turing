@@ -8,7 +8,7 @@ import uuid
 import statistics
 import time
 from enum import Enum
-from typing import List, Dict, Tuple, Optional, AsyncGenerator, Deque, Any
+from typing import List, Dict, Tuple, Optional, AsyncGenerator, Deque, Any, Callable, Set
 from collections import deque
 import torch
 import torch.nn.functional as F
@@ -21,7 +21,7 @@ from .traffic import (
     AdmissionResult, Lane, LanePolicy
 )
 from .spec_gate import SpecGateDecision, SpeculationGatePolicy
-from ..kernels.triton_fused_sample import batched_sample_tokens
+from .prefix_cache import PrefixCache
 
 class RequestRejected(RuntimeError):
     """The engine cannot take this request now. The HTTP layer returns status_code (429 or 503) with Retry-After."""
@@ -31,6 +31,25 @@ class RequestRejected(RuntimeError):
         self.status_code, self.retry_after = status_code, retry_after
 
 
+def _eos_ids(tokenizer) -> Set[int]:
+    """End-of-sequence ids of a tokenizer: eos_token_id plus the generation config's (chat models end turns with
+    <|im_end|>, <|eot_id|>, <end_of_turn> ...). Empty without a tokenizer (synthetic models run to max_tokens)."""
+    if tokenizer is None:
+        return set()
+    ids = set()
+    eos = getattr(tokenizer, "eos_token_id", None)
+    if isinstance(eos, int):
+        ids.add(eos)
+    for tok in ("<|im_end|>", "<|eot_id|>", "<end_of_turn>", "<|end|>", "<|endoftext|>"):
+        try:
+            tid = tokenizer.convert_tokens_to_ids(tok)
+        except Exception:
+            tid = None
+        if isinstance(tid, int) and tid != getattr(tokenizer, "unk_token_id", None):
+            ids.add(tid)
+    return ids
+
+
 class RequestState(Enum):
     WAITING = 0
     PREFILLING = 1
@@ -38,6 +57,10 @@ class RequestState(Enum):
     FINISHED = 3
 
 class AsyncSequenceRequest:
+    """One generation request. logits_processor(generated, logits) may change the next-token logits [V] in place or
+    return new ones (constrained decoding, reasoning budgets); it sees every token generated so far. Generation ends at
+    max_new_tokens ("length"), at a token in stop_token_ids ("stop", the token is not emitted), or by cancel()."""
+
     def __init__(
         self,
         prompt_tokens: List[int],
@@ -45,20 +68,26 @@ class AsyncSequenceRequest:
         temperature: float = 0.7,
         top_k: int = 50,
         request_id: Optional[str] = None,
-        sparsity_ratio: Optional[float] = None,
-        use_svd_kv: Optional[bool] = None,
         draft_tokens: Optional[int] = None,
-        lane: Optional[Lane] = None
+        lane: Optional[Lane] = None,
+        top_p: float = 1.0,
+        stop_token_ids: Optional[Set[int]] = None,
+        logits_processor: Optional[Callable[[List[int], torch.Tensor], Optional[torch.Tensor]]] = None,
+        adapter: Optional[str] = None,
     ):
         self.request_id = request_id or str(uuid.uuid4())[:8]
         self.prompt_tokens = list(prompt_tokens)
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_k = top_k
-        self.sparsity_ratio = sparsity_ratio
-        self.use_svd_kv = use_svd_kv
+        self.top_p = top_p
         self.draft_tokens = draft_tokens
         self.lane = lane
+        self.stop_token_ids = set(stop_token_ids or ())
+        self.logits_processor = logits_processor
+        self.adapter = adapter
+        self.finish_reason: Optional[str] = None
+        self.cached_prompt_tokens = 0  # prompt tokens served from the prefix cache
         self.state = RequestState.WAITING
         self.generated_tokens: List[int] = []
         self.output_queue: asyncio.Queue[Optional[int]] = asyncio.Queue()
@@ -85,7 +114,10 @@ class ContinuousBatchEngine:
         admission: Optional[AdmissionController] = None,
         lane_policy: Optional[LanePolicy] = None,
         spec_gate: Optional[SpeculationGatePolicy] = None,
-        dist_driver: Optional[Any] = None
+        dist_driver: Optional[Any] = None,
+        prefix_caching: bool = True,
+        draft_tokens: int = 0,
+        eos_token_ids: Optional[Set[int]] = None,
     ):
         self.model_config = model_config
         self.turing_config = turing_config or TuringConfig()
@@ -104,6 +136,10 @@ class ContinuousBatchEngine:
 
         # The model's paged KV pool, sized once from free memory after the weights (ModelConfig.kv_pool_*)
         self.kv_pool = self.model.kv_pool()
+        self.prefix_cache = PrefixCache(self.kv_pool) if prefix_caching and dist_driver is None else None
+        self.eos_token_ids = set(eos_token_ids) if eos_token_ids is not None else _eos_ids(tokenizer)
+        self.default_draft_tokens = draft_tokens  # n-gram drafts per step when the gate allows (0 = off)
+        self.spec_drafted = self.spec_accepted = 0
 
         self.max_batch_size = self.turing_config.max_batch_size
         self.waiting_queue: List[AsyncSequenceRequest] = []
@@ -157,67 +193,88 @@ class ContinuousBatchEngine:
         max_new_tokens: int = 32,
         temperature: float = 0.7,
         top_k: int = 50,
-        sparsity_ratio: Optional[float] = None,
-        use_svd_kv: Optional[bool] = None,
         draft_tokens: Optional[int] = None,
         lane: Optional[Lane] = None,
-        prefix_kv: Optional[Any] = None
+        prefix_kv: Optional[Any] = None,
+        top_p: float = 1.0,
+        stop_token_ids: Optional[Set[int]] = None,
+        logits_processor: Optional[Callable] = None,
+        adapter: Optional[str] = None,
     ) -> AsyncSequenceRequest:
-        # Classify QoS lane if policy provided and lane not explicit
+        """Admit a request: reserve every KV page it can need (reusing cached prefix pages) and queue it. Raises
+        RequestRejected (400 never fits, 429 admission says wait, 503 overloaded). stop_token_ids defaults to the
+        tokenizer's end-of-sequence ids; pass an empty set to generate exactly max_new_tokens."""
         if lane is None and self.lane_policy is not None:
             lane = self.lane_policy.classify_request(max_tokens=max_new_tokens, stream=True)
-
+        if adapter is not None and adapter not in getattr(self.model, "adapter_names", ()):
+            raise RequestRejected(f"unknown LoRA adapter '{adapter}'", status_code=400)
         req = AsyncSequenceRequest(
-            prompt_tokens=prompt_tokens,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_k=top_k,
-            sparsity_ratio=sparsity_ratio,
-            use_svd_kv=use_svd_kv,
-            draft_tokens=draft_tokens,
-            lane=lane
-        )
+            prompt_tokens=prompt_tokens, max_new_tokens=max_new_tokens, temperature=temperature, top_k=top_k,
+            draft_tokens=draft_tokens, lane=lane, top_p=top_p,
+            stop_token_ids=self.eos_token_ids if stop_token_ids is None else stop_token_ids,
+            logits_processor=logits_processor, adapter=adapter)
+        if not req.prompt_tokens:
+            raise RequestRejected("empty prompt", status_code=400)
 
-        # Check VRAM Admission Control if configured
+        def reject(msg, status, retry=None):
+            req.state = RequestState.FINISHED
+            req.output_queue.put_nowait(None)
+            if self.admission is not None:
+                self.admission.release(req.request_id)
+            raise RequestRejected(f"Request {req.request_id} rejected: {msg}", status_code=status, retry_after=retry)
+
         if self.admission is not None:
             cfg = self.model_config
             native_bytes = next(self.model.parameters()).element_size()
             est_bytes = (len(prompt_tokens) + max_new_tokens) * kv_bytes_per_token(
                 cfg.num_layers, cfg.num_kv_heads, cfg.head_dim, cfg.kv_cache_dtype, native_bytes)
-            adm_res = self.admission.admit(req.request_id, est_bytes)
-            if adm_res.decision in (AdmissionDecision.SHED, AdmissionDecision.QUEUE):
-                req.state = RequestState.FINISHED
-                req.output_queue.put_nowait(None)
-                shed = adm_res.decision == AdmissionDecision.SHED
-                raise RequestRejected(
-                    f"Request {req.request_id} rejected by admission controller: {adm_res.reason or 'VRAM limit exceeded'}",
-                    status_code=503 if shed else 429, retry_after=adm_res.retry_after_seconds)
+            adm = self.admission.admit(req.request_id, est_bytes)
+            if adm.decision in (AdmissionDecision.SHED, AdmissionDecision.QUEUE):
+                shed = adm.decision == AdmissionDecision.SHED
+                reject(f"admission controller: {adm.reason or 'VRAM limit exceeded'}", 503 if shed else 429,
+                       adm.retry_after_seconds)
 
         # A request larger than the pool (or the page table) can never run: that is the client's error, not overload
         prefix_len = prefix_kv.length if isinstance(prefix_kv, KVCache) else 0
-        need, cap = prefix_len + len(prompt_tokens) + max_new_tokens, min(self.kv_pool.table_width, self.kv_pool.page_limit) * PAGE
+        need = prefix_len + len(prompt_tokens) + max_new_tokens
+        cap = min(self.kv_pool.table_width, self.kv_pool.page_limit) * PAGE
         if need > cap:
-            req.state = RequestState.FINISHED
-            req.output_queue.put_nowait(None)
-            if self.admission is not None:
-                self.admission.release(req.request_id)
-            raise RequestRejected(f"Request {req.request_id} rejected: prompt plus max_tokens is {need} tokens, "
-                                  f"but this server holds at most {cap} per request", status_code=400)
+            reject(f"prompt plus max_tokens is {need} tokens, but this server holds at most {cap} per request", 400)
 
         # Reserve every page the request can need, so it can never run out of pages mid-decode
         try:
-            req.past_kv = prefix_kv.clone() if isinstance(prefix_kv, KVCache) else KVCache(self.kv_pool)
-            req.past_kv.reserve(req.past_kv.length + len(prompt_tokens) + max_new_tokens)
+            if isinstance(prefix_kv, KVCache):
+                req.past_kv = prefix_kv.clone()
+            elif self.prefix_cache is not None:  # reuse cached pages; at least one prompt token is prefilled
+                req.past_kv = self.prefix_cache.attach(req.prompt_tokens, adapter, limit=len(req.prompt_tokens) - 1)
+                req.prefill_offset = req.cached_prompt_tokens = req.past_kv.length
+            else:
+                req.past_kv = KVCache(self.kv_pool)
+            total = req.past_kv.length - req.prefill_offset + len(prompt_tokens) + max_new_tokens
+            self._reserve(req.past_kv, total)
         except KVPoolExhausted as e:
+            if req.past_kv is not None:
+                req.past_kv.free()
             req.past_kv = None
-            req.state = RequestState.FINISHED
-            req.output_queue.put_nowait(None)
-            if self.admission is not None:
-                self.admission.release(req.request_id)
-            raise RequestRejected(f"Request {req.request_id} rejected: {e}", status_code=503, retry_after=1.0) from e
+            reject(str(e), 503, 1.0)
 
         self.waiting_queue.append(req)
         return req
+
+    def _reserve(self, cache: KVCache, tokens: int) -> None:
+        """cache.reserve(tokens), evicting unused prefix-cache pages when the pool is short."""
+        try:
+            cache.reserve(tokens)
+        except KVPoolExhausted:
+            if self.prefix_cache is None:
+                raise
+            self.prefix_cache.evict(-(-tokens // PAGE) - len(cache.pages))
+            cache.reserve(tokens)
+
+    def cancel(self, req: AsyncSequenceRequest) -> None:
+        """End a request early (client gone, stop string seen): its pages return to the pool at the next step."""
+        if req.state != RequestState.FINISHED:
+            req.cancelled = True
 
     async def submit_with_shared_prefix(
         self,
@@ -228,200 +285,227 @@ class ContinuousBatchEngine:
         top_k: int = 50,
         lane: Optional[Lane] = None
     ) -> List[AsyncSequenceRequest]:
-        """
-        Submits N requests sharing a common prefix past_kv state (e.g. for DSL fork() branches).
-        """
-        requests = []
-        for suffix_tokens in suffix_tokens_list:
-            # each branch shares the prefix's full pages copy-on-write
-            req = await self.add_request(
-                prompt_tokens=suffix_tokens,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                top_k=top_k,
-                lane=lane,
-                prefix_kv=prefix_kv
-            )
-            if not isinstance(req.past_kv, KVCache):
-                req.past_kv = prefix_kv
-            requests.append(req)
-        return requests
+        """N requests continuing one prefilled prefix (DSL fork() branches): each shares its full pages copy-on-write."""
+        return [await self.add_request(prompt_tokens=suffix, max_new_tokens=max_new_tokens, temperature=temperature,
+                                       top_k=top_k, lane=lane, prefix_kv=prefix_kv) for suffix in suffix_tokens_list]
 
-    async def stream_generate(
-        self,
-        prompt_tokens: List[int],
-        max_new_tokens: int = 32,
-        temperature: float = 0.7,
-        top_k: int = 50,
-        sparsity_ratio: Optional[float] = None,
-        use_svd_kv: Optional[bool] = None,
-        draft_tokens: Optional[int] = None,
-        lane: Optional[Lane] = None
-    ) -> AsyncGenerator[int, None]:
-        req = await self.add_request(
-            prompt_tokens=prompt_tokens,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_k=top_k,
-            sparsity_ratio=sparsity_ratio,
-            use_svd_kv=use_svd_kv,
-            draft_tokens=draft_tokens,
-            lane=lane
-        )
+    async def stream_generate(self, prompt_tokens: List[int], max_new_tokens: int = 32, temperature: float = 0.7,
+                              top_k: int = 50, **kw) -> AsyncGenerator[int, None]:
+        req = await self.add_request(prompt_tokens=prompt_tokens, max_new_tokens=max_new_tokens,
+                                     temperature=temperature, top_k=top_k, **kw)
         async for token in self.stream_request(req):
             yield token
 
     async def stream_request(self, req: AsyncSequenceRequest) -> AsyncGenerator[int, None]:
-        """Tokens of a request already admitted by add_request (admit first so a rejection precedes any response)."""
-        while True:
-            token = await req.output_queue.get()
-            if token is None:
-                break
-            yield token
+        """Tokens of a request already admitted by add_request (admit first so a rejection precedes any response).
+        Closing the generator early (client disconnect) cancels the request."""
+        try:
+            while True:
+                token = await req.output_queue.get()
+                if token is None:
+                    break
+                yield token
+        finally:
+            self.cancel(req)
 
     async def _scheduler_loop(self):
         while self.is_running:
-            # 1. Update Speculation Gating Mode based on active running batch
             if self.spec_gate is not None:
                 self.spec_gate.gate_decision(len(self.running_batch))
-
-            # 2. Priority sort waiting queue by lane policy (Interactive > Batch > Background)
             if self.lane_policy is not None and self.waiting_queue:
                 self.waiting_queue.sort(key=lambda r: self.lane_policy.priority(r.lane) if r.lane else 0)
-
-            # 3. Admit waiting requests up to batch capacity
             while len(self.running_batch) < self.max_batch_size and self.waiting_queue:
                 req = self.waiting_queue.pop(0)
                 req.state = RequestState.PREFILLING
-                req.prefill_offset = 0
                 self.running_batch.append(req)
-
             if not self.running_batch:
                 await asyncio.sleep(0.001)
                 continue
-
-            # 4. Execute single iteration step
             self._step_batch()
             await asyncio.sleep(0)
+
+    # ------------------------------------------------------------------ one scheduler step
+
+    def _forward(self, ids: torch.Tensor, caches, adapters=None, logits_to_keep: int = 0):
+        if self.dist_driver is not None:
+            return self.dist_driver.forward_distributed(ids, past_key_values=caches)
+        kw = {"adapters": adapters} if adapters is not None and any(adapters) else {}
+        return self.model(ids, past_key_values=caches, logits_to_keep=logits_to_keep, **kw)
 
     def _step_batch(self):
         if not self.running_batch:
             return
-
-        finished_indices = []
-
-        # Partition running batch into prefill and decode requests
-        prefill_reqs = [req for req in self.running_batch if req.state == RequestState.PREFILLING]
-        decode_reqs = [req for req in self.running_batch if req.state == RequestState.DECODING]
+        for req in self.running_batch:
+            if getattr(req, "cancelled", False) and req.state != RequestState.FINISHED:
+                self._finish_request(req, time.time(), "cancelled")
+        self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
 
         with torch.inference_mode():
-            # =========================================================================
-            # Phase 1: Piggybacked Chunked Prefill (Compute-Bound Slice)
-            # =========================================================================
-            if prefill_reqs:
-                # Process highest priority prefill request up to its chunk budget
-                req = prefill_reqs[0]
-                chunk_budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) else self.prefill_chunk_size
-                chunk_end = min(req.prefill_offset + chunk_budget, len(req.prompt_tokens))
-                chunk_tokens = req.prompt_tokens[req.prefill_offset:chunk_end]
-                chunk_input = torch.tensor([chunk_tokens], dtype=torch.long, device=self.device)
-
-                if self.dist_driver is not None:
-                    logits, new_kv = self.dist_driver.forward_distributed(chunk_input, past_key_values=req.past_kv)
-                else:
-                    logits, new_kv = self.model(chunk_input, past_key_values=req.past_kv, logits_to_keep=1)
-                req.past_kv = new_kv
-                req.prefill_offset = chunk_end
-
-                # If entire prompt prefilled, transition to decode & emit first token
-                if req.prefill_offset >= len(req.prompt_tokens):
+            # Prefill: one chunk of the highest-priority prefilling request (compute-bound)
+            prefill = [r for r in self.running_batch if r.state == RequestState.PREFILLING]
+            if prefill:
+                req = prefill[0]
+                budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) \
+                    else self.prefill_chunk_size
+                end = min(req.prefill_offset + budget, len(req.prompt_tokens))
+                chunk = torch.tensor([req.prompt_tokens[req.prefill_offset:end]], dtype=torch.long, device=self.device)
+                logits, req.past_kv = self._forward(chunk, req.past_kv, [req.adapter], logits_to_keep=1)
+                req.prefill_offset = end
+                if end >= len(req.prompt_tokens):
                     req.state = RequestState.DECODING
-                    next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)
-                    now = time.time()  # after the forward and the sample (which syncs), so TTFT includes the prefill
-                    req.first_token_at = now
-                    req.last_token_at = now
+                    if self.prefix_cache is not None and self.dist_driver is None:
+                        self.prefix_cache.insert(req.prompt_tokens, req.past_kv, req.adapter)
+                    token = self._sample([req], logits[:, -1])[0]
+                    now = time.time()  # after the forward and the sample (which syncs), so TTFT includes prefill
+                    req.first_token_at = req.last_token_at = now
                     self.recent_ttft.append(now - req.created_at)
+                    self._emit(req, token, now)
 
-                    req.generated_tokens.append(next_token)
-                    self.total_tokens_generated += 1
-                    req.output_queue.put_nowait(next_token)
-                    req.current_input = torch.tensor([[next_token]], dtype=torch.long, device=self.device)
-
-                    if len(req.generated_tokens) >= req.max_new_tokens:
-                        self._finish_request(req, now)
-
-            # =========================================================================
-            # Phase 2: Parallel Interleaved Autoregressive Decode (Bandwidth-Bound Slice)
-            # =========================================================================
-            active_decode = [r for r in decode_reqs if r.state == RequestState.DECODING]
-            if len(active_decode) > 1 and self.dist_driver is None:
-                # Multi-sequence batched forward and fused sampling
-                if all(isinstance(r.past_kv, KVCache) for r in active_decode):
-                    # one forward for every decoding request: the weights are read once per step, not once per request
-                    batch_input = torch.cat([r.current_input for r in active_decode], dim=0)
-                    logits, _ = self.model(batch_input, past_key_values=[r.past_kv for r in active_decode])
-                    batched_logits = logits[:, -1, :]
-                else:
-                    collected_logits = []
-                    for req in active_decode:
-                        logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
-                        req.past_kv = new_kv
-                        collected_logits.append(logits[:, -1, :])
-                    batched_logits = torch.cat(collected_logits, dim=0)
-                batched_temps = torch.tensor([r.temperature for r in active_decode], dtype=torch.float32, device=self.device)
-                sampled_tokens = batched_sample_tokens(batched_logits, batched_temps, top_k=50).tolist()  # one sync
+            # Decode: speculative rows one by one, the rest in one batched forward (bandwidth-bound)
+            decode = [r for r in self.running_batch if r.state == RequestState.DECODING and r.first_token_at is not None
+                      and r.generated_tokens]
+            decode = [r for r in decode if r.state == RequestState.DECODING]
+            spec, plain = [], []
+            for r in decode:
+                drafts = self._drafts(r, len(decode))
+                (spec if drafts else plain).append((r, drafts))
+            for r, drafts in spec:
+                self._speculative_step(r, drafts)
+            plain = [r for r, _ in plain]
+            if len(plain) > 1 and self.dist_driver is None:
+                ids = torch.tensor([[r.generated_tokens[-1]] for r in plain], dtype=torch.long, device=self.device)
+                logits, _ = self._forward(ids, [r.past_kv for r in plain], [r.adapter for r in plain])
+                tokens = self._sample(plain, logits[:, -1])
                 now = time.time()
-
-                for i, req in enumerate(active_decode):
-                    next_token = int(sampled_tokens[i])
-                    if req.last_token_at is not None:
-                        self.recent_itl.append(now - req.last_token_at)
-                    req.last_token_at = now
-
-                    req.generated_tokens.append(next_token)
-                    self.total_tokens_generated += 1
-                    req.output_queue.put_nowait(next_token)
-                    req.current_input = torch.tensor([[next_token]], dtype=torch.long, device=self.device)
-
-                    if len(req.generated_tokens) >= req.max_new_tokens:
-                        self._finish_request(req, now)
+                for r, t in zip(plain, tokens):
+                    self._emit(r, t, now)
             else:
-                for req in active_decode:
-                    if self.dist_driver is not None:
-                        logits, new_kv = self.dist_driver.forward_distributed(req.current_input, past_key_values=req.past_kv)
-                    else:
-                        logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
-                    req.past_kv = new_kv
+                for r in plain:
+                    ids = torch.tensor([[r.generated_tokens[-1]]], dtype=torch.long, device=self.device)
+                    logits, r.past_kv = self._forward(ids, r.past_kv, [r.adapter])
+                    self._emit(r, self._sample([r], logits[:, -1])[0], time.time())
 
-                    next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)
-                    now = time.time()
-                    if req.last_token_at is not None:
-                        self.recent_itl.append(now - req.last_token_at)
-                    req.last_token_at = now
+        self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
 
-                    req.generated_tokens.append(next_token)
-                    self.total_tokens_generated += 1
-                    req.output_queue.put_nowait(next_token)
-                    req.current_input = torch.tensor([[next_token]], dtype=torch.long, device=self.device)
+    def _emit(self, req: AsyncSequenceRequest, token: int, now: float) -> bool:
+        """Deliver one sampled token; finish the request on a stop token or the length limit. True while it runs.
+        A stop token ends the request without being emitted (as OpenAI-compatible servers do)."""
+        if token in req.stop_token_ids:
+            self._finish_request(req, now, "stop")
+            return False
+        if req.generated_tokens and req.last_token_at is not None and req.first_token_at != now:
+            self.recent_itl.append(now - req.last_token_at)
+        req.last_token_at = now
+        req.generated_tokens.append(token)
+        self.total_tokens_generated += 1
+        req.output_queue.put_nowait(token)
+        if len(req.generated_tokens) >= req.max_new_tokens:
+            self._finish_request(req, now, "length")
+            return False
+        return True
 
-                    if len(req.generated_tokens) >= req.max_new_tokens:
-                        self._finish_request(req, now)
+    # ------------------------------------------------------------------ sampling
 
-        # Clean up finished requests from active running batch
-        self.running_batch = [req for req in self.running_batch if req.state != RequestState.FINISHED]
+    def _probs(self, req: AsyncSequenceRequest, logits: torch.Tensor) -> Optional[torch.Tensor]:
+        """Next-token distribution [V] after temperature, top-k and top-p; None for greedy requests."""
+        if req.temperature <= 1e-5:
+            return None
+        x = logits.float() / req.temperature
+        if 0 < req.top_k < x.shape[-1]:
+            kth = torch.topk(x, req.top_k).values[-1]
+            x = x.masked_fill(x < kth, float("-inf"))
+        if req.top_p < 1.0:
+            sorted_x, order = torch.sort(x, descending=True)
+            cum = torch.softmax(sorted_x, -1).cumsum(-1)
+            drop = cum - torch.softmax(sorted_x, -1) > req.top_p  # keep the smallest set reaching top_p
+            x = x.scatter(-1, order, sorted_x.masked_fill(drop, float("-inf")))
+        return torch.softmax(x, -1)
 
-    def _sample_token(self, next_token_logits: torch.Tensor, temperature: float, top_k: int) -> int:
-        if next_token_logits.ndim == 1:
-            next_token_logits = next_token_logits.unsqueeze(0)
-        temps = torch.tensor([temperature], dtype=torch.float32, device=next_token_logits.device)
-        sampled = batched_sample_tokens(next_token_logits, temps, top_k=top_k)
-        return int(sampled[0].item())
+    def _processed(self, req: AsyncSequenceRequest, logits: torch.Tensor) -> torch.Tensor:
+        if req.logits_processor is None:
+            return logits
+        out = req.logits_processor(req.generated_tokens, logits)
+        return logits if out is None else out
 
-    def _finish_request(self, req: AsyncSequenceRequest, finished_time: float):
+    def _sample(self, reqs: List[AsyncSequenceRequest], logits: torch.Tensor) -> List[int]:
+        """One token per row of logits [B, V], each with its request's processor and sampling settings (one host sync)."""
+        rows = []
+        for r, row in zip(reqs, logits):
+            row = self._processed(r, row)
+            p = self._probs(r, row)
+            rows.append(row.argmax(-1) if p is None else torch.multinomial(p, 1)[0])
+        return torch.stack(rows).tolist()
+
+    # ------------------------------------------------------------------ speculative decoding (prompt lookup)
+
+    def _drafts(self, req: AsyncSequenceRequest, n_decoding: int) -> List[int]:
+        """Draft tokens for req from n-gram lookup in its own prompt and output (no draft model): the tokens that
+        followed the most recent earlier occurrence of its last 3 (else 2, else 1) tokens. Off for requests with a
+        logits processor, on the distributed path, and while the speculation gate says the batch is large enough."""
+        k = req.draft_tokens if req.draft_tokens is not None else self.default_draft_tokens
+        if not k or req.logits_processor is not None or self.dist_driver is not None:
+            return []
+        if self.spec_gate is not None and not self.spec_gate.should_speculate(n_decoding):
+            return []
+        k = min(k, req.max_new_tokens - len(req.generated_tokens) - 1)
+        if k <= 0:
+            return []
+        seq = req.prompt_tokens + req.generated_tokens
+        for n in (3, 2, 1):
+            if len(seq) <= n:
+                continue
+            tail = seq[-n:]
+            for start in range(len(seq) - n - 1, -1, -1):
+                if seq[start:start + n] == tail:
+                    return seq[start + n:start + n + k]
+        return []
+
+    def _speculative_step(self, req: AsyncSequenceRequest, drafts: List[int]) -> None:
+        """Verify drafts in one forward: [last token] + drafts. Greedy requests accept a draft when it is the argmax;
+        sampled requests accept draft d with probability p(d) and otherwise sample from p with d removed, which keeps
+        the output distribution exactly that of plain sampling (the draft distribution is a point mass)."""
+        cache = req.past_kv
+        start = cache.length
+        ids = torch.tensor([[req.generated_tokens[-1]] + drafts], dtype=torch.long, device=self.device)
+        logits, req.past_kv = self._forward(ids, cache, [req.adapter])
+        logits = logits[0]
+        emitted = []
+        for i, d in enumerate(drafts):
+            p = self._probs(req, logits[i])
+            if p is None:
+                best = int(logits[i].argmax())
+                emitted.append(best)
+                if best != d:
+                    break
+            else:
+                if float(torch.rand(())) < float(p[d]):
+                    emitted.append(d)
+                    continue
+                p = p.clone()
+                p[d] = 0
+                emitted.append(int(torch.multinomial(p / p.sum(), 1)))
+                break
+        else:
+            p = self._probs(req, logits[len(drafts)])
+            emitted.append(int(logits[len(drafts)].argmax()) if p is None else int(torch.multinomial(p, 1)))
+        # the cache keeps the positions of the inputs whose successor was accepted; the last emitted token is the next
+        # step's input
+        req.past_kv.length = start + len(emitted)
+        self.spec_drafted += len(drafts)
+        self.spec_accepted += len(emitted) - 1
+        now = time.time()
+        for t in emitted:
+            if not self._emit(req, t, now):
+                break
+
+    def _finish_request(self, req: AsyncSequenceRequest, finished_time: float, reason: str = "length"):
         req.state = RequestState.FINISHED
         req.finished_at = finished_time
+        req.finish_reason = req.finish_reason or reason
         if isinstance(req.past_kv, KVCache):
-            req.past_kv.free()  # return its pages to the pool
+            if self.prefix_cache is not None and self.dist_driver is None and reason != "cancelled":
+                self.prefix_cache.insert(req.prompt_tokens + req.generated_tokens, req.past_kv, req.adapter)
+            req.past_kv.free()  # return its pages to the pool (cached pages keep the index's reference)
         req.past_kv = None
         if self.admission is not None:
             self.admission.release(req.request_id)
@@ -462,6 +546,11 @@ class ContinuousBatchEngine:
             telemetry["admission"] = self.admission.stats
         if self.spec_gate is not None:
             telemetry["spec_gate"] = self.spec_gate.stats
+        telemetry["speculation"] = {"drafted_tokens": self.spec_drafted, "accepted_tokens": self.spec_accepted,
+                                    "acceptance_rate": round(self.spec_accepted / self.spec_drafted, 4)
+                                    if self.spec_drafted else None}
+        if self.prefix_cache is not None:
+            telemetry["prefix_cache"] = self.prefix_cache.stats()
         if self.lane_policy is not None:
             telemetry["lane_policy"] = {"slo_target_p99_ms": self.lane_policy.slo_target_p99_ms}
 

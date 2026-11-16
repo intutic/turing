@@ -401,8 +401,6 @@ def create_app(
                 max_new_tokens=max_new_tokens,
                 temperature=temp,
                 top_k=top_k,
-                sparsity_ratio=controls["sparsity_ratio"],
-                use_svd_kv=controls["use_svd_kv"],
                 draft_tokens=controls["draft_tokens"],
             )
 
@@ -452,8 +450,6 @@ def create_app(
             max_new_tokens=max_new_tokens,
             temperature=temp,
             top_k=top_k,
-            sparsity_ratio=controls["sparsity_ratio"],
-            use_svd_kv=controls["use_svd_kv"],
             draft_tokens=controls["draft_tokens"],
         )
         async for token_id in token_stream:
@@ -536,8 +532,6 @@ def create_app(
                 max_new_tokens=max_new_tokens,
                 temperature=temp,
                 top_k=top_k,
-                sparsity_ratio=controls["sparsity_ratio"],
-                use_svd_kv=controls["use_svd_kv"],
                 draft_tokens=controls["draft_tokens"]
             )
 
@@ -586,8 +580,6 @@ def create_app(
             max_new_tokens=max_new_tokens,
             temperature=temp,
             top_k=top_k,
-            sparsity_ratio=controls["sparsity_ratio"],
-            use_svd_kv=controls["use_svd_kv"],
             draft_tokens=controls["draft_tokens"]
         )
         async for token_id in token_stream:
@@ -662,8 +654,6 @@ def create_app(
                 max_new_tokens=max_new_tokens,
                 temperature=temp,
                 top_k=top_k,
-                sparsity_ratio=controls["sparsity_ratio"],
-                use_svd_kv=controls["use_svd_kv"],
                 draft_tokens=controls["draft_tokens"]
             )
 
@@ -690,8 +680,6 @@ def create_app(
             max_new_tokens=max_new_tokens,
             temperature=temp,
             top_k=top_k,
-            sparsity_ratio=controls["sparsity_ratio"],
-            use_svd_kv=controls["use_svd_kv"],
             draft_tokens=controls["draft_tokens"]
         )
         async for token_id in token_stream:
@@ -797,8 +785,6 @@ def create_app(
                 max_new_tokens=max_new_tokens,
                 temperature=temp,
                 top_k=top_k,
-                sparsity_ratio=controls["sparsity_ratio"],
-                use_svd_kv=controls["use_svd_kv"],
                 draft_tokens=controls["draft_tokens"]
             )
 
@@ -829,8 +815,6 @@ def create_app(
             max_new_tokens=max_new_tokens,
             temperature=temp,
             top_k=top_k,
-            sparsity_ratio=controls["sparsity_ratio"],
-            use_svd_kv=controls["use_svd_kv"],
             draft_tokens=controls["draft_tokens"]
         )
         async for token_id in token_stream:
@@ -894,8 +878,6 @@ def create_app(
                 max_new_tokens=max_new_tokens,
                 temperature=temp,
                 top_k=top_k,
-                sparsity_ratio=controls["sparsity_ratio"],
-                use_svd_kv=controls["use_svd_kv"],
                 draft_tokens=controls["draft_tokens"]
             )
 
@@ -925,8 +907,6 @@ def create_app(
             max_new_tokens=max_new_tokens,
             temperature=temp,
             top_k=top_k,
-            sparsity_ratio=controls["sparsity_ratio"],
-            use_svd_kv=controls["use_svd_kv"],
             draft_tokens=controls["draft_tokens"]
         )
         async for token_id in token_stream:

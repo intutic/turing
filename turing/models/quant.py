@@ -203,8 +203,10 @@ def quantize_layer(model: nn.Module, li: int, method: str, hs: Optional[List[tor
     lins = [(n, m) for n, m in _quantizable(model) if n.startswith(f"layers.{li}.")]
     if method == "rtn":
         for n, m in lins:
-            c, s, z = rtn_quantize(m.weight.float(), group)
-            _replace(model, n, QuantLinear.from_codes(c, s, z, m.bias, group).to(m.weight.device))
+            work = m.weight.device if m.weight.device.type == "cuda" else torch.device("cpu")  # MPS has no float64
+            c, s, z = rtn_quantize(m.weight.float().to(work), group)
+            bias = m.bias.to(work) if m.bias is not None else None
+            _replace(model, n, QuantLinear.from_codes(c, s, z, bias, group).to(m.weight.device))
         return hs
     if method != "gptq":
         raise ValueError(f"quantization method '{method}' is not 'rtn' or 'gptq'")

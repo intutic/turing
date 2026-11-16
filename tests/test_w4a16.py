@@ -78,3 +78,16 @@ def test_tgate4_round_trip(tmp_path):
     torch.testing.assert_close(loaded(ids)[0], model(ids)[0])
     assert isinstance(loaded.layers[1].mlp.down_proj, QuantLinear)
     assert weight_bytes(loaded) < 0.6 * weight_bytes(dense)  # embeddings and head stay fp32 in this tiny model
+
+
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS only")
+@pytest.mark.parametrize("method", ["rtn", "gptq"])
+def test_quantize_model_on_mps(method):
+    """MPS has no float64: the quantizers run on the host and the packed layers land on MPS."""
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="mps")
+    quantize_model(model, method, torch.randint(0, 128, (2, 32)) if method == "gptq" else None)
+    lin = model.layers[0].self_attn.q_proj
+    assert isinstance(lin, QuantLinear) and lin.qweight.device.type == "mps"
+    assert model(torch.randint(0, 128, (1, 8), device="mps"))[0].isfinite().all()
