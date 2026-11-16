@@ -3,6 +3,7 @@ Unified Master GPU Validation & Silicon Benchmark Suite (Turing Engine v1.5.0).
 Executes exhaustive physical telemetry across all 6 core subsystem suites on Google Cloud NVIDIA L4 GPU & Apple Silicon.
 Generates structured JSON telemetry artifact for master reporting.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

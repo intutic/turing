@@ -3,6 +3,7 @@
 Physical Empirical Benchmarking Suite for Native C++20 SIMD & Triton/CUDA Kernel Fusions.
 Measures execution latencies, throughput, and speedup ratios on CPU, Apple Silicon (MPS), and NVIDIA GPU (CUDA).
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

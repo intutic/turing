@@ -7,6 +7,7 @@ Measures:
 3. C++ Fast Safetensors Header Parser (NativeSafetensorsHeaderParser vs Python json.loads)
 4. C++ Lock-Free AI Traffic Manager (NativeTrafficManager vs Python dict/heapq scheduler)
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import json
 import time

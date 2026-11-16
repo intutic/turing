@@ -1,3 +1,4 @@
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 import time
 import sys
 import os

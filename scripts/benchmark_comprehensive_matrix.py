@@ -6,6 +6,7 @@ Executes live on-device hardware micro-benchmarks across:
 3. Live Multi-Batch Serving Throughput (Tokens/sec & Latency)
 4. Comparative Architecture Memory Footprint Analysis against vLLM, TRT-LLM, and Ollama.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

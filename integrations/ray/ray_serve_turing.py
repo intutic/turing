@@ -1,56 +1,42 @@
 """
-Ray Serve Deployment Actor for Turing Engine.
-Enables distributed continuous batching across Ray clusters.
+Ray Serve deployment for Turing Engine: one replica per GPU, each serving Turing's full HTTP API
+(OpenAI, Anthropic and Ollama routes). Run from the repository root:
+
+    serve run integrations.ray.ray_serve_turing:app
+
+Set TURING_MODEL (default smollm2) and TURING_DEVICE (default auto). Responses are buffered: a
+"stream": true request gets its whole SSE body at once.
 """
 
-from typing import Dict, Any
-import asyncio
+import os
+
+from starlette.requests import Request
+from starlette.responses import Response
+
+from integrations.common import InProcessTuring, load_engine
 
 try:
     from ray import serve
-    from fastapi import FastAPI, Request
-    from fastapi.responses import StreamingResponse
 except ImportError:
     serve = None
-    FastAPI = None
 
-from turing.serving.engine import ContinuousBatchEngine
-from turing.config import ModelConfig
-from turing.models.registry import get_model_config
 
-if FastAPI:
-    app = FastAPI(title="Turing Engine Ray Serve Gateway")
+async def forward(turing: InProcessTuring, request: Request) -> Response:
+    """Send a request Ray Serve received to the in-process Turing app and return its response."""
+    resp = await turing.request(request.method, request.url.path, params=request.query_params,
+                                content=await request.body(),
+                                headers={"content-type": request.headers.get("content-type", "application/json")})
+    return Response(resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
 
+
+if serve is not None:
     @serve.deployment(ray_actor_options={"num_gpus": 1})
-    @serve.ingress(app)
     class TuringRayServeDeployment:
-        def __init__(self, model_key: str = "llama-3.1-70b"):
-            self.model_key = model_key
-            config = get_model_config(model_key)
-            self.engine = ContinuousBatchEngine(model_config=config)
+        def __init__(self, model_id: str = "", device: str = ""):
+            self.turing = InProcessTuring(load_engine(model_id or os.environ.get("TURING_MODEL", "smollm2"),
+                                                      device or os.environ.get("TURING_DEVICE", "auto")))
 
-        @app.post("/v1/chat/completions")
-        async def chat_completions(self, request: Request):
-            body = await request.json()
-            messages = body.get("messages", [])
-            prompt = messages[-1]["content"] if messages else ""
-            max_tokens = body.get("max_tokens", 128)
+        async def __call__(self, request: Request) -> Response:
+            return await forward(self.turing, request)
 
-            output_text = f"Turing Ray Response for: {prompt[:30]}"
-            prompt_tokens = 8
-            completion_tokens = 16
-            return {
-                "id": "chatcmpl-turing-ray",
-                "object": "chat.completion",
-                "model": self.model_key,
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": output_text},
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": prompt_tokens + completion_tokens
-                }
-            }
+    app = TuringRayServeDeployment.bind()

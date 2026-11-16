@@ -5,6 +5,7 @@ Synthetic: random int8 latent caches and randn fp32 dense K/V (no model). The de
 baseline is full-head MHA without GQA or SDPA, and the hybrid's full-attention layer
 attends with one query, so neither comparison is like-for-like; read these as kernel timings.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import argparse
 import time

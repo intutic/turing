@@ -1,43 +1,19 @@
-# LlamaIndex LLMs Integration: Turing Engine
+# LlamaIndex
 
-`llama-index-llms-turing` connects LlamaIndex directly to **Turing Engine** — an open-source inference runtime that serves frontier 70B+ models on a single 24GB consumer GPU with 75% less KV cache memory.
-
-## Installation
+Turing Engine serves the OpenAI API, so LlamaIndex uses its own `OpenAILike` client; there is no
+`llama-index-llms-turing` package.
 
 ```bash
-pip install llama-index-llms-turing
+pip install llama-index-llms-openai-like
+turing serve --model smollm2 --port 8000
 ```
-
-## Quickstart
 
 ```python
-from llama_index.llms.turing import Turing
+from llama_index.llms.openai_like import OpenAILike
 
-llm = Turing(
-    model="deepseek-r1-7b",
-    api_base="http://localhost:8000/v1",
-    temperature=0.7,
-    max_tokens=512,
-    sparsity_ratio=0.57,  # 57% FFN subspace channel pruning
-    svd_rank=64           # Calibrated SVD INT8 KV cache paging
-)
-
-response = llm.complete("Explain the vector indexing retrieval pipeline:")
-print(response)
+llm = OpenAILike(model="smollm2", api_base="http://localhost:8000/v1", api_key="turing-local", is_chat_model=True)
+print(llm.complete("Explain KV cache paging in one sentence:").text)
 ```
 
-## RAG Query Engine Integration
-
-```python
-from llama_index.core import VectorStoreIndex, SimpleDirectoryReader
-from llama_index.llms.turing import Turing
-
-# Initialize documents and index
-documents = SimpleDirectoryReader("data").load_data()
-index = VectorStoreIndex.from_documents(documents)
-
-# Set Turing Engine as the LLM
-query_engine = index.as_query_engine(llm=llm)
-response = query_engine.query("Summarize the key architectural concepts:")
-print(response)
-```
+`openai_like_example.py` is the same code as a script; `tests/test_llamaindex_example.py` runs it
+against a live server.

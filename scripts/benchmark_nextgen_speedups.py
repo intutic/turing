@@ -8,6 +8,7 @@ Measures empirical latency, throughput, and memory scaling across:
   4. Two-Level Grouped Micro-Scaling (NVFP4 / GS-128 pattern)
   5. 2:4 Structured Sparse Subspace Prompt Prefill
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import time
 import math

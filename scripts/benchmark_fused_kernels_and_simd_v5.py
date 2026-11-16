@@ -13,6 +13,7 @@ Measures:
 9. C++20 Fast Safetensors JSON Parser vs json.loads
 10. C++20 O(1) AI Traffic Admission Manager vs Python Dynamic Sum
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

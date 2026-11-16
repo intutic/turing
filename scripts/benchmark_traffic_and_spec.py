@@ -8,6 +8,7 @@ Features:
 3. 3-lane QoS scheduling verification.
 4. Self-check of the parity verifier on fixed token lists (no spec or plain decode is run).
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import argparse
 import json

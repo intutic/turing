@@ -2,6 +2,7 @@
 Silicon Benchmark Harness for Fused GPU Kernels & C++20 AVX2 SIMD Extensions (Turing Engine v1.5.0).
 Measures real-world throughput, latency reduction, and memory traffic savings across CPU and GPU backends.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import time
 import math

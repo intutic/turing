@@ -2,6 +2,7 @@
 Validates all registered 2026 model architectures directly on the active CUDA / MPS GPU.
 Tests layer tensor allocations, forward pass executions, and memory limits across all 17 models.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import os

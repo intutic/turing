@@ -2,6 +2,7 @@
 Verification script to audit all MODEL_ALIASES against the Hugging Face Hub API.
 Ensures every model alias resolves to a real, accessible repository containing actual weight files.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import os

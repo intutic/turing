@@ -2,6 +2,7 @@
 """
 Benchmark real Safetensors weight readahead on GCP NVIDIA L4 VM using actual model checkpoints.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

@@ -18,6 +18,7 @@ Tier 3 (.tgate4 compressed container) and Tier 4 (GPUDirect Storage) are reporte
 
 python scripts/benchmark_ingest_ladder_all_tiers.py [--size-mib 1024] [--repeats 3] [--queue-depth 64] [--out FILE]
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 import argparse
 import ctypes
 import json

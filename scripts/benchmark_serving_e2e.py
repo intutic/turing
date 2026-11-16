@@ -3,6 +3,7 @@ End-to-End Continuous Serving Load Test with Traffic Management & Prometheus Met
 Evaluates continuous batching serving runtime under concurrent load across QoS lanes,
 measuring TTFT, ITL, generation throughput, VRAM admission control, and dynamic spec gating.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import argparse
 import asyncio

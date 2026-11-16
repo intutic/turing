@@ -7,6 +7,7 @@ Executes REAL, unmocked CUDA operations on actual hardware:
 4. Live End-to-End Comparison against running vLLM EngineCore (Qwen2.5-7B-Instruct)
 5. Live GSM8K Reasoning Evaluation on Qwen2.5-7B
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

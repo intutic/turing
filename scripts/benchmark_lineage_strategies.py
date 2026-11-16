@@ -11,6 +11,7 @@ Part 2 times a full-length linear transfer against k-slot pooling followed by th
 same transfer, on randn K/V with a random-init pooler; it measures latency only,
 not what the pooled slots preserve.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import argparse
 import json

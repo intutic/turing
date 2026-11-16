@@ -14,6 +14,7 @@ Sanity rows: `exact_forward` vs HuggingFace's own model (`hf_native`), and `exac
 
 python scripts/eval_kv_quality.py --models HuggingFaceTB/SmolLM2-135M --arms exact_forward,served_default
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 import argparse
 import gc
 import json

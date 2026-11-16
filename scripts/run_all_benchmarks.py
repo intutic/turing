@@ -7,6 +7,7 @@ Executes:
 4. Pointers to the real-weight throughput benchmark (scripts/benchmark_kv_decode.py)
 5. HPC primitive micro-timings
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

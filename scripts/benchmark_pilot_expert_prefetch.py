@@ -6,6 +6,7 @@ Measures:
 2. Latency hiding ratio (H%) of PCIe Host-to-Device transfers.
 3. Prefetch hit rates across top-K prefetch widths (K = 2, 4, 8).
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import time

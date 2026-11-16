@@ -8,7 +8,7 @@ This PR adds `ChatTuringEngine` to `langchain-community`, allowing LangChain and
 ## Changes
 - Created `libs/community/langchain_community/chat_models/turing.py`.
 - Exposed hyperparameters: `sparsity_ratio`, `use_svd_kv`, and `speculative_draft_tokens`.
-- Added unit and integration tests with mock server fixtures.
+- Added integration tests against a live in-process Turing Engine server.
 
 ## Example
 ```python

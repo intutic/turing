@@ -1,7 +1,5 @@
-"""
-Official LangChain and LangGraph Partner Package for Turing Engine.
-"""
+"""LangChain integration for Turing Engine (see turing.integrations.langchain)."""
 
-from .chat_turing import ChatTuring, TuringLLM
+from .chat_turing import ChatTuring, ChatTuringEngine
 
-__all__ = ["ChatTuring", "TuringLLM"]
+__all__ = ["ChatTuring", "ChatTuringEngine"]

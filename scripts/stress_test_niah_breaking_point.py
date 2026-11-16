@@ -3,6 +3,7 @@
 Tests long-context retrieval limits across context length (up to 1M), fine-grained depth (0-100%),
 rank degradation (Rank-128 to Rank-2), adversarial signal-to-noise ratio, and multi-needle stress.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import time
 import sys

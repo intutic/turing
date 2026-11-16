@@ -6,6 +6,7 @@ Measures:
 2. Latency improvement and miss penalty avoidance from GPULRUExpertCache.pin_experts().
 3. RoutingHistoryTracker serialization and decay speed.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import time
