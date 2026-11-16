@@ -5,6 +5,7 @@ Enables direct memory-mapped loading and execution of local .gguf model files
 """
 
 import os
+import math
 import mmap
 import struct
 from enum import IntEnum
@@ -98,132 +99,126 @@ class GGUFTensorInfo:
     offset: int
 
 
+# (values per block, bytes per block) of every GGML type Turing dequantizes (ggml-common.h)
+GGML_BLOCK_LAYOUT = {
+    GGMLType.F32: (1, 4), GGMLType.F16: (1, 2), GGMLType.BF16: (1, 2),
+    GGMLType.Q4_0: (32, 18), GGMLType.Q4_1: (32, 20), GGMLType.Q5_0: (32, 22), GGMLType.Q5_1: (32, 24),
+    GGMLType.Q8_0: (32, 34), GGMLType.Q2_K: (256, 84), GGMLType.Q3_K: (256, 110), GGMLType.Q4_K: (256, 144),
+    GGMLType.Q5_K: (256, 176), GGMLType.Q6_K: (256, 210), GGMLType.Q8_K: (256, 292),
+}
+
+
+def ggml_nbytes(ggml_type: GGMLType, num_elements: int) -> int:
+    """Bytes that num_elements values of ggml_type take; raises for types Turing cannot dequantize."""
+    if ggml_type not in GGML_BLOCK_LAYOUT:
+        raise ValueError(f"GGML type {GGMLType(ggml_type).name} is not supported "
+                         f"(supported: {', '.join(t.name for t in GGML_BLOCK_LAYOUT)})")
+    per_block, block_bytes = GGML_BLOCK_LAYOUT[ggml_type]
+    if num_elements % per_block:
+        raise ValueError(f"{GGMLType(ggml_type).name}: {num_elements} values are not whole {per_block}-value blocks")
+    return num_elements // per_block * block_bytes
+
+
+def _f16(b: np.ndarray) -> np.ndarray:
+    return b.view(np.float16).astype(np.float32)
+
+
+def _bits(b: np.ndarray, shifts, mask: int) -> np.ndarray:
+    """(nb, groups, n) bytes -> (nb, groups, len(shifts), n): each byte shifted right by each shift, masked."""
+    return (b[:, :, None, :] >> np.array(shifts, dtype=np.uint8)[None, None, :, None]) & np.uint8(mask)
+
+
+def _k_scale_min(s: np.ndarray):
+    """The eight 6-bit scales and mins packed in the 12 scale bytes of a Q4_K / Q5_K block."""
+    a, m, md = s[:, 0:4], s[:, 4:8], s[:, 8:12]
+    sc = np.concatenate([a & 63, (md & 0x0F) | ((a >> 2) & 0x30)], axis=-1)
+    mn = np.concatenate([m & 63, (md >> 4) | ((m >> 2) & 0x30)], axis=-1)
+    return sc.astype(np.float32), mn.astype(np.float32)
+
+
 class GGUFDequantizer:
     """
-    Dequantizes GGML quantized tensor byte buffers into PyTorch FP16/FP32 tensors.
+    Dequantizes GGML tensor bytes into PyTorch tensors, exactly as ggml does (bit for bit, checked against gguf-py).
     """
 
     @staticmethod
+    def dequantize_numpy(data_bytes: bytes, ggml_type: GGMLType, num_elements: int) -> np.ndarray:
+        """Pure-NumPy dequantization to a flat float32 array (the path when the native extension is absent)."""
+        nbytes = ggml_nbytes(ggml_type, num_elements)
+        if len(data_bytes) < nbytes:
+            raise ValueError(f"GGUF tensor data is truncated: {len(data_bytes)} bytes, {nbytes} needed")
+        t, n = GGMLType(ggml_type), num_elements
+        if t == GGMLType.F32:
+            return np.frombuffer(data_bytes, dtype=np.float32, count=n).copy()
+        if t == GGMLType.F16:
+            return np.frombuffer(data_bytes, dtype=np.float16, count=n).astype(np.float32)
+        if t == GGMLType.BF16:
+            return (np.frombuffer(data_bytes, dtype=np.uint16, count=n).astype(np.uint32) << 16).view(np.float32)
+
+        per_block, block_bytes = GGML_BLOCK_LAYOUT[t]
+        nb = n // per_block
+        b = np.frombuffer(data_bytes, dtype=np.uint8, count=nb * block_bytes).reshape(nb, block_bytes)
+        f32 = np.float32
+        if t in (GGMLType.Q4_0, GGMLType.Q4_1, GGMLType.Q5_0, GGMLType.Q5_1):
+            # values 0-15 of a block are the low nibbles, 16-31 the high ones; Q5 adds bit j of qh as bit 4 of value j
+            has_min, has_high = t in (GGMLType.Q4_1, GGMLType.Q5_1), t in (GGMLType.Q5_0, GGMLType.Q5_1)
+            d = _f16(b[:, 0:2])
+            pos = 4 if has_min else 2
+            q = _bits(b[:, None, pos + 4 * has_high:], (0, 4), 0x0F).reshape(nb, 32)
+            if has_high:
+                qh = b[:, pos:pos + 4].view(np.uint32)
+                q = q | (((qh >> np.arange(32, dtype=np.uint32)) & 1).astype(np.uint8) << 4)
+            if has_min:
+                return (d * q.astype(f32) + _f16(b[:, 2:4])).reshape(n)
+            return (d * (q.astype(np.int8) - np.int8(16 if has_high else 8)).astype(f32)).reshape(n)
+        if t == GGMLType.Q8_0:
+            return (b[:, 2:].view(np.int8).astype(f32) * _f16(b[:, 0:2])).reshape(n)
+        if t == GGMLType.Q8_K:
+            return (b[:, 4:260].view(np.int8).astype(f32) * b[:, 0:4].view(f32)).reshape(n)
+        if t == GGMLType.Q2_K:
+            scales, d, dmin = b[:, 0:16], _f16(b[:, 80:82]), _f16(b[:, 82:84])
+            dl = (d * (scales & 0x0F).astype(f32))[:, :, None]
+            ml = (dmin * (scales >> 4).astype(f32))[:, :, None]
+            q = _bits(b[:, 16:80].reshape(nb, 2, 32), (0, 2, 4, 6), 3).reshape(nb, 16, 16).astype(f32)
+            return (dl * q - ml).reshape(n)
+        if t == GGMLType.Q3_K:
+            s, d = b[:, 96:108], _f16(b[:, 108:110])
+            lo = _bits(s[:, None, 0:8], (0, 4), 0x0F).reshape(nb, 16)
+            hi = _bits(s[:, None, 8:12], (0, 2, 4, 6), 3).reshape(nb, 16)
+            dl = (d * ((lo | (hi << 4)).astype(np.int8) - np.int8(32)).astype(f32))[:, :, None]
+            ql = _bits(b[:, 32:96].reshape(nb, 2, 32), (0, 2, 4, 6), 3).reshape(nb, 16, 16)
+            qh = _bits(b[:, None, 0:32], tuple(range(8)), 1).reshape(nb, 16, 16)
+            q = (ql.astype(np.int8) - ((qh ^ 1) << 2).astype(np.int8)).astype(f32)  # a clear hmask bit subtracts 4
+            return (dl * q).reshape(n)
+        if t in (GGMLType.Q4_K, GGMLType.Q5_K):
+            d, dmin = _f16(b[:, 0:2]), _f16(b[:, 2:4])
+            sc, mn = _k_scale_min(b[:, 4:16])
+            qs = b[:, 16:144] if t == GGMLType.Q4_K else b[:, 48:176]
+            q = _bits(qs.reshape(nb, 4, 32), (0, 4), 0x0F).reshape(nb, 8, 32)
+            if t == GGMLType.Q5_K:
+                q = q | (_bits(b[:, None, 16:48], tuple(range(8)), 1).reshape(nb, 8, 32) << 4)
+            return ((d * sc)[:, :, None] * q.astype(f32) - (dmin * mn)[:, :, None]).reshape(n)
+        if t == GGMLType.Q6_K:
+            sc, d = b[:, 192:208].view(np.int8).astype(f32), _f16(b[:, 208:210])
+            ql = _bits(b[:, 0:128].reshape(nb, 2, 64), (0, 4), 0x0F).reshape(nb, 8, 32)
+            qh = _bits(b[:, 128:192].reshape(nb, 2, 32), (0, 2, 4, 6), 3).reshape(nb, 8, 32)
+            q = ((ql | (qh << 4)).astype(np.int8) - np.int8(32)).reshape(nb, 16, 16).astype(f32)
+            return ((d * sc)[:, :, None] * q).reshape(n)
+        raise AssertionError(f"no dequantizer for {t.name}")  # every GGML_BLOCK_LAYOUT type is handled above
+
+    @staticmethod
     def dequantize(data_bytes: bytes, ggml_type: GGMLType, shape: List[int], target_dtype: torch.dtype = torch.float16) -> torch.Tensor:
-        # Try native C++20 AVX2 / NEON SIMD dequantizer first
-        try:
-            import turing.turing_csrc as turing_csrc
-            arr_f32 = turing_csrc.dequantize_gguf_simd(data_bytes, int(ggml_type.value), shape)
-            return torch.from_numpy(arr_f32).to(target_dtype)
-        except Exception:
-            pass
-
         num_elements = int(np.prod(shape))
-        
-        if ggml_type == GGMLType.F32:
-            arr = np.frombuffer(data_bytes, dtype=np.float32, count=num_elements)
-            return torch.from_numpy(arr.copy()).to(target_dtype).reshape(shape)
-
-        elif ggml_type == GGMLType.F16:
-            arr = np.frombuffer(data_bytes, dtype=np.float16, count=num_elements)
-            return torch.from_numpy(arr.copy()).to(target_dtype).reshape(shape)
-
-        elif ggml_type == GGMLType.BF16:
-            arr = np.frombuffer(data_bytes, dtype=np.uint16, count=num_elements)
-            t = torch.from_numpy(arr.copy()).view(torch.bfloat16)
-            return t.to(target_dtype).reshape(shape)
-
-        elif ggml_type == GGMLType.Q8_0:
-            # Block size 32: 2 bytes fp16 delta + 32 bytes int8
-            block_size = 32
-            block_bytes = 2 + 32  # 34 bytes
-            num_blocks = num_elements // block_size
-            
-            raw = np.frombuffer(data_bytes, dtype=np.uint8, count=num_blocks * block_bytes)
-            raw = raw.reshape((num_blocks, block_bytes))
-            
-            # Extract delta (FP16) from first 2 bytes
-            deltas = np.frombuffer(raw[:, :2].copy(), dtype=np.float16).astype(np.float32)
-            # Extract 32 int8 quants
-            quants = raw[:, 2:].view(np.int8).astype(np.float32)
-            
-            # Dequantize: quant * delta
-            dequant = quants * deltas[:, None]
-            out = dequant.reshape(num_elements)
-            return torch.from_numpy(out).to(target_dtype).reshape(shape)
-
-        elif ggml_type == GGMLType.Q4_0:
-            # Block size 32: 2 bytes fp16 delta + 16 bytes (32 nibbles)
-            block_size = 32
-            block_bytes = 2 + 16  # 18 bytes
-            num_blocks = num_elements // block_size
-            
-            raw = np.frombuffer(data_bytes, dtype=np.uint8, count=num_blocks * block_bytes)
-            raw = raw.reshape((num_blocks, block_bytes))
-            
-            deltas = np.frombuffer(raw[:, :2].copy(), dtype=np.float16).astype(np.float32)
-            nibbles = raw[:, 2:]
-            
-            # Low 4 bits and high 4 bits
-            q_low = (nibbles & 0x0F).astype(np.int32) - 8
-            q_high = ((nibbles >> 4) & 0x0F).astype(np.int32) - 8
-            
-            # Interleave low and high nibbles: [num_blocks, 16, 2] -> [num_blocks, 32]
-            quants = np.stack([q_low, q_high], axis=-1).reshape((num_blocks, 32)).astype(np.float32)
-            
-            dequant = quants * deltas[:, None]
-            out = dequant.reshape(num_elements)
-            return torch.from_numpy(out).to(target_dtype).reshape(shape)
-
-        elif ggml_type == GGMLType.Q4_1:
-            # Block size 32: 2 bytes fp16 delta + 2 bytes fp16 min + 16 bytes (32 nibbles)
-            block_size = 32
-            block_bytes = 2 + 2 + 16  # 20 bytes
-            num_blocks = num_elements // block_size
-            
-            raw = np.frombuffer(data_bytes, dtype=np.uint8, count=num_blocks * block_bytes)
-            raw = raw.reshape((num_blocks, block_bytes))
-            
-            deltas = np.frombuffer(raw[:, :2].copy(), dtype=np.float16).astype(np.float32)
-            mins = np.frombuffer(raw[:, 2:4].copy(), dtype=np.float16).astype(np.float32)
-            nibbles = raw[:, 4:]
-            
-            q_low = (nibbles & 0x0F).astype(np.float32)
-            q_high = ((nibbles >> 4) & 0x0F).astype(np.float32)
-            
-            quants = np.stack([q_low, q_high], axis=-1).reshape((num_blocks, 32))
-            dequant = quants * deltas[:, None] + mins[:, None]
-            out = dequant.reshape(num_elements)
-            return torch.from_numpy(out).to(target_dtype).reshape(shape)
-
-        elif ggml_type in (GGMLType.Q4_K, GGMLType.Q5_K, GGMLType.Q6_K, GGMLType.Q8_K):
-            # Fallback for K-quants: approximate linear scaling if exact bitfield unpacking is pending
-            block_size = 256
-            num_blocks = max(1, num_elements // block_size)
-            bytes_per_block = len(data_bytes) // num_blocks
-            
-            # Extract first 2 bytes as primary FP16 scale
-            raw = np.frombuffer(data_bytes[:num_blocks * bytes_per_block], dtype=np.uint8).reshape((num_blocks, bytes_per_block))
-            deltas = np.frombuffer(raw[:, :2].copy(), dtype=np.float16).astype(np.float32)
-            
-            # Center quant bytes around zero
-            body = raw[:, 4:].astype(np.float32) - 128.0
-            scale = deltas[:, None] / 16.0
-            
-            # Repeat or slice to reach 256 elements per block
-            if body.shape[1] < block_size:
-                repeats = (block_size + body.shape[1] - 1) // body.shape[1]
-                body_expanded = np.tile(body, (1, repeats))[:, :block_size]
-            else:
-                body_expanded = body[:, :block_size]
-                
-            dequant = body_expanded * scale
-            out = dequant.reshape(num_elements)
-            return torch.from_numpy(out).to(target_dtype).reshape(shape)
-
+        ggml_nbytes(ggml_type, num_elements)  # unsupported types raise here, on either path
+        try:
+            from turing import turing_csrc  # native C++ AVX2 / NEON dequantizer
+        except ImportError:
+            turing_csrc = None
+        if turing_csrc is not None:
+            arr = turing_csrc.dequantize_gguf_simd(bytes(data_bytes), int(ggml_type), [num_elements])
         else:
-            # Generic fallback: read raw bytes and pad/cast
-            raw = np.frombuffer(data_bytes, dtype=np.uint8).astype(np.float32)
-            if len(raw) < num_elements:
-                padded = np.pad(raw, (0, num_elements - len(raw)), mode='constant')
-            else:
-                padded = raw[:num_elements]
-            return torch.from_numpy(padded).to(target_dtype).reshape(shape)
+            arr = GGUFDequantizer.dequantize_numpy(data_bytes, ggml_type, num_elements)
+        return torch.from_numpy(arr).reshape(shape).to(target_dtype)
 
 
 class GGUFReader:
@@ -376,24 +371,10 @@ class GGUFReader:
             
         info = self.tensor_infos[name]
         data_start = self.tensor_data_offset + info.offset
-        
-        # Calculate tensor byte size based on GGMLType
-        num_elements = int(np.prod(info.shape))
-        if info.ggml_type == GGMLType.F32:
-            byte_size = num_elements * 4
-        elif info.ggml_type in (GGMLType.F16, GGMLType.BF16):
-            byte_size = num_elements * 2
-        elif info.ggml_type == GGMLType.Q8_0:
-            byte_size = (num_elements // 32) * 34
-        elif info.ggml_type == GGMLType.Q4_0:
-            byte_size = (num_elements // 32) * 18
-        elif info.ggml_type == GGMLType.Q4_1:
-            byte_size = (num_elements // 32) * 20
-        elif info.ggml_type in (GGMLType.Q4_K, GGMLType.Q5_K, GGMLType.Q6_K, GGMLType.Q8_K):
-            byte_size = (num_elements // 256) * 144
-        else:
-            byte_size = num_elements
-            
+        byte_size = ggml_nbytes(info.ggml_type, int(np.prod(info.shape)))
+        if data_start + byte_size > self.file_size:
+            raise ValueError(f"GGUF file {self.filepath} is truncated: tensor '{name}' needs bytes "
+                             f"{data_start}..{data_start + byte_size} of a {self.file_size}-byte file")
         data_bytes = self.mmap_obj[data_start : data_start + byte_size]
         tensor = GGUFDequantizer.dequantize(data_bytes, info.ggml_type, info.shape, target_dtype=target_dtype)
         return tensor.to(device)
@@ -416,25 +397,48 @@ class GGUFModelLoader:
     Loads a complete local .gguf file into a Turing SubspaceCausalLM model with tokenizer.
     """
 
-    # Mapping from GGUF architecture string to standard architecture family
-    ARCH_MAP = {
-        "llama": "llama",
-        "qwen2": "qwen2",
-        "deepseek2": "deepseek_v3",
-        "mistral": "mistral",
-        "gemma": "gemma",
-        "gemma2": "gemma2",
-        "phi3": "phi3",
-        "gpt2": "gpt2",
-    }
+    # GGUF architectures SubspaceCausalLM computes exactly (logit parity with HF is tested), and whether llama.cpp's
+    # convert_hf_to_gguf permuted their q/k rows for interleaved RoPE (Turing's RoPE rotates halves, as HF does).
+    # Mistral checkpoints convert to "llama". Others (gemma, phi3, deepseek2, ...) need model changes first.
+    ARCHS = {"llama": True, "qwen2": False, "qwen3": False}
 
     def __init__(self, filepath: str):
         self.filepath = filepath
         self.reader = GGUFReader(filepath)
 
+    def _rope_scaling(self, arch: str, head_dim: int, rope_theta: float) -> Optional[dict]:
+        """Llama-3 RoPE scaling as ModelConfig.rope_scaling, from the rope_freqs.weight tensor llama.cpp's converter
+        writes for it; None for plain RoPE. RoPE scaling types the model cannot compute yet raise."""
+        meta = self.reader.metadata
+        kind = meta.get(f"{arch}.rope.scaling.type", "none")
+        if kind != "none":
+            raise ValueError(f"RoPE scaling type '{kind}' ({arch}.rope.scaling.type in {self.filepath}) is not supported yet")
+        if "rope_freqs.weight" not in self.reader.tensor_infos:
+            return None
+        factors = self.reader.get_tensor_tensor("rope_freqs.weight", torch.float32).numpy()
+        # The converter writes only the per-frequency factors; low/high_freq_factor 1/4 and an 8192-token original
+        # context are its defaults (and every Llama 3.x's). Anything else fails the check below rather than load wrong.
+        orig = int(meta.get(f"{arch}.rope.scaling.original_context_length", 8192))
+        scaling = (float(factors.max()), 1.0, 4.0, orig)
+        dim = int(meta.get(f"{arch}.rope.dimension_count", head_dim))
+        freqs = 1.0 / (rope_theta ** (np.arange(0, dim, 2, dtype=np.float64) / dim))
+        wavelen = 2 * math.pi / freqs
+        smooth = (orig / wavelen - 1.0) / (4.0 - 1.0)
+        expected = np.where(wavelen < orig / 4.0, 1.0,
+                            np.where(wavelen > orig, scaling[0], 1 / ((1 - smooth) / scaling[0] + smooth)))
+        if factors.shape != expected.shape or not np.allclose(factors, expected, rtol=1e-4, atol=1e-6):
+            raise ValueError(f"rope_freqs.weight in {self.filepath} is not llama3 RoPE scaling with factor "
+                             f"{scaling[0]}, low/high_freq_factor 1/4 and original context {orig}: not supported")
+        if scaling[0] == 1.0:
+            return None
+        return {"rope_type": "llama3", "factor": scaling[0], "low_freq_factor": 1.0, "high_freq_factor": 4.0,
+                "original_max_position_embeddings": orig}
+
     def extract_config(self, sparsity_ratio: float = 0.0) -> ModelConfig:
         meta = self.reader.metadata
         arch = meta.get("general.architecture", "llama")
+        if arch not in self.ARCHS:
+            raise ValueError(f"GGUF architecture '{arch}' is not supported (supported: {', '.join(self.ARCHS)})")
         name = meta.get("general.name", os.path.basename(self.filepath).replace(".gguf", ""))
         
         hidden_dim = int(meta.get(f"{arch}.embedding_length", 2048))
@@ -470,84 +474,90 @@ class GGUFModelLoader:
             active_tiles=active_tiles,
             rank_sub=64 if hidden_dim >= 768 else 32,
             max_position_embeddings=max_pos,
-            rope_theta=rope_theta
+            rope_theta=rope_theta,
+            rms_norm_eps=float(meta.get(f"{arch}.attention.layer_norm_rms_epsilon", 1e-6)),
+            rope_scaling=self._rope_scaling(arch, head_dim, rope_theta),
+            attention_bias="blk.0.attn_q.bias" in self.reader.tensor_infos,     # Qwen2
+            qk_norm="blk.0.attn_q_norm.weight" in self.reader.tensor_infos,     # Qwen3
         )
 
     def extract_tokenizer(self) -> Any:
         from .gguf_tokenizer import GGUFTokenizer
         return GGUFTokenizer(self.reader.metadata)
 
+    @staticmethod
+    def tensor_map(config: ModelConfig) -> Dict[str, str]:
+        """SubspaceCausalLM parameter name -> llama.cpp GGUF tensor name, for every weight a checkpoint holds."""
+        m = {"embed_tokens.weight": "token_embd.weight", "norm.weight": "output_norm.weight",
+             "lm_head.weight": "output.weight"}
+        per_layer = {"input_layernorm.weight": "attn_norm.weight", "post_attention_layernorm.weight": "ffn_norm.weight",
+                     "self_attn.q_proj.weight": "attn_q.weight", "self_attn.k_proj.weight": "attn_k.weight",
+                     "self_attn.v_proj.weight": "attn_v.weight", "self_attn.o_proj.weight": "attn_output.weight",
+                     "mlp.gate_proj.weight": "ffn_gate.weight", "mlp.up_proj.weight": "ffn_up.weight",
+                     "mlp.down_proj.weight": "ffn_down.weight"}
+        if config.attention_bias:
+            per_layer.update({f"self_attn.{p}_proj.bias": f"attn_{p}.bias" for p in "qkv"})
+        if config.qk_norm:
+            per_layer.update({f"self_attn.{p}_norm.weight": f"attn_{p}_norm.weight" for p in "qk"})
+        for l in range(config.num_layers):
+            m.update({f"layers.{l}.{k}": f"blk.{l}.{v}" for k, v in per_layer.items()})
+        return m
+
     def load(
         self,
         sparsity_ratio: float = 0.0,
         device: str = "cpu",
-        dtype: torch.dtype = torch.float16
+        dtype: Optional[torch.dtype] = None
     ) -> Tuple[SubspaceCausalLM, Any]:
+        """Every GGUF tensor goes into the model, dequantized one at a time straight into the model's dtype (fp16 on
+        CUDA, fp32 elsewhere, as the HF loader does). A file missing a weight, or holding one the model has no place
+        for, raises instead of leaving weights at random init."""
         config = self.extract_config(sparsity_ratio=sparsity_ratio)
-        model = SubspaceCausalLM(config).to(device=device, dtype=dtype)
-        
-        state_dict = {}
-        tensor_names = set(self.reader.tensor_infos.keys())
-        
-        # 1. Embeddings
-        for emb_key in ["token_embd.weight", "model.embed_tokens.weight", "embeddings.weight"]:
-            if emb_key in tensor_names:
-                state_dict["embed_tokens.weight"] = self.reader.get_tensor_tensor(emb_key, dtype, device)
-                break
-                
-        # 2. Output Norm & LM Head
-        for norm_key in ["output_norm.weight", "norm.weight", "model.norm.weight"]:
-            if norm_key in tensor_names:
-                state_dict["norm.weight"] = self.reader.get_tensor_tensor(norm_key, dtype, device)
-                break
-                
-        for head_key in ["output.weight", "lm_head.weight"]:
-            if head_key in tensor_names:
-                state_dict["lm_head.weight"] = self.reader.get_tensor_tensor(head_key, dtype, device)
-                break
-        if "lm_head.weight" not in state_dict and "embed_tokens.weight" in state_dict:
-            # Tied embeddings
-            state_dict["lm_head.weight"] = state_dict["embed_tokens.weight"].clone()
+        if dtype is None:
+            dtype = torch.float16 if torch.device(device).type == "cuda" else torch.float32
+        names = self.reader.tensor_infos
+        mapping = self.tensor_map(config)
+        if "output.weight" not in names:
+            mapping["lm_head.weight"] = "token_embd.weight"  # tied embeddings
+        missing = sorted(g for g in mapping.values() if g not in names)
+        unexpected = sorted(set(names) - set(mapping.values()) - {"rope_freqs.weight"})
+        if missing or unexpected:
+            raise ValueError(f"GGUF file {self.filepath} does not match a {config.num_layers}-layer "
+                             f"{self.reader.metadata.get('general.architecture', 'llama')} model: "
+                             f"missing tensors {missing}, unexpected tensors {unexpected}")
 
-        # 3. Layer by layer weights
-        for l in range(config.num_layers):
-            prefix = f"blk.{l}."
-            
-            # Attention Norm
-            for anorm_key in [f"{prefix}attn_norm.weight", f"{prefix}attn_qkv_norm.weight"]:
-                if anorm_key in tensor_names:
-                    state_dict[f"layers.{l}.input_layernorm.weight"] = self.reader.get_tensor_tensor(anorm_key, dtype, device)
-                    break
-                    
-            # Post-Attn / FFN Norm
-            for fnorm_key in [f"{prefix}ffn_norm.weight", f"{prefix}post_attention_layernorm.weight"]:
-                if fnorm_key in tensor_names:
-                    state_dict[f"layers.{l}.post_attention_layernorm.weight"] = self.reader.get_tensor_tensor(fnorm_key, dtype, device)
-                    break
-                    
-            # QKV Projections
-            if f"{prefix}attn_q.weight" in tensor_names:
-                state_dict[f"layers.{l}.self_attn.q_proj.weight"] = self.reader.get_tensor_tensor(f"{prefix}attn_q.weight", dtype, device)
-            if f"{prefix}attn_k.weight" in tensor_names:
-                state_dict[f"layers.{l}.self_attn.k_proj.weight"] = self.reader.get_tensor_tensor(f"{prefix}attn_k.weight", dtype, device)
-            if f"{prefix}attn_v.weight" in tensor_names:
-                state_dict[f"layers.{l}.self_attn.v_proj.weight"] = self.reader.get_tensor_tensor(f"{prefix}attn_v.weight", dtype, device)
-            if f"{prefix}attn_output.weight" in tensor_names:
-                state_dict[f"layers.{l}.self_attn.o_proj.weight"] = self.reader.get_tensor_tensor(f"{prefix}attn_output.weight", dtype, device)
-                
-            # MLP Projections (SwiGLU)
-            if f"{prefix}ffn_gate.weight" in tensor_names:
-                state_dict[f"layers.{l}.mlp.gate_proj.weight"] = self.reader.get_tensor_tensor(f"{prefix}ffn_gate.weight", dtype, device)
-            if f"{prefix}ffn_up.weight" in tensor_names:
-                state_dict[f"layers.{l}.mlp.up_proj.weight"] = self.reader.get_tensor_tensor(f"{prefix}ffn_up.weight", dtype, device)
-            if f"{prefix}ffn_down.weight" in tensor_names:
-                state_dict[f"layers.{l}.mlp.down_proj.weight"] = self.reader.get_tensor_tensor(f"{prefix}ffn_down.weight", dtype, device)
+        # Built on the device in the target dtype: never a whole-model fp32 copy (a 70B model is 280 GB in fp32).
+        # shortcut: the default dtype is process-wide while the model is built; build on "meta" if loads go concurrent.
+        default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(dtype)
+        try:
+            with torch.device(device):
+                model = SubspaceCausalLM(config)
+        finally:
+            torch.set_default_dtype(default_dtype)
 
-        # Load matched parameters with non-strict mode to preserve Subspace specialized buffers
-        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        permuted = self.ARCHS[self.reader.metadata.get("general.architecture", "llama")]
+        params = dict(model.named_parameters())
+        with torch.no_grad():
+            for pname, gname in mapping.items():
+                t = self.reader.get_tensor_tensor(gname, torch.float32)
+                if permuted and gname.endswith(("attn_q.weight", "attn_q.bias")):
+                    t = unpermute_qk(t, config.num_heads)
+                elif permuted and gname.endswith(("attn_k.weight", "attn_k.bias")):
+                    t = unpermute_qk(t, config.num_kv_heads)
+                p = params[pname]
+                if t.shape != p.shape:
+                    raise ValueError(f"GGUF tensor '{gname}' has shape {tuple(t.shape)}; {pname} is {tuple(p.shape)}")
+                p.copy_(t)
+                del t
         tokenizer = self.extract_tokenizer()
-        
         return model, tokenizer
+
+
+def unpermute_qk(w: torch.Tensor, n_head: int) -> torch.Tensor:
+    """Undo convert_hf_to_gguf's q/k row permutation for llama (made for llama.cpp's interleaved RoPE):
+    the file holds w.reshape(n_head, 2, head_dim // 2, ...).swapaxes(1, 2)."""
+    return w.reshape(n_head, w.shape[0] // n_head // 2, 2, *w.shape[1:]).transpose(1, 2).reshape(w.shape)
 
 
 def create_test_gguf_file(

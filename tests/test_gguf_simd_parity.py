@@ -35,8 +35,8 @@ def test_gguf_simd_q4_0_parity():
     # Native C++ SIMD
     res_cpp = turing_csrc.dequantize_gguf_simd(data, int(GGMLType.Q4_0.value), [32])
     
-    # Expected: 16 pairs of (-3*0.5 = -1.5, 2*0.5 = 1.0)
-    expected = np.array([-1.5, 1.0] * 16, dtype=np.float32)
+    # Expected (ggml layout): low nibbles are values 0-15 (-3*0.5 = -1.5), high nibbles 16-31 (2*0.5 = 1.0)
+    expected = np.array([-1.5] * 16 + [1.0] * 16, dtype=np.float32)
     np.testing.assert_allclose(res_cpp, expected, rtol=1e-4, atol=1e-4)
 
 

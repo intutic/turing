@@ -11,6 +11,7 @@
 #include <cmath>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include "turing_gguf_simd.hpp"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -110,7 +111,8 @@ public:
         return it->second;
     }
 
-    // Dequantizes tensor directly into preallocated FP32 destination buffer
+    // Dequantizes a tensor into a preallocated FP32 buffer, in the file's layout: llama q/k rows stay in the
+    // order llama.cpp's converter permuted them to, which is what the engine's interleaved (GPT-J) RoPE expects.
     void read_tensor_fp32(const std::string& name, float* dst, size_t dst_capacity) const {
         const auto& info = get_tensor_info(name);
         size_t num_elements = 1;
@@ -120,89 +122,25 @@ public:
         if (num_elements > dst_capacity) {
             throw std::runtime_error("Destination buffer too small for tensor " + name);
         }
-
-        const uint8_t* src = mmap_data + tensor_data_offset + info.offset;
-
-        if (info.ggml_type == GGMLTypeCpp::F32) {
-            std::memcpy(dst, src, num_elements * sizeof(float));
+        const size_t nbytes = gguf_tensor_nbytes(static_cast<uint32_t>(info.ggml_type), num_elements);
+        if (tensor_data_offset + info.offset + nbytes > file_size) {
+            throw std::runtime_error("GGUF file is truncated: tensor " + name + " ends past the end of the file");
         }
-        else if (info.ggml_type == GGMLTypeCpp::F16) {
-            const uint16_t* src16 = reinterpret_cast<const uint16_t*>(src);
-            for (size_t i = 0; i < num_elements; ++i) {
-                dst[i] = fp16_to_fp32(src16[i]);
-            }
-        }
-        else if (info.ggml_type == GGMLTypeCpp::Q8_0) {
-            // Block size 32: 2 bytes fp16 delta + 32 bytes int8
-            size_t blocks = num_elements / 32;
-            const uint8_t* ptr = src;
-            size_t out_idx = 0;
-            for (size_t b = 0; b < blocks; ++b) {
-                uint16_t d_raw = *reinterpret_cast<const uint16_t*>(ptr);
-                float delta = fp16_to_fp32(d_raw);
-                const int8_t* quants = reinterpret_cast<const int8_t*>(ptr + 2);
-                for (int i = 0; i < 32; ++i) {
-                    dst[out_idx++] = static_cast<float>(quants[i]) * delta;
-                }
-                ptr += 34;
-            }
-        }
-        else if (info.ggml_type == GGMLTypeCpp::Q4_0) {
-            // Block size 32: 2 bytes fp16 delta + 16 bytes (32 nibbles)
-            size_t blocks = num_elements / 32;
-            const uint8_t* ptr = src;
-            size_t out_idx = 0;
-            for (size_t b = 0; b < blocks; ++b) {
-                uint16_t d_raw = *reinterpret_cast<const uint16_t*>(ptr);
-                float delta = fp16_to_fp32(d_raw);
-                const uint8_t* nibbles = ptr + 2;
-                for (int i = 0; i < 16; ++i) {
-                    int8_t q0 = static_cast<int8_t>(nibbles[i] & 0x0F) - 8;
-                    int8_t q1 = static_cast<int8_t>((nibbles[i] >> 4) & 0x0F) - 8;
-                    dst[out_idx++] = static_cast<float>(q0) * delta;
-                    dst[out_idx++] = static_cast<float>(q1) * delta;
-                }
-                ptr += 18;
-            }
-        }
-        else {
-            // Fallback for unhandled types: zero fill
-            std::memset(dst, 0, num_elements * sizeof(float));
-        }
+        dequantize_gguf(static_cast<uint32_t>(info.ggml_type), mmap_data + tensor_data_offset + info.offset, dst,
+                        num_elements);
     }
 
 private:
-    static inline float fp16_to_fp32(uint16_t h) {
-        uint32_t sign = (h & 0x8000) << 16;
-        uint32_t exp = (h & 0x7C00) >> 10;
-        uint32_t mant = (h & 0x03FF);
-
-        if (exp == 0) {
-            if (mant == 0) {
-                uint32_t val = sign;
-                float f;
-                std::memcpy(&f, &val, sizeof(f));
-                return f;
-            }
-            while ((mant & 0x0400) == 0) {
-                mant <<= 1;
-                exp--;
-            }
-            exp++;
-            mant &= ~0x0400;
-        } else if (exp == 31) {
-            uint32_t val = sign | 0x7F800000 | (mant << 13);
-            float f;
-            std::memcpy(&f, &val, sizeof(f));
-            return f;
+    // Byte size of a scalar GGUF metadata value (0 for STRING and ARRAY, which carry their own lengths)
+    static size_t scalar_size(GGUFValueTypeCpp t) {
+        switch (t) {
+            case GGUFValueTypeCpp::UINT8: case GGUFValueTypeCpp::INT8: case GGUFValueTypeCpp::BOOL: return 1;
+            case GGUFValueTypeCpp::UINT16: case GGUFValueTypeCpp::INT16: return 2;
+            case GGUFValueTypeCpp::UINT32: case GGUFValueTypeCpp::INT32: case GGUFValueTypeCpp::FLOAT32: return 4;
+            case GGUFValueTypeCpp::UINT64: case GGUFValueTypeCpp::INT64: case GGUFValueTypeCpp::FLOAT64: return 8;
+            case GGUFValueTypeCpp::STRING: case GGUFValueTypeCpp::ARRAY: return 0;
         }
-
-        exp = exp + (127 - 15);
-        mant = mant << 13;
-        uint32_t val = sign | (exp << 23) | mant;
-        float f;
-        std::memcpy(&f, &val, sizeof(f));
-        return f;
+        throw std::runtime_error("Unknown GGUF metadata value type " + std::to_string(static_cast<uint32_t>(t)));
     }
 
     void open_and_mmap(const std::string& filepath) {
@@ -300,16 +238,14 @@ private:
                         if (key == "tokenizer.ggml.tokens") {
                             tokenizer_tokens.push_back(elem_str);
                         }
-                    } else if (elem_type == GGUFValueTypeCpp::FLOAT32) {
-                        pos += 4;
-                    } else if (elem_type == GGUFValueTypeCpp::INT32 || elem_type == GGUFValueTypeCpp::UINT32) {
-                        pos += 4;
+                    } else if (elem_type == GGUFValueTypeCpp::ARRAY) {
+                        throw std::runtime_error("Nested GGUF metadata arrays are not supported: " + key);
                     } else {
-                        pos += 1;
+                        pos += scalar_size(elem_type);
                     }
                 }
             } else {
-                pos += 4; // Skip other scalar types
+                pos += scalar_size(vtype);  // other scalar types are not used
             }
         }
 

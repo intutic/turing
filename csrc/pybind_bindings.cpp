@@ -50,6 +50,7 @@
 #include "turing_json_fast_scan.hpp"
 #include "turing_chunked_decay.hpp"
 #include "turing_gguf_simd.hpp"
+#include "turing_model_cpp.hpp"
 #include "turing_io_uring.hpp"
 #include "turing_cufile.hpp"
 #include "turing_safetensors_fast_header.hpp"
@@ -1497,39 +1498,34 @@ PYBIND11_MODULE(turing_csrc, m) {
 
     // Native C++20 AVX2 SIMD GGUF Block Dequantizer
     m.def("dequantize_gguf_simd", [](py::bytes data_bytes, int ggml_type, const std::vector<size_t>& shape) -> py::array_t<float> {
-        py::buffer_info in_buf = py::buffer(data_bytes).request();
-        const void* src_ptr = in_buf.ptr;
+        std::string_view src = data_bytes;
         size_t total_elements = 1;
         for (auto dim : shape) total_elements *= dim;
-
-        py::array_t<float> result(shape);
-        py::buffer_info buf = result.request();
-        float* dst_ptr = static_cast<float*>(buf.ptr);
-
-        if (ggml_type == 0) { // F32
-            std::memcpy(dst_ptr, src_ptr, total_elements * sizeof(float));
-        } else if (ggml_type == 1) { // F16
-            turing::dequantize_fp16(src_ptr, dst_ptr, total_elements);
-        } else if (ggml_type == 2) { // Q4_0
-            size_t num_blocks = total_elements / 32;
-            turing::dequantize_q4_0(src_ptr, dst_ptr, num_blocks);
-        } else if (ggml_type == 3) { // Q4_1
-            size_t num_blocks = total_elements / 32;
-            turing::dequantize_q4_1(src_ptr, dst_ptr, num_blocks);
-        } else if (ggml_type == 8) { // Q8_0
-            size_t num_blocks = total_elements / 32;
-            turing::dequantize_q8_0(src_ptr, dst_ptr, num_blocks);
-        } else if (ggml_type == 12) { // Q4_K
-            size_t num_blocks = total_elements / 256;
-            turing::dequantize_q4_k(src_ptr, dst_ptr, num_blocks);
-        } else if (ggml_type == 30) { // BF16
-            turing::dequantize_bf16(src_ptr, dst_ptr, total_elements);
-        } else {
-            throw std::runtime_error("Unsupported GGML type in SIMD dequantizer: " + std::to_string(ggml_type));
+        const size_t nbytes = turing::gguf_tensor_nbytes(static_cast<uint32_t>(ggml_type), total_elements);
+        if (src.size() < nbytes) {
+            throw std::runtime_error("GGUF tensor data is truncated: " + std::to_string(src.size()) + " bytes, " +
+                                     std::to_string(nbytes) + " needed");
         }
 
+        py::array_t<float> result(shape);
+        float* dst_ptr = static_cast<float*>(result.request().ptr);
+        {
+            py::gil_scoped_release release;
+            turing::dequantize_gguf(static_cast<uint32_t>(ggml_type), src.data(), dst_ptr, total_elements);
+        }
         return result;
-    }, py::arg("data_bytes"), py::arg("ggml_type"), py::arg("shape"), "Native AVX2 SIMD GGUF Block Dequantizer");
+    }, py::arg("data_bytes"), py::arg("ggml_type"), py::arg("shape"), "Native AVX2 / NEON GGUF block dequantizer");
+
+    // The standalone C++ engine (turing-cli) on a GGUF file: logits [len(token_ids), vocab] of one sequence
+    m.def("gguf_cpp_engine_logits", [](const std::string& path, const std::vector<int32_t>& token_ids) {
+        turing::GGUFReaderCpp reader(path);
+        auto model = turing::TransformerModelCpp::load_from_gguf(reader);
+        const size_t vocab = model->config.vocab_size;
+        py::array_t<float> logits({token_ids.size(), vocab});
+        float* out = static_cast<float*>(logits.request().ptr);
+        for (size_t pos = 0; pos < token_ids.size(); ++pos) model->forward_token(token_ids[pos], pos, out + pos * vocab);
+        return logits;
+    }, py::arg("path"), py::arg("token_ids"), "Logits of the standalone C++ GGUF engine for one sequence");
 
     // Tier 2: Native Async Ring Reader (io_uring / pread parallel queue)
     py::class_<turing::NativeAsyncRingReader>(m, "NativeAsyncRingReader")
