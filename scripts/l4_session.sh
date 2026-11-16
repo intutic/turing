@@ -4,6 +4,8 @@
 #   nohup bash scripts/l4_session.sh > ~/l4_session.log 2>&1 &
 set -u
 cd "$(dirname "$0")/.."
+export PATH="$HOME/.local/bin:$PATH"
+python() { python3 "$@"; }  # the GCE image has python3 only
 mkdir -p ~/l4_logs
 step() { local name=$1; shift; echo "start $name $(date -u +%H:%M:%S)" >> ~/l4_status.txt; "$@" > ~/l4_logs/$name.log 2>&1;
          echo "end $name exit=$? $(date -u +%H:%M:%S)" >> ~/l4_status.txt; }
