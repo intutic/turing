@@ -4,9 +4,9 @@ Master Colibrì × Turing Engine Empirical Benchmark Orchestrator.
 Runs all 5 newly integrated systems benchmark suites:
 1. MoE Routing History & Learned Hot-Expert Pinning
 2. PILOT One-Layer-Ahead Speculative Prefetching
-3. LFRU Eviction Policy & Hysteresis Promotion Gate
-4. Vectorized Batch-Union Accumulation (Prefill & Speculative Verify)
-5. Bandwidth-Adaptive Decider EMA Rate Smoothing
+3. Vectorized Batch-Union Accumulation (Prefill & Speculative Verify)
+4. Bandwidth-Adaptive Decider EMA Rate Smoothing
+(LRU vs LFRU on real OLMoE routing: scripts/benchmark_moe_offload_olmoe.py)
 """
 
 import os
@@ -27,7 +27,6 @@ import torch
 
 from benchmark_routing_history_and_pinning import benchmark_routing_and_pinning
 from benchmark_pilot_expert_prefetch import benchmark_pilot_prefetch
-from benchmark_lfru_eviction_hysteresis import benchmark_lfru_vs_lru
 from benchmark_vectorized_batch_union import benchmark_batch_union
 from benchmark_bandwidth_adaptive_ema import benchmark_bandwidth_ema
 
@@ -92,10 +91,6 @@ def main():
     r2 = benchmark_pilot_prefetch(device_str)
     results["suites"]["pilot_expert_prefetch"] = r2
 
-    # Suite 3: LFRU Eviction & Hysteresis
-    r3 = benchmark_lfru_vs_lru(device_str)
-    results["suites"]["lfru_eviction_hysteresis"] = r3
-
     # Suite 4: Vectorized Batch-Union Accumulation
     r4 = benchmark_batch_union(device_str)
     results["suites"]["vectorized_batch_union"] = r4
@@ -113,7 +108,6 @@ def main():
     print("=" * 80)
     print(f"   1. Routing Pinning Hit Gain     : +{r1['hit_rate_improvement_pct']}% (Turn 0: +{r1['warm_initial_hit_rate_pct'] - r1['cold_initial_hit_rate_pct']}%)")
     print(f"   2. PILOT Prefetch DMA Hiding    : {r2['latency_hiding_pct']}% hidden (Speedup: {r2['speedup_x']}x)")
-    print(f"   3. LFRU Thrashing Reduction     : {r3['thrashing_reduction_pct']}% fewer evictions")
     print(f"   4. Vectorized Batch-Union Speed : Up to {r4['max_speedup_x']}x vs Python loop")
     print(f"   5. Dispatch Stability Gain      : +{r5['stability_gain_pct']}% thrash reduction")
     print("=" * 80)

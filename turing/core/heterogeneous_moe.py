@@ -5,6 +5,7 @@ model calibrated on the machine (BandwidthAdaptiveDecider). HeterogeneousMoERunn
 """
 
 import time
+from collections import Counter
 from typing import Dict, Tuple, Optional, Any
 import torch
 import torch.nn as nn
@@ -177,6 +178,7 @@ class HeterogeneousMoERunner(nn.Module):
                              f"[{host_bank.hidden_dim}, {host_bank.ffn_dim}]")
         self.host_bank, self.cache, self.decider = host_bank, cache, decider
         self.top_k, self.norm_topk_prob, self.act = top_k, norm_topk_prob, act
+        self.totals = Counter()  # dispatch counts summed over every call made through OffloadedMoE
 
     @classmethod
     def from_model(cls, model: nn.Module, cache: GPULRUExpertCache, decider: BandwidthAdaptiveDecider,
@@ -185,6 +187,14 @@ class HeterogeneousMoERunner(nn.Module):
         cfg = model.config
         return cls(HostExpertBank.from_model(model, pin_memory), cache, decider, cfg.num_experts_per_tok,
                    cfg.norm_topk_prob, activation(cfg.hidden_act))
+
+    def attach(self, model: nn.Module) -> Dict[int, nn.Module]:
+        """Makes model run its MoE layers through this runner: each offloaded layer's mlp becomes an OffloadedMoE.
+        Returns {layer index: the module replaced}. Move the model to the device afterwards: the experts stay here."""
+        old = {}
+        for i in self.host_bank.layers:
+            old[i], model.layers[i].mlp = model.layers[i].mlp, OffloadedMoE(self, i)
+        return old
 
     def _mlp(self, x, gate, up, down):
         """Gated MLP with weights in slot layout: gate, up [H, F], down [F, H]."""
@@ -223,3 +233,17 @@ class HeterogeneousMoERunner(nn.Module):
                 stats["host_executed"] += 1
             out.index_add_(0, token, (y.to(x.device) * weights[token, slot, None]).to(out.dtype))
         return out.view(shape), stats
+
+
+class OffloadedMoE(nn.Module):
+    """Stands in for layer layer_idx's SparseMoE: runs it through a HeterogeneousMoERunner and adds each call's
+    dispatch counts to runner.totals. Has no parameters of its own (the runner's bank and cache hold the weights)."""
+
+    def __init__(self, runner: HeterogeneousMoERunner, layer_idx: int):
+        super().__init__()
+        self.runner, self.layer_idx = runner, layer_idx
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out, stats = self.runner.route_and_execute(x, self.layer_idx)
+        self.runner.totals.update(stats)
+        return out

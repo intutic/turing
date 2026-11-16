@@ -72,6 +72,27 @@ def test_prefetcher_loads_real_weights_from_the_bank():
     assert torch.equal(cache.slot_gate_weights[slot], gate) and torch.equal(cache.slot_down_weights[slot], down)
 
 
+@torch.no_grad()
+def test_attached_runner_reproduces_the_whole_model():
+    model = _model("olmoe")
+    ids = torch.randint(0, model.config.vocab_size, (1, 12), generator=torch.Generator().manual_seed(2))
+    ref_prefill, past = model(ids[:, :8])
+    ref_steps = [model(ids[:, t:t + 1], past_key_values=past)[0] for t in range(8, 12)]
+    decider = BandwidthAdaptiveDecider(CPU, pcie_bandwidth_gb_s=1e9, cpu_throughput_gflops=1.0,
+                                       gpu_throughput_gflops=1e9)
+    runner = _runner(model, num_slots=12, decider=decider)  # 16 (layer, expert) keys: some evicted
+    old = runner.attach(model)
+    assert sorted(old) == list(range(model.config.num_layers)) and not any(
+        "experts" in n or "gate_up" in n for n, _ in model.named_parameters())
+    prefill, past = model(ids[:, :8])
+    torch.testing.assert_close(prefill, ref_prefill, atol=1e-5, rtol=0)
+    for t, ref in zip(range(8, 12), ref_steps):
+        torch.testing.assert_close(model(ids[:, t:t + 1], past_key_values=past)[0], ref, atol=1e-5, rtol=0)
+    tot = runner.totals
+    assert tot["experts"] == tot["cache_hits"] + tot["loaded_to_device"] + tot["host_executed"] > 0
+    assert tot["cache_hits"] > 0 and tot["loaded_to_device"] > 0
+
+
 def test_bank_rejects_dense_models():
     with pytest.raises(ValueError):
         HostExpertBank.from_model(_model("llama"))
