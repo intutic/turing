@@ -1,0 +1,46 @@
+{
+  "script": "scripts/benchmark_cpp_engine.py",
+  "model": {
+    "hidden_dim": 1024,
+    "ffn_dim": 2816,
+    "num_layers": 8,
+    "num_heads": 16,
+    "num_kv_heads": 16,
+    "vocab_size": 8192,
+    "max_position_embeddings": 2048,
+    "dtype": "F16 GGUF (synthetic, seed 0), fp32 weights in the engine"
+  },
+  "env": {
+    "machine": "x86_64",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "processor": "x86_64",
+    "cpu": "x86_64",
+    "compiler_flags": "-std=c++20 -O3 -flto -fvisibility=hidden (+ -mavx2 -mfma -mf16c on x86_64)",
+    "threads": 1,
+    "load_average_start": 0.86669921875,
+    "load_average_end": 1.0595703125
+  },
+  "rows": [
+    {
+      "binary": "current",
+      "kv_cache_dtype": "native",
+      "prompt_tokens": 17,
+      "new_tokens": 256,
+      "n": 5,
+      "tok_s_median": 25.323718234066337,
+      "tok_s_mean": 25.310874824383706,
+      "tok_s_se": 0.060375833313058576
+    },
+    {
+      "binary": "current",
+      "kv_cache_dtype": "int8",
+      "prompt_tokens": 17,
+      "new_tokens": 256,
+      "n": 5,
+      "tok_s_median": 25.906840620306916,
+      "tok_s_mean": 25.90043855187241,
+      "tok_s_se": 0.025204264133368588
+    }
+  ],
+  "note": "tok/s = new tokens / wall time of generate (prefill of 17 tokens included), greedy; se over n runs."
+}

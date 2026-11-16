@@ -8,7 +8,7 @@
   "args": {
     "model": "HuggingFaceTB/SmolLM2-360M",
     "settings": "int8,int8_quest25",
-    "contexts": "1024,2048,4096,8192,16384,32768",
+    "contexts": "2048,4096,8192,16384,32768",
     "batches": "1,8,64",
     "steps": 32,
     "device": "cuda",
@@ -39,54 +39,57 @@
     "kv_pool_gib": null,
     "kv_pool_fraction": 0.85,
     "cuda_graphs": true,
+    "decode_attention": "kernel",
     "rope_scaling": null,
     "attention_bias": false,
-    "qk_norm": false
+    "qk_norm": false,
+    "arch": "llama",
+    "norm_type": "rms",
+    "norm_offset": 0.0,
+    "hidden_act": "silu",
+    "mlp_gated": true,
+    "mlp_bias": false,
+    "o_proj_bias": false,
+    "lm_head_bias": false,
+    "rotary_dim": null,
+    "learned_positions": false,
+    "position_offset": 0,
+    "parallel_residual": false,
+    "shared_layer_norm": false,
+    "pre_norm": true,
+    "final_norm": true,
+    "embed_scale": null,
+    "embed_proj_dim": null,
+    "sandwich_norm": false,
+    "attn_scale": null,
+    "attn_softcap": null,
+    "final_softcap": null,
+    "sliding_window": null,
+    "layer_types": null,
+    "rope_local_theta": null,
+    "rope_local_scaling": null,
+    "qk_norm_full": false,
+    "clip_qkv": null,
+    "num_experts": 0,
+    "num_experts_per_tok": 0,
+    "moe_ffn_dim": null,
+    "norm_topk_prob": true,
+    "shared_expert_ffn_dim": 0,
+    "moe_layers": null,
+    "quantization": null,
+    "activation_sparsity": 0.0
   },
   "rows": [
     {
       "setting": "int8",
-      "context": 1024,
-      "batch": 1,
-      "steps": 32,
-      "beyond_trained_context": false,
-      "tokens_per_s": 172.99085274707832,
-      "kv_cache_bytes": 23326720,
-      "fit": true,
-      "kv_pool_tokens": 882368
-    },
-    {
-      "setting": "int8",
-      "context": 1024,
-      "batch": 8,
-      "steps": 32,
-      "beyond_trained_context": false,
-      "tokens_per_s": 1045.603989407272,
-      "kv_cache_bytes": 186613760,
-      "fit": true,
-      "kv_pool_tokens": 882368
-    },
-    {
-      "setting": "int8",
-      "context": 1024,
-      "batch": 64,
-      "steps": 32,
-      "beyond_trained_context": false,
-      "tokens_per_s": 3011.3884948870086,
-      "kv_cache_bytes": 1492910080,
-      "fit": true,
-      "kv_pool_tokens": 882368
-    },
-    {
-      "setting": "int8",
       "context": 2048,
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 163.8625046929422,
+      "tokens_per_s": 164.16212801569952,
       "kv_cache_bytes": 45608960,
       "fit": true,
-      "kv_pool_tokens": 882368
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
@@ -94,10 +97,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 885.8703104092835,
+      "tokens_per_s": 889.4063071853711,
       "kv_cache_bytes": 364871680,
       "fit": true,
-      "kv_pool_tokens": 882368
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
@@ -105,10 +108,10 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 1742.1765482190997,
+      "tokens_per_s": 1719.521986421885,
       "kv_cache_bytes": 2918973440,
       "fit": true,
-      "kv_pool_tokens": 882368
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
@@ -116,10 +119,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 147.87405058768698,
+      "tokens_per_s": 154.51798392574375,
       "kv_cache_bytes": 90173440,
       "fit": true,
-      "kv_pool_tokens": 882368
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
@@ -127,10 +130,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 611.4535817790334,
+      "tokens_per_s": 609.9459720106929,
       "kv_cache_bytes": 721387520,
       "fit": true,
-      "kv_pool_tokens": 882368
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
@@ -138,10 +141,10 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 953.7918790904232,
+      "tokens_per_s": 940.806960439824,
       "kv_cache_bytes": 5771100160,
       "fit": true,
-      "kv_pool_tokens": 882368
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
@@ -149,10 +152,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 123.59220130535756,
+      "tokens_per_s": 125.44892289080074,
       "kv_cache_bytes": 179302400,
       "fit": true,
-      "kv_pool_tokens": 882368
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
@@ -160,10 +163,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 387.43381837714026,
+      "tokens_per_s": 381.0508809040379,
       "kv_cache_bytes": 1434419200,
       "fit": true,
-      "kv_pool_tokens": 882368
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
@@ -171,107 +174,30 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 502.50050101150657,
+      "tokens_per_s": 490.1377884588657,
       "kv_cache_bytes": 11475353600,
       "fit": true,
-      "kv_pool_tokens": 882368
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
       "context": 16384,
       "batch": 1,
-      "steps": 32,
-      "beyond_trained_context": true,
-      "tokens_per_s": 102.16899704085637,
-      "kv_cache_bytes": 357560320,
-      "fit": true,
-      "kv_pool_tokens": 882368
-    },
-    {
-      "setting": "int8",
-      "context": 16384,
-      "batch": 8,
-      "steps": 32,
-      "beyond_trained_context": true,
-      "tokens_per_s": 217.20121141895706,
-      "kv_cache_bytes": 2860482560,
-      "fit": true,
-      "kv_pool_tokens": 882368
-    },
-    {
-      "setting": "int8",
-      "context": 16384,
-      "batch": 64,
       "steps": 32,
       "beyond_trained_context": true,
       "fit": false,
-      "limit": "kv pool full",
-      "kv_pool_tokens": 882368
+      "limit": "cuda out of memory",
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8",
       "context": 32768,
       "batch": 1,
-      "steps": 32,
-      "beyond_trained_context": true,
-      "tokens_per_s": 74.66537510528904,
-      "kv_cache_bytes": 714076160,
-      "fit": true,
-      "kv_pool_tokens": 882368
-    },
-    {
-      "setting": "int8",
-      "context": 32768,
-      "batch": 8,
-      "steps": 32,
-      "beyond_trained_context": true,
-      "tokens_per_s": 116.46452587681513,
-      "kv_cache_bytes": 5712609280,
-      "fit": true,
-      "kv_pool_tokens": 882368
-    },
-    {
-      "setting": "int8",
-      "context": 32768,
-      "batch": 64,
       "steps": 32,
       "beyond_trained_context": true,
       "fit": false,
-      "limit": "kv pool full",
-      "kv_pool_tokens": 882368
-    },
-    {
-      "setting": "int8_quest25",
-      "context": 1024,
-      "batch": 1,
-      "steps": 32,
-      "beyond_trained_context": false,
-      "tokens_per_s": 15.451402758186955,
-      "kv_cache_bytes": 23326720,
-      "fit": true,
-      "kv_pool_tokens": 783456
-    },
-    {
-      "setting": "int8_quest25",
-      "context": 1024,
-      "batch": 8,
-      "steps": 32,
-      "beyond_trained_context": false,
-      "tokens_per_s": 120.60537117927309,
-      "kv_cache_bytes": 186613760,
-      "fit": true,
-      "kv_pool_tokens": 783456
-    },
-    {
-      "setting": "int8_quest25",
-      "context": 1024,
-      "batch": 64,
-      "steps": 32,
-      "beyond_trained_context": false,
-      "tokens_per_s": 939.7254783093884,
-      "kv_cache_bytes": 1492910080,
-      "fit": true,
-      "kv_pool_tokens": 783456
+      "limit": "cuda out of memory",
+      "kv_pool_tokens": 883616
     },
     {
       "setting": "int8_quest25",
@@ -279,10 +205,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 15.500501027785273,
+      "tokens_per_s": 127.15573626485305,
       "kv_cache_bytes": 45608960,
       "fit": true,
-      "kv_pool_tokens": 783456
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -290,10 +216,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 120.17534501040993,
+      "tokens_per_s": 566.5390724037956,
       "kv_cache_bytes": 364871680,
       "fit": true,
-      "kv_pool_tokens": 783456
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -301,10 +227,10 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 940.5062941557509,
+      "tokens_per_s": 686.0234792526888,
       "kv_cache_bytes": 2918973440,
       "fit": true,
-      "kv_pool_tokens": 783456
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -312,10 +238,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 15.523349702819504,
+      "tokens_per_s": 124.94808651041222,
       "kv_cache_bytes": 90173440,
       "fit": true,
-      "kv_pool_tokens": 783456
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -323,10 +249,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 120.41043316615215,
+      "tokens_per_s": 544.1999450461713,
       "kv_cache_bytes": 721387520,
       "fit": true,
-      "kv_pool_tokens": 783456
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -334,10 +260,10 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 939.9081164184086,
+      "tokens_per_s": 668.2071676104962,
       "kv_cache_bytes": 5771100160,
       "fit": true,
-      "kv_pool_tokens": 783456
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -345,10 +271,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 15.693566025192872,
+      "tokens_per_s": 109.69897599981779,
       "kv_cache_bytes": 179302400,
       "fit": true,
-      "kv_pool_tokens": 783456
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -356,10 +282,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 119.67793799224646,
+      "tokens_per_s": 335.66148048791723,
       "kv_cache_bytes": 1434419200,
       "fit": true,
-      "kv_pool_tokens": 783456
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -367,10 +293,10 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 599.8919748628638,
+      "tokens_per_s": 315.50517558024774,
       "kv_cache_bytes": 11475353600,
       "fit": true,
-      "kv_pool_tokens": 783456
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -378,31 +304,9 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": true,
-      "tokens_per_s": 15.572576358794155,
-      "kv_cache_bytes": 357560320,
-      "fit": true,
-      "kv_pool_tokens": 783456
-    },
-    {
-      "setting": "int8_quest25",
-      "context": 16384,
-      "batch": 8,
-      "steps": 32,
-      "beyond_trained_context": true,
-      "tokens_per_s": 119.26371881639469,
-      "kv_cache_bytes": 2860482560,
-      "fit": true,
-      "kv_pool_tokens": 783456
-    },
-    {
-      "setting": "int8_quest25",
-      "context": 16384,
-      "batch": 64,
-      "steps": 32,
-      "beyond_trained_context": true,
       "fit": false,
-      "limit": "kv pool full",
-      "kv_pool_tokens": 783456
+      "limit": "cuda out of memory",
+      "kv_pool_tokens": 784448
     },
     {
       "setting": "int8_quest25",
@@ -410,31 +314,9 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": true,
-      "tokens_per_s": 15.644954138268782,
-      "kv_cache_bytes": 714076160,
-      "fit": true,
-      "kv_pool_tokens": 783456
-    },
-    {
-      "setting": "int8_quest25",
-      "context": 32768,
-      "batch": 8,
-      "steps": 32,
-      "beyond_trained_context": true,
-      "tokens_per_s": 120.03095827218827,
-      "kv_cache_bytes": 5712609280,
-      "fit": true,
-      "kv_pool_tokens": 783456
-    },
-    {
-      "setting": "int8_quest25",
-      "context": 32768,
-      "batch": 64,
-      "steps": 32,
-      "beyond_trained_context": true,
       "fit": false,
-      "limit": "kv pool full",
-      "kv_pool_tokens": 783456
+      "limit": "cuda out of memory",
+      "kv_pool_tokens": 784448
     }
   ]
 }
