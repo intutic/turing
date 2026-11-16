@@ -91,3 +91,12 @@ def test_quantize_model_on_mps(method):
     lin = model.layers[0].self_attn.q_proj
     assert isinstance(lin, QuantLinear) and lin.qweight.device.type == "mps"
     assert model(torch.randint(0, 128, (1, 8), device="mps"))[0].isfinite().all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for the Triton dequantize kernel")
+def test_triton_dequantize_matches_reference():
+    from turing.kernels.triton_w4a16 import dequantize_cuda
+    codes, scales, zeros = rtn_quantize(torch.randn(384, 512))
+    q, s, z = pack(codes).cuda(), scales.cuda(), zeros.cuda()
+    out = torch.empty(384, 512, device="cuda", dtype=torch.float16)
+    torch.testing.assert_close(dequantize_cuda(q, s, z, out), dequantize(q, s, z, torch.float16), rtol=0, atol=1e-3)

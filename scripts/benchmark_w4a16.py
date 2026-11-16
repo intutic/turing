@@ -16,7 +16,7 @@ import statistics
 import torch
 import torch.nn.functional as F
 
-from turing.kernels.triton_w4a16 import w4a16_gemm
+from turing.kernels.triton_w4a16 import dequantize_cuda, w4a16_gemm
 from turing.models.quant import dequantize, pack, rtn_quantize
 
 
@@ -54,7 +54,7 @@ def main():
             r = dict(K=K, N=N, M=M,
                      int4_kernel_us=timed(lambda: w4a16_gemm(x, q, s, z), a.iters),
                      fp16_cublas_us=timed(lambda: F.linear(x, w16), a.iters),
-                     dequant_cublas_us=timed(lambda: F.linear(x, dequantize(q, s, z, torch.float16, out=scratch)), a.iters))
+                     dequant_cublas_us=timed(lambda: F.linear(x, dequantize_cuda(q, s, z, scratch)), a.iters))
             print(json.dumps(r), flush=True)
             rows.append(r)
     env = dict(torch=torch.__version__, gpu=torch.cuda.get_device_name(0), platform=platform.platform())

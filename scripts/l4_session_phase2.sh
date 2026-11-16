@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Second pass after l4_session.sh: steps that need code changed during the run (Triton dequantize kernel) and steps
+# that failed for a missing package. Same status file and logs.
+set -u
+cd "$(dirname "$0")/.."
+export PATH="$HOME/.local/bin:$PATH"
+python() { python3 "$@"; }
+step() { local name=$1; shift; echo "start $name $(date -u +%H:%M:%S)" >> ~/l4_status.txt; "$@" > ~/l4_logs/$name.log 2>&1;
+         echo "end $name exit=$? $(date -u +%H:%M:%S)" >> ~/l4_status.txt; }
+PARITY="gpt2,facebook/opt-125m,facebook/opt-350m,EleutherAI/pythia-160m,HuggingFaceTB/SmolLM2-135M,unsloth/gemma-3-270m,Qwen/Qwen2.5-0.5B,Qwen/Qwen3-0.6B,unsloth/Llama-3.2-1B,deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B,unsloth/gemma-2-2b,microsoft/phi-2,microsoft/Phi-3-mini-4k-instruct,allenai/OLMoE-1B-7B-0924"
+step build python setup.py build_ext --inplace
+step w4a16_tests python -W error -m pytest -q -p no:cacheprovider tests/test_w4a16.py tests/test_activation_sparsity.py
+step w4a16_crossover2 python scripts/benchmark_w4a16.py
+step parity2 python scripts/eval_parity.py --device cuda --dtype bf16 --models "$PARITY"
+step formats_1p7b2 python scripts/benchmark_weight_formats.py --model HuggingFaceTB/SmolLM2-1.7B --out results_weight_formats_cuda.json
+step formats_qwen2 python scripts/benchmark_weight_formats.py --model Qwen/Qwen2.5-1.5B --out results_weight_formats_qwen_cuda.json
+echo "PHASE2 DONE $(date -u +%H:%M:%S)" >> ~/l4_status.txt

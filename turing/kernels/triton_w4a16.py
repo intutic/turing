@@ -69,3 +69,30 @@ def w4a16_gemm(x: torch.Tensor, qweight: torch.Tensor, scales: torch.Tensor, zer
                         x.stride(0), x.stride(1), qweight.stride(0), qweight.stride(1),
                         scales.stride(0), scales.stride(1), y.stride(0), y.stride(1), GROUP=group)
     return y
+
+
+if HAS_TRITON:
+    @triton.jit
+    def _dequant_kernel(W, S, Z, OUT, N, K, s_wn, s_sn, s_on, GROUP: tl.constexpr, BLOCK_B: tl.constexpr):
+        """One program = one output row block of packed bytes: OUT[n, 2b], OUT[n, 2b+1] = (nibbles - zero) * scale."""
+        n = tl.program_id(0)
+        offs_b = tl.program_id(1) * BLOCK_B + tl.arange(0, BLOCK_B)
+        mask = offs_b < K // 2
+        b = tl.load(W + n * s_wn + offs_b, mask=mask, other=0)
+        g = (2 * offs_b) // GROUP
+        sc = tl.load(S + n * s_sn + g, mask=mask, other=0.0).to(tl.float32)
+        zp = tl.load(Z + n * s_sn + g, mask=mask, other=0).to(tl.float32)
+        lo = ((b & 0x0F).to(tl.float32) - zp) * sc
+        hi = (((b >> 4) & 0x0F).to(tl.float32) - zp) * sc
+        tl.store(OUT + n * s_on + 2 * offs_b, lo.to(OUT.dtype.element_ty), mask=mask)
+        tl.store(OUT + n * s_on + 2 * offs_b + 1, hi.to(OUT.dtype.element_ty), mask=mask)
+
+
+def dequantize_cuda(qweight: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor, out: torch.Tensor,
+                    group: int = 64) -> torch.Tensor:
+    """Packed int4 [N, K / 2] -> out [N, K] (fp16/bf16) in one memory-bound pass (QuantLinear's large-M path)."""
+    N, Kh = qweight.shape
+    BLOCK_B = 512
+    _dequant_kernel[(N, triton.cdiv(Kh, BLOCK_B))](qweight, scales, zeros, out, N, Kh * 2, qweight.stride(0),
+                                                   scales.stride(0), out.stride(0), GROUP=group, BLOCK_B=BLOCK_B)
+    return out

@@ -153,9 +153,13 @@ class QuantLinear(nn.Module):
                     y = y + self.bias
                 return y.view(*shape[:-1], self.out_features)
         n = self.out_features * self.in_features
-        w = dequantize(self.qweight, self.scales, self.zeros, x.dtype,
-                       out=_scratch(n, x.device, x.dtype).view(self.out_features, self.in_features)) \
-            if x.is_cuda else self.dequantized(x.dtype)
+        if x.is_cuda:
+            from ..kernels.triton_w4a16 import HAS_TRITON, dequantize_cuda
+            buf = _scratch(n, x.device, x.dtype).view(self.out_features, self.in_features)
+            w = dequantize_cuda(self.qweight, self.scales, self.zeros, buf, self.group) if HAS_TRITON \
+                else dequantize(self.qweight, self.scales, self.zeros, x.dtype, out=buf)
+        else:
+            w = self.dequantized(x.dtype)
         return F.linear(x, w, self.bias)
 
     def extra_repr(self) -> str:
