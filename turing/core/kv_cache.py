@@ -316,6 +316,19 @@ class KVPool:
         phys = self.page_table[meta[2], :width].long()
         return width, max(keep), meta[0], meta[1], phys
 
+    def selection_plan_device(self, slots: torch.Tensor, starts: torch.Tensor, width: int, budget: float,
+                              min_tokens: int) -> tuple:
+        """selection_plan with static shapes and no host values, for a CUDA graph: the table width W is fixed (a
+        context bucket) and K = the most pages any row can keep at that width. starts [B] are lengths before this
+        step's append."""
+        lengths = starts.long() + 1
+        n_pages = (lengths + PAGE - 1) // PAGE
+        quota = torch.clamp(torch.ceil(budget * n_pages.float()).long(), min=2)
+        keep = torch.where(lengths < min_tokens, n_pages, torch.minimum(n_pages, quota))
+        k_max = min(width, max(math.ceil(budget * width), 2, -(-min_tokens // PAGE)))
+        phys = self.page_table[slots.long(), :width].long()
+        return width, k_max, n_pages, keep, phys
+
     def select_pages_planned(self, layer: int, q: torch.Tensor, plan: tuple) -> torch.Tensor:
         """Quest for a batch: q [B, H, 1, D] -> logical page indices [B, Hkv, K], -1 = none. Per row and KV head: the
         first and the last page, then the pages with the highest bound sum_d max(q_d kmax_d, q_d kmin_d) (max over

@@ -151,6 +151,7 @@ class DecodeStep:
         self.pool, self.slots, self.starts_t, self.caches, self.starts = pool, slots, starts_t, caches, starts
         self._freqs = {}  # per RoPE configuration (Gemma 3's local and global layers differ)
         self.quest_plan = None
+        self.quest_width: Optional[int] = None  # in a CUDA graph: the context bucket's page-table width for Quest
 
     @classmethod
     def of(cls, caches: List[KVCache], device) -> "DecodeStep":
@@ -317,12 +318,17 @@ class SubspaceAttention(nn.Module):
             out = self._attend(q, k_all, v_all, mask, causal=False)
             return out.transpose(1, 2).reshape(batch, 1, self.num_heads * self.head_dim)
         sel = None
-        if (self.window is None and cfg.kv_page_budget < 1.0 and pool.track_pages
-                and max(step.starts) + 1 >= cfg.kv_select_min_tokens):
-            if step.quest_plan is None:  # once per step: every layer shares the rows' page counts and pages
-                step.quest_plan = pool.selection_plan(step.caches, [n + 1 for n in step.starts],
-                                                      cfg.kv_page_budget, cfg.kv_select_min_tokens)
-            sel = pool.select_pages_planned(layer, q, step.quest_plan)
+        if self.window is None and cfg.kv_page_budget < 1.0 and pool.track_pages:
+            if step.quest_width is not None:  # CUDA graph: static shapes, all on the device
+                if step.quest_plan is None:
+                    step.quest_plan = pool.selection_plan_device(step.slots, step.starts_t, step.quest_width,
+                                                                 cfg.kv_page_budget, cfg.kv_select_min_tokens)
+                sel = pool.select_pages_planned(layer, q, step.quest_plan)
+            elif step.starts is not None and max(step.starts) + 1 >= cfg.kv_select_min_tokens:
+                if step.quest_plan is None:  # once per step: every layer shares the rows' page counts and pages
+                    step.quest_plan = pool.selection_plan(step.caches, [n + 1 for n in step.starts],
+                                                          cfg.kv_page_budget, cfg.kv_select_min_tokens)
+                sel = pool.select_pages_planned(layer, q, step.quest_plan)
         out = triton_pool_decode(pool, layer, q, k, v, step.slots, step.starts_t, sel, scale=self.scale,
                                  window=self.window or 0, softcap=self.softcap or 0.0)
         return out.transpose(1, 2).reshape(batch, 1, self.num_heads * self.head_dim)
@@ -378,29 +384,37 @@ class DecodeGraphs:
     """CUDA graphs of one decode step through SubspaceCausalLM._body, one per batch bucket. A step is copied into the
     graph's static buffers (token ids, page-table slots, lengths; padding rows point at the pool's scratch page) and
     replayed, so a step costs a few copies instead of every kernel launch. Rebuilt when the pool or its page table
-    is replaced. Not used for Quest selection, LoRA tenants, or off CUDA."""
+    is replaced. With Quest (kv_page_budget < 1), steps whose longest row has reached kv_select_min_tokens use graphs
+    captured per context bucket (page-table width), whose page selection runs on the device with static shapes. Not
+    used for LoRA steps, MoE models, or off CUDA."""
 
     BUCKETS = (1, 2, 4, 8, 16, 32, 64, 128)
+    CONTEXT_BUCKETS = tuple(2 ** i for i in range(9, 14))  # page-table widths for Quest graphs: 8K .. 128K tokens
 
     def __init__(self):
         # holds no reference to its model (the model passes itself in): no model <-> graphs cycle, so a dropped model
         # frees its KV pool at once, and a deep-copied model gets graphs of its own
-        self.graphs = {}  # bucket -> (key, graph, ids, rows, logits)
+        self.graphs = {}  # (batch bucket, Quest width or None) -> (key, graph, ids, rows, logits)
 
     def eligible(self, model: "SubspaceCausalLM", caches: List[KVCache], lora: bool) -> bool:
         cfg, pool = model.config, caches[0].pool
         return (cfg.cuda_graphs and pool.device.type == "cuda" and len(caches) <= self.BUCKETS[-1]
-                and not lora and not pool.track_pages and not torch.is_grad_enabled()
+                and not lora and not torch.is_grad_enabled()
+                and (not pool.track_pages or max(c.length for c in caches) + 1 <= self.CONTEXT_BUCKETS[-1] * 16)
                 and cfg.num_experts == 0  # MoE routing picks experts on the host
                 and pool_decode_supported(pool, model.embed_tokens.weight))
 
     def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, caches: List[KVCache]) -> torch.Tensor:
-        B, pool = len(caches), caches[0].pool
+        B, pool, cfg = len(caches), caches[0].pool, model.config
         bucket = next(b for b in self.BUCKETS if b >= B)
+        width = None
+        longest = max(c.length for c in caches) + 1
+        if pool.track_pages and cfg.kv_page_budget < 1.0 and longest >= cfg.kv_select_min_tokens:
+            width = next(w for w in self.CONTEXT_BUCKETS if w * 16 >= longest)
         key = (id(pool), pool.page_table.data_ptr())
-        entry = self.graphs.get(bucket)
+        entry = self.graphs.get((bucket, width))
         if entry is None or entry[0] != key:
-            entry = self._capture(model, bucket, pool, key)
+            entry = self._capture(model, bucket, pool, key, width)
         _, graph, ids, rows, logits = entry
         scratch = pool.scratch_slot()
         host = torch.tensor([[c.slot for c in caches] + [scratch] * (bucket - B),
@@ -410,26 +424,27 @@ class DecodeGraphs:
         graph.replay()
         return logits[:B].clone()  # the next replay overwrites the static output
 
-    def _capture(self, model: "SubspaceCausalLM", bucket: int, pool: KVPool, key):
+    def _capture(self, model: "SubspaceCausalLM", bucket: int, pool: KVPool, key, width: Optional[int] = None):
         device = pool.device
         torch.cuda.empty_cache()  # give capture the memory a long prefill left cached (rare: once per bucket and pool)
         ids = torch.zeros(bucket, 1, dtype=torch.long, device=device)
         rows = torch.zeros(2, bucket, dtype=torch.int32, device=device)
         rows[0] = pool.scratch_slot()
         step = DecodeStep(pool, rows[0], rows[1])
+        step.quest_width = width
         side = torch.cuda.Stream(device)
         side.wait_stream(torch.cuda.current_stream(device))
         with torch.cuda.stream(side):  # warm-up (Triton compilation, allocator) writes only the scratch page
             for _ in range(2):
-                step._freqs = {}
+                step._freqs, step.quest_plan = {}, None
                 model._body(ids, rows[1], None, step)
         torch.cuda.current_stream(device).wait_stream(side)
         graph = torch.cuda.CUDAGraph()
-        step._freqs = {}
+        step._freqs, step.quest_plan = {}, None
         with torch.cuda.graph(graph):
             logits = model._body(ids, rows[1], None, step)
-        self.graphs[bucket] = (key, graph, ids, rows, logits)
-        return self.graphs[bucket]
+        self.graphs[(bucket, width)] = (key, graph, ids, rows, logits)
+        return self.graphs[(bucket, width)]
 
 
 class SubspaceCausalLM(nn.Module):

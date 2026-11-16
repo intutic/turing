@@ -139,3 +139,28 @@ def test_fused_decode_window_softcap_and_scale_match_reference(window, softcap, 
             s[..., : max(0, T + 1 - window)] = float("-inf")
         ref = torch.softmax(s, -1) @ vr
         torch.testing.assert_close(out[b:b + 1], ref, atol=1e-3, rtol=0)
+
+
+@torch.no_grad()
+@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8"])
+def test_quest_cuda_graph_decode_matches_eager_quest(kv_cache_dtype):
+    """Quest inside a CUDA graph (static page-table width, selection on the device) picks the same pages as eager
+    Quest, so the logits agree."""
+    import copy
+    from tests.test_hf_parity import _tiny_llama
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    base = RealHuggingFaceLoader.convert_hf_model(_tiny_llama(), sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
+    base.config.kv_cache_dtype, base.config.kv_pool_gib = kv_cache_dtype, 0.05
+    base.config.kv_page_budget, base.config.kv_select_min_tokens = 0.25, 48
+    g = torch.Generator().manual_seed(7)
+    prompts = [torch.randint(0, 128, (1, n), generator=g).cuda() for n in (20, 70, 120)]  # one row below the threshold
+    nxt = torch.randint(0, 128, (3, 5), generator=g).cuda()
+    outs = []
+    for graphs in (False, True):
+        model = copy.deepcopy(base).cuda()
+        model.config.cuda_graphs = graphs
+        caches = [model(p)[1] for p in prompts]
+        outs.append([model(nxt[:, t:t + 1], past_key_values=caches)[0] for t in range(5)])
+        assert any(w is not None for _, w in model._graphs.graphs) == graphs
+    for eager, graphed in zip(*outs):
+        torch.testing.assert_close(graphed, eager, atol=1e-3, rtol=0)
