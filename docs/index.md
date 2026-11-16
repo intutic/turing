@@ -1,71 +1,71 @@
 # Turing Engine
 
-**HuggingFace-exact inference for Llama-family models, with an int8 KV cache that halves cache memory at no measured quality cost.**
+**An inference server that reproduces HuggingFace's logits for 16 model families, with a paged int8/int4 KV cache, OpenAI, Anthropic and Ollama APIs in one process, and a standalone C++ engine.**
 
-[![Release](https://img.shields.io/badge/Release-v1.7.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.7.0)
-
-
-
-
-
+[![Release](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](https://github.com/intutic/turing/blob/master/CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests](https://img.shields.io/badge/Tests-383%20%2818%20need%20CUDA%29-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-667%20%2849%20need%20CUDA%29-brightgreen.svg)]()
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
 ---
 
-## ⚡ What is Turing Engine?
+## What is Turing Engine?
 
-Turing Engine is an inference and serving runtime for NVIDIA GPUs and Apple Silicon Macs. By default it reproduces the HuggingFace model's logits exactly; every lossy option (KV quantization, page selection, FFN pruning) is opt-in, and the measured ones are in [benchmarks](benchmarks.md). Real-weight runs so far cover SmolLM2 135M–1.7B (Llama architecture); no MoE checkpoint and no model larger than 1.7B has been run end to end, and the serving path keeps fp16 weights, so a 70B model does not fit on one 24 GB GPU.
-
----
-
-## 🚀 Core Technologies
-
-**Measured on real weights** ([benchmarks](benchmarks.md)):
-
-* **Exact HuggingFace parity** for Llama-architecture checkpoints (mean NLL difference below 0.00001 on SmolLM2 135M–1.7B in fp32).
-* **int8 / int4 KV cache with fused batched decode**: int8 halves the cache (−48% at head_dim 128) with no measurable quality cost; on CUDA one fused append + attention kernel per layer serves every running request (1,274 tok/s vs 833 for HuggingFace transformers, SmolLM2-360M, batch 64, 2K context, NVIDIA L4).
-* **Opt-in FFN channel pruning**: smaller matrix multiplies, but +6.8 to +15.8 nats NLL at 50% on SmolLM2, so it is off by default.
-
-**Implemented, not measured on a model** (unit tests and random-data micro-benchmarks only; see the [claims audit](claims-audit.md) for why earlier numbers were removed):
-
-* **Serving**: OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`) and Ollama (`/api/*`) endpoints in one server; JSON-schema prompting, truncated-JSON repair and tool-call parsing; token-budget admission control with three priority lanes; a gate that turns speculation off at 4+ active streams. `/v1/embeddings`, `/v1/rerank` and `/v1/extract` are placeholders (random embeddings, word-overlap rerank, substring extract).
-* **Loading**: native GGUF reader (`Q4_0`, `Q4_K_M`, `Q8_0`, `FP16`), safetensors mmap with readahead, `io_uring` and GPUDirect Storage paths.
-* **Turing DSL**: `@turing.chain`, `fork()`, `join()`, `select()`, `constrain()` (branches currently re-prefill the shared prefix).
-* **Standalone C++20 binary (`turing-cli`)** with an embedded HTTP server.
-* **Experimental kernels and components**: paged and split-K decode GEMV, linear-recurrence and hybrid anchor attention, latent (SVD INT8) decode, k-slot KV pooling, Matryoshka draft heads, multi-turn `clean_base` lineage, cross-model KV transfer, MoE expert cache (LFRU, routing history, PILOT prefetch), tensor hashing, reasoning-tag scanner. Some are slower than the baseline they replace.
-* **Tensor and pipeline parallel building blocks** (multi-GPU serving not validated).
-* **Hardware dispatch**: CUDA (Triton), Apple Silicon (MPS) and CPU (AVX2/NEON). AMD ROCm, Intel XPU and Vulkan have dispatch code but no recorded run.
+An inference and serving runtime for NVIDIA GPUs, Apple Silicon Macs and CPUs. It loads HuggingFace checkpoints,
+llama.cpp GGUF files and its own 4-bit `.tgate4` directories, and by default reproduces the HuggingFace model's
+logits; every lossy option (KV quantization, Quest page selection, 4-bit weights, activation sparsity, FFN pruning)
+is opt-in.
 
 ---
 
-## ⏱️ Quickstart in 30 Seconds
+## Measured
+
+Raw results are committed as `results_*.json`; the [benchmarks](benchmarks.md) page has the tables.
+
+* **HuggingFace parity on real weights**: SmolLM2 135M–1.7B score the same mean NLL as HuggingFace to five decimals.
+* **GGUF parity with llama.cpp**: 13 real GGUF files across 12 families agree with llama.cpp on the top-1 token at
+  97–100% of 64 positions (`results_gguf_parity_mps.json`).
+* **KV cache**: int8 costs no measurable NLL on SmolLM2 135M–1.7B, int4 about +0.02 nats; on an NVIDIA L4 the
+  v1.7.0 engine decoded SmolLM2-360M at 1,715 tok/s at batch 64 and 2K context, against 827 for HuggingFace
+  transformers.
+* **C++ engine**: 7.4× the tokens per second of the previous release's binary on a synthetic model
+  (`results_cpp_engine_mps.json`).
+
+## Implemented, not yet measured
+
+* **Engine**: automatic prefix caching, prompt-lookup speculative decoding, multi-LoRA serving, CUDA graphs with
+  Quest page selection, batched decode on MPS and CPU.
+* **Weights**: 4-bit GPTQ/RTN (`turing convert`) and TEAL-style activation sparsity; their quality is measured by
+  `scripts/eval_kv_quality.py` and their speed by `scripts/benchmark_weight_formats.py`, but no run is committed yet.
+* **API**: chat templates, tools, reasoning budgets, JSON schema by constrained decoding (llguidance), embeddings,
+  rerank, extraction, Ollama `/api/pull`, llm-d KV events, Prometheus metrics.
+* **Distributed**: tensor and pipeline parallelism and prefill/decode disaggregation, tested as CPU processes only.
+* **Comparison with other engines**: none yet. `scripts/benchmark_e2e_generation.py` runs Turing and vLLM on the
+  same prompts; its GPU run is pending.
+
+---
+
+## Quickstart
 
 ```bash
-# 1. Install Turing Engine
-pip install turing-engine
-
-# 2. Chat in your terminal with real weights
-turing chat --model deepseek-r1-1.5b
-
-# 3. Launch an OpenAI-compatible serving server on port 8000
-turing serve --model deepseek-r1-7b --port 8000
+git clone https://github.com/intutic/turing.git && cd turing && pip install -e .
+turing chat --model smollm2
+turing serve --model Qwen/Qwen2.5-0.5B-Instruct --port 8000
 ```
 
 ---
 
-## 📖 Navigation
+## Navigation
 
-* [🌐 Technical Comparison: vs vLLM, SGLang, Ollama & llama.cpp](comparison.md)
-* [⚡ Quickstart Guide](quickstart.md)
-* [🌐 Supported Models & Hardware Setup](models_and_hardware.md)
-* [🚀 Serving & API Reference](serving.md)
-* [☸️ Kubernetes & llm-d Integration](llmd-integration.md)
-* [🧠 Architecture Deep-Dive](architecture.md)
-* [🔌 Ecosystem Integrations](integrations.md)
-* [📊 Empirical Benchmarks](benchmarks.md)
-* [🔍 Claims Audit](claims-audit.md)
-* [📜 Licensing Terms](licensing.md)
-
+* [Technical comparison](comparison.md)
+* [Quickstart](quickstart.md)
+* [Models & hardware](models_and_hardware.md)
+* [Serving & API reference](serving.md)
+* [Architecture](architecture.md)
+* [Docker](docker.md)
+* [Kubernetes & llm-d](llmd-integration.md)
+* [Integrations](integrations.md)
+* [Benchmarks](benchmarks.md)
+* [Claims audit](claims-audit.md)
+* [Licensing](licensing.md)
