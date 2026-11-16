@@ -1,85 +1,88 @@
 """
-Unit tests for Turing Engine LangChain and LangGraph integration adapter.
+ChatTuring (turing.integrations.langchain) against a live in-process Turing server.
 """
 
+import socket
+
 import pytest
-import unittest.mock as mock
-import json
-import io
-import urllib.error
 
-from turing.integrations.langchain import ChatTuring, TuringLLM
+pytest.importorskip("langchain_core")
 
-class DummyMessage:
-    def __init__(self, content, msg_type):
-        self.content = content
-        self.type = msg_type
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import tool
 
-def test_chat_turing_message_formatting():
-    chat = ChatTuring(model="deepseek-r1-1.5b")
+from turing.integrations.langchain import ChatTuring, _chat_result
+from turing.serving.tools import ToolCallingHandler
 
-    # 1. Plain string
-    formatted = chat._format_messages("Hello world")
-    assert formatted == [{"role": "user", "content": "Hello world"}]
 
-    # 2. List of dicts
-    dict_msgs = [{"role": "system", "content": "Be concise"}, {"role": "user", "content": "Hi"}]
-    assert chat._format_messages(dict_msgs) == dict_msgs
+@tool
+def get_weather(city: str) -> str:
+    """Current weather for a city."""
+    return "sunny"
 
-    # 3. Object messages (HumanMessage, AIMessage, SystemMessage)
-    obj_msgs = [
-        DummyMessage("System instruction", "system"),
-        DummyMessage("User question", "human"),
-        DummyMessage("AI answer", "ai")
+
+def _llm(url, **kw):
+    return ChatTuring(model="test-tiny", base_url=url, max_tokens=8, **kw)
+
+
+def test_is_a_langchain_chat_model():
+    assert isinstance(ChatTuring(), BaseChatModel)
+
+
+def test_invoke(turing_server):
+    msg = _llm(turing_server).invoke("Explain KV cache paging:")
+    assert isinstance(msg, AIMessage) and isinstance(msg.content, str) and msg.content
+    assert msg.usage_metadata["output_tokens"] == 8
+    assert msg.response_metadata["finish_reason"] == "stop"
+
+
+def test_stream(turing_server):
+    chunks = list(_llm(turing_server).stream("Write a haiku:"))
+    assert len(chunks) >= 8  # one chunk per generated token, then the finish chunk
+    assert "".join(c.content for c in chunks)
+    assert [c.response_metadata.get("finish_reason") for c in chunks if c.response_metadata] == ["stop"]
+
+
+def test_batch(turing_server):
+    out = _llm(turing_server).batch(["one", "two"])
+    assert len(out) == 2 and all(isinstance(m, AIMessage) for m in out)
+
+
+def test_tool_conversation_round_trip(turing_server):
+    """A full tool-calling history (system, user, assistant tool call, tool result) is accepted by the server."""
+    history = [
+        SystemMessage("Be brief."),
+        HumanMessage("Weather in Paris?"),
+        AIMessage("", tool_calls=[{"name": "get_weather", "args": {"city": "Paris"}, "id": "call_1"}]),
+        ToolMessage("sunny", tool_call_id="call_1"),
     ]
-    res = chat._format_messages(obj_msgs)
-    assert res == [
-        {"role": "system", "content": "System instruction"},
-        {"role": "user", "content": "User question"},
-        {"role": "assistant", "content": "AI answer"}
-    ]
+    assert isinstance(_llm(turing_server).bind_tools([get_weather]).invoke(history), AIMessage)
 
-def test_chat_turing_invoke_mocked():
-    chat = ChatTuring(model="deepseek-r1-1.5b", sparsity_ratio=0.57, svd_rank=64)
 
-    mock_response_data = {
-        "id": "chatcmpl-123",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "This is a verified test response from Turing Engine."
-                },
-                "finish_reason": "stop"
-            }
-        ],
-        "usage": {"total_tokens": 12}
-    }
+def test_bind_tools_sends_openai_tools():
+    bound = ChatTuring().bind_tools([get_weather], tool_choice="get_weather")
+    tools = bound.kwargs["tools"]
+    assert tools[0]["type"] == "function"
+    assert tools[0]["function"]["name"] == "get_weather" and "city" in tools[0]["function"]["parameters"]["properties"]
+    assert bound.kwargs["tool_choice"] == {"type": "function", "function": {"name": "get_weather"}}
 
-    mock_resp = io.BytesIO(json.dumps(mock_response_data).encode("utf-8"))
 
-    with mock.patch("urllib.request.urlopen", return_value=mock_resp):
-        res = chat.invoke("Explain KV cache compression")
-        assert res["content"] == "This is a verified test response from Turing Engine."
-        assert res["raw"]["id"] == "chatcmpl-123"
+def test_tool_calls_from_server_response():
+    """The server's own tool-call parser output, shaped as its /v1/chat/completions body, becomes AIMessage.tool_calls."""
+    text, calls = ToolCallingHandler.extract_tool_calls(
+        '<tool_call>{"name": "get_weather", "arguments": {"city": "Paris"}}</tool_call>')
+    body = {"model": "test-tiny", "usage": {"prompt_tokens": 5, "completion_tokens": 9, "total_tokens": 14},
+            "choices": [{"index": 0, "finish_reason": "tool_calls",
+                         "message": {"role": "assistant", "content": text or None, "tool_calls": calls}}]}
+    msg = _chat_result(body).generations[0].message
+    assert [(c["name"], c["args"], c["id"]) for c in msg.tool_calls] == [("get_weather", {"city": "Paris"}, calls[0]["id"])]
+    assert msg.usage_metadata["total_tokens"] == 14
 
-def test_turing_llm_callable_mocked():
-    llm = TuringLLM(model="deepseek-r1-1.5b")
 
-    mock_response_data = {
-        "choices": [{"message": {"content": "Generated text output"}}]
-    }
-    mock_resp = io.BytesIO(json.dumps(mock_response_data).encode("utf-8"))
-
-    with mock.patch("urllib.request.urlopen", return_value=mock_resp):
-        output = llm("Hello prompt")
-        assert output == "Generated text output"
-
-def test_chat_turing_connection_error_handling():
-    chat = ChatTuring(model="deepseek-r1-1.5b", base_url="http://localhost:9999/v1")
-
-    with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
-        with pytest.raises(ConnectionError) as exc_info:
-            chat.invoke("Hello")
-        assert "Failed to connect to Turing Engine" in str(exc_info.value)
+def test_connection_error():
+    with socket.socket() as s:  # a port nothing listens on
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    with pytest.raises(ConnectionError, match="Failed to connect to Turing Engine"):
+        _llm(f"http://127.0.0.1:{port}/v1").invoke("hello")

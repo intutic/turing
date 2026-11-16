@@ -5,6 +5,7 @@ Measures:
 1. Decision stability (flips avoided) under synthetic PCIe bus latency jitter.
 2. Dispatch optimality percentage with one-pole EMA smoothing vs raw un-smoothed bus probes.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import time

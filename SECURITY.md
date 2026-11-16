@@ -10,8 +10,16 @@ We provide active security patches, bug fixes, and vulnerability remediation for
 
 | Version Series | Release Date | Supported Status |
 | :--- | :--- | :---: |
-| **v0.2.x / v0.1.x** | August 2026 – Present | 🟢 **Active Security Support** |
-| **< v0.1.0** | Experimental | 🔴 **End of Life** |
+| **1.7.x and later** | November 2026 – Present | 🟢 **Active Security Support** |
+| **< 1.7.0** | August – November 2026 | 🔴 **End of Life** |
+
+---
+
+## 🔑 Deploying the Server
+
+Authentication is off by default: `turing serve` answers every request that reaches its port unless it is started
+with `--api-key`. Bind it to `127.0.0.1` (`--host 127.0.0.1`), or put it behind a gateway that authenticates
+callers, before exposing it to a network.
 
 ---
 
@@ -30,7 +38,7 @@ Alternatively, you can email our security response team directly:
 ### 📋 What to Include in Your Report
 To help us triage and resolve the issue quickly, please provide:
 1. **Description**: A clear overview of the potential vulnerability.
-2. **Impact**: Which components are affected (e.g. `csrc/`, `/v1/chat/completions`, `license_gate.py`, `.tgate` binary deserializer).
+2. **Impact**: Which components are affected (e.g. `csrc/`, `/v1/chat/completions`, the `.tgate` or GGUF readers).
 3. **Reproduction Steps / PoC**: Minimal reproducible Python/C++ script or payload demonstrating the issue.
 4. **Environment**: OS (Linux, macOS, Windows), Python version, and CUDA/AVX2 hardware configuration.
 

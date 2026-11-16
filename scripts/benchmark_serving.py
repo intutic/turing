@@ -3,6 +3,7 @@ High-Concurrency Production Serving Benchmark.
 Simulates 1 to 128 concurrent client streams against Turing Engine ContinuousBatchEngine.
 Measures TTFT, ITL, throughput, and P90/P99 latencies.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

@@ -2,6 +2,7 @@
 Empirical Benchmark: Distributed Multi-GPU & Pipeline Parallel Throughput Scaling.
 Measures token throughput (tok/s), micro-batch bubble overhead, and pipeline speedup across GPU partitions.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import time

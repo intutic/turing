@@ -108,10 +108,12 @@ class LocalExecutor(BaseExecutor):
                     device=str(self.device)
                 )
                 self.config = self.model.config
-            except Exception:
-                self.config = get_model_config("test-tiny")
-                self.model = SubspaceCausalLM(self.config).to(self.device).eval()
-                self.tokenizer = None
+            except Exception as e:
+                # Random weights served for a mistyped name would only produce gibberish
+                raise RuntimeError(
+                    f"Could not load weights for '{name}': {e}\n"
+                    "Pass model_name_or_id='test-tiny' (or 'mock') to run on synthetic weights."
+                ) from e
 
     def _decode_tokens(self, tokens: List[int]) -> str:
         if self.tokenizer is not None:

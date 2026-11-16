@@ -2,6 +2,7 @@
 Hardware Auto-Discovery and Universal Backend Probe for Turing Engine.
 Tests compatibility across NVIDIA CUDA, AMD ROCm, Intel XPU, Apple Metal (MPS), Vulkan, and CPU SIMD.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import os

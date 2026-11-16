@@ -2,6 +2,7 @@
 Comprehensive Empirical Benchmark for C++20 SIMD Micro-Kernels & Fused Triton Layers.
 Measures latency (ms), throughput, and memory bandwidth reduction across all migrated components.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import time
 import argparse

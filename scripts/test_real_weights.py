@@ -2,11 +2,11 @@
 Real Pretrained Weight Verification & Inference Benchmark.
 Executes real HuggingFace models through Turing Engine Subspace engine.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys
 import time
-import warnings
 
 # Ensure repository root is in python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,7 +14,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["HF_HUB_DISABLE_UNAUTHENTICATED_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-warnings.filterwarnings("ignore")
 
 import huggingface_hub
 huggingface_hub.logging.set_verbosity_error()

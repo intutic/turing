@@ -2,6 +2,7 @@
 Empirical Benchmark: Turing Programmatic DSL Parallel Fork/Join vs Sequential Generation.
 Measures latency speedup, prefix KV cache sharing efficiency, and branch throughput.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import time

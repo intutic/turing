@@ -65,6 +65,7 @@ nav:
   - Models & Hardware: models_and_hardware.md
   - Serving & API: serving.md
   - Architecture: architecture.md
+  - Docker: docker.md
   - Kubernetes & llm-d: llmd-integration.md
   - Integrations: integrations.md
   - Benchmarks: benchmarks.md

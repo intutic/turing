@@ -3,6 +3,7 @@ Comprehensive Benchmark: Associative Recall Probe, Hybrid Memory Retention & Chu
 Directly evaluates the sequence-memory-comparison findings (Softmax vs Fixed Decay vs Learned Decay vs Turing Hybrid)
 on physical silicon (MPS / CUDA).
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import time
 import json

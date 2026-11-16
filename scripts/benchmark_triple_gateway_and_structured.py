@@ -3,6 +3,7 @@ Empirical Benchmark Suite: Triple Gateway (Ollama API), Structured Outputs (JSON
 and Native Tool / Function Calling for Turing Engine.
 Runs on Apple Silicon (MPS/CPU) and NVIDIA CUDA GPUs.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

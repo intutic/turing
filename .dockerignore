@@ -1,0 +1,16 @@
+.git
+.github
+.claude
+.pytest_cache
+**/__pycache__
+build
+dist
+site
+*.egg-info
+*.so
+*.tgate*
+weights
+docs
+tests
+results_*.json
+exhaustive_*.json

@@ -12,6 +12,7 @@ model's trained length measure speed only; the model's quality there is not clai
 
 python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M --contexts 2048,8192,32768 --batches 1,8,32,64
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 import argparse
 import gc
 import json

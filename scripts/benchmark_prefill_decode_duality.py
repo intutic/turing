@@ -2,6 +2,7 @@
 Empirical Benchmark Suite: Prefill (Encoder / Compute-Bound) vs. Decode (Decoder / Bandwidth-Bound) Duality.
 Validates Chunked Prefill TTFT, Batched Decode TPS, ITL Jitter Suppression, Speculation Gating, and SVD KV Memory Reduction.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import os

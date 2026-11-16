@@ -7,11 +7,13 @@ Thank you for your interest in contributing to **Turing Engine**! We welcome con
 ## 🛠️ Development Setup
 
 ### 1. Prerequisites
-- **Operating System**: Red Hat Enterprise Linux (RHEL 8/9, Rocky Linux, AlmaLinux, Fedora), Ubuntu / Debian / Arch, macOS (Apple Silicon M1-M4 & Intel), or Windows 10/11 (Native MSVC or WSL2)
+CI runs the test suite on these; other platforms are untested.
+- **Operating System**: Ubuntu, macOS on Apple Silicon, or Windows (native MSVC)
 - **Python**: 3.9, 3.10, 3.11, or 3.12
-- **C++ Compiler**: Modern `g++` (GCC 11+ / `gcc-toolset-12` on RHEL), `clang++`, or Microsoft Visual C++ (`cl.exe` from Build Tools 2019/2022) with **C++20** support
-- **CPU Architecture**: x86_64 with **AVX2** SIMD support, or Apple Silicon (ARM64 with Accelerate/Metal)
-- **GPU (Optional)**: NVIDIA GPU with CUDA 12.0+ and Triton 2.1+ for GPU kernel acceleration
+- **C++ Compiler**: `g++`, `clang++`, or Microsoft Visual C++ (Build Tools 2019/2022) with **C++20** support
+- **CPU Architecture**: x86_64 with **AVX2**, or arm64. On Apple Silicon PyTorch runs on the GPU through MPS; the C++
+  extension uses portable code and NEON there (no Accelerate).
+- **GPU (Optional)**: NVIDIA GPU with CUDA 12 for the Triton kernels and CUDA graphs (measured on an NVIDIA L4)
 
 ### 2. Setting Up Your Environment
 ```bash
@@ -34,7 +36,8 @@ python setup.py build_ext --inplace
 
 ## 🧪 Testing & Verification
 
-We enforce strict test cleanliness. All pull requests must pass the full test suite with **zero warnings**:
+We enforce strict test cleanliness. All pull requests must pass the full test suite with **zero warnings**
+(383 tests; 18 need CUDA and skip elsewhere):
 
 ```bash
 # Run the complete test suite with strict warning escalation
@@ -44,7 +47,15 @@ python -W error -m pytest -v
 python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
 ```
 
+### Scripts and git worktrees
+An editable install (`pip install -e .`) puts one checkout's `turing` package on every Python path. A script run
+from another checkout or a git worktree would silently import that package instead of the code next to it, so
+every script in `scripts/` that imports `turing` starts with `import _bootstrap` (it puts its own repo root first
+on `sys.path`). New scripts must do the same.
+
 ### Adding New Tests
+- Tests run on real code: no mock objects. Integration tests serve the real app in-process (see the
+  `turing_server` fixture in `tests/conftest.py`).
 - When introducing new core algorithms or GPU kernels, add comprehensive unit tests in the `tests/` directory.
 - For SIMD or Triton acceleration routines, include **numerical parity tests** comparing the optimized implementation against a standard PyTorch reference tensor output with strict tolerance (`torch.allclose(atol=1e-3, rtol=1e-3)`).
 
@@ -73,7 +84,7 @@ python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
 1. **Fork the Repository**: Create a personal fork on GitHub.
 2. **Create a Feature Branch**: `git checkout -b feature/my-new-kernel`
 3. **Implement Your Changes**: Keep commits focused and provide clear, descriptive commit messages.
-4. **Verify Tests**: Run `python -W error -m pytest -v` and ensure all 82+ tests pass cleanly.
+4. **Verify Tests**: Run `python -W error -m pytest -v` and ensure all 383 tests pass cleanly (18 need CUDA).
 5. **Submit PR**: Open a pull request against the `master` branch of `intutic/turing`. Include:
    - A clear summary of the motivation and changes.
    - Any benchmark results or hardware specifications (e.g. tested on NVIDIA L4 or Apple M3 Max).

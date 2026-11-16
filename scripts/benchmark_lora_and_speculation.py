@@ -3,6 +3,7 @@ Empirical Benchmark Suite: Speculative Drafting (EAGLE-3/DFlash/DSpark), Multi-T
 All inputs are synthetic: random-init adapters and draft head, randn activations, unseeded 80/20 tenant traffic,
 constructed target logits, and random/empty weights for the cold-start path (no checkpoint is read).
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

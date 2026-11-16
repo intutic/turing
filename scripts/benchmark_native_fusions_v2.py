@@ -2,6 +2,7 @@
 Empirical Benchmark Suite: Native C++20 AVX2 SIMD & In-SRAM Fused Triton GPU Kernels.
 Measures physical micro-benchmark speedups and latency reductions.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import time
 import argparse

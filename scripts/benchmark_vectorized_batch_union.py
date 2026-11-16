@@ -6,6 +6,7 @@ Measures:
 2. Batched speculative draft decode verification throughput across batch sizes (1 to 64).
 3. Speedup multiplier of vectorized C++ index_add_ vs sequential Python per-token loop.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import time

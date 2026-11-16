@@ -3,18 +3,17 @@
 Executes real pretrained weights from Hugging Face Hub across multiple model architectures,
 context lengths, subspace ranks (Rank-64, Rank-32, Rank-16), and sparsity ratios.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys
 import time
-import warnings
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ["HF_HUB_DISABLE_UNAUTHENTICATED_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
-warnings.filterwarnings("ignore")
 
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, logging as hf_logging

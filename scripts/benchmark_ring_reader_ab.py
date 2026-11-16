@@ -10,6 +10,7 @@ Build the baseline first, e.g.:
   git archive f936008 | tar -x -C /tmp/base && (cd /tmp/base && python setup.py build_ext --inplace)
 python scripts/benchmark_ring_reader_ab.py --baseline /tmp/base [--pairs 8] [--size-mib 2048]
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 import argparse
 import json
 import os

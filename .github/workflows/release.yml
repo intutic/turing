@@ -1,4 +1,8 @@
-name: Release & Binary Wheel Publisher
+name: Release
+
+# A version tag (v2.0.0) builds wheels and the sdist, publishes them to PyPI as turing-engine (trusted
+# publishing: no stored token), pushes ghcr.io/intutic/turing:<tag> (CPU) and :<tag>-cuda, and creates
+# the GitHub release. A manual run builds everything and publishes nothing.
 
 on:
   push:
@@ -7,120 +11,143 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
-  publish-docker-package:
-    name: Publish Container to GitHub Packages (GHCR)
+  check-version:
+    name: Tag matches the package version
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and Push Container Images
+      - uses: actions/checkout@v4
+      - name: Compare the tag with setup.py, pyproject.toml and turing/__init__.py
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
-          IMAGE_NAME="ghcr.io/${{ github.repository }}"
-          IMAGE_NAME=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
-          TAG_NAME="${{ github.ref_name }}"
-          docker build -f deploy/Dockerfile.cpu -t "${IMAGE_NAME}:${TAG_NAME}" -t "${IMAGE_NAME}:latest" .
-          docker push "${IMAGE_NAME}:${TAG_NAME}"
-          docker push "${IMAGE_NAME}:latest"
+          V="${GITHUB_REF_NAME#v}"
+          grep -q "^version = \"$V\"" pyproject.toml
+          grep -q "version=\"$V\"" setup.py
+          grep -q "__version__ = \"$V\"" turing/__init__.py
 
   build-wheels:
-    name: Build Wheel (${{ matrix.os }} - Py${{ matrix.python-version }})
+    name: Wheels (${{ matrix.os }})
+    needs: check-version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
-        python-version: [ '3.10', '3.11', '3.12' ]
-
+        # linux x86_64, linux aarch64, macOS arm64
+        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-14 ]
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: pypa/cibuildwheel@v2.23.3
+        env:
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-*"
+          CIBW_SKIP: "*-musllinux_*"
+          CIBW_ARCHS: native
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
         with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip install pytest pybind11
-          pip install --no-build-isolation -e ".[dev]"
-
-      - name: Build Binary Wheel
-        run: |
-          pip wheel --no-deps --no-build-isolation -w dist .
-
-      - name: Upload Wheel Artifact
-        uses: actions/upload-artifact@v4
+          output-dir: dist
+      - uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
+          name: wheels-${{ matrix.os }}
           path: dist/*.whl
 
   build-sdist:
-    name: Build Source Distribution (.tar.gz)
+    name: Source distribution
+    needs: check-version
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Build sdist
-        run: |
+      - run: |
           python -m pip install --upgrade build
           python -m build --sdist
-
-      - name: Upload sdist Artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: sdist
           path: dist/*.tar.gz
 
-  publish-release:
-    name: Publish GitHub Release with Artifacts
+  publish-pypi:
+    name: Publish to PyPI
     needs: [ build-wheels, build-sdist ]
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/turing-engine/
+    permissions:
+      id-token: write  # trusted publishing
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Download all built artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          path: release_artifacts
+          pattern: '{wheels-*,sdist}'
+          path: dist
           merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
 
-      - name: Generate SHA256 Checksums
-        working-directory: release_artifacts
-        run: |
-          sha256sum * > SHA256SUMS.txt
-          echo "=== Computed SHA256 Checksums ==="
-          cat SHA256SUMS.txt
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+  images:
+    name: Image (${{ matrix.flavor }})
+    needs: check-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: cpu
+            suffix: ''
+            torch-index: https://download.pytorch.org/whl/cpu
+            platforms: linux/amd64,linux/arm64
+          - flavor: cuda
+            suffix: '-cuda'
+            torch-index: https://download.pytorch.org/whl/cu128
+            platforms: linux/amd64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space for the CUDA PyTorch wheels
+        if: matrix.flavor == 'cuda'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
-          files: |
-            release_artifacts/*
-          draft: false
-          prerelease: false
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: ${{ matrix.platforms }}
+          build-args: TORCH_INDEX=${{ matrix.torch-index }}
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: |
+            ghcr.io/intutic/turing:${{ github.ref_name }}${{ matrix.suffix }}
+            ghcr.io/intutic/turing:latest${{ matrix.suffix }}
+
+  github-release:
+    name: GitHub release
+    needs: [ build-wheels, build-sdist ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '{wheels-*,sdist}'
+          path: dist
+          merge-multiple: true
+      - name: SHA256 checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
           generate_release_notes: true

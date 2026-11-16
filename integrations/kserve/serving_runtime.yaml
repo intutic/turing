@@ -15,7 +15,7 @@ spec:
       autoSelect: false
   containers:
     - name: kserve-container
-      image: ghcr.io/intutic/turing:v0.3.5-cuda
+      image: ghcr.io/intutic/turing:v2.0.0-cuda
 
 
       command: ["python3", "-m", "turing.cli", "serve"]

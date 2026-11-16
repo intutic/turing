@@ -3,6 +3,7 @@ Comprehensive Apple Silicon Metal GPU (MPS) Benchmark & Validation Suite for Tur
 Tests native Metal Performance Shaders compute kernels, unified memory bandwidth,
 subspace INT4 quantization, and end-to-end real weight inference.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

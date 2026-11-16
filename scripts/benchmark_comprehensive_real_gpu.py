@@ -2,6 +2,7 @@
 Comprehensive Live Unmocked GPU Benchmark & Model-by-Model Profiler.
 Runs sequentially with strict GPU VRAM cleanup (torch.cuda.empty_cache()) between every model.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

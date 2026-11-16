@@ -6,6 +6,7 @@ Measures:
 3. Elastic Memory Dynamic Budget Rebalancing under context expansion.
 4. Bandwidth-Adaptive q* Bus Streaming Decisions.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import argparse
 import sys

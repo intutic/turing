@@ -5,6 +5,7 @@ ElasticMultiModelManager placeholders, not real models: extract is a substring m
 pool randn hidden states, rerank is word overlap, and the LM stage only registers a model entry.
 Its "VRAM" is the sum of the estimates passed to register_model, not memory read from the device.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import time
 import json

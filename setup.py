@@ -1,4 +1,5 @@
 import os
+import platform
 import sys
 import sysconfig
 import subprocess
@@ -38,15 +39,13 @@ elif sys.platform == "darwin":
         "-flto",
     ]
 else:
-    # Linux GCC / Clang flags
+    # Linux GCC / Clang flags (AVX2/FMA on x86_64 only; aarch64 builds the NEON paths)
     extra_compile_args = [
         "-std=c++20",
         "-O3",
         "-flto",
         "-fvisibility=hidden",
-        "-mavx2",
-        "-mfma",
-    ]
+    ] + (["-mavx2", "-mfma"] if platform.machine().lower() in ("x86_64", "amd64") else [])
     extra_link_args = [
         "-flto",
         "-Wl,--strip-all",
@@ -95,7 +94,7 @@ setup(
     author="Ishan Gupta",
     author_email="support@intutic.ai",
     description="Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Runtime",
-    packages=find_packages(),
+    packages=find_packages(include=["turing", "turing.*"]),  # not the repo's scripts/ or integrations/
     ext_modules=ext_modules,
     cmdclass={"build_ext": StripBuildExt},
     entry_points={

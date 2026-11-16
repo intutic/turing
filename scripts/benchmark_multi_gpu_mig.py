@@ -9,6 +9,7 @@ Evaluates:
 4. Cross-Instance Distributed MoE Expert Sharding
 5. Multi-Instance Speculative Decoding (Instance 0 Drafter -> Instance 1 Target)
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import os
 import sys

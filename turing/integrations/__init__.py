@@ -1,8 +1,6 @@
 """
-Ecosystem Integrations for Turing Engine (LangChain, LangGraph, LlamaIndex, LiteLLM).
+Ecosystem integrations for Turing Engine.
+
+`turing.integrations.langchain.ChatTuring` (needs langchain-core). LlamaIndex, LiteLLM and other
+OpenAI-compatible clients talk to `turing serve` directly; see integrations/ in the repository.
 """
-
-from .langchain import ChatTuring, TuringLLM
-from .llamaindex import Turing, TuringEngine, TuringEngineLLM
-
-__all__ = ["ChatTuring", "TuringLLM", "Turing", "TuringEngine", "TuringEngineLLM"]

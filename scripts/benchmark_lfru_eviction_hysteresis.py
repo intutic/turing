@@ -5,6 +5,7 @@ Measures:
 1. Hit rate under non-uniform Zipfian expert activations.
 2. Eviction thrashing and ping-pong reduction from the 25% + 4 hysteresis gate.
 """
+import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
 import sys
 import time
