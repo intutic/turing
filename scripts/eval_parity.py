@@ -4,7 +4,9 @@ Real-checkpoint parity: does the Turing model reproduce HuggingFace's logits for
 
 For each model: HuggingFace's logits for one WikiText-2 test window (T tokens), then the converted Turing model's
 logits from a full forward and from an incremental run (prefill half, then one token at a time through the paged KV
-cache). Reports the largest absolute logit difference, top-1 agreement and both models' NLL on the window.
+cache). Reports the largest absolute logit difference, top-1 agreement and both models' NLL on the window, and the
+same comparison of HuggingFace's own cached decode against its full forward (the dtype's noise floor: in bf16 the two
+HF paths already differ).
 
 python scripts/eval_parity.py --models gpt2,facebook/opt-125m --device mps
 """
@@ -46,6 +48,16 @@ def run(name, device, dtype_name, T):
     # SDPA reuses one cached graph per shape with the first call's scale
     hf = AutoModelForCausalLM.from_pretrained(name, dtype=dtype, attn_implementation="eager").to(dev).eval()
     ref = hf(ids).logits.float()
+    # HF against itself, prefill half then one token at a time: the noise floor of this dtype (bf16 reductions differ
+    # between a full forward and cached decode)
+    out = hf(ids[:, :T // 2], use_cache=True)
+    hf_inc, past_hf = [out.logits], out.past_key_values
+    for t in range(T // 2, T):
+        out = hf(ids[:, t:t + 1], past_key_values=past_hf, use_cache=True)
+        hf_inc.append(out.logits)
+        past_hf = out.past_key_values
+    hf_inc = torch.cat(hf_inc, 1).float()
+    del past_hf, out
     params = sum(p.numel() for p in hf.parameters())
     model = RealHuggingFaceLoader.convert_hf_model(hf, device=device, dtype=dtype)
     arch = model.config.arch
@@ -67,6 +79,8 @@ def run(name, device, dtype_name, T):
                max_abs_diff_full=(full - ref).abs().max().item(), max_abs_diff_incremental=(inc - ref).abs().max().item(),
                max_rel_diff=((inc - ref).abs().max() / ref.abs().max()).item(),  # diff relative to the largest logit
                top1_agreement=(inc.argmax(-1) == ref.argmax(-1)).float().mean().item(),
+               hf_self_max_abs_diff=(hf_inc - ref).abs().max().item(),
+               hf_self_top1_agreement=(hf_inc.argmax(-1) == ref.argmax(-1)).float().mean().item(),
                nll_hf=nll(ref, ids), nll_turing=nll(inc, ids), seconds=round(time.perf_counter() - t0, 1))
     print(json.dumps(row), flush=True)
     return row
