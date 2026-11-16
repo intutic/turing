@@ -1,177 +1,154 @@
 """
-Hugging Face Safetensors On-The-Fly Streaming Quantizer and Subspace Converter.
-Streams weights layer-by-layer to convert 70B/120B models into .tgate4 without
-downloading full uncompressed FP16 weights to disk.
+Layer-by-layer conversion of a HuggingFace checkpoint into a 4-bit .tgate4 file with bounded memory: the safetensors
+shards are memory-mapped and read one tensor at a time, each decoder layer is mapped onto SubspaceCausalLM,
+quantized (RTN, or GPTQ on the outputs of the already-quantized layers before it) and moved to the host as packed
+codes before the next layer is read. Peak memory is one dense layer plus the calibration activations, not the model.
+The checkpoint is downloaded (or read from the HF cache) first; nothing is streamed from the network mid-conversion.
 """
 
-import os
-import io
 import json
+import os
 import time
-from typing import Dict, Any, Optional, Generator, Tuple, List
-import torch
-import torch.nn as nn
-import huggingface_hub
+from collections.abc import Mapping
+from typing import Any, Dict, Iterator, Optional
 
-from .safetensors_mmap import SafetensorsMmapReader
-from .registry import get_model_config
-from .converter import TuringConverter
+import torch
+
+from ..config import ModelConfig
+from .causal_lm import SubspaceCausalLM
+from .hf_loader import FAMILIES, _Writer, _config_kwargs, _copy_weights, resolve_dtype
+from .quant import calibration_windows, embed_inputs, quantize_layer, save_quantized
+
+
+class ShardedStateDict(Mapping):
+    """name -> tensor over a checkpoint's safetensors shards, loading each tensor on access. Names follow the
+    transformers model's state dict; checkpoints that store MoE experts one by one (Mixtral, Qwen-MoE, OLMoE) or
+    GPT-2's unprefixed names are mapped on the fly."""
+
+    def __init__(self, folder: str):
+        from safetensors import safe_open
+        idx = os.path.join(folder, "model.safetensors.index.json")
+        if os.path.exists(idx):
+            weight_map = json.load(open(idx))["weight_map"]
+        else:
+            single = os.path.join(folder, "model.safetensors")
+            if not os.path.exists(single):
+                raise ValueError(f"no safetensors weights in {folder}")
+            with safe_open(single, "pt") as f:
+                weight_map = {k: "model.safetensors" for k in f.keys()}
+        self.folder, self.map = folder, weight_map
+        self._open = {}
+
+    def _raw(self, name: str) -> torch.Tensor:
+        from safetensors import safe_open
+        shard = self.map[name]
+        if shard not in self._open:
+            self._open[shard] = safe_open(os.path.join(self.folder, shard), "pt")
+        return self._open[shard].get_tensor(name)
+
+    def _resolve(self, name: str) -> Optional[torch.Tensor]:
+        if name in self.map:
+            return self._raw(name)
+        if name.startswith("transformer.") and name[len("transformer."):] in self.map:  # GPT-2's original names
+            return self._raw(name[len("transformer."):])
+        for suffix, parts in ((".mlp.experts.gate_up_proj", ("gate", "up")), (".mlp.experts.down_proj", ("down",))):
+            if name.endswith(suffix):
+                return self._stacked_experts(name[: -len(suffix)], parts)
+        if name.endswith(".mlp.gate.weight"):  # Mixtral's original router name
+            alt = name.replace(".mlp.gate.weight", ".block_sparse_moe.gate.weight")
+            if alt in self.map:
+                return self._raw(alt)
+        return None
+
+    def _stacked_experts(self, prefix: str, parts) -> Optional[torch.Tensor]:
+        names = {"gate": ("mlp.experts.{e}.gate_proj.weight", "block_sparse_moe.experts.{e}.w1.weight"),
+                 "up": ("mlp.experts.{e}.up_proj.weight", "block_sparse_moe.experts.{e}.w3.weight"),
+                 "down": ("mlp.experts.{e}.down_proj.weight", "block_sparse_moe.experts.{e}.w2.weight")}
+        experts = []
+        for e in range(4096):
+            row = []
+            for part in parts:
+                found = next((f"{prefix}.{pat.format(e=e)}" for pat in names[part]
+                              if f"{prefix}.{pat.format(e=e)}" in self.map), None)
+                if found is None:
+                    break
+                row.append(self._raw(found))
+            if len(row) != len(parts):
+                break
+            experts.append(torch.cat(row, dim=0))
+        return torch.stack(experts) if experts else None
+
+    def __getitem__(self, name: str) -> torch.Tensor:
+        t = self._resolve(name)
+        if t is None:
+            raise KeyError(name)
+        return t
+
+    def get(self, name, default=None):
+        t = self._resolve(name)
+        return default if t is None else t
+
+    def __contains__(self, name) -> bool:
+        return name in self.map or self._resolve(name) is not None
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.map)
+
+    def __len__(self) -> int:
+        return len(self.map)
+
 
 class StreamingHFSubspaceLoader:
-    """
-    Streams and quantizes large LLM checkpoints directly from Hugging Face Hub.
-    Peak memory footprint during conversion is strictly bounded (< 4GB).
-    """
-    def __init__(
-        self,
-        repo_id: str,
-        token: Optional[str] = None,
-        target_device: str = "cpu",
-        sparsity_ratio: float = 0.50
-    ):
-        self.repo_id = repo_id
-        self.token = token or os.environ.get("HF_TOKEN") or huggingface_hub.get_token()
-        self.target_device = torch.device(target_device)
-        self.sparsity_ratio = sparsity_ratio
+    """Converts one HuggingFace checkpoint into out_dir/model.tgate4 (see the module docstring)."""
 
-    def stream_and_convert_layer(
-        self,
-        layer_idx: int,
-        layer_weights: Dict[str, torch.Tensor],
-        output_dir: str = "weights"
-    ) -> str:
-        """
-        Converts a single layer in-memory into Rank-64 INT4 Subspace format (.tgate4).
-        """
-        os.makedirs(output_dir, exist_ok=True)
-        out_filename = f"{self.repo_id.replace('/', '_')}_layer{layer_idx}.tgate4"
-        out_path = os.path.join(output_dir, out_filename)
+    def __init__(self, repo_id: str, token: Optional[str] = None, target_device: str = "cpu",
+                 method: str = "gptq", calib_windows: int = 128, calib_tokens: int = 2048):
+        self.repo_id, self.token = repo_id, token or os.environ.get("HF_TOKEN")
+        self.device = torch.device(target_device)
+        self.method, self.calib_windows, self.calib_tokens = method, calib_windows, calib_tokens
 
-        # 1. Extract and SVD-project weights
-        gate_w = layer_weights.get("gate_proj", torch.randn(2048, 8192))
-        up_w = layer_weights.get("up_proj", torch.randn(2048, 8192))
-        down_w = layer_weights.get("down_proj", torch.randn(8192, 2048))
+    def _folder(self) -> str:
+        if os.path.isdir(self.repo_id):
+            return self.repo_id
+        from huggingface_hub import snapshot_download
+        return snapshot_download(self.repo_id, token=self.token,
+                                 allow_patterns=["*.json", "*.safetensors", "*.model", "*.txt", "*.tiktoken"])
 
-        # 2. Calculate Channel Saliency (L1-norm)
-        saliency = torch.norm(gate_w.float(), p=1, dim=1) + torch.norm(up_w.float(), p=1, dim=1)
-        k_active = max(64, int(gate_w.shape[0] * (1.0 - self.sparsity_ratio)))
-        _, active_indices = torch.topk(saliency, k=k_active)
-
-        active_gate = gate_w[active_indices, :]
-        active_up = up_w[active_indices, :]
-        active_down = down_w[:, active_indices]
-
-        # 3. Pack to INT4 format
-        cfg = get_model_config("test-tiny")
-        converter = TuringConverter(cfg)
-        num_tiles = (cfg.ffn_dim + cfg.tile_size - 1) // cfg.tile_size
-        active_tiles = list(range(min(len(active_indices), num_tiles)))
-
-        # Ensure correct shapes for converter: [HiddenDim, FFNDim]
-        w_g = torch.randn(cfg.hidden_dim, cfg.ffn_dim, dtype=torch.float32)
-        w_u = torch.randn(cfg.hidden_dim, cfg.ffn_dim, dtype=torch.float32)
-        w_d = torch.randn(cfg.ffn_dim, cfg.hidden_dim, dtype=torch.float32)
-
-        converter.export_turing_gate4_layer(
-            output_filepath=out_path,
-            layer_idx=layer_idx,
-            w_gate=w_g,
-            w_up=w_u,
-            w_down=w_d,
-            active_tiles=active_tiles
-        )
-        return out_path
-
-    def convert_model_streaming(
-        self,
-        total_layers: int = 4,
-        output_dir: str = "weights"
-    ) -> Dict[str, Any]:
-        """
-        Simulates / executes streaming conversion layer-by-layer with bounded RAM.
-        """
+    @torch.no_grad()
+    def convert(self, out_dir: str) -> Dict[str, Any]:
+        from transformers import AutoConfig, AutoTokenizer
         t0 = time.perf_counter()
-        converted_files = []
-
-        print(f"[*] Streaming & Quantizing '{self.repo_id}' Layer-by-Layer (Sparsity: {self.sparsity_ratio * 100:.1f}%)...")
-        for l in range(total_layers):
-            # Mock / streamed layer weight dict
-            mock_layer = {
-                "gate_proj": torch.randn(512, 1024, dtype=torch.float16),
-                "up_proj": torch.randn(512, 1024, dtype=torch.float16),
-                "down_proj": torch.randn(1024, 512, dtype=torch.float16),
-            }
-            f_path = self.stream_and_convert_layer(l, mock_layer, output_dir=output_dir)
-            converted_files.append(f_path)
-
-        elapsed = time.perf_counter() - t0
-        return {
-            "model_id": self.repo_id,
-            "layers_converted": total_layers,
-            "elapsed_seconds": round(elapsed, 3),
-            "peak_memory_mb": 128.0,
-            "files": converted_files
-        }
-
-
-class PipelinedSubspaceWarmupLoader:
-    """
-    Pipelined Zero-Overhead Checkpoint Loader & Bucketed CUDA Graph Warmup:
-    - Stage 1: Loads early layers (0..3) -> Captures power-of-2 CUDA graphs (B in {1, 4, 16, 64, 256})
-    - Stage 2: Asynchronously streams remaining layers in background over pinned PCIe channels.
-    - Achieves <650ms Time-To-Ready.
-    """
-    def __init__(
-        self,
-        model_config=None,
-        device: str = "cpu",
-        warmup_buckets: Optional[List[int]] = None
-    ):
-        self.config = model_config or get_model_config("test-tiny")
-        self.device = torch.device(device)
-        self.warmup_buckets = warmup_buckets or [1, 4, 16, 64]
-        self.time_to_ready_ms: float = 0.0
-
-    def pipelined_load_and_warmup(self, total_layers: Optional[int] = None) -> Dict[str, Any]:
-        """
-        Executes pipelined loading and graph warmup.
-        """
-        t0 = time.perf_counter()
-        n_layers = total_layers or self.config.num_layers
-        stage1_cutoff = min(3, n_layers)
-
-        # Stage 1: Load bootstrap layers (Subspace Active Channels in FP16)
-        active_dim = self.config.active_subspace_dim if hasattr(self.config, "active_subspace_dim") else self.config.hidden_dim
-        bootstrap_layers = []
-        for l in range(stage1_cutoff):
-            w = torch.randn(self.config.hidden_dim, min(active_dim, 2048), dtype=torch.float16, device=self.device)
-            bootstrap_layers.append(w)
-
-        # Warmup / CUDA graph pre-capture for bucketed batch sizes
-        captured = []
-        for b in self.warmup_buckets:
-            dummy_x = torch.zeros(b, self.config.hidden_dim, dtype=torch.float16, device=self.device)
-            # Fast kernel warmup
-            _ = torch.matmul(dummy_x, bootstrap_layers[0])
-            captured.append(b)
-
-        # Stage 2: Asynchronously stage remaining layers
-        remaining_layers = []
-        for l in range(stage1_cutoff, n_layers):
-            w = torch.empty(self.config.hidden_dim, min(active_dim, 2048), dtype=torch.float16, device=self.device)
-            remaining_layers.append(w)
-
-
-        t1 = time.perf_counter()
-        self.time_to_ready_ms = (t1 - t0) * 1000.0
-
-        return {
-            "status": "ready",
-            "time_to_ready_ms": round(self.time_to_ready_ms, 2),
-            "bootstrap_layers": stage1_cutoff,
-            "total_layers": n_layers,
-            "captured_buckets": captured,
-            "device": str(self.device)
-        }
-
-
+        folder = self._folder()
+        hf_cfg = AutoConfig.from_pretrained(folder)
+        if hf_cfg.model_type not in FAMILIES:
+            raise ValueError(f"model type '{hf_cfg.model_type}' is not supported; supported: {', '.join(sorted(FAMILIES))}")
+        kw = _config_kwargs(hf_cfg)
+        ffn = kw["ffn_dim"]
+        cfg = ModelConfig(name=f"HF-{self.repo_id}", tile_size=64 if ffn <= 4096 else 256,
+                          active_tiles=-(-ffn // (64 if ffn <= 4096 else 256)), **kw)
+        dtype = resolve_dtype(None, self.device, torch.bfloat16 if self.device.type == "cuda" else None)
+        with torch.device("meta"):
+            model = SubspaceCausalLM(cfg)
+        sd = ShardedStateDict(folder)
+        put = _Writer(model, self.device, dtype)
+        layout = FAMILIES[hf_cfg.model_type]
+        _copy_weights(cfg, sd, put, layout, layers=[], glob=True)
+        tokenizer = AutoTokenizer.from_pretrained(folder)
+        hs = None
+        if self.method == "gptq":
+            calib = calibration_windows(tokenizer, self.calib_windows, self.calib_tokens)
+            hs = embed_inputs(model, calib)
+        peak = 0
+        for li in range(cfg.num_layers):
+            _copy_weights(cfg, sd, put, layout, layers=[li], glob=False)
+            hs = quantize_layer(model, li, self.method, hs)
+            model.layers[li].to("cpu")  # packed codes on the host; the next layer gets the device
+            if self.device.type == "cuda":
+                peak = max(peak, torch.cuda.max_memory_allocated())
+        put.check()
+        model.to("cpu")
+        cfg.quantization = f"w4a16-{self.method}"
+        path = save_quantized(model, out_dir, tokenizer)
+        return {"model_id": self.repo_id, "layers_converted": cfg.num_layers, "method": self.method,
+                "output": path, "bytes": os.path.getsize(path), "elapsed_seconds": round(time.perf_counter() - t0, 1),
+                "peak_device_bytes": peak or None}

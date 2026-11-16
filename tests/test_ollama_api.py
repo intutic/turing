@@ -60,7 +60,9 @@ def test_ollama_show_endpoint(test_app):
         assert "modelfile" in data
         assert "parameters" in data
         assert "model_info" in data
-        assert data["model_info"]["general.architecture"] == "subspace_causal_lm"
+        assert data["model_info"]["general.architecture"] == "llama"  # the HF family the weights follow
+        assert data["details"]["quantization_level"] == "F32"  # the served dtype, not a fixed "w4a16" label
+        assert data["model_info"]["general.parameter_count"] > 0
 
 
 def test_ollama_generate_non_streaming(test_app):

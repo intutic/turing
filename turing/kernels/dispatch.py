@@ -76,7 +76,6 @@ def get_hardware_backend_info() -> dict:
 try:
     from .triton_swiglu import launch_triton_swiglu
     from .triton_flash_tree import launch_triton_flash_tree_attention
-    from .triton_w4a16 import launch_triton_w4a16_gemm
     from .triton_recirculation import launch_triton_subspace_recirculation
     from .triton_swiglu import HAS_TRITON
 except ImportError:
@@ -123,39 +122,6 @@ def dispatch_flash_tree_attention(
     attn_weights = F.softmax(scores, dim=-1, dtype=torch.float32).to(q.dtype)
     out = torch.matmul(attn_weights, v_all)
     return out
-
-def dispatch_w4a16_gemm(
-    x: torch.Tensor,
-    w_packed: torch.Tensor,
-    scales: torch.Tensor,
-    group_size: int = 128
-) -> torch.Tensor:
-    """
-    Dispatches W4A16 packed INT4 matrix-vector multiplication.
-    """
-    if HAS_CUDA and HAS_TRITON and x.is_cuda and x.dtype == torch.float16:
-        try:
-            return launch_triton_w4a16_gemm(x, w_packed, scales, group_size)
-        except Exception:
-            pass
-
-    # PyTorch Fallback
-    n, k_half = w_packed.shape
-    k = k_half * 2
-
-    # Unpack nibbles
-    w_low = (w_packed & 0x0F).to(torch.float32) - 8.0
-    w_high = ((w_packed >> 4) & 0x0F).to(torch.float32) - 8.0
-
-    w_unpacked = torch.empty((n, k), dtype=torch.float32, device=w_packed.device)
-    w_unpacked[:, 0::2] = w_low
-    w_unpacked[:, 1::2] = w_high
-
-    # Expand scales
-    scales_expanded = scales.repeat_interleave(group_size, dim=1)[:, :k].to(torch.float32)
-    w_dequant = (w_unpacked * scales_expanded).to(x.dtype)
-
-    return torch.matmul(x, w_dequant.t())
 
 def dispatch_subspace_recirculation(
     h_shallow: torch.Tensor,

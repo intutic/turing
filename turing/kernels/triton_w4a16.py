@@ -1,5 +1,8 @@
 """
-W4A16 / Marlin-Style Packed INT4 GEMM Triton Kernel with In-SRAM Dequantization.
+W4A16 GEMM in Triton: y = x W^T with W stored as packed unsigned 4-bit codes (two per byte, low nibble = even
+column), an fp16 scale and a uint8 zero point per group of input columns: w = (q - zero) * scale. Each packed byte is
+loaded once and split into its two nibbles, which multiply the even and the odd columns of x. Tiles are autotuned.
+Used by turing.models.quant.QuantLinear for small row counts (decode); see tests/test_w4a16.py for parity.
 """
 
 from typing import Optional
@@ -15,84 +18,54 @@ except ImportError:
     tl = None
 
 if HAS_TRITON:
+    _CONFIGS = [triton.Config({"BLOCK_M": bm, "BLOCK_N": bn, "BLOCK_K": bk}, num_warps=w, num_stages=s)
+                for bm in (16, 32) for bn in (64, 128) for bk in (64,) for w in (4,) for s in (2, 3)]
+
+    @triton.autotune(configs=_CONFIGS, key=["M", "N", "K"])
     @triton.jit
-    def _w4a16_subspace_gemm_kernel(
-        X_ptr, W_packed_ptr, Scales_ptr, Out_ptr,
-        M, N, K,
-        stride_xm, stride_xk,
-        stride_wn, stride_wk_half,
-        stride_sn, stride_sk_groups,
-        stride_om, stride_on,
-        BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr
-    ):
+    def _w4a16_kernel(X, W, S, Z, Y, M, N, K,
+                      s_xm, s_xk, s_wn, s_wk, s_sn, s_sg, s_ym, s_yn,
+                      GROUP: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
         pid_m = tl.program_id(0)
         pid_n = tl.program_id(1)
-
         offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
         offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-
+        offs_b = tl.arange(0, BLOCK_K // 2)  # packed bytes of one K tile
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+        mask_m, mask_n = offs_m < M, offs_n < N
+        for k0 in range(0, K, BLOCK_K):
+            kb = k0 // 2 + offs_b
+            mask_k = kb < K // 2
+            wb = tl.load(W + offs_n[:, None] * s_wn + kb[None, :] * s_wk, mask=mask_n[:, None] & mask_k[None, :],
+                         other=0)
+            g = k0 // GROUP  # BLOCK_K divides GROUP: one scale and zero per row of this tile
+            sc = tl.load(S + offs_n * s_sn + g * s_sg, mask=mask_n, other=0.0).to(tl.float32)
+            zp = tl.load(Z + offs_n * s_sn + g * s_sg, mask=mask_n, other=0).to(tl.float32)
+            lo = ((wb & 0x0F).to(tl.float32) - zp[:, None]) * sc[:, None]
+            hi = (((wb >> 4) & 0x0F).to(tl.float32) - zp[:, None]) * sc[:, None]
+            x_even = tl.load(X + offs_m[:, None] * s_xm + (2 * kb)[None, :] * s_xk,
+                             mask=mask_m[:, None] & mask_k[None, :], other=0.0)
+            x_odd = tl.load(X + offs_m[:, None] * s_xm + (2 * kb + 1)[None, :] * s_xk,
+                            mask=mask_m[:, None] & mask_k[None, :], other=0.0)
+            acc += tl.dot(x_even, tl.trans(lo.to(x_even.dtype)))
+            acc += tl.dot(x_odd, tl.trans(hi.to(x_odd.dtype)))
+        tl.store(Y + offs_m[:, None] * s_ym + offs_n[None, :] * s_yn, acc.to(Y.dtype.element_ty),
+                 mask=mask_m[:, None] & mask_n[None, :])
 
-        for k_step in range(0, K, BLOCK_K):
-            offs_k = k_step + tl.arange(0, BLOCK_K)
 
-            # Load activation tile
-            mask_x = (offs_m[:, None] < M) & (offs_k[None, :] < K)
-            x = tl.load(X_ptr + offs_m[:, None] * stride_xm + offs_k[None, :] * stride_xk, mask=mask_x, other=0.0)
-
-            # Load packed weights (2 nibbles per byte)
-            offs_k_byte = offs_k // 2
-            w_ptrs = W_packed_ptr + offs_n[:, None] * stride_wn + offs_k_byte[None, :] * stride_wk_half
-            w_byte = tl.load(w_ptrs, mask=(offs_n[:, None] < N) & (offs_k[None, :] < K), other=0)
-
-            # Bitwise nibble extraction
-            is_odd = (offs_k[None, :] % 2 == 1)
-            w_int4 = tl.where(is_odd, (w_byte >> 4) & 0x0F, w_byte & 0x0F)
-            w_fp = (w_int4.to(tl.float16) - 8.0)
-
-            # Load scale factors (group size 128)
-            scale_ptrs = Scales_ptr + offs_n[:, None] * stride_sn + (offs_k[None, :] // 128) * stride_sk_groups
-            w_scale = tl.load(scale_ptrs, mask=(offs_n[:, None] < N), other=1.0)
-
-            w_final = w_fp * w_scale
-            acc += tl.dot(x, tl.trans(w_final.to(tl.float16)))
-
-        mask_out = (offs_m[:, None] < M) & (offs_n[None, :] < N)
-        tl.store(Out_ptr + offs_m[:, None] * stride_om + offs_n[None, :] * stride_on, acc.to(tl.float16), mask=mask_out)
-
-def launch_triton_w4a16_gemm(
-    x: torch.Tensor,
-    w_packed: torch.Tensor, # [N, K // 2], uint8
-    scales: torch.Tensor,   # [N, K // 128], fp16
-    group_size: int = 128
-) -> torch.Tensor:
-    """
-    Python launcher for W4A16 packed INT4 GEMM.
-    """
+def w4a16_gemm(x: torch.Tensor, qweight: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor,
+               group: int = 64) -> torch.Tensor:
+    """x [M, K] fp16/bf16, qweight [N, K / 2] uint8, scales [N, K / group] fp16, zeros [N, K / group] uint8 ->
+    y [M, N] in x's dtype."""
     if not HAS_TRITON:
-        raise RuntimeError("Triton is not available in current environment")
-
-    m, k = x.shape
-    n = w_packed.shape[0]
-
-    out = torch.empty((m, n), dtype=torch.float16, device=x.device)
-
-    BLOCK_M = 16
-    BLOCK_N = 64
-    BLOCK_K = 64
-
-    grid = (triton.cdiv(m, BLOCK_M), triton.cdiv(n, BLOCK_N))
-
-    _w4a16_subspace_gemm_kernel[grid](
-        x, w_packed, scales, out,
-        m, n, k,
-        x.stride(0), x.stride(1),
-        w_packed.stride(0), w_packed.stride(1),
-        scales.stride(0), scales.stride(1),
-        out.stride(0), out.stride(1),
-        BLOCK_M=BLOCK_M,
-        BLOCK_N=BLOCK_N,
-        BLOCK_K=BLOCK_K
-    )
-
-    return out
+        raise RuntimeError("Triton is not available")
+    M, K = x.shape
+    N = qweight.shape[0]
+    if group % 64:
+        raise ValueError("the int4 kernel needs a group size that is a multiple of 64")
+    y = torch.empty(M, N, device=x.device, dtype=x.dtype)
+    grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]), triton.cdiv(N, meta["BLOCK_N"]))
+    _w4a16_kernel[grid](x, qweight, scales, zeros, y, M, N, K,
+                        x.stride(0), x.stride(1), qweight.stride(0), qweight.stride(1),
+                        scales.stride(0), scales.stride(1), y.stride(0), y.stride(1), GROUP=group)
+    return y

@@ -103,6 +103,7 @@ class ModelConfig:
     norm_topk_prob: bool = True        # renormalise the top-k router probabilities
     shared_expert_ffn_dim: int = 0     # Qwen2-MoE: a sigmoid-gated shared expert
     moe_layers: Optional[List[int]] = None  # indices of MoE layers; None = all layers when num_experts > 0
+    quantization: Optional[str] = None  # None (fp16/bf16/fp32 weights), "w4a16-rtn" or "w4a16-gptq" (turing/models/quant.py)
 
     @property
     def total_tiles(self) -> int:
@@ -230,7 +231,7 @@ class ModelConfig:
 class TuringConfig:
     device: str = "auto"
     precision: str = "fp16" # "fp16", "bf16", "fp32"
-    quantization: str = "w4a16" # "w4a16", "w8a8", "none"
+    quantization: str = "none"  # "none", "w4a16-rtn", "w4a16-gptq" (applied at load; see turing/models/quant.py)
     group_size: int = 128
     enable_recirculation: bool = False
     recirculation_alpha: float = 0.15

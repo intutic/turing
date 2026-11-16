@@ -14,7 +14,6 @@ from .config import TuringConfig
 from .models.registry import get_model_config, MODEL_REGISTRY
 from .models.causal_lm import SubspaceCausalLM
 from .core.kv_cache import resolve_kv_cache_dtype
-from .models.converter import TuringConverter
 from .serving.engine import ContinuousBatchEngine
 from .serving.server import create_app
 from .serving.benchmark import TuringBenchmarkSuite
@@ -31,13 +30,26 @@ def _load_hf_or_exit(args, dev):
         raise SystemExit(f"[!] Could not load weights for '{args.model}': {e}\n    Pass --mock to run on synthetic weights.")
 
 def _load_weights(args, dev):
-    """Real weights from a local .gguf file or HuggingFace, with the KV cache flags applied when the command has them."""
-    if args.model.endswith(".gguf") and os.path.isfile(args.model):
+    """Real weights from a .tgate4 directory or file, a local .gguf file, or HuggingFace, with --quantization and the
+    KV cache flags applied when the command has them."""
+    from .models.quant import TGATE4_FILE, load_quantized, quantize_model, calibration_windows
+    if args.model.endswith(".tgate4") or os.path.isfile(os.path.join(args.model, TGATE4_FILE)):
+        print(f"[*] Loading 4-bit .tgate4 weights from '{args.model}'...")
+        model, tokenizer = load_quantized(args.model, device=str(dev), dtype=getattr(args, "dtype", None))
+        if tokenizer is None:
+            raise SystemExit(f"[!] '{args.model}' has no tokenizer files next to its model.tgate4")
+    elif args.model.endswith(".gguf") and os.path.isfile(args.model):
         from .models.gguf_loader import GGUFModelLoader
         print(f"[*] Loading native GGUF weights from '{args.model}'...")
         model, tokenizer = GGUFModelLoader(args.model).load(sparsity_ratio=args.sparsity, device=str(dev))
     else:
         model, tokenizer = _load_hf_or_exit(args, dev)
+    q = getattr(args, "quantization", "none")
+    if q != "none" and model.config.quantization is None:
+        method = q.split("-")[-1]
+        print(f"[*] Quantizing weights to 4 bits ({method})...")
+        calib = calibration_windows(tokenizer, args.calib_windows, 2048) if method == "gptq" else None
+        quantize_model(model, method, calib)
     cfg = model.config
     if hasattr(args, "kv_cache_dtype"):
         cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
@@ -55,6 +67,8 @@ def main():
     serve_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, cpu, mps)")
+    serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
+    serve_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     serve_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     serve_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     serve_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
@@ -83,6 +97,8 @@ def main():
     gen_parser.add_argument("--prompt", type=str, default="Artificial intelligence is", help="Input prompt")
     gen_parser.add_argument("--max-new-tokens", "--max-tokens", type=int, default=32, help="Tokens to generate")
     gen_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
+    gen_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
+    gen_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     gen_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     gen_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     gen_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
@@ -92,9 +108,13 @@ def main():
     gen_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
 
     # 4. Convert
-    conv_parser = subparsers.add_parser("convert", help="Export weights into .tgate4 binary container")
-    conv_parser.add_argument("--model", type=str, default="test-tiny", help="Model identifier")
-    conv_parser.add_argument("--output", type=str, default="model_layer0.tgate4", help="Output filepath")
+    conv_parser = subparsers.add_parser("convert", help="Quantize a HuggingFace checkpoint to 4-bit .tgate4 (GPTQ or RTN), layer by layer")
+    conv_parser.add_argument("--model", type=str, required=True, help="HF repo id, alias, or local checkpoint directory")
+    conv_parser.add_argument("--output", type=str, required=True, help="Output directory (model.tgate4 + tokenizer)")
+    conv_parser.add_argument("--method", type=str, default="gptq", choices=["gptq", "rtn"])
+    conv_parser.add_argument("--device", type=str, default="auto", help="Device for the per-layer work")
+    conv_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows (default 128)")
+    conv_parser.add_argument("--calib-tokens", type=int, default=2048, help="Tokens per calibration window (default 2048)")
 
     # 5. Eval NIAH
     niah_parser = subparsers.add_parser("eval-niah", help="Run Needle-In-A-Haystack long-context evaluation")
@@ -152,6 +172,8 @@ def main():
     chat_parser = subparsers.add_parser("chat", help="Start an instant interactive terminal chat session with real weights")
     chat_parser.add_argument("--model", type=str, default="smollm2", help="Model to chat with (e.g. smollm2, gpt2, qwen-2.5-7b, llama-3.1-8b)")
     chat_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
+    chat_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
+    chat_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     chat_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     chat_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     chat_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
@@ -311,15 +333,10 @@ def main():
         print(f"\n[+] Generated Output:\n{out_text}\n")
 
     elif args.command == "convert":
-        cfg = get_model_config(args.model)
-        converter = TuringConverter(cfg)
-        # Slices mock layer for verification
-        w_g = torch.randn(cfg.hidden_dim, cfg.ffn_dim)
-        w_u = torch.randn(cfg.hidden_dim, cfg.ffn_dim)
-        w_d = torch.randn(cfg.ffn_dim, cfg.hidden_dim)
-        active_tiles = list(range(cfg.active_tiles))
-        converter.export_turing_gate4_layer(args.output, layer_idx=0, w_gate=w_g, w_up=w_u, w_down=w_d, active_tiles=active_tiles)
-        print(f"[+] Successfully exported {cfg.name} Layer 0 to '{args.output}'")
+        from .models.converter import convert_checkpoint
+        dev = TuringConfig(device=args.device).resolve_device()
+        res = convert_checkpoint(args.model, args.output, args.method, str(dev), args.calib_windows, args.calib_tokens)
+        print(json.dumps(res, indent=2))
 
     elif args.command == "eval-niah":
         cfg = get_model_config(args.model)

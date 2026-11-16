@@ -255,14 +255,18 @@ class SubspaceAttention(nn.Module):
         return mask
 
     def _attend(self, q, k, v, mask, causal: bool) -> torch.Tensor:
-        """softmax(q k^T * scale) v with an optional bool mask; soft-capped scores take the explicit path."""
-        if self.softcap is None:
+        """softmax(q k^T * scale) v with an optional bool mask. Soft-capped scores, and every call on MPS, take the
+        explicit path: PyTorch 2.9's MPS scaled_dot_product_attention caches one graph per tensor shape and reuses it
+        with whatever `scale` the first call of that shape had, so a model whose scale differs from an earlier caller's
+        (HF's OPT passes 1.0 after pre-scaling q) silently gets wrong attention."""
+        if self.softcap is None and q.device.type != "mps":
             return F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=causal, scale=self.scale,
                                                   enable_gqa=self.num_kv_groups > 1)
         if self.num_kv_groups > 1:
             k, v = k.repeat_interleave(self.num_kv_groups, dim=1), v.repeat_interleave(self.num_kv_groups, dim=1)
         s = torch.matmul(q, k.transpose(2, 3)) * self.scale
-        s = torch.tanh(s / self.softcap) * self.softcap
+        if self.softcap is not None:
+            s = torch.tanh(s / self.softcap) * self.softcap
         if causal:
             mask = self._mask(0, q.shape[2], k.shape[2], q.device)
         if mask is not None:

@@ -5,7 +5,7 @@ Model architectures, tensor parallelism, converters, and upstream adapters for T
 from .causal_lm import SubspaceCausalLM, SubspaceDecoderLayer, SubspaceAttention, SubspaceMLP
 from .tensor_parallel import ColumnParallelLinear, RowParallelLinear, init_tensor_parallel
 from .registry import MODEL_REGISTRY, get_model_config
-from .converter import TuringConverter
+from .converter import convert_checkpoint
 from .adapters import UncertaintyKnowledgeGate, TenantLoRAAdapter
 from .vllm_adapter import VLLMCustomModelRunnerHarness, VLLMSubspaceQuantWrapper
 from .gguf_loader import GGUFModelLoader, GGUFReader, GGUFDequantizer
@@ -22,7 +22,7 @@ __all__ = [
     "init_tensor_parallel",
     "MODEL_REGISTRY",
     "get_model_config",
-    "TuringConverter",
+    "convert_checkpoint",
     "UncertaintyKnowledgeGate",
     "TenantLoRAAdapter",
     "VLLMCustomModelRunnerHarness",

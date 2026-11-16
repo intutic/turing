@@ -5,6 +5,8 @@ OpenAI-Compatible FastAPI Asynchronous LLM Serving Server.
 import json
 import math
 import time
+
+import torch
 from typing import List, Optional, Dict, Any, Union
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
@@ -713,15 +715,22 @@ def create_app(
         """
         Lists available models in native Ollama format (compatible with Open WebUI, Ollama CLI).
         """
-        return OllamaAPIHandler.format_tags_response(engine.model_config.name, engine.model_config)
+        return OllamaAPIHandler.format_tags_response(engine.model_config.name, engine.model_config, engine.model)
 
     @app.get("/api/ps")
     async def ollama_ps():
         """
         Lists running models and active VRAM footprint in Ollama format.
         """
-        vram_bytes = int(engine.get_kv_cache_utilization() * 4_294_967_296) + 2_000_000_000
-        return OllamaAPIHandler.format_ps_response(engine.model_config.name, engine.model_config, vram_bytes=vram_bytes)
+        # weights plus the KV pool as allocated (on CUDA, what the allocator really holds)
+        if engine.device.type == "cuda":
+            vram_bytes = torch.cuda.memory_allocated(engine.device)
+        else:
+            vram_bytes = sum(t.numel() * t.element_size() for t in list(engine.model.parameters()) + list(engine.model.buffers()))
+            st = engine.kv_pool.get_stats()
+            vram_bytes += st["max_physical_pages"] * st["bytes_per_page"]
+        return OllamaAPIHandler.format_ps_response(engine.model_config.name, engine.model_config, vram_bytes=vram_bytes,
+                                                   model=engine.model)
 
     @app.get("/api/version")
     async def ollama_version():
@@ -736,7 +745,8 @@ def create_app(
         Inspects model parameters and architecture in Ollama format.
         """
         target_model = req.model or engine.model_config.name
-        return OllamaAPIHandler.format_show_response(target_model, engine.model_config)
+        return OllamaAPIHandler.format_show_response(target_model, engine.model_config, engine.model,
+                                                     getattr(engine.tokenizer, "chat_template", None))
 
     @app.post("/api/pull")
     async def ollama_pull(raw_req: Request):

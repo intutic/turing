@@ -163,13 +163,16 @@ class _Writer:
             raise ValueError(f"no HF weights for {len(missing)} Turing parameters, e.g. {missing[:5]}")
 
 
-def _copy_weights(cfg: ModelConfig, sd: Dict[str, torch.Tensor], put: _Writer, layout: str) -> None:
-    L = cfg.num_layers
+def _copy_weights(cfg: ModelConfig, sd, put: _Writer, layout: str, layers=None, glob: bool = True) -> None:
+    """Map HF tensors (sd: name -> tensor, or any mapping that loads on access) onto the model: the embeddings, final
+    norm and head when glob, and the given layers (all by default)."""
+    idx = range(cfg.num_layers) if layers is None else layers
     if layout in ("llama", "gemma2", "phi3"):
-        put("embed_tokens.weight", sd["model.embed_tokens.weight"])
-        put("norm.weight", sd["model.norm.weight"])
-        put("lm_head.weight", sd.get("lm_head.weight", sd["model.embed_tokens.weight"]))
-        for i in range(L):
+        if glob:
+            put("embed_tokens.weight", sd["model.embed_tokens.weight"])
+            put("norm.weight", sd["model.norm.weight"])
+            put("lm_head.weight", sd.get("lm_head.weight", sd["model.embed_tokens.weight"]))
+        for i in idx:
             s, t = f"model.layers.{i}.", f"layers.{i}."
             if layout == "phi3":
                 qd, kd = cfg.num_heads * cfg.head_dim, cfg.num_kv_heads * cfg.head_dim
@@ -220,11 +223,12 @@ def _copy_weights(cfg: ModelConfig, sd: Dict[str, torch.Tensor], put: _Writer, l
             put(dst + ".bias", sd[src + ".bias"] if b is None else b)
 
     if layout == "gpt2":
-        put("embed_tokens.weight", sd["transformer.wte.weight"])
-        put("embed_positions.weight", sd["transformer.wpe.weight"])
-        ln("norm", "transformer.ln_f")
-        put("lm_head.weight", sd.get("lm_head.weight", sd["transformer.wte.weight"]))
-        for i in range(L):
+        if glob:
+            put("embed_tokens.weight", sd["transformer.wte.weight"])
+            put("embed_positions.weight", sd["transformer.wpe.weight"])
+            ln("norm", "transformer.ln_f")
+            put("lm_head.weight", sd.get("lm_head.weight", sd["transformer.wte.weight"]))
+        for i in idx:
             s, t = f"transformer.h.{i}.", f"layers.{i}."
             ln(t + "input_layernorm", s + "ln_1")
             ln(t + "post_attention_layernorm", s + "ln_2")
@@ -236,16 +240,17 @@ def _copy_weights(cfg: ModelConfig, sd: Dict[str, torch.Tensor], put: _Writer, l
             lin(t + "mlp.down_proj", s + "mlp.c_proj", w=sd[s + "mlp.c_proj.weight"].t())
     elif layout == "opt":
         d = "model.decoder."
-        put("embed_tokens.weight", sd[d + "embed_tokens.weight"])
-        put("embed_positions.weight", sd[d + "embed_positions.weight"])
-        if cfg.embed_proj_dim:
-            put("project_in.weight", sd[d + "project_in.weight"])
-            put("project_out.weight", sd[d + "project_out.weight"])
-        if cfg.final_norm:
-            ln("norm", d + "final_layer_norm")
-        put("lm_head.weight", sd.get("lm_head.weight", sd[d + "embed_tokens.weight"]))
         bias = cfg.attention_bias
-        for i in range(L):
+        if glob:
+            put("embed_tokens.weight", sd[d + "embed_tokens.weight"])
+            put("embed_positions.weight", sd[d + "embed_positions.weight"])
+            if cfg.embed_proj_dim:
+                put("project_in.weight", sd[d + "project_in.weight"])
+                put("project_out.weight", sd[d + "project_out.weight"])
+            if cfg.final_norm:
+                ln("norm", d + "final_layer_norm")
+            put("lm_head.weight", sd.get("lm_head.weight", sd[d + "embed_tokens.weight"]))
+        for i in idx:
             s, t = f"{d}layers.{i}.", f"layers.{i}."
             for p in ("q_proj", "k_proj", "v_proj"):
                 lin(t + f"self_attn.{p}", s + f"self_attn.{p}", bias)
@@ -255,11 +260,12 @@ def _copy_weights(cfg: ModelConfig, sd: Dict[str, torch.Tensor], put: _Writer, l
             lin(t + "mlp.up_proj", s + "fc1", cfg.mlp_bias)
             lin(t + "mlp.down_proj", s + "fc2", cfg.mlp_bias)
     elif layout == "gpt_neox":
-        put("embed_tokens.weight", sd["gpt_neox.embed_in.weight"])
-        ln("norm", "gpt_neox.final_layer_norm")
-        put("lm_head.weight", sd.get("embed_out.weight", sd.get("lm_head.weight")))
         H, D = cfg.num_heads, cfg.head_dim
-        for i in range(L):
+        if glob:
+            put("embed_tokens.weight", sd["gpt_neox.embed_in.weight"])
+            ln("norm", "gpt_neox.final_layer_norm")
+            put("lm_head.weight", sd.get("embed_out.weight", sd.get("lm_head.weight")))
+        for i in idx:
             s, t = f"gpt_neox.layers.{i}.", f"layers.{i}."
             ln(t + "input_layernorm", s + "input_layernorm")
             ln(t + "post_attention_layernorm", s + "post_attention_layernorm")
@@ -272,10 +278,11 @@ def _copy_weights(cfg: ModelConfig, sd: Dict[str, torch.Tensor], put: _Writer, l
             lin(t + "mlp.up_proj", s + "mlp.dense_h_to_4h")
             lin(t + "mlp.down_proj", s + "mlp.dense_4h_to_h")
     elif layout == "phi":
-        put("embed_tokens.weight", sd["model.embed_tokens.weight"])
-        ln("norm", "model.final_layernorm")
-        lin("lm_head", "lm_head")
-        for i in range(L):
+        if glob:
+            put("embed_tokens.weight", sd["model.embed_tokens.weight"])
+            ln("norm", "model.final_layernorm")
+            lin("lm_head", "lm_head")
+        for i in idx:
             s, t = f"model.layers.{i}.", f"layers.{i}."
             ln(t + "input_layernorm", s + "input_layernorm")
             for p in ("q_proj", "k_proj", "v_proj"):

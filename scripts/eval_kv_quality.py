@@ -45,6 +45,9 @@ ARMS |= {  # KV cache settings through the cache; low-bit arms vs exact_forward,
     "quest25": ("decode", _EXACT, dict(kv_page_budget=0.25), "exact_decode"),
     "quest10": ("decode", _EXACT, dict(kv_page_budget=0.10), "exact_decode"),
     "int8_quest25": ("decode", _EXACT, dict(kv_cache_dtype="int8", kv_page_budget=0.25), "exact_decode"),
+    # 4-bit weights (turing/models/quant.py): round to nearest, and GPTQ calibrated on 128 x 2048 WikiText-2 train tokens
+    "rtn4": ("forward", dict(_EXACT, quant="rtn"), {}, "exact_forward"),
+    "gptq4": ("forward", dict(_EXACT, quant="gptq"), {}, "exact_forward"),
 }
 
 
@@ -84,13 +87,20 @@ def mean_se(v):
 def run_model(name, arms, T, D, n_win, device):
     dtype = torch.float16 if device.type == "cuda" else torch.float32
     tok = AutoTokenizer.from_pretrained(name)
-    hf = AutoModelForCausalLM.from_pretrained(name, dtype=dtype).to(device).eval()
+    # eager attention on MPS: its SDPA reuses one cached graph per shape with the first call's scale (PyTorch 2.9)
+    hf = AutoModelForCausalLM.from_pretrained(name, dtype=dtype, **({"attn_implementation": "eager"}
+                                                                     if device.type == "mps" else {})).to(device).eval()
     wins = windows(tok, T, n_win).to(device)
     s = T - D
     per_arm, rows = {}, []
     for arm in arms:
         mode, load, kv, _ = ARMS[arm]
+        load = dict(load) if load is not None else None
+        quant = load.pop("quant", None) if load else None
         model = hf if load is None else RealHuggingFaceLoader.convert_hf_model(hf, device=str(device), **load)
+        if quant:  # replaces modules only: the HF weights this model shares stay as they are for the other arms
+            from turing.models.quant import calibration_windows, quantize_model
+            model = quantize_model(model, quant, calibration_windows(tok) if quant == "gptq" else None)
         for k, v in kv.items():
             setattr(model.config, k, v)
         t0 = time.perf_counter()

@@ -55,8 +55,8 @@ class OllamaModelDetails(BaseModel):
     format: str = "subspace"
     family: str = "llama"
     families: List[str] = []
-    parameter_size: str = "7B"
-    quantization_level: str = "w4a16"
+    parameter_size: str = ""
+    quantization_level: str = ""
 
 
 class OllamaModelInfo(BaseModel):
@@ -84,6 +84,26 @@ class OllamaProcessInfo(BaseModel):
 
 class OllamaPsResponse(BaseModel):
     models: List[OllamaProcessInfo]
+
+
+def _model_facts(model_config: ModelConfig, model=None) -> Dict[str, Any]:
+    """Family, parameter count, weight bytes and quantization label of the served model, from the model itself."""
+    params, nbytes, dtype = 0, 0, None
+    if model is not None:
+        for t in list(model.parameters()) + list(model.buffers()):
+            nbytes += t.numel() * t.element_size()
+            if t.is_floating_point():
+                params += t.numel()
+                dtype = dtype or t.dtype
+        for m in model.modules():  # packed 4-bit layers hold two weights per byte of qweight
+            if hasattr(m, "qweight"):
+                params += m.qweight.numel() * 2
+    q = getattr(model_config, "quantization", None)
+    label = {"w4a16-gptq": "Q4 (GPTQ)", "w4a16-rtn": "Q4 (RTN)"}.get(q) or \
+        {"torch.float16": "F16", "torch.bfloat16": "BF16", "torch.float32": "F32"}.get(str(dtype), "unknown")
+    size = f"{params / 1e9:.1f}B" if params >= 1e9 else f"{params / 1e6:.0f}M"
+    return {"family": getattr(model_config, "arch", "llama"), "params": params, "bytes": nbytes, "label": label,
+            "parameter_size": size}
 
 
 class OllamaAPIHandler:
@@ -226,53 +246,51 @@ class OllamaAPIHandler:
         return json.dumps(payload) + "\n"
 
     @staticmethod
-    def format_tags_response(active_model_name: str, model_config: ModelConfig) -> Dict[str, Any]:
+    def format_tags_response(active_model_name: str, model_config: ModelConfig, model=None) -> Dict[str, Any]:
         iso_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         spec = ModelResolver.parse(active_model_name)
-        param_est = f"{model_config.num_layers * model_config.hidden_dim * 12 // 1_000_000_000}B" if model_config.num_layers else "7B"
-        
+        f = _model_facts(model_config, model)
         details = OllamaModelDetails(
             parent_model="",
             format="subspace",
-            family="llama" if "llama" in spec.model_name.lower() else ("qwen" if "qwen" in spec.model_name.lower() else "deepseek"),
-            families=[spec.model_name.lower()],
-            parameter_size=param_est,
-            quantization_level="w4a16"
+            family=f["family"],
+            families=[f["family"]],
+            parameter_size=f["parameter_size"],
+            quantization_level=f["label"]
         )
         
         info = OllamaModelInfo(
             name=active_model_name,
             model=spec.repo_id,
             modified_at=iso_now,
-            size=int(model_config.hidden_dim * model_config.ffn_dim * model_config.num_layers * 0.5) if model_config else 4_000_000_000,
+            size=f["bytes"],
             digest=f"sha256:turing{abs(hash(active_model_name)):016x}",
             details=details
         )
         return {"models": [info.model_dump()]}
 
     @staticmethod
-    def format_show_response(model_name: str, model_config: ModelConfig) -> Dict[str, Any]:
+    def format_show_response(model_name: str, model_config: ModelConfig, model=None, chat_template=None) -> Dict[str, Any]:
         spec = ModelResolver.parse(model_name)
         iso_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        param_est = f"{model_config.num_layers * model_config.hidden_dim * 12 // 1_000_000_000}B" if model_config.num_layers else "7B"
+        f = _model_facts(model_config, model)
         
         return {
             "license": "Business Source License 1.1 (BSL 1.1) / Open Apache 2.0 conversion 2030",
             "modelfile": f"# Turing Engine Native Modelfile\nFROM {spec.repo_id}\nPARAMETER temperature 0.7\nPARAMETER top_p 0.9\nPARAMETER stop <|im_end|>\n",
             "parameters": f"stop                           \"<|im_end|>\"\ntemperature                    0.7\ntop_p                          0.9\n",
-            "template": "{{ if .System }}<|im_start|>system\n{{ .System }}<|im_end|>\n{{ end }}{{ if .Prompt }}<|im_start|>user\n{{ .Prompt }}<|im_end|>\n{{ end }}<|im_start|>assistant\n{{ .Response }}<|im_end|>",
+            "template": chat_template or "",  # the tokenizer's own (Jinja) chat template, which the server applies
             "details": {
                 "parent_model": "",
                 "format": "subspace",
-                "family": "llama" if "llama" in spec.model_name.lower() else ("qwen" if "qwen" in spec.model_name.lower() else "deepseek"),
-                "families": [spec.model_name.lower()],
-                "parameter_size": param_est,
-                "quantization_level": "w4a16"
+                "family": f["family"],
+                "families": [f["family"]],
+                "parameter_size": f["parameter_size"],
+                "quantization_level": f["label"]
             },
             "model_info": {
-                "general.architecture": "subspace_causal_lm",
-                "general.file_type": 1,
-                "general.parameter_count": model_config.num_layers * model_config.hidden_dim * 12,
+                "general.architecture": f["family"],
+                "general.parameter_count": f["params"],
                 "turing.hidden_size": model_config.hidden_dim,
                 "turing.intermediate_size": model_config.ffn_dim,
                 "turing.num_hidden_layers": model_config.num_layers,
@@ -285,25 +303,26 @@ class OllamaAPIHandler:
         }
 
     @staticmethod
-    def format_ps_response(active_model_name: str, model_config: ModelConfig, vram_bytes: int = 0) -> Dict[str, Any]:
+    def format_ps_response(active_model_name: str, model_config: ModelConfig, vram_bytes: int = 0, model=None) -> Dict[str, Any]:
         iso_now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         expires_at = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=30)).isoformat()
         spec = ModelResolver.parse(active_model_name)
         
+        f = _model_facts(model_config, model)
         proc = OllamaProcessInfo(
             name=active_model_name,
             model=spec.repo_id,
-            size=vram_bytes or 4_294_967_296,
+            size=vram_bytes,
             digest=f"sha256:turing{abs(hash(active_model_name)):016x}",
             details=OllamaModelDetails(
                 parent_model="",
                 format="subspace",
-                family="llama",
-                families=[spec.model_name.lower()],
-                parameter_size="7B",
-                quantization_level="w4a16"
+                family=f["family"],
+                families=[f["family"]],
+                parameter_size=f["parameter_size"],
+                quantization_level=f["label"]
             ),
             expires_at=expires_at,
-            size_vram=vram_bytes or 4_294_967_296
+            size_vram=vram_bytes
         )
         return {"models": [proc.model_dump()]}
