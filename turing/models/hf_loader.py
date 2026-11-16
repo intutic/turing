@@ -5,11 +5,9 @@ exports packed .tgate4 INT4 containers, and loads them into SubspaceCausalLM.
 """
 
 import os
-import warnings
 
 os.environ["HF_HUB_DISABLE_UNAUTHENTICATED_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-warnings.filterwarnings("ignore")
 
 import huggingface_hub
 huggingface_hub.logging.set_verbosity_error()
@@ -22,7 +20,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, logging as hf_logg
 # Silence non-critical HF warnings
 hf_logging.set_verbosity_error()
 
-from ..config import ModelConfig, hf_rope_theta
+from ..config import ModelConfig, hf_rope_scaling, hf_rope_theta
 from .causal_lm import SubspaceCausalLM, SubspaceDecoderLayer
 from .converter import TuringConverter
 from ..core.subspace import SubspaceManager
@@ -68,7 +66,7 @@ class RealHuggingFaceLoader:
         hf_model = AutoModelForCausalLM.from_pretrained(
             resolved_id,
             token=hf_token,
-            torch_dtype=target_dtype,
+            dtype=target_dtype,
             low_cpu_mem_usage=True
         ).eval()
 
@@ -109,6 +107,13 @@ class RealHuggingFaceLoader:
         vocab_size = getattr(hf_cfg, "vocab_size", 50257)
         ffn_dim = getattr(hf_cfg, "intermediate_size", hidden_dim * 4)
 
+        modules = dict(hf_model.named_modules())
+        q_projs = [m for n, m in modules.items() if n.endswith("q_proj")]
+        if any(n.endswith("o_proj") and m.bias is not None for n, m in modules.items()):
+            raise ValueError("o_proj biases are not supported")
+        if getattr(hf_cfg, "use_sliding_window", False):
+            raise ValueError("sliding-window attention is not supported")
+
         tile_size = 64 if ffn_dim <= 4096 else 256
         total_tiles = ffn_dim // tile_size
         active_tiles_count = max(1, int(total_tiles * (1.0 - sparsity_ratio)))
@@ -127,6 +132,9 @@ class RealHuggingFaceLoader:
             rank_sub=64 if hidden_dim >= 768 else 32,
             max_position_embeddings=getattr(hf_cfg, "max_position_embeddings", 2048),
             rope_theta=hf_rope_theta(hf_cfg),
+            rope_scaling=hf_rope_scaling(hf_cfg),
+            attention_bias=bool(q_projs) and q_projs[0].bias is not None,
+            qk_norm=any(n.endswith("q_norm") for n in modules),
             rms_norm_eps=getattr(hf_cfg, "rms_norm_eps", 1e-6),
             enable_recirculation=enable_recirculation
         )
@@ -180,6 +188,12 @@ class RealHuggingFaceLoader:
                             j_layer.self_attn.q_proj.weight.copy_(attn.q_proj.weight.to(target_device))
                             j_layer.self_attn.k_proj.weight.copy_(attn.k_proj.weight.to(target_device))
                             j_layer.self_attn.v_proj.weight.copy_(attn.v_proj.weight.to(target_device))
+                            if turing_cfg.attention_bias:  # Qwen2
+                                for proj in ("q_proj", "k_proj", "v_proj"):
+                                    getattr(j_layer.self_attn, proj).bias.copy_(getattr(attn, proj).bias.to(target_device))
+                            if turing_cfg.qk_norm:  # Qwen3
+                                j_layer.self_attn.q_norm.weight.copy_(attn.q_norm.weight.to(target_device))
+                                j_layer.self_attn.k_norm.weight.copy_(attn.k_norm.weight.to(target_device))
                         elif hasattr(attn, "c_attn"): # GPT-2
                             qkv_w = attn.c_attn.weight.to(target_device).t().contiguous()
                             q_w, k_w, v_w = qkv_w.chunk(3, dim=0)

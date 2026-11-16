@@ -39,3 +39,12 @@ def test_expanded_model_aliases():
 
     # Test fallback on raw repo identifier
     assert RealHuggingFaceLoader.resolve_model_id("custom/my-fine-tuned-model") == "custom/my-fine-tuned-model"
+
+
+def test_cli_exits_instead_of_falling_back_to_random_weights(monkeypatch):
+    import sys
+    from turing import cli
+    monkeypatch.setattr(sys, "argv", ["turing", "generate", "--model", "/nonexistent/model-dir", "--prompt", "hi"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert "--mock" in str(exc.value.code)

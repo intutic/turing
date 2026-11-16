@@ -4,7 +4,6 @@ Turing Engine Subspace Accelerated Generator with Multi-Hardware Dispatch & Cros
 
 import os
 import time
-import warnings
 from typing import Tuple, List, Dict, Optional, Any, Union
 
 import torch
@@ -15,7 +14,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, logging as hf_logg
 # Silence HF hub notices
 os.environ["HF_HUB_DISABLE_UNAUTHENTICATED_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-warnings.filterwarnings("ignore")
 hf_logging.set_verbosity_error()
 
 import huggingface_hub

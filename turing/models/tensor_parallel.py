@@ -211,7 +211,9 @@ class PipelineStage(nn.Module):
         else:
             hidden_states = hidden_or_ids
 
-        # 2. Stage decoder layers
+        # 2. Stage decoder layers; the cached length is the new tokens' first RoPE position
+        if start_pos == 0 and past_key_values and past_key_values[0][0] is not None:
+            start_pos = past_key_values[0][0].shape[2]
         new_kvs = []
         for idx, layer in enumerate(self.layers):
             p_k, p_v = (past_key_values[idx] if past_key_values and idx < len(past_key_values) else (None, None))

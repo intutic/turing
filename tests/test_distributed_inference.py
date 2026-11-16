@@ -118,3 +118,23 @@ def test_distributed_inference_driver_pp2():
     assert logits.shape == (1, 3, cfg.vocab_size)
     assert kvs is not None
     assert len(kvs) == cfg.num_layers
+
+
+@pytest.mark.parametrize("pp_size", [1, 2])
+@torch.no_grad()
+def test_distributed_decode_matches_full_sequence_logits(pp_size):
+    """Decode through the pipeline must take each token's RoPE position (and each stage's layers) from the past cache."""
+    torch.manual_seed(0)
+    cfg = get_model_config("test-tiny")
+    model = SubspaceCausalLM(cfg).eval()
+    driver = DistributedInferenceDriver(model=model, config=cfg, dist_config=DistributedConfig(tp_size=1, pp_size=pp_size))
+    ids = torch.randint(0, cfg.vocab_size, (1, 12), generator=torch.Generator().manual_seed(1))
+    ref, _ = model(ids)
+
+    logits, past = driver.forward_distributed(ids[:, :6])
+    outs = [logits]
+    for t in range(6, 12):
+        logits, past = driver.forward_distributed(ids[:, t:t + 1], past_key_values=past)
+        outs.append(logits)
+
+    torch.testing.assert_close(torch.cat(outs, dim=1), ref, atol=1e-3, rtol=0)
