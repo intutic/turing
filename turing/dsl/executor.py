@@ -68,7 +68,7 @@ class LocalExecutor(BaseExecutor):
         self,
         model_name_or_id: Optional[str] = "test-tiny",
         device: str = "auto",
-        sparsity: float = 0.5,
+        sparsity: float = 0.0,
         model: Optional[SubspaceCausalLM] = None,
         tokenizer: Optional[Any] = None
     ):

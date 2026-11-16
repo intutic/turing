@@ -6,6 +6,12 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 import torch
 
+
+def hf_rope_theta(hf_cfg) -> float:
+    """RoPE base of a HuggingFace config; transformers 5 moved it from `rope_theta` into `rope_parameters`."""
+    return float(getattr(hf_cfg, "rope_theta", None) or (getattr(hf_cfg, "rope_parameters", None) or {}).get("rope_theta", 10000.0))
+
+
 @dataclass
 class ModelConfig:
     name: str
@@ -22,6 +28,11 @@ class ModelConfig:
     max_position_embeddings: int = 8192
     rope_theta: float = 10000.0
     router_layer_idx: Optional[int] = None # Defaults to num_layers // 3
+    rms_norm_eps: float = 1e-6
+    enable_recirculation: bool = False
+    kv_cache_dtype: str = "native"     # "native", "int8" or "int4" (see turing/core/kv_cache.py)
+    kv_page_budget: float = 1.0        # Quest: share of 16-token pages a decode step reads; 1.0 reads all
+    kv_select_min_tokens: int = 1024   # Quest selection only once the cache holds at least this many tokens
 
     @property
     def total_tiles(self) -> int:
@@ -44,7 +55,7 @@ class ModelConfig:
             self.rank_sub = max(1, self.hidden_dim)
 
     @classmethod
-    def from_gguf_metadata(cls, metadata: Dict[str, Any], sparsity_ratio: float = 0.5) -> "ModelConfig":
+    def from_gguf_metadata(cls, metadata: Dict[str, Any], sparsity_ratio: float = 0.0) -> "ModelConfig":
         """
         Dynamically derives ModelConfig from parsed GGUF metadata dictionary.
         """
@@ -88,7 +99,7 @@ class ModelConfig:
         )
 
     @classmethod
-    def from_pretrained(cls, model_name_or_id: str, sparsity_ratio: float = 0.5, token: Optional[str] = None) -> "ModelConfig":
+    def from_pretrained(cls, model_name_or_id: str, sparsity_ratio: float = 0.0, token: Optional[str] = None) -> "ModelConfig":
         """
         Dynamically extracts ModelConfig architecture geometry from any Hugging Face Hub repository,
         local directory containing a config.json file, or local .gguf binary file. Zero hardcoding required.
@@ -127,7 +138,7 @@ class ModelConfig:
                 active_tiles=active_tiles,
                 rank_sub=64 if hidden_dim >= 768 else 32,
                 max_position_embeddings=getattr(hf_cfg, "max_position_embeddings", 2048),
-                rope_theta=getattr(hf_cfg, "rope_theta", 10000.0)
+                rope_theta=hf_rope_theta(hf_cfg)
             )
         except Exception as e:
             raise ValueError(f"Could not dynamically derive ModelConfig from '{model_name_or_id}': {e}")
@@ -138,7 +149,7 @@ class TuringConfig:
     precision: str = "fp16" # "fp16", "bf16", "fp32"
     quantization: str = "w4a16" # "w4a16", "w8a8", "none"
     group_size: int = 128
-    enable_recirculation: bool = True
+    enable_recirculation: bool = False
     recirculation_alpha: float = 0.15
     enable_speculation: bool = False
     speculation_branching: int = 4

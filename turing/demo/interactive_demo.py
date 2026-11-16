@@ -15,7 +15,7 @@ from .engine_wrapper import TuringAcceleratedGenerator
 def run_demo(
     model_name: str = "smollm2",
     device: str = "auto",
-    sparsity: float = 0.57,
+    sparsity: float = 0.0,
     prompt: str = "Explain how high-performance subspace inference accelerates LLM token generation in 3 bullet points."
 ):
     print("=" * 80)
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Turing Engine Interactive Demo Runner")
     parser.add_argument("--model", type=str, default="smollm2", help="Model target (e.g. smollm2, gpt2)")
     parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
-    parser.add_argument("--sparsity", type=float, default=0.57, help="Subspace sparsity ratio")
+    parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace sparsity ratio")
     parser.add_argument("--prompt", type=str, default="Explain how high-performance subspace inference accelerates LLM token generation in 3 bullet points.", help="Prompt to evaluate")
     args = parser.parse_args()
 

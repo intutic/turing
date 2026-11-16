@@ -12,6 +12,9 @@ from ..core.subspace import SubspaceRecirculation
 from ..core.router import SubspaceStructuredRouter
 from ..core.rope import NTKDynamicRoPEScaling, apply_rotary_pos_emb
 from ..core.hybrid_attention import ChunkContextScorer
+from ..core.kv_cache import DecodeBatchLayer, KVCache, LayerKVCache
+from ..kernels.triton_kv_decode import (batched_decode_supported, build_decode_tables, kv_decode_supported,
+                                        triton_kv_decode, triton_kv_decode_batch)
 from ..kernels.dispatch import dispatch_swiglu
 from ..kernels.triton_fused_rmsnorm_swiglu import dispatch_fused_rmsnorm_swiglu
 
@@ -23,8 +26,8 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        variance = x.pow(2).mean(-1, keepdim=True)
-        return x * torch.rsqrt(variance + self.eps) * self.weight
+        xf = x.float()  # in fp32, as HF Llama does: fp16 squares overflow for large activations
+        return (xf * torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + self.eps)).to(x.dtype) * self.weight
 
 class SubspaceMLP(nn.Module):
     """
@@ -70,6 +73,7 @@ class SubspaceAttention(nn.Module):
     """
     def __init__(self, config: ModelConfig):
         super().__init__()
+        self.config = config
         self.hidden_dim = config.hidden_dim
         self.num_heads = config.num_heads
         self.num_kv_heads = config.num_kv_heads
@@ -93,18 +97,31 @@ class SubspaceAttention(nn.Module):
         hidden_states: torch.Tensor,
         past_k: Optional[torch.Tensor] = None,
         past_v: Optional[torch.Tensor] = None,
-        start_pos: int = 0
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        start_pos: Union[int, List[int]] = 0,
+        cache: Union[LayerKVCache, List[LayerKVCache], None] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         batch, seq_len, _ = hidden_states.shape
 
         q = self.q_proj(hidden_states).view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         k = self.k_proj(hidden_states).view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
         v = self.v_proj(hidden_states).view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
 
-        cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device)
-        cos = cos[start_pos : start_pos + seq_len]
-        sin = sin[start_pos : start_pos + seq_len]
-        q, k = apply_rotary_pos_emb(q, k, cos, sin)
+        if isinstance(start_pos, list):  # batched decode: one position per row
+            cos, sin = self.rope.compute_freqs_at(tuple(start_pos), device=hidden_states.device)
+            cos, sin = cos.view(batch, 1, 1, self.head_dim), sin.view(batch, 1, 1, self.head_dim)
+        else:
+            cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos)
+        q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
+
+        if isinstance(cache, DecodeBatchLayer):  # CUDA decode step: one fused append + attention for every row
+            out = triton_kv_decode_batch(q, k, v, cache.rows, cache.table)
+            return self.o_proj(out.transpose(1, 2).reshape(batch, 1, self.num_heads * self.head_dim)), None, None
+        if isinstance(cache, list):  # batched decode: each row attends over its own request's cache
+            out = torch.cat([self._attend_cache(q[b:b + 1], k[b:b + 1], v[b:b + 1], cache[b], start_pos[b])
+                             for b in range(batch)])
+            return self.o_proj(out), None, None
+        if cache is not None:
+            return self.o_proj(self._attend_cache(q, k, v, cache, start_pos)), None, None
 
         if past_k is not None and past_v is not None:
             k = torch.cat([past_k, k], dim=2)
@@ -137,6 +154,28 @@ class SubspaceAttention(nn.Module):
 
         return output, cur_k, cur_v
 
+    def _attend_cache(self, q, k, v, cache: LayerKVCache, start_pos: int) -> torch.Tensor:
+        """Append k, v to the cache, then attend q over it: [B, H, L, D] -> [B, L, H * D]."""
+        batch, _, seq_len, _ = q.shape
+        cache.append(k, v)
+        cfg, gqa, mask, causal = self.config, self.num_kv_groups > 1, None, False
+        select = (seq_len == 1 and cfg.kv_page_budget < 1.0 and cache.track_pages
+                  and cache.length >= cfg.kv_select_min_tokens)
+        if seq_len == 1 and kv_decode_supported(q, cache):  # CUDA: fused kernel reads the stored format directly
+            out = triton_kv_decode(q, cache, cache.select_pages(q, cfg.kv_page_budget) if select else None)
+            return out.transpose(1, 2).reshape(batch, 1, self.num_heads * self.head_dim)
+        if select:
+            k_all, v_all, valid = cache.read_positions(cache.select_pages(q, cfg.kv_page_budget))
+            mask = valid.repeat_interleave(self.num_kv_groups, dim=1)
+        else:
+            k_all, v_all = cache.read()
+            if seq_len > 1 and start_pos > 0:  # chunked prefill: query i sees keys 0 .. start_pos + i
+                pos = torch.arange(cache.length, device=q.device)
+                mask = pos <= (start_pos + torch.arange(seq_len, device=q.device))[:, None]
+            causal = seq_len > 1 and start_pos == 0
+        out = F.scaled_dot_product_attention(q, k_all, v_all, attn_mask=mask, is_causal=causal, enable_gqa=gqa)
+        return out.transpose(1, 2).reshape(batch, seq_len, self.num_heads * self.head_dim)
+
 
 class SubspaceDecoderLayer(nn.Module):
     """
@@ -145,9 +184,9 @@ class SubspaceDecoderLayer(nn.Module):
     def __init__(self, config: ModelConfig, layer_idx: int):
         super().__init__()
         self.layer_idx = layer_idx
-        self.input_layernorm = RMSNorm(config.hidden_dim)
+        self.input_layernorm = RMSNorm(config.hidden_dim, config.rms_norm_eps)
         self.self_attn = SubspaceAttention(config)
-        self.post_attention_layernorm = RMSNorm(config.hidden_dim)
+        self.post_attention_layernorm = RMSNorm(config.hidden_dim, config.rms_norm_eps)
         self.mlp = SubspaceMLP(config)
 
     def forward(
@@ -155,11 +194,12 @@ class SubspaceDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         past_k: Optional[torch.Tensor] = None,
         past_v: Optional[torch.Tensor] = None,
-        start_pos: int = 0
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        start_pos: Union[int, List[int]] = 0,
+        cache: Union[LayerKVCache, List[LayerKVCache], None] = None
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
-        attn_out, k_out, v_out = self.self_attn(hidden_states, past_k=past_k, past_v=past_v, start_pos=start_pos)
+        attn_out, k_out, v_out = self.self_attn(hidden_states, past_k=past_k, past_v=past_v, start_pos=start_pos, cache=cache)
         hidden_states = residual + attn_out
 
         # Fused RMSNorm + Subspace SwiGLU + Residual
@@ -195,7 +235,7 @@ class SubspaceCausalLM(nn.Module):
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_dim)
         self.layers = nn.ModuleList([SubspaceDecoderLayer(config, i) for i in range(config.num_layers)])
-        self.norm = RMSNorm(config.hidden_dim)
+        self.norm = RMSNorm(config.hidden_dim, config.rms_norm_eps)
         self.lm_head = nn.Linear(config.hidden_dim, config.vocab_size, bias=False)
 
         # Recirculation layer at layer L/3
@@ -211,31 +251,60 @@ class SubspaceCausalLM(nn.Module):
     def forward(
         self,
         input_ids: torch.Tensor,
-        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        past_key_values: Optional[Union[KVCache, List[Tuple[torch.Tensor, torch.Tensor]]]] = None,
         start_pos: int = 0,
         tenant_id: Optional[str] = None
-    ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
+    ) -> Tuple[torch.Tensor, Union[KVCache, List[Tuple[torch.Tensor, torch.Tensor]]]]:
+        """past_key_values: None or a KVCache (filled in place and returned); a list of KVCache, one per row of a
+        [B, 1] decode step (batched decode across requests); or a legacy list of (k, v) per layer."""
         batch, seq_len = input_ids.shape
-        if past_key_values is not None and start_pos == 0 and len(past_key_values) > 0 and past_key_values[0][0] is not None:
+        cache = None
+        if isinstance(past_key_values, list) and past_key_values and isinstance(past_key_values[0], KVCache):
+            if seq_len != 1 or batch != len(past_key_values):
+                raise ValueError("a list of KVCache takes one decode token per request: input_ids [len(caches), 1]")
+            cache, start_pos = past_key_values, [c.length for c in past_key_values]
+        elif past_key_values is None or isinstance(past_key_values, KVCache):
+            cache = past_key_values if past_key_values is not None else KVCache(
+                len(self.layers), self.config.kv_cache_dtype, track_pages=self.config.kv_page_budget < 1.0)
+            start_pos = cache.length
+        elif start_pos == 0 and len(past_key_values) > 0 and past_key_values[0][0] is not None:
             start_pos = past_key_values[0][0].shape[2]
+
+        # CUDA decode step: one pointer table per step, then fused kernels per layer for every request at once
+        rows, tables = None, None
+        if seq_len == 1 and cache is not None:
+            rows = cache if isinstance(cache, list) else ([cache] if cache.length > 0 else None)
+        if rows and batched_decode_supported(rows, input_ids.device, self.config.head_dim):
+            for c in rows:
+                if c.length + 1 > c.layers[0].capacity:
+                    for layer_cache in c.layers:
+                        layer_cache.ensure(c.length + 1)
+            tables = build_decode_tables(rows, input_ids.device)
+            start_pos = [c.length for c in rows]
         hidden_states = self.embed_tokens(input_ids)
 
         new_key_values = []
         shallow_state = None
 
         for i, layer in enumerate(self.layers):
-            p_k = past_key_values[i][0] if past_key_values is not None else None
-            p_v = past_key_values[i][1] if past_key_values is not None else None
-
             # Capture shallow state at router boundary
-            if i == self.router_layer_idx:
+            if self.config.enable_recirculation and i == self.router_layer_idx:
                 shallow_state = hidden_states.clone()
 
-            hidden_states, k_out, v_out = layer(hidden_states, past_k=p_k, past_v=p_v, start_pos=start_pos)
-            new_key_values.append((k_out, v_out))
+            if tables is not None:
+                batch_layer = DecodeBatchLayer([c[i] for c in rows], tables[i])
+                hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, cache=batch_layer)
+            elif isinstance(cache, list):
+                hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, cache=[c[i] for c in cache])
+            elif cache is not None:
+                hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, cache=cache[i])
+            else:
+                p_k, p_v = past_key_values[i]
+                hidden_states, k_out, v_out = layer(hidden_states, past_k=p_k, past_v=p_v, start_pos=start_pos)
+                new_key_values.append((k_out, v_out))
 
             # Apply deep-to-shallow recurrence at the penultimate layer if state captured
-            if i == len(self.layers) - 2 and shallow_state is not None:
+            if self.config.enable_recirculation and i == len(self.layers) - 2 and shallow_state is not None:
                 hidden_states = self.recirculation(hidden_states, shallow_state)
 
         # Apply multi-tenant dynamic LoRA adapter if active
@@ -245,7 +314,7 @@ class SubspaceCausalLM(nn.Module):
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)
 
-        return logits, new_key_values
+        return logits, (cache if cache is not None else new_key_values)
 
     @torch.inference_mode()
     def generate(

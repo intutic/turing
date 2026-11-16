@@ -12,6 +12,7 @@ import torch
 from .config import TuringConfig
 from .models.registry import get_model_config, MODEL_REGISTRY
 from .models.causal_lm import SubspaceCausalLM
+from .core.kv_cache import resolve_kv_cache_dtype
 from .models.converter import TuringConverter
 from .serving.engine import ContinuousBatchEngine
 from .serving.server import create_app
@@ -29,7 +30,9 @@ def main():
     serve_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, cpu, mps)")
-    serve_parser.add_argument("--sparsity", type=float, default=0.5, help="Subspace channel sparsity ratio (default: 0.5)")
+    serve_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
+    serve_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
+    serve_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
     serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
     serve_parser.add_argument("--block-size", type=int, default=64, help="KV cache block size tokens (default: 64)")
     serve_parser.add_argument("--enable-kv-events", action="store_true", help="Enable ZeroMQ KV block event publisher for llm-d EPP prefix cache routing")
@@ -53,7 +56,9 @@ def main():
     gen_parser.add_argument("--prompt", type=str, default="Artificial intelligence is", help="Input prompt")
     gen_parser.add_argument("--max-new-tokens", type=int, default=32, help="Tokens to generate")
     gen_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
-    gen_parser.add_argument("--sparsity", type=float, default=0.5, help="Subspace channel sparsity ratio")
+    gen_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
+    gen_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
+    gen_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
     gen_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
     gen_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights")
     gen_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
@@ -73,7 +78,7 @@ def main():
     acc_parser = subparsers.add_parser("eval-accuracy", help="Run live GSM8K reasoning evaluation on loaded model")
     acc_parser.add_argument("--model", type=str, default="smollm2", help="Model identifier (e.g. gpt2, smollm2)")
     acc_parser.add_argument("--samples", type=int, default=5, help="Number of GSM8K samples to evaluate")
-    acc_parser.add_argument("--sparsity", type=float, default=0.5, help="Subspace channel sparsity ratio")
+    acc_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     acc_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
 
     # 7. Compare
@@ -107,7 +112,7 @@ def main():
     demo_parser = subparsers.add_parser("demo", help="Run interactive Turing Engine subspace inference demo")
     demo_parser.add_argument("--model", type=str, default="smollm2", help="Model target (smollm2 or gpt2)")
     demo_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, mps, cuda, cpu)")
-    demo_parser.add_argument("--sparsity", type=float, default=0.57, help="Subspace sparsity ratio (default: 0.57)")
+    demo_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     demo_parser.add_argument("--prompt", type=str, default="Explain how high-performance subspace inference accelerates LLM token generation in 3 bullet points.", help="Prompt to evaluate")
 
     # 13. Speculation Benchmark
@@ -119,7 +124,7 @@ def main():
     chat_parser = subparsers.add_parser("chat", help="Start an instant interactive terminal chat session with real weights")
     chat_parser.add_argument("--model", type=str, default="smollm2", help="Model to chat with (e.g. smollm2, gpt2, qwen-2.5-7b, llama-3.1-8b)")
     chat_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
-    chat_parser.add_argument("--sparsity", type=float, default=0.57, help="Subspace sparsity ratio (default: 0.57)")
+    chat_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     chat_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     chat_parser.add_argument("--max-new-tokens", type=int, default=128, help="Maximum new tokens per response")
     chat_parser.add_argument("--mock", action="store_true", help="Run with mock synthetic weights without downloading")
@@ -238,6 +243,7 @@ def main():
                     device=str(dev)
                 )
                 cfg = model_inst.config
+                cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
             except Exception as e:
                 print(f"[!] Notice: Could not load real HuggingFace weights for '{args.model}' ({e}). Falling back to architecture geometry.")
                 cfg = get_model_config(args.model)
@@ -308,6 +314,7 @@ def main():
                     device=str(dev)
                 )
                 cfg = model.config
+                cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
                 prompt_tokens = tokenizer.encode(args.prompt)
                 print(f"[*] Generating from prompt: '{args.prompt}' on {cfg.name} ({len(prompt_tokens)} input tokens)...")
                 output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
@@ -455,7 +462,7 @@ def main():
             "model": cfg.name,
             "host_bank_bytes_per_expert_mb": round(host_bank.bytes_per_expert / (1024**2), 2),
             "uncompressed_bytes_per_expert_mb": round((3 * cfg.hidden_dim * cfg.ffn_dim * 2) / (1024**2), 2),
-            "subspace_pcie_payload_reduction": "75.0%",
+            "subspace_pcie_payload_reduction": f"{(1 - host_bank.bytes_per_expert / (3 * cfg.hidden_dim * cfg.ffn_dim * 2)) * 100:.1f}%",
             "step_latency_ms": round(elapsed_ms, 2),
             "dispatch_stats": stats,
             "gpu_lru_cache_stats": lru_cache.stats()

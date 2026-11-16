@@ -97,7 +97,7 @@ class AutoSubspaceModel:
     @staticmethod
     def from_pretrained(
         model_name_or_id: str,
-        sparsity_ratio: float = 0.5,
+        sparsity_ratio: float = 0.0,
         device: str = "cpu",
         token: Optional[str] = None
     ) -> Tuple[SubspaceCausalLM, Any]:

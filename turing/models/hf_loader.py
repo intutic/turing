@@ -22,7 +22,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, logging as hf_logg
 # Silence non-critical HF warnings
 hf_logging.set_verbosity_error()
 
-from ..config import ModelConfig
+from ..config import ModelConfig, hf_rope_theta
 from .causal_lm import SubspaceCausalLM, SubspaceDecoderLayer
 from .converter import TuringConverter
 from ..core.subspace import SubspaceManager
@@ -47,9 +47,10 @@ class RealHuggingFaceLoader:
     @staticmethod
     def load_hf_model_into_turing(
         hf_model_id: str = "gpt2",
-        sparsity_ratio: float = 0.5,
+        sparsity_ratio: float = 0.0,
         device: str = "cpu",
-        token: Optional[str] = None
+        token: Optional[str] = None,
+        enable_recirculation: bool = False
     ) -> Tuple[SubspaceCausalLM, Any]:
         """
         Loads real Hugging Face model and maps weights to SubspaceCausalLM.
@@ -71,12 +72,40 @@ class RealHuggingFaceLoader:
             low_cpu_mem_usage=True
         ).eval()
 
+        turing_model = RealHuggingFaceLoader.convert_hf_model(
+            hf_model, sparsity_ratio=sparsity_ratio, device=device,
+            enable_recirculation=enable_recirculation, name=f"HF-{hf_model_id}"
+        )
+        num_layers = turing_model.config.num_layers
+
+        del hf_model
+        if target_device.type == "cuda":
+            torch.cuda.empty_cache()
+
+        print(f"[+] Successfully loaded {num_layers} real layers from '{hf_model_id}' into Turing Engine Subspace format ({sparsity_ratio*100:.1f}% channel pruned).")
+        return turing_model, tokenizer
+
+    @staticmethod
+    def convert_hf_model(
+        hf_model: nn.Module,
+        sparsity_ratio: float = 0.0,
+        device: str = "cpu",
+        enable_recirculation: bool = False,
+        name: str = "HF-model"
+    ) -> SubspaceCausalLM:
+        """
+        Maps the weights of an already-loaded HuggingFace causal LM into SubspaceCausalLM.
+        sparsity_ratio=0 with enable_recirculation=False is exact mode: the HF model's own logits.
+        """
+        target_device = torch.device(device)
+        target_dtype = torch.float16 if target_device.type == "cuda" else torch.float32
+
         hf_cfg = hf_model.config
         hidden_dim = getattr(hf_cfg, "hidden_size", getattr(hf_cfg, "n_embd", 768))
         num_layers = getattr(hf_cfg, "num_hidden_layers", getattr(hf_cfg, "n_layer", 12))
         num_heads = getattr(hf_cfg, "num_attention_heads", getattr(hf_cfg, "n_head", 12))
         num_kv_heads = getattr(hf_cfg, "num_key_value_heads", num_heads)
-        head_dim = hidden_dim // num_heads
+        head_dim = getattr(hf_cfg, "head_dim", None) or hidden_dim // num_heads
         vocab_size = getattr(hf_cfg, "vocab_size", 50257)
         ffn_dim = getattr(hf_cfg, "intermediate_size", hidden_dim * 4)
 
@@ -85,7 +114,7 @@ class RealHuggingFaceLoader:
         active_tiles_count = max(1, int(total_tiles * (1.0 - sparsity_ratio)))
 
         turing_cfg = ModelConfig(
-            name=f"HF-{hf_model_id}",
+            name=name,
             hidden_dim=hidden_dim,
             ffn_dim=ffn_dim,
             num_heads=num_heads,
@@ -97,7 +126,9 @@ class RealHuggingFaceLoader:
             active_tiles=active_tiles_count,
             rank_sub=64 if hidden_dim >= 768 else 32,
             max_position_embeddings=getattr(hf_cfg, "max_position_embeddings", 2048),
-            rope_theta=getattr(hf_cfg, "rope_theta", 10000.0)
+            rope_theta=hf_rope_theta(hf_cfg),
+            rms_norm_eps=getattr(hf_cfg, "rms_norm_eps", 1e-6),
+            enable_recirculation=enable_recirculation
         )
 
         turing_model = SubspaceCausalLM(turing_cfg).to(target_dtype).to(target_device)
@@ -168,6 +199,13 @@ class RealHuggingFaceLoader:
                         elif hasattr(attn, "c_proj"): # GPT-2
                             j_layer.self_attn.o_proj.weight.copy_(attn.c_proj.weight.to(target_device).t().contiguous())
 
+                    # Per-layer norms (Llama-style names, then GPT-2's)
+                    for j_norm, names in ((j_layer.input_layernorm, ("input_layernorm", "ln_1")),
+                                          (j_layer.post_attention_layernorm, ("post_attention_layernorm", "ln_2"))):
+                        src = next((getattr(hf_layer, n) for n in names if hasattr(hf_layer, n)), None)
+                        if src is not None:
+                            j_norm.weight.copy_(src.weight.to(target_device))
+
                     # Extract MLP (SwiGLU vs standard MLP)
                     mlp = getattr(hf_layer, "mlp", getattr(hf_layer, "feed_forward", None))
                     if mlp is not None:
@@ -197,9 +235,4 @@ class RealHuggingFaceLoader:
                             j_layer.mlp.down_proj.weight.copy_(down_w)
                             j_layer.mlp.set_active_tiles(torch.tensor(active_indices, dtype=torch.int32, device=target_device))
 
-        del hf_model
-        if target_device.type == "cuda":
-            torch.cuda.empty_cache()
-
-        print(f"[+] Successfully loaded {num_layers} real layers from '{hf_model_id}' into Turing Engine Subspace format ({sparsity_ratio*100:.1f}% channel pruned).")
-        return turing_model, tokenizer
+        return turing_model

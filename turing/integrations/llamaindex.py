@@ -94,7 +94,7 @@ class Turing(CustomLLM):
     api_key: str = "turing-local"
     temperature: float = 0.7
     max_tokens: int = 512
-    sparsity_ratio: float = 0.57
+    sparsity_ratio: float = 0.0
     svd_rank: int = 64
     timeout: float = 60.0
     context_window: int = 32768
@@ -106,7 +106,7 @@ class Turing(CustomLLM):
         api_key: str = "turing-local",
         temperature: float = 0.7,
         max_tokens: int = 512,
-        sparsity_ratio: float = 0.57,
+        sparsity_ratio: float = 0.0,
         svd_rank: int = 64,
         timeout: float = 60.0,
         context_window: int = 32768,

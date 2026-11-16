@@ -158,7 +158,14 @@ def dispatch_fused_rmsnorm_swiglu(
 ) -> torch.Tensor:
     """
     Unified dispatcher: runs Triton kernel on CUDA, PyTorch fused reference on MPS/CPU.
+    With every tile active (exact mode) it is a dense FFN: plain matmuls (cuBLAS / MPS) on every device.
     """
+    n_tiles = active_tiles if isinstance(active_tiles, int) else active_tiles.numel()
+    if n_tiles * tile_size >= min(w_gate.shape[1], w_down.shape[0]):
+        variance = x.float().pow(2).mean(-1, keepdim=True)
+        x_normed = (x.float() * torch.rsqrt(variance + eps)).to(x.dtype) * weight_norm
+        return torch.matmul(F.silu(torch.matmul(x_normed, w_gate)) * torch.matmul(x_normed, w_up), w_down) + residual
+
     if x.is_cuda and HAS_TRITON:
         try:
             return fused_rmsnorm_swiglu_cuda(

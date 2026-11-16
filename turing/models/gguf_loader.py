@@ -432,7 +432,7 @@ class GGUFModelLoader:
         self.filepath = filepath
         self.reader = GGUFReader(filepath)
 
-    def extract_config(self, sparsity_ratio: float = 0.5) -> ModelConfig:
+    def extract_config(self, sparsity_ratio: float = 0.0) -> ModelConfig:
         meta = self.reader.metadata
         arch = meta.get("general.architecture", "llama")
         name = meta.get("general.name", os.path.basename(self.filepath).replace(".gguf", ""))
@@ -479,7 +479,7 @@ class GGUFModelLoader:
 
     def load(
         self,
-        sparsity_ratio: float = 0.5,
+        sparsity_ratio: float = 0.0,
         device: str = "cpu",
         dtype: torch.dtype = torch.float16
     ) -> Tuple[SubspaceCausalLM, Any]:

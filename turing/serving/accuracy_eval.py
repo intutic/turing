@@ -56,7 +56,7 @@ class LiveAccuracyEvaluator:
     def __init__(
         self,
         model_id: str = "gpt2",
-        sparsity_ratio: float = 0.5,
+        sparsity_ratio: float = 0.0,
         device: str = "auto"
     ):
         if device == "auto":

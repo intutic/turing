@@ -20,7 +20,7 @@ class ChatTuring:
         api_key: str = "turing-local",
         temperature: float = 0.7,
         max_tokens: int = 512,
-        sparsity_ratio: float = 0.57,
+        sparsity_ratio: float = 0.0,
         svd_rank: int = 64,
         timeout: float = 60.0
     ):
@@ -138,7 +138,7 @@ class TuringLLM:
         api_key: str = "turing-local",
         temperature: float = 0.7,
         max_tokens: int = 512,
-        sparsity_ratio: float = 0.57
+        sparsity_ratio: float = 0.0
     ):
         self.chat = ChatTuring(
             model=model,

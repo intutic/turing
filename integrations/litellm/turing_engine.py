@@ -18,7 +18,7 @@ class TuringEngineConfig:
         self,
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
-        sparsity_ratio: float = 0.57,
+        sparsity_ratio: float = 0.0,
         use_svd_kv_cache: bool = True,
         speculative_draft_tokens: int = 4,
     ):

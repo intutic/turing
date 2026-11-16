@@ -122,7 +122,7 @@ class ComparativeBenchmarker:
         kv_bytes_fp16_per_tok = 2 * (cfg.num_kv_heads * head_dim * 2) * layers
         kv_total_fp16_mb = (kv_bytes_fp16_per_tok * seq_len_32k) / (1024**2)
         kv_vllm_mb = kv_total_fp16_mb # Standard 16-token paged attention
-        kv_turing_mb = (kv_total_fp16_mb * 0.25) # SVD Rank-64 INT8 (75% reduction)
+        kv_turing_mb = kv_total_fp16_mb * (head_dim + 4) / (2 * head_dim)  # the int8 KV cache: D + 4 bytes vs 2D
 
         return {
             "model_name": cfg.name,
@@ -142,7 +142,7 @@ class ComparativeBenchmarker:
             },
             "kv_cache_footprint_32k_context": {
                 "standard_paged_fp16": f"{kv_vllm_mb:.1f} MB",
-                "turing_svd_int8_hierarchical": f"{kv_turing_mb:.1f} MB (-75.0%)",
+                "turing_int8_kv": f"{kv_turing_mb:.1f} MB (-{(1 - kv_turing_mb / kv_total_fp16_mb) * 100:.1f}%)",
             },
             "dram_traffic_mb_per_tok": {
                 "native_pytorch_fp16": f"{dram_fp16_mb:.1f} MB/tok",

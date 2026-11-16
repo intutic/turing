@@ -39,7 +39,7 @@ class TuringAcceleratedGenerator:
         self,
         model_id_or_instance: Union[str, nn.Module] = "HuggingFaceTB/SmolLM2-1.7B-Instruct",
         tokenizer: Optional[Any] = None,
-        sparsity_ratio: float = 0.57,
+        sparsity_ratio: float = 0.0,
         device: str = "auto",
         token: Optional[str] = None
     ):

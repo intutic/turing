@@ -120,7 +120,7 @@ class ChainContext:
         self,
         model: Optional[str] = "test-tiny",
         device: str = "auto",
-        sparsity: float = 0.5,
+        sparsity: float = 0.0,
         executor: Optional[Any] = None,
         tokenizer: Optional[Any] = None
     ):

@@ -15,8 +15,9 @@ import torch.nn.functional as F
 from ..config import ModelConfig, TuringConfig
 from ..models.causal_lm import SubspaceCausalLM
 from ..core.paging import StaticPagedKVPool
+from ..core.kv_cache import KVCache, kv_bytes_per_token
 from .traffic import (
-    KVMemoryEstimator, AdmissionController, AdmissionDecision,
+    AdmissionController, AdmissionDecision,
     AdmissionResult, Lane, LanePolicy
 )
 from .spec_gate import SpecGateDecision, SpeculationGatePolicy
@@ -179,15 +180,10 @@ class ContinuousBatchEngine:
 
         # Check VRAM Admission Control if configured
         if self.admission is not None:
-            head_dim = self.model_config.hidden_dim // self.model_config.num_heads
-            est_bytes = KVMemoryEstimator.estimate_kv_bytes(
-                num_prompt_tokens=len(prompt_tokens),
-                max_new_tokens=max_new_tokens,
-                num_layers=self.model_config.num_layers,
-                num_kv_heads=self.model_config.num_heads,
-                head_dim=head_dim,
-                svd_compression_ratio=0.75 if use_svd_kv else 0.0
-            )
+            cfg = self.model_config
+            native_bytes = next(self.model.parameters()).element_size()
+            est_bytes = (len(prompt_tokens) + max_new_tokens) * kv_bytes_per_token(
+                cfg.num_layers, cfg.num_kv_heads, cfg.head_dim, cfg.kv_cache_dtype, native_bytes)
             adm_res = self.admission.admit(req.request_id, est_bytes)
             if adm_res.decision == AdmissionDecision.SHED:
                 req.state = RequestState.FINISHED
@@ -218,7 +214,8 @@ class ContinuousBatchEngine:
                 top_k=top_k,
                 lane=lane
             )
-            req.past_kv = prefix_kv
+            # the cache is filled in place, so each branch gets its own copy of the shared prefix
+            req.past_kv = prefix_kv.clone() if isinstance(prefix_kv, KVCache) else prefix_kv
             requests.append(req)
         return requests
 
@@ -326,13 +323,18 @@ class ContinuousBatchEngine:
             active_decode = [r for r in decode_reqs if r.state == RequestState.DECODING]
             if len(active_decode) > 1 and self.dist_driver is None:
                 # Multi-sequence batched forward and fused sampling
-                collected_logits = []
-                for req in active_decode:
-                    logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
-                    req.past_kv = new_kv
-                    collected_logits.append(logits[:, -1, :])
-
-                batched_logits = torch.cat(collected_logits, dim=0)
+                if all(isinstance(r.past_kv, KVCache) for r in active_decode):
+                    # one forward for every decoding request: the weights are read once per step, not once per request
+                    batch_input = torch.cat([r.current_input for r in active_decode], dim=0)
+                    logits, _ = self.model(batch_input, past_key_values=[r.past_kv for r in active_decode])
+                    batched_logits = logits[:, -1, :]
+                else:
+                    collected_logits = []
+                    for req in active_decode:
+                        logits, new_kv = self.model(req.current_input, past_key_values=req.past_kv)
+                        req.past_kv = new_kv
+                        collected_logits.append(logits[:, -1, :])
+                    batched_logits = torch.cat(collected_logits, dim=0)
                 batched_temps = torch.tensor([r.temperature for r in active_decode], dtype=torch.float32, device=self.device)
                 sampled_tokens = batched_sample_tokens(batched_logits, batched_temps, top_k=50)
 

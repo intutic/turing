@@ -97,7 +97,7 @@ class Turing(CustomLLM):
     api_key: str = Field(default="turing-local", description="API key for authentication.")
     temperature: float = Field(default=0.7, description="Generation temperature.")
     max_tokens: int = Field(default=512, description="Maximum number of tokens to generate.")
-    sparsity_ratio: float = Field(default=0.57, description="Subspace channel pruning ratio.")
+    sparsity_ratio: float = Field(default=0.0, description="Subspace channel pruning ratio (0 = exact model; pruning costs quality, see docs/benchmarks.md).")
     svd_rank: int = Field(default=64, description="SVD rank for singular value KV cache compression.")
     timeout: float = Field(default=60.0, description="HTTP request timeout in seconds.")
     context_window: int = Field(default=32768, description="Model context window length.")
@@ -109,7 +109,7 @@ class Turing(CustomLLM):
         api_key: str = "turing-local",
         temperature: float = 0.7,
         max_tokens: int = 512,
-        sparsity_ratio: float = 0.57,
+        sparsity_ratio: float = 0.0,
         svd_rank: int = 64,
         timeout: float = 60.0,
         context_window: int = 32768,
