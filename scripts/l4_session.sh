@@ -36,8 +36,8 @@ step gsm_teal40 turing eval-accuracy $GSM --activation-sparsity 0.4
 step e2e_turing python scripts/benchmark_e2e_generation.py --engine turing --model HuggingFaceTB/SmolLM2-360M
 step e2e_turing_1p7b python scripts/benchmark_e2e_generation.py --engine turing --model HuggingFaceTB/SmolLM2-1.7B
 step vllm_venv bash -c "python3 -m venv ~/vllm-venv && ~/vllm-venv/bin/pip install -q vllm datasets"
-step e2e_vllm ~/vllm-venv/bin/python scripts/benchmark_e2e_generation.py --engine vllm --model HuggingFaceTB/SmolLM2-360M
-step e2e_vllm_1p7b ~/vllm-venv/bin/python scripts/benchmark_e2e_generation.py --engine vllm --model HuggingFaceTB/SmolLM2-1.7B
+step e2e_vllm env PATH="$HOME/vllm-venv/bin:$PATH" ~/vllm-venv/bin/python scripts/benchmark_e2e_generation.py --engine vllm --model HuggingFaceTB/SmolLM2-360M
+step e2e_vllm_1p7b env PATH="$HOME/vllm-venv/bin:$PATH" ~/vllm-venv/bin/python scripts/benchmark_e2e_generation.py --engine vllm --model HuggingFaceTB/SmolLM2-1.7B
 step ingest python scripts/benchmark_ingest_ladder_all_tiers.py --dir /tmp --label "l4 $(uname -r)"
 step cpp_build bash -c "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4 --target turing-cli"
 step cpp_engine python scripts/benchmark_cpp_engine.py --binary current=build/bin/turing-cli --out results_cpp_engine_x86.json
