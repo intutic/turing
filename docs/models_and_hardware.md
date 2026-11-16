@@ -6,7 +6,7 @@ Turing Engine resolves and loads HuggingFace and GGUF checkpoints on NVIDIA GPUs
 
 ## 1. Models and Memory
 
-> **What is measured today:** exact parity with HuggingFace is tested for **Llama-architecture** models (e.g. SmolLM2, Llama-style GQA). Not yet mapped by the loader: Qwen2 attention biases, Qwen3 q/k norms, and Llama-3 RoPE frequency scaling, so those families do not yet reproduce their reference outputs. Models run with real weights so far: SmolLM2 135M, 360M and 1.7B through the Turing engine, and GPT-2 and SmolLM2-1.7B-Instruct through HuggingFace `generate`. No MoE checkpoint and no model larger than 1.7B has been run end to end. The serving path keeps fp16 weights (int4 weight loading is not wired), so weight memory is about 2 bytes per parameter: a 70B model needs about 141 GB and does not fit on one 24 GB GPU.
+> **What is measured today:** the HuggingFace loader reproduces HuggingFace's logits (prefill, chunked prefill and decode, `atol 1e-3`) for the **Llama**, **Llama-3.1 RoPE scaling** (`rope_type="llama3"`), **Qwen2/Qwen2.5** (q/k/v biases, also DeepSeek-R1-Distill-Qwen) and **Qwen3** (q/k norms) architectures, tested on small randomly initialised models of each (`tests/test_hf_parity.py`); quality on real weights is measured for SmolLM2 only. The loader refuses what it cannot reproduce (other RoPE scaling types, sliding-window attention, `o_proj` biases), and `serve`, `generate` and `chat` exit when weights fail to load instead of falling back to random weights (`--mock` runs synthetic weights on purpose). Other families (Gemma, Phi) and the GGUF loader have no parity test. Models run with real weights so far: SmolLM2 135M, 360M and 1.7B through the Turing engine, and GPT-2 and SmolLM2-1.7B-Instruct through HuggingFace `generate`. No MoE checkpoint and no model larger than 1.7B has been run end to end. The serving path keeps fp16 weights (int4 weight loading is not wired), so weight memory is about 2 bytes per parameter: a 70B model needs about 141 GB and does not fit on one 24 GB GPU.
 
 Turing Engine features a **Universal Dynamic Model Resolver** (`ModelResolver`) and **Architecture Registry** (`ArchitectureRegistry`). It resolves any Hugging Face Hub repository ID or local checkpoint and derives the architecture from its `config.json`; exact output parity is only implemented and tested for Llama-architecture models.
 
@@ -27,7 +27,7 @@ The rows below are names the resolver and `SIZING_PROFILES` know about; **none o
 | **Alibaba** | `Qwen/Qwen2.5-72B-Instruct` | 72.7B | ~145 GB | No |
 | **DeepSeek** | `deepseek-ai/DeepSeek-V3` | 671B MoE (37B active) | ~1,342 GB | No |
 
-Qwen-family checkpoints load but do not yet reproduce their reference outputs (attention biases are not mapped). MoE checkpoints have no loader path.
+Qwen2/Qwen2.5 and Qwen3 checkpoints reproduce HuggingFace's logits in the parity tests (small random models; no real Qwen checkpoint has been run). MoE checkpoints have no loader path.
 
 ### B. Multi-Model Pipeline Endpoints
 

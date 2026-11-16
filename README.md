@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 371/371 Passing](https://img.shields.io/badge/Tests-371%2F371%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 377/377 Passing](https://img.shields.io/badge/Tests-377%2F377%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -99,7 +99,7 @@ What has actually been run with real weights in this repository:
 | `HuggingFaceTB/SmolLM2-135M`, `-360M`, `-1.7B` | Turing forward pass vs HuggingFace (NLL), int8/int4 KV, batched decode throughput | [benchmarks §2–§3](https://intutic.github.io/turing/benchmarks/) |
 | `gpt2`, `SmolLM2-1.7B-Instruct` | HuggingFace `generate` timing (not the Turing engine) | `scripts/benchmark_comprehensive_real_gpu.py` |
 
-Exact HuggingFace parity is implemented for **Llama-architecture** checkpoints. Other families resolve and load through `ModelResolver`, but Qwen2 attention biases, Qwen3 q/k norms and Llama-3 RoPE scaling are not mapped yet, and no MoE checkpoint and no model larger than 1.7B has been run end to end. The serving path keeps fp16 weights, so a 70B model needs about 141 GB of weight memory and does not fit on one 24 GB GPU. Names such as `llama-3.3-70b` or `glm-5.3-flash` in `SIZING_PROFILES` are layer geometries for dry-run sizing, not tested models.
+Exact HuggingFace parity is implemented and tested for **Llama**, **Llama-3.1 RoPE scaling**, **Qwen2/Qwen2.5** and **Qwen3** architectures (on small randomly initialised models of each; real-weight quality is measured for SmolLM2 only). The loader refuses what it cannot reproduce (other RoPE scaling types, sliding-window attention), and no MoE checkpoint and no model larger than 1.7B has been run end to end. The serving path keeps fp16 weights, so a 70B model needs about 141 GB of weight memory and does not fit on one 24 GB GPU. Names such as `llama-3.3-70b` or `glm-5.3-flash` in `SIZING_PROFILES` are layer geometries for dry-run sizing, not tested models.
 
 > **❓ Clarification: `CLI_ALIASES` vs. `SIZING_PROFILES`**
 > * **`CLI_ALIASES` (`resolver.py`)**: Purely optional typing shortcuts for interactive developers (e.g. typing `turing chat --model smollm2` instead of `turing chat --model HuggingFaceTB/SmolLM2-135M`). Passing any full repo ID (e.g. `turing chat --model EleutherAI/pythia-70m` or `meta-llama/Llama-3.3-70B-Instruct`) bypasses aliases and streams weights directly from Hugging Face Hub.

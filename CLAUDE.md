@@ -17,7 +17,7 @@ python setup.py build_ext --inplace
 
 ### 2. Testing & Quality Verification (Strict 0-Warning Invariant)
 ```bash
-# Run the entire test suite with strict warning escalation (All 371 tests MUST pass with 0 warnings on CUDA; 18 of them need CUDA and skip on Mac/CPU)
+# Run the entire test suite with strict warning escalation (All 377 tests MUST pass with 0 warnings on CUDA; 18 of them need CUDA and skip on Mac/CPU)
 python -W error -m pytest -v
 
 # Run a specific test file
