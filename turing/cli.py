@@ -15,6 +15,7 @@ from .models.registry import get_model_config, MODEL_REGISTRY
 from .models.causal_lm import SubspaceCausalLM
 from .core.kv_cache import resolve_kv_cache_dtype
 from .serving.engine import ContinuousBatchEngine
+from .serving.spec_gate import SpeculationGatePolicy
 from .serving.server import create_app
 
 def _load_hf_or_exit(args, dev):
@@ -320,6 +321,7 @@ def main():
         engine = ContinuousBatchEngine(cfg, jcfg, model=model_inst, tokenizer=tokenizer_inst, dist_driver=dist_driver,
                                        prefix_caching=not args.no_prefix_caching and dist_driver is None
                                        and not args.prefill_worker, draft_tokens=args.draft_tokens,
+                                       spec_gate=SpeculationGatePolicy() if args.draft_tokens else None,
                                        remote_prefill=(args.prefill_server.rsplit(":", 1)[0],
                                                        int(args.prefill_server.rsplit(":", 1)[1]))
                                        if args.prefill_server else None)
