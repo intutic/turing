@@ -202,9 +202,11 @@ class PipelineStage(nn.Module):
     def forward(
         self,
         hidden_or_ids: torch.Tensor,
-        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        past_key_values: Optional[Any] = None,
         start_pos: int = 0
-    ) -> Tuple[torch.Tensor, Optional[List[Tuple[torch.Tensor, torch.Tensor]]]]:
+    ) -> Tuple[torch.Tensor, Optional[Any]]:
+        """past_key_values: the request's KVCache (each layer writes its own layer of the pool; the caller reserves
+        pages and advances the length after the last stage), or None for causal attention over these tokens alone."""
         # 1. First stage embedding
         if self.is_first_stage and self.embed_tokens is not None:
             hidden_states = self.embed_tokens(hidden_or_ids)
@@ -212,13 +214,11 @@ class PipelineStage(nn.Module):
             hidden_states = hidden_or_ids
 
         # 2. Stage decoder layers; the cached length is the new tokens' first RoPE position
-        if start_pos == 0 and past_key_values and past_key_values[0][0] is not None:
-            start_pos = past_key_values[0][0].shape[2]
-        new_kvs = []
-        for idx, layer in enumerate(self.layers):
-            p_k, p_v = (past_key_values[idx] if past_key_values and idx < len(past_key_values) else (None, None))
-            hidden_states, k_out, v_out = layer(hidden_states, past_k=p_k, past_v=p_v, start_pos=start_pos)
-            new_kvs.append((k_out, v_out))
+        cache = past_key_values
+        if cache is not None:
+            start_pos = cache.length
+        for layer in self.layers:
+            hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, cache=cache)
 
         # 3. Last stage norm + head
         if self.is_last_stage:
@@ -226,9 +226,9 @@ class PipelineStage(nn.Module):
                 hidden_states = self.norm(hidden_states)
             if self.lm_head is not None:
                 logits = self.lm_head(hidden_states)
-                return logits, new_kvs
+                return logits, cache
 
-        return hidden_states, new_kvs
+        return hidden_states, cache
 
 
 def partition_model_for_pipeline(model: Any, num_stages: int) -> List[PipelineStage]:

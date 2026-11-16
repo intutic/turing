@@ -42,6 +42,8 @@ def main():
     serve_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     serve_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
     serve_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
+    serve_parser.add_argument("--no-cuda-graphs", action="store_true", help="Run decode steps eagerly instead of replaying CUDA graphs")
+    serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=0.6, help="Share of free GPU memory (after the weights) for the paged KV pool (default: 0.6)")
     serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
     serve_parser.add_argument("--block-size", type=int, default=64, help="KV cache block size tokens (default: 64)")
     serve_parser.add_argument("--enable-kv-events", action="store_true", help="Enable ZeroMQ KV block event publisher for llm-d EPP prefix cache routing")
@@ -236,6 +238,7 @@ def main():
             model_inst, tokenizer_inst = _load_hf_or_exit(args, dev)
             cfg = model_inst.config
             cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
+            cfg.cuda_graphs, cfg.kv_pool_fraction = not args.no_cuda_graphs, args.kv_cache_memory_fraction
 
         # Multi-GPU / Multi-Node Distributed Driver setup
         tp_size = getattr(args, "tensor_parallel", 1)

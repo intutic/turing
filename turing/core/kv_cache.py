@@ -1,17 +1,23 @@
 """
-Preallocated per-request KV cache for the serving decode path, with optional low-bit storage and Quest page selection.
+Paged KV cache for the serving path: one fixed pool per model, a page table per request.
 
-Layout per layer: [B, Hkv, capacity, D], written in place at the current length; capacity doubles when full, so a
-decode step never copies the whole cache. Storage modes (`kv_cache_dtype`):
-- "native": the model's dtype.
-- "int8":   asymmetric round-to-nearest per token and KV head, fp16 scale and zero (D + 4 bytes per token-head).
+Pool layout per layer (`KVPool`): `k`, `v` [num_pages, Hkv, 16, D'], plus for low-bit storage `k_scale`, `k_zero`,
+`v_scale`, `v_zero` [num_pages, Hkv, 16, G], and for Quest page selection `kmin`, `kmax` [num_pages, Hkv, D] (the
+elementwise min and max of K over each 16-token page, from the values before quantization). A page id addresses the
+same slot in every layer. Storage modes (`kv_cache_dtype`):
+- "native": the model's dtype (D' = D).
+- "int8":   asymmetric round-to-nearest per token and KV head, fp16 scale and zero (D' = D, G = 1).
 - "int4":   asymmetric round-to-nearest per group of 32 values along D, fp16 scale and zero per group, two codes per
-            byte (D/2 + D/8 bytes per token-head).
-K is stored after RoPE. Quest metadata: per 16-token page and KV head, the elementwise min and max of K (from the
-values before quantization), so a decode query can bound q.k over a page without reading it.
+            byte (D' = D / 2, G = D / 32).
+K is stored after RoPE. A request (`KVCache`) owns a row of the pool's device page table and the pages it lists; a
+clone shares its full pages copy-on-write (refcounted) and copies only the partial last page, so a fork costs one page
+per layer. At most one partial page per request is unused, instead of a per-request capacity margin.
+
+The methods here are the reference path (any device). On CUDA, `turing/kernels/triton_kv_decode.py` reads and
+writes the same layout with fused kernels.
 """
 
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, Tuple
 import math
 import torch
 
@@ -22,8 +28,21 @@ KV_CACHE_DTYPES = ("native", "int8", "int4")
 
 def resolve_kv_cache_dtype(choice: str, device) -> str:
     """'auto' = int8 on CUDA (measured free in quality, fused kernels read it directly), native elsewhere (the
-    reference path dequantizes the whole cache each step, so int8 there saves memory but costs speed)."""
+    reference path dequantizes what it reads each step, so int8 there saves memory but costs speed)."""
     return ("int8" if torch.device(device).type == "cuda" else "native") if choice == "auto" else choice
+
+
+def kv_bytes_per_token(num_layers: int, num_kv_heads: int, head_dim: int, kv_cache_dtype: str = "native",
+                       native_bytes: int = 2) -> int:
+    """K and V bytes one token adds to the cache across all layers (scales included, Quest metadata excluded)."""
+    per_head = {"native": head_dim * native_bytes,
+                "int8": head_dim + 4,
+                "int4": head_dim // 2 + 4 * (head_dim // INT4_GROUP)}[kv_cache_dtype]
+    return 2 * num_layers * num_kv_heads * per_head
+
+
+class KVPoolExhausted(RuntimeError):
+    """The pool has no free page. Raise ModelConfig.kv_pool_gib / kv_pool_fraction, or admit fewer requests."""
 
 
 def _quantize(x: torch.Tensor, bits: int, group: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -50,190 +69,292 @@ def _unpack4(packed: torch.Tensor) -> torch.Tensor:
     return torch.stack((packed & 0xF, packed >> 4), dim=-1).flatten(-2)
 
 
-class LayerKVCache:
-    """K and V of one layer for a batch of B sequences that share a length."""
+class KVPool:
+    """Every layer's K and V pages for one model, plus the page tables of the requests using it."""
 
-    def __init__(self, kv_cache_dtype: str = "native", track_pages: bool = False):
+    def __init__(self, num_layers: int, num_kv_heads: int, head_dim: int, num_pages: int, dtype, device,
+                 kv_cache_dtype: str = "native", track_pages: bool = False, max_tokens_per_request: int = 131072):
         if kv_cache_dtype not in KV_CACHE_DTYPES:
             raise ValueError(f"kv_cache_dtype must be one of {KV_CACHE_DTYPES}, not {kv_cache_dtype!r}")
-        self.kv_cache_dtype = kv_cache_dtype
-        self.track_pages = track_pages  # keep Quest page min/max (a dozen small ops per append); off unless selecting
-        self.length = 0
-        self.capacity = 0
-        self.store = {}  # name -> tensor [B, Hkv, capacity, ...]
-        self.dtype = None
-
-    # ------------------------------------------------------------------ storage
-
-    def _fields(self, B: int, H: int, D: int, dtype) -> dict:
-        """name -> (trailing shape, dtype, initial value) of every stored tensor."""
-        if self.kv_cache_dtype == "native":
-            f = {"k": ((D,), dtype, 0), "v": ((D,), dtype, 0)}
-        elif self.kv_cache_dtype == "int8":
-            f = {n: ((D,), torch.uint8, 0) for n in ("k", "v")}
-            f |= {n + s: ((1,), torch.float16, 0) for n in ("k", "v") for s in ("_scale", "_zero")}
+        if kv_cache_dtype == "int4" and head_dim % INT4_GROUP:
+            raise ValueError(f"int4 KV cache needs head_dim divisible by {INT4_GROUP}, got {head_dim}")
+        self.num_layers, self.num_kv_heads, self.head_dim = num_layers, num_kv_heads, head_dim
+        self.num_pages, self.dtype, self.device = num_pages, dtype, torch.device(device)
+        self.kv_cache_dtype, self.track_pages = kv_cache_dtype, track_pages
+        L, P, H, D = num_layers, num_pages, num_kv_heads, head_dim
+        shape = lambda tail: (L, P, H, PAGE) + tail
+        # uninitialized: a slot is read only after it is written (reads are bounded by each request's length or
+        # masked), and untouched host pages are never backed by memory
+        if kv_cache_dtype == "native":
+            self.k, self.v = (torch.empty(shape((D,)), dtype=dtype, device=device) for _ in range(2))
+            self.k_scale = self.k_zero = self.v_scale = self.v_zero = None
         else:
-            if D % INT4_GROUP:
-                raise ValueError(f"int4 KV cache needs head_dim divisible by {INT4_GROUP}, got {D}")
-            f = {n: ((D // 2,), torch.uint8, 0) for n in ("k", "v")}
-            f |= {n + s: ((D // INT4_GROUP,), torch.float16, 0) for n in ("k", "v") for s in ("_scale", "_zero")}
-        return f
-
-    def _reserve(self, B: int, H: int, D: int, need: int, dtype, device) -> None:
-        if need <= self.capacity:
-            return
-        cap = max(need, self.capacity + self.capacity // 4, 256)  # grow by a quarter: doubling wasted up to half
-        cap = -(-cap // 256) * 256
-        new = {}
-        for name, (tail, dt, init) in self._fields(B, H, D, dtype).items():
-            t = torch.full((B, H, cap) + tail, init, dtype=dt, device=device)
-            if name in self.store:
-                t[:, :, :self.length] = self.store[name][:, :, :self.length]
-            new[name] = t
-        for name, init in ((("kmin", float("inf")), ("kmax", float("-inf"))) if self.track_pages else ()):
-            t = torch.full((B, H, cap // PAGE, D), init, dtype=torch.float16, device=device)
-            if name in self.store:
-                t[:, :, :self.capacity // PAGE] = self.store[name]
-            new[name] = t
-        self.store, self.capacity, self.dtype = new, cap, dtype
-
-    def _write(self, name: str, x: torch.Tensor, start: int, end: int) -> None:
-        s = self.store
-        if self.kv_cache_dtype == "native":
-            s[name][:, :, start:end] = x
+            width, groups = (D, 1) if kv_cache_dtype == "int8" else (D // 2, D // INT4_GROUP)
+            self.k, self.v = (torch.empty(shape((width,)), dtype=torch.uint8, device=device) for _ in range(2))
+            self.k_scale, self.k_zero, self.v_scale, self.v_zero = (
+                torch.empty(shape((groups,)), dtype=torch.float16, device=device) for _ in range(4))
+        if track_pages:
+            self.kmin = torch.full((L, P, H, D), float("inf"), dtype=torch.float16, device=device)
+            self.kmax = torch.full((L, P, H, D), float("-inf"), dtype=torch.float16, device=device)
         else:
-            bits, group = (8, x.shape[-1]) if self.kv_cache_dtype == "int8" else (4, INT4_GROUP)
-            codes, scale, zero = _quantize(x, bits, group)
-            s[name][:, :, start:end] = codes if bits == 8 else _pack4(codes)
-            s[name + "_scale"][:, :, start:end] = scale
-            s[name + "_zero"][:, :, start:end] = zero
+            self.kmin = self.kmax = None
+        self.table_width = -(-max_tokens_per_request // PAGE)
+        self.page_table = torch.zeros((8, self.table_width), dtype=torch.int32, device=device)
+        self._free_pages = list(range(P - 1, -1, -1))  # a stack: pop() hands out low page ids first
+        self._refs = [0] * P
+        self.page_limit = P  # pages that may be in use at once (lowered by ElasticMemoryBudgetManager)
+        self._free_slots = list(range(7, -1, -1))
 
-    def _update_page_bounds(self, k: torch.Tensor, start: int, end: int) -> None:
-        p0, p1 = start // PAGE, -(-end // PAGE)
-        pad_lo, pad_hi = start - p0 * PAGE, p1 * PAGE - end
-        kf = k.float()
-        lo = torch.nn.functional.pad(kf, (0, 0, pad_lo, pad_hi), value=float("inf"))
-        hi = torch.nn.functional.pad(kf, (0, 0, pad_lo, pad_hi), value=float("-inf"))
-        B, H, _, D = k.shape
-        pmin = lo.view(B, H, p1 - p0, PAGE, D).amin(3).half()
-        pmax = hi.view(B, H, p1 - p0, PAGE, D).amax(3).half()
-        s = self.store
-        s["kmin"][:, :, p0:p1] = torch.minimum(s["kmin"][:, :, p0:p1], pmin)
-        s["kmax"][:, :, p0:p1] = torch.maximum(s["kmax"][:, :, p0:p1], pmax)
+    @classmethod
+    def for_model(cls, config, dtype, device) -> "KVPool":
+        """Sized from config.kv_pool_gib if set, else config.kv_pool_fraction of the free CUDA memory (counting
+        memory PyTorch has cached but not used), else 4 GiB off CUDA."""
+        device = torch.device(device)
+        D, H, L = config.head_dim, config.num_kv_heads, config.num_layers
+        page_bytes = PAGE * kv_bytes_per_token(L, H, D, config.kv_cache_dtype, torch.finfo(dtype).bits // 8)
+        track = config.kv_page_budget < 1.0
+        if track:
+            page_bytes += 2 * L * H * D * 2
+        if config.kv_pool_gib:
+            budget = config.kv_pool_gib * 2 ** 30
+        elif device.type == "cuda":
+            free, _ = torch.cuda.mem_get_info(device)
+            budget = config.kv_pool_fraction * (free + torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device))
+        else:
+            budget = 4 * 2 ** 30
+        return cls(L, H, D, max(1, int(budget // page_bytes)), dtype, device, config.kv_cache_dtype, track)
 
-    def ensure(self, need: int) -> None:
-        """Reserve capacity for `need` tokens in an allocated cache (before a fused kernel writes past its end)."""
-        k = self.store["k"]
-        D = k.shape[-1] * (2 if self.kv_cache_dtype == "int4" else 1)
-        self._reserve(k.shape[0], k.shape[1], D, need, self.dtype, k.device)
+    # ------------------------------------------------------------------ pages and slots
 
-    def append(self, k: torch.Tensor, v: torch.Tensor) -> None:
-        """k, v [B, Hkv, L, D] (K after RoPE) written at positions length .. length + L - 1."""
-        B, H, L, D = k.shape
-        start, end = self.length, self.length + L
-        self._reserve(B, H, D, end, k.dtype, k.device)
-        self._write("k", k, start, end)
-        self._write("v", v, start, end)
+    @property
+    def num_free_pages(self) -> int:
+        return len(self._free_pages)
+
+    def fields(self) -> List[torch.Tensor]:
+        return [t for t in (self.k, self.v, self.k_scale, self.k_zero, self.v_scale, self.v_zero) if t is not None]
+
+    def page_bytes(self) -> int:
+        """K, V and scale bytes of one page across all layers (Quest metadata excluded)."""
+        return sum(t[:, :1].numel() * t.element_size() for t in self.fields())
+
+    @property
+    def page_size(self) -> int:
+        return PAGE
+
+    @property
+    def max_total_pages(self) -> int:
+        return self.num_pages
+
+    @property
+    def used_pages(self) -> int:
+        return self.num_pages - len(self._free_pages)
+
+    def adjust_active_capacity(self, new_max_pages: int) -> int:
+        """Cap the pages in use at once (no reallocation; pages already in use stay valid)."""
+        self.page_limit = max(1, min(new_max_pages, self.num_pages))
+        return self.page_limit
+
+    def get_stats(self) -> dict:
+        used = self.used_pages
+        return {"total_pages": self.page_limit, "max_physical_pages": self.num_pages, "used_pages": used,
+                "free_pages": max(0, self.page_limit - used), "page_size": PAGE,
+                "kv_cache_dtype": self.kv_cache_dtype, "bytes_per_page": self.page_bytes(),
+                "utilization_pct": round(used / self.page_limit * 100.0, 2)}
+
+    def alloc_pages(self, n: int) -> List[int]:
+        if n > min(len(self._free_pages), self.page_limit - self.used_pages):
+            raise KVPoolExhausted(f"KV pool has {max(0, self.page_limit - self.used_pages)} free pages of "
+                                  f"{self.page_limit}, {n} needed")
+        pages = [self._free_pages.pop() for _ in range(n)]
+        for p in pages:
+            self._refs[p] = 1
+        if self.track_pages and pages:
+            idx = torch.tensor(pages, device=self.device)
+            self.kmin[:, idx] = float("inf")
+            self.kmax[:, idx] = float("-inf")
+        return pages
+
+    def incref(self, pages: List[int]) -> None:
+        for p in pages:
+            self._refs[p] += 1
+
+    def decref(self, pages: List[int]) -> None:
+        for p in pages:
+            self._refs[p] -= 1
+            if self._refs[p] == 0:
+                self._free_pages.append(p)
+
+    def new_slot(self) -> int:
+        if not self._free_slots:  # grow the page table by doubling its rows (a few KB; rare)
+            rows = self.page_table.shape[0]
+            self.page_table = torch.cat([self.page_table, torch.zeros_like(self.page_table)])
+            self._free_slots = list(range(2 * rows - 1, rows - 1, -1))
+        return self._free_slots.pop()
+
+    def release_slot(self, slot: int) -> None:
+        self._free_slots.append(slot)
+
+    def scratch_slot(self) -> int:
+        """A page-table row with one page of its own, for the padding rows of a CUDA-graph decode step (they write and
+        read only there). Reserved on first use."""
+        if getattr(self, "_scratch", None) is None:
+            slot, page = self.new_slot(), self.alloc_pages(1)[0]
+            self.page_table[slot, 0] = page
+            self._scratch = slot
+        return self._scratch
+
+    def copy_page(self, src: int, dst: int) -> None:
+        for t in self.fields() + ([self.kmin, self.kmax] if self.track_pages else []):
+            t[:, dst] = t[:, src]
+
+    # ------------------------------------------------------------------ reference reads and writes
+
+    def append(self, layer: int, cache: "KVCache", k: torch.Tensor, v: torch.Tensor) -> None:
+        """k, v [1, Hkv, L, D] (K after RoPE) at positions cache.length .. + L - 1 of one request; the caller has
+        reserved the pages and advances cache.length after the last layer."""
+        L = k.shape[2]
+        pos = torch.arange(cache.length, cache.length + L, device=self.device)
+        phys = self.page_table[cache.slot, pos // PAGE].long()
+        slot = pos % PAGE
+        for x, codes_t, scale_t, zero_t in ((k, self.k, self.k_scale, self.k_zero),
+                                            (v, self.v, self.v_scale, self.v_zero)):
+            xt = x[0].transpose(0, 1)  # [L, Hkv, D]
+            if self.kv_cache_dtype == "native":
+                codes_t[layer][phys, :, slot] = xt.to(codes_t.dtype)
+                continue
+            bits, group = (8, self.head_dim) if self.kv_cache_dtype == "int8" else (4, INT4_GROUP)
+            codes, scale, zero = _quantize(xt, bits, group)
+            codes_t[layer][phys, :, slot] = codes if bits == 8 else _pack4(codes)
+            scale_t[layer][phys, :, slot] = scale
+            zero_t[layer][phys, :, slot] = zero
         if self.track_pages:
-            self._update_page_bounds(k, start, end)
-        self.length = end
+            kt = k[0].transpose(0, 1).half()
+            idx = phys[:, None, None].expand_as(kt)
+            self.kmin[layer].scatter_reduce_(0, idx, kt, reduce="amin")
+            self.kmax[layer].scatter_reduce_(0, idx, kt, reduce="amax")
 
-    # ------------------------------------------------------------------ reads
+    def _gather(self, t: torch.Tensor, layer: int, phys: torch.Tensor) -> torch.Tensor:
+        """phys [N] -> [Hkv, N * 16, width]; phys [Hkv, N] (one page list per KV head) -> the same."""
+        if phys.dim() == 1:
+            return t[layer][phys].transpose(0, 1).flatten(1, 2)          # [N, Hkv, 16, w] -> [Hkv, N * 16, w]
+        heads = torch.arange(phys.shape[0], device=self.device)[:, None]
+        return t[layer][phys, heads].flatten(1, 2)                        # [Hkv, N, 16, w] -> [Hkv, N * 16, w]
 
-    def _read(self, name: str, index: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """name 'k' or 'v' -> [B, Hkv, T, D] in the model dtype; index [B, Hkv, N] picks token positions."""
-        s = self.store
-
-        def take(t):
-            t = t[:, :, :self.length]
-            if index is None:
-                return t
-            return torch.gather(t, 2, index.unsqueeze(-1).expand(-1, -1, -1, t.shape[-1]))
-
+    def _decode_field(self, layer: int, phys: torch.Tensor, which: str) -> torch.Tensor:
+        codes_t, scale_t, zero_t = ((self.k, self.k_scale, self.k_zero) if which == "k"
+                                    else (self.v, self.v_scale, self.v_zero))
+        codes = self._gather(codes_t, layer, phys)
         if self.kv_cache_dtype == "native":
-            return take(s[name])
-        if self.kv_cache_dtype == "int8":
-            codes, group = take(s[name]), s[name].shape[-1]
-        else:
-            codes, group = _unpack4(take(s[name])), INT4_GROUP
-        return _dequantize(codes, take(s[name + "_scale"]), take(s[name + "_zero"]), group, self.dtype)
+            return codes
+        group = self.head_dim if self.kv_cache_dtype == "int8" else INT4_GROUP
+        if self.kv_cache_dtype == "int4":
+            codes = _unpack4(codes)
+        return _dequantize(codes, self._gather(scale_t, layer, phys), self._gather(zero_t, layer, phys), group,
+                           self.dtype)
 
-    def read(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self._read("k"), self._read("v")
+    def read(self, layer: int, cache: "KVCache", length: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """K, V [1, Hkv, length, D] of one request, in the model dtype."""
+        phys = self.page_table[cache.slot, :-(-length // PAGE)].long()
+        k, v = (self._decode_field(layer, phys, w)[:, :length].unsqueeze(0) for w in ("k", "v"))
+        return k, v
 
-    def select_pages(self, q: torch.Tensor, budget: float) -> torch.Tensor:
-        """Quest: q [B, H, 1, D] -> token positions [B, Hkv, N] of the kept pages (first, last, then the highest
-        bound sum_d max(q_d kmax_d, q_d kmin_d), max over the query heads sharing a KV head). N = pages kept * 16;
-        positions past the end of the cache are clamped to the last token (masked by the caller)."""
+    def selection_plan(self, caches: List["KVCache"], lengths: List[int], budget: float, min_tokens: int) -> tuple:
+        """What Quest needs per step, shared by every layer: table width W, pages kept K, and on the device each row's
+        page count and keep count [B] and its physical pages [B, W]. lengths are after this step's append."""
+        width = -(-max(lengths) // PAGE)
+        n_pages = [-(-n // PAGE) for n in lengths]
+        keep = [p if n < min_tokens else min(p, max(2, math.ceil(budget * p))) for n, p in zip(lengths, n_pages)]
+        meta = torch.tensor([n_pages, keep, [c.slot for c in caches]], device=self.device)
+        phys = self.page_table[meta[2], :width].long()
+        return width, max(keep), meta[0], meta[1], phys
+
+    def select_pages_planned(self, layer: int, q: torch.Tensor, plan: tuple) -> torch.Tensor:
+        """Quest for a batch: q [B, H, 1, D] -> logical page indices [B, Hkv, K], -1 = none. Per row and KV head: the
+        first and the last page, then the pages with the highest bound sum_d max(q_d kmax_d, q_d kmin_d) (max over
+        the query heads sharing the KV head), up to its keep count. All on the device."""
+        width, k_max, n_pages, keep, phys = plan
         B, H, _, D = q.shape
-        Hkv = self.store["kmin"].shape[1]
-        n_pages = -(-self.length // PAGE)
-        keep = min(n_pages, max(2, math.ceil(budget * n_pages)))
+        Hkv = self.num_kv_heads
+        kmin, kmax = self.kmin[layer][phys].float(), self.kmax[layer][phys].float()     # [B, W, Hkv, D]
         qg = q.view(B, Hkv, H // Hkv, D).float()
-        kmin = self.store["kmin"][:, :, :n_pages].float()
-        kmax = self.store["kmax"][:, :, :n_pages].float()
-        bound = qg.clamp(min=0) @ kmax.transpose(-1, -2) + qg.clamp(max=0) @ kmin.transpose(-1, -2)
-        bound = bound.amax(2)  # [B, Hkv, P]
-        bound[:, :, 0] = float("inf")
-        bound[:, :, n_pages - 1] = float("inf")
-        pages = bound.topk(keep, dim=-1).indices.sort(-1).values
-        pos = (pages.unsqueeze(-1) * PAGE + torch.arange(PAGE, device=q.device)).flatten(-2)
-        return pos
+        bound = (torch.einsum("bhgd,bwhd->bhgw", qg.clamp(min=0), kmax)
+                 + torch.einsum("bhgd,bwhd->bhgw", qg.clamp(max=0), kmin)).amax(2)     # [B, Hkv, W]
+        lp = torch.arange(width, device=self.device)
+        inside = (lp < n_pages[:, None])[:, None]                                      # [B, 1, W]
+        forced = ((lp == 0) | (lp == n_pages[:, None] - 1))[:, None]
+        bound = bound.masked_fill(~inside, float("-inf")).masked_fill(forced & inside, float("inf"))
+        top = bound.topk(k_max, dim=-1)
+        ok = (torch.arange(k_max, device=self.device) < keep[:, None, None]) & (top.values > float("-inf"))
+        return torch.where(ok, top.indices, torch.full_like(top.indices, -1))
 
-    def read_positions(self, pos: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Gathered K, V [B, Hkv, N, D] at pos, and a bool mask [B, Hkv, 1, N] of the positions inside the cache."""
-        valid = pos < self.length
-        idx = pos.clamp(max=self.length - 1)
-        return self._read("k", idx), self._read("v", idx), valid.unsqueeze(2)
+    def select_pages(self, layer: int, caches: List["KVCache"], lengths: List[int], q: torch.Tensor,
+                     budget: float, min_tokens: int) -> torch.Tensor:
+        """Quest for a batch in one call (selection_plan + select_pages_planned); a row shorter than min_tokens keeps
+        every page."""
+        return self.select_pages_planned(layer, q, self.selection_plan(caches, lengths, budget, min_tokens))
 
-    def clone(self) -> "LayerKVCache":
-        c = LayerKVCache(self.kv_cache_dtype, self.track_pages)
-        c.length, c.capacity, c.dtype = self.length, self.capacity, self.dtype
-        c.store = {n: t.clone() for n, t in self.store.items()}
-        return c
-
-    def nbytes(self) -> int:
-        """Bytes held for the current length (K, V, scales; not the Quest page metadata)."""
-        return sum(t[:, :, :self.length].numel() * t.element_size()
-                   for n, t in self.store.items() if n not in ("kmin", "kmax"))
+    def read_selected(self, layer: int, cache: "KVCache", sel: torch.Tensor, length: int):
+        """Reference read of selected logical pages sel [Hkv, K] of one request -> K, V [1, Hkv, K * 16, D] and a
+        bool mask [1, Hkv, 1, K * 16] of the positions inside the cache."""
+        phys = self.page_table[cache.slot, sel.clamp(min=0)].long()                     # [Hkv, K]
+        pos = (sel[..., None] * PAGE + torch.arange(PAGE, device=self.device)).flatten(-2)
+        valid = (sel[..., None] >= 0).expand(-1, -1, PAGE).flatten(-2) & (pos < length)
+        k, v = (self._decode_field(layer, phys, w).masked_fill(~valid[..., None], 0).unsqueeze(0) for w in ("k", "v"))
+        return k, v, valid[None, :, None]  # unwritten slots zeroed: a masked 0 * NaN would still poison attention
 
 
 class KVCache:
-    """All layers of one request's cache. Passed as `past_key_values` and returned by SubspaceCausalLM.forward."""
+    """One request's cache in a pool: a row of the pool's page table and a length. Passed as `past_key_values` and
+    returned by SubspaceCausalLM.forward. Frees its pages when freed or garbage collected."""
 
-    def __init__(self, num_layers: int, kv_cache_dtype: str = "native", track_pages: bool = False):
-        self.layers: List[LayerKVCache] = [LayerKVCache(kv_cache_dtype, track_pages) for _ in range(num_layers)]
+    def __init__(self, pool: KVPool):
+        self.pool = pool
+        self.slot = pool.new_slot()
+        self.pages: List[int] = []
+        self.length = 0
 
     def __len__(self) -> int:
-        return len(self.layers)
+        return self.pool.num_layers
 
-    def __getitem__(self, i: int) -> LayerKVCache:
-        return self.layers[i]
+    def reserve(self, tokens: int) -> None:
+        """Make the cache hold `tokens` positions (allocates pages, writes their ids into the device page table)."""
+        need = -(-tokens // PAGE) - len(self.pages)
+        if need <= 0:
+            return
+        if len(self.pages) + need > self.pool.table_width:
+            raise KVPoolExhausted(f"a request may hold at most {self.pool.table_width * PAGE} tokens")
+        new = self.pool.alloc_pages(need)
+        self.pool.page_table[self.slot, len(self.pages):len(self.pages) + need] = torch.tensor(new, dtype=torch.int32)
+        self.pages += new
 
-    @property
-    def length(self) -> int:
-        return self.layers[0].length if self.layers else 0
-
-    def clone(self) -> "KVCache":
-        c = KVCache(0)
-        c.layers = [layer.clone() for layer in self.layers]
+    def clone(self, share: bool = True) -> "KVCache":
+        """share=True: full pages are shared copy-on-write and only the partial last page is copied (a fork);
+        share=False: every page is copied (an independent request with the same content)."""
+        c = KVCache(self.pool)
+        full = self.length // PAGE if share else 0
+        c.pages = self.pages[:full]
+        self.pool.incref(c.pages)
+        rest = self.pool.alloc_pages(len(self.pages) - full)
+        for src, dst in zip(self.pages[full:], rest):
+            self.pool.copy_page(src, dst)
+        c.pages += rest
+        if c.pages:
+            self.pool.page_table[c.slot, :len(c.pages)] = torch.tensor(c.pages, dtype=torch.int32)
+        c.length = self.length
         return c
 
+    def free(self) -> None:
+        if self.pages is not None:
+            self.pool.decref(self.pages)
+            self.pool.release_slot(self.slot)
+            self.pages = None
+
+    def __del__(self):
+        try:
+            self.free()
+        except Exception:
+            pass
+
     def nbytes(self) -> int:
-        return sum(layer.nbytes() for layer in self.layers)
-
-
-def kv_bytes_per_token(num_layers: int, num_kv_heads: int, head_dim: int, kv_cache_dtype: str = "native",
-                       native_bytes: int = 2) -> int:
-    """K and V bytes one token adds to the cache across all layers (scales included, Quest metadata excluded)."""
-    per_head = {"native": head_dim * native_bytes,
-                "int8": head_dim + 4,
-                "int4": head_dim // 2 + 4 * (head_dim // INT4_GROUP)}[kv_cache_dtype]
-    return 2 * num_layers * num_kv_heads * per_head
-
-
-class DecodeBatchLayer(NamedTuple):
-    """One layer of a batched decode step on CUDA: each row's cache, and their device table
-    [B, 8] = (k, v, k_scale, k_zero, v_scale, v_zero data pointers, length before the step, capacity)."""
-    rows: List[LayerKVCache]
-    table: torch.Tensor
+        """Bytes of the pages this request holds (K, V and scales across all layers; shared pages counted in full)."""
+        return len(self.pages) * self.pool.page_bytes()

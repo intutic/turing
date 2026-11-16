@@ -36,11 +36,16 @@ class NTKDynamicRoPEScaling(nn.Module):
         """
         return _rope_table(self.dim, self._theta(seq_len), start, seq_len, torch.device(device), self.llama3_scaling)
 
-    def compute_freqs_at(self, positions: Tuple[int, ...], device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
-        """cos, sin [len(positions), dim] for one position per row (a batched decode step), each row's base set by
-        its own sequence length position + 1, as compute_freqs(position + 1, start=position) would."""
-        thetas = tuple(self._theta(p + 1) for p in positions)
-        return _rope_rows(self.dim, tuple(positions), thetas, torch.device(device), self.llama3_scaling)
+    def compute_freqs_device(self, positions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """cos, sin [B, dim] for one position per row, from a device tensor and without any host sync (safe inside a
+        CUDA graph). Each row's base comes from its own length position + 1, as compute_freqs(position + 1,
+        start=position) would choose it (the same within the trained context; beyond it, fp32 instead of fp64 math)."""
+        pos = positions.float()[:, None]
+        scale = ((pos + 1) / self.max_position_embeddings).clamp(min=1.0)
+        theta = self.base_theta * scale ** (self.dim / (self.dim - 2.0))  # = base_theta while scale == 1
+        freqs = pos * _inv_freq(self.dim, theta, positions.device, self.llama3_scaling)
+        emb = torch.cat((freqs, freqs), dim=-1)
+        return torch.cos(emb), torch.sin(emb)
 
     def _theta(self, seq_len: int) -> float:
         if seq_len > self.max_position_embeddings:
@@ -75,17 +80,6 @@ def _rope_table(dim: int, theta: float, start: int, end: int, device: torch.devi
         t = torch.arange(start, end, dtype=torch.float32, device=device)
         freqs = torch.outer(t, inv_freq) # [seq_len, dim // 2]
         emb = torch.cat((freqs, freqs), dim=-1) # [seq_len, dim]
-        return torch.cos(emb), torch.sin(emb)
-
-@functools.lru_cache(maxsize=64)
-def _rope_rows(dim: int, positions: Tuple[int, ...], thetas: Tuple[float, ...],
-               device: torch.device, llama3: Optional[Tuple[float, float, float, int]] = None
-               ) -> Tuple[torch.Tensor, torch.Tensor]:
-    with torch.inference_mode(False), torch.no_grad():
-        t = torch.tensor(positions, dtype=torch.float32, device=device)[:, None]
-        theta = torch.tensor(thetas, dtype=torch.float32, device=device)[:, None]
-        freqs = t * _inv_freq(dim, theta, device, llama3)
-        emb = torch.cat((freqs, freqs), dim=-1)
         return torch.cos(emb), torch.sin(emb)
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:

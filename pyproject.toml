@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turing-engine"
-version = "1.6.0"
+version = "1.7.0"
 
 description = "Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Runtime for 70B+ LLMs on single consumer GPUs"
 
@@ -36,6 +36,7 @@ dev = [
     "wheel",
     "build",
     "pyzmq>=24.0.0",
+    "httpx2>=2.0; python_version >= '3.10'",  # starlette >= 1.x's TestClient warns (an error under -W error) without it
 ]
 llmd = [
     "pyzmq>=24.0.0",

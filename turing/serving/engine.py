@@ -14,8 +14,7 @@ import torch.nn.functional as F
 
 from ..config import ModelConfig, TuringConfig
 from ..models.causal_lm import SubspaceCausalLM
-from ..core.paging import StaticPagedKVPool
-from ..core.kv_cache import KVCache, kv_bytes_per_token
+from ..core.kv_cache import KVCache, KVPoolExhausted, kv_bytes_per_token
 from .traffic import (
     AdmissionController, AdmissionDecision,
     AdmissionResult, Lane, LanePolicy
@@ -94,17 +93,8 @@ class ContinuousBatchEngine:
         else:
             self.model = SubspaceCausalLM(model_config).to(self.device).eval()
 
-        # Zero-Allocation Contiguous Page Memory Pool
-        head_dim = model_config.hidden_dim // model_config.num_heads
-        self.kv_pool = StaticPagedKVPool(
-            num_layers=model_config.num_layers,
-            num_heads=model_config.num_heads,
-            head_dim=head_dim,
-            page_size=16,
-            max_total_pages=max(256, self.turing_config.max_batch_size * 64),
-            device=self.device,
-            dtype=torch.float16 if self.device.type == "cuda" else torch.float32
-        )
+        # The model's paged KV pool, sized once from free memory after the weights (ModelConfig.kv_pool_*)
+        self.kv_pool = self.model.kv_pool()
 
         self.max_batch_size = self.turing_config.max_batch_size
         self.waiting_queue: List[AsyncSequenceRequest] = []
@@ -161,7 +151,8 @@ class ContinuousBatchEngine:
         sparsity_ratio: Optional[float] = None,
         use_svd_kv: Optional[bool] = None,
         draft_tokens: Optional[int] = None,
-        lane: Optional[Lane] = None
+        lane: Optional[Lane] = None,
+        prefix_kv: Optional[Any] = None
     ) -> AsyncSequenceRequest:
         # Classify QoS lane if policy provided and lane not explicit
         if lane is None and self.lane_policy is not None:
@@ -190,6 +181,18 @@ class ContinuousBatchEngine:
                 req.output_queue.put_nowait(None)
                 raise RuntimeError(f"Request {req.request_id} rejected by admission controller: {adm_res.reason or 'VRAM limit exceeded'}")
 
+        # Reserve every page the request can need, so it can never run out of pages mid-decode
+        try:
+            req.past_kv = prefix_kv.clone() if isinstance(prefix_kv, KVCache) else KVCache(self.kv_pool)
+            req.past_kv.reserve(req.past_kv.length + len(prompt_tokens) + max_new_tokens)
+        except KVPoolExhausted as e:
+            req.past_kv = None
+            req.state = RequestState.FINISHED
+            req.output_queue.put_nowait(None)
+            if self.admission is not None:
+                self.admission.release(req.request_id)
+            raise RuntimeError(f"Request {req.request_id} rejected: {e}") from e
+
         self.waiting_queue.append(req)
         return req
 
@@ -207,15 +210,17 @@ class ContinuousBatchEngine:
         """
         requests = []
         for suffix_tokens in suffix_tokens_list:
+            # each branch shares the prefix's full pages copy-on-write
             req = await self.add_request(
                 prompt_tokens=suffix_tokens,
                 max_new_tokens=max_new_tokens,
                 temperature=temperature,
                 top_k=top_k,
-                lane=lane
+                lane=lane,
+                prefix_kv=prefix_kv
             )
-            # the cache is filled in place, so each branch gets its own copy of the shared prefix
-            req.past_kv = prefix_kv.clone() if isinstance(prefix_kv, KVCache) else prefix_kv
+            if not isinstance(req.past_kv, KVCache):
+                req.past_kv = prefix_kv
             requests.append(req)
         return requests
 
@@ -297,7 +302,7 @@ class ContinuousBatchEngine:
                 if self.dist_driver is not None:
                     logits, new_kv = self.dist_driver.forward_distributed(chunk_input, past_key_values=req.past_kv)
                 else:
-                    logits, new_kv = self.model(chunk_input, past_key_values=req.past_kv)
+                    logits, new_kv = self.model(chunk_input, past_key_values=req.past_kv, logits_to_keep=1)
                 req.past_kv = new_kv
                 req.prefill_offset = chunk_end
 
@@ -385,8 +390,9 @@ class ContinuousBatchEngine:
     def _finish_request(self, req: AsyncSequenceRequest, finished_time: float):
         req.state = RequestState.FINISHED
         req.finished_at = finished_time
-        req.past_kv = None  # Free VRAM/DRAM allocated tensors
-        self.kv_pool.free_pages(req.request_id)
+        if isinstance(req.past_kv, KVCache):
+            req.past_kv.free()  # return its pages to the pool
+        req.past_kv = None
         if self.admission is not None:
             self.admission.release(req.request_id)
         req.output_queue.put_nowait(None)
@@ -450,7 +456,7 @@ class ContinuousBatchEngine:
             "num_requests_running": len(self.running_batch),
             "kv_cache_usage_perc": self.get_kv_cache_utilization(),
             "block_size": self.kv_pool.page_size,
-            "num_gpu_blocks": self.kv_pool.max_total_pages,
+            "num_gpu_blocks": self.kv_pool.page_limit,
             "total_tokens_generated": self.total_tokens_generated,
         }
 

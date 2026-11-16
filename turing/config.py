@@ -45,7 +45,11 @@ class ModelConfig:
     enable_recirculation: bool = False
     kv_cache_dtype: str = "native"     # "native", "int8" or "int4" (see turing/core/kv_cache.py)
     kv_page_budget: float = 1.0        # Quest: share of 16-token pages a decode step reads; 1.0 reads all
-    kv_select_min_tokens: int = 1024   # Quest selection only once the cache holds at least this many tokens
+    kv_select_min_tokens: int = 8192   # Quest only from this length: on an L4 it beats reading every page only at
+                                       # batch >= 64 and >= 8K tokens (results_quest_threshold_cuda_smollm2_360m.json)
+    kv_pool_gib: Optional[float] = None  # KV pool size; None = kv_pool_fraction of free CUDA memory (4 GiB off CUDA)
+    kv_pool_fraction: float = 0.6      # share of free CUDA memory the KV pool takes when kv_pool_gib is unset
+    cuda_graphs: bool = True           # replay decode steps as CUDA graphs (CUDA only; see DecodeGraphs)
     rope_scaling: Optional[Tuple[float, float, float, int]] = None  # llama3: see hf_rope_scaling
     attention_bias: bool = False       # q/k/v projection biases (Qwen2)
     qk_norm: bool = False              # per-head RMSNorm on q and k before RoPE (Qwen3)

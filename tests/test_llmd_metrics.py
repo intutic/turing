@@ -30,7 +30,7 @@ def test_engine_llmd_metrics_methods():
     assert metrics["num_requests_waiting"] == 0
     assert metrics["num_requests_running"] == 0
     assert metrics["block_size"] == 16
-    assert metrics["num_gpu_blocks"] == 256
+    assert metrics["num_gpu_blocks"] == engine.kv_pool.page_limit > 0  # the real paged pool
 
 
 def test_prometheus_llmd_metrics_exposition():

@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.distributed as dist
 
 from ..config import ModelConfig
+from ..core.kv_cache import KVCache
 from ..models.tensor_parallel import (
     ColumnParallelLinear,
     RowParallelLinear,
@@ -136,28 +137,20 @@ class DistributedInferenceDriver:
     def forward_distributed(
         self,
         input_ids: torch.Tensor,
-        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        past_key_values: Optional[KVCache] = None,
         start_pos: int = 0
-    ) -> Tuple[torch.Tensor, Optional[List[Tuple[torch.Tensor, torch.Tensor]]]]:
+    ) -> Tuple[torch.Tensor, KVCache]:
         """
-        Executes distributed forward pass through pipeline stages and TP layers.
+        Executes distributed forward pass through pipeline stages and TP layers for one request. past_key_values is
+        its KVCache (created on the first call); positions come from the cache, so start_pos is not used.
         """
-        if self.dist_config.pp_size == 1:
-            # Single stage: full forward pass
-            stage = self.stages[0]
-            return stage(input_ids, past_key_values=past_key_values, start_pos=start_pos)
-
-        # Multi-stage pipeline execution
+        cache = past_key_values if past_key_values is not None else KVCache(self.model.kv_pool())
+        cache.reserve(cache.length + input_ids.shape[1])
         activations = input_ids
-        all_new_kvs = []
-        
         for stage in self.stages:
-            stage_past = past_key_values[len(all_new_kvs):len(all_new_kvs) + len(stage.layers)] if past_key_values else None
-            activations, stage_kvs = stage(activations, past_key_values=stage_past, start_pos=start_pos)
-            if stage_kvs:
-                all_new_kvs.extend(stage_kvs)
-
-        return activations, all_new_kvs
+            activations, _ = stage(activations, past_key_values=cache)
+        cache.length += input_ids.shape[1]
+        return activations, cache
 
     def all_gather_logits(self, local_logits: torch.Tensor) -> torch.Tensor:
         """

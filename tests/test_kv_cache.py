@@ -1,8 +1,8 @@
-"""KVCache: low-bit storage error bounds, growth, Quest page bounds, and equivalence of the decode paths."""
+"""Paged KV pool: low-bit error bounds, pages and Quest bounds, copy-on-write forks, and equivalence of the paths."""
 import pytest
 import torch
 
-from turing.core.kv_cache import PAGE, KVCache, LayerKVCache
+from turing.core.kv_cache import PAGE, KVCache, KVPool, KVPoolExhausted, kv_bytes_per_token
 from tests.test_hf_parity import _tiny_llama
 from turing.models.hf_loader import RealHuggingFaceLoader
 
@@ -14,12 +14,27 @@ def _kv(T, H=2, D=64, seed=0):
     return k, torch.randn(1, H, T, D, generator=g)
 
 
+def _pool(kv_cache_dtype="native", pages=128, H=2, D=64, layers=1, track=False):
+    return KVPool(layers, H, D, pages, torch.float32, "cpu", kv_cache_dtype, track)
+
+
+def _fill(pool, k, v, chunk=None):
+    """A cache holding k, v in layer 0 (appended in chunks of `chunk` tokens)."""
+    c = KVCache(pool)
+    T = k.shape[2]
+    for s in range(0, T, chunk or T):
+        e = min(T, s + (chunk or T))
+        c.reserve(e)
+        pool.append(0, c, k[:, :, s:e], v[:, :, s:e])
+        c.length = e
+    return c
+
+
 @pytest.mark.parametrize("dtype,levels,group", [("int8", 255, 64), ("int4", 15, 32)])
 def test_low_bit_error_is_within_half_a_step_of_each_group(dtype, levels, group):
     k, v = _kv(40)
-    c = LayerKVCache(dtype)
-    c.append(k, v)
-    kr, vr = c.read()
+    pool = _pool(dtype)
+    kr, vr = pool.read(0, _fill(pool, k, v), 40)
     for x, xr in ((k, kr), (v, vr)):
         g = x.unflatten(-1, (-1, group))
         step = (g.amax(-1, keepdim=True) - g.amin(-1, keepdim=True)) / levels
@@ -27,46 +42,89 @@ def test_low_bit_error_is_within_half_a_step_of_each_group(dtype, levels, group)
         assert (err <= step / 2 + 2e-3 * g.abs().amax(-1, keepdim=True)).all()  # + fp16 rounding of scale and zero
 
 
-def test_growth_keeps_content_and_page_bounds():
+def test_uneven_chunks_keep_content_and_page_bounds():
     k, v = _kv(600)
-    c = LayerKVCache("native", track_pages=True)
-    for s in range(0, 600, 37):  # uneven chunks cross pages and the 256 / 512 capacity steps
-        c.append(k[:, :, s:s + 37], v[:, :, s:s + 37])
-    kr, vr = c.read()
+    pool = _pool(track=True)
+    c = _fill(pool, k, v, chunk=37)  # chunks cross page boundaries
+    kr, vr = pool.read(0, c, 600)
     torch.testing.assert_close(kr, k, rtol=0, atol=0)
     torch.testing.assert_close(vr, v, rtol=0, atol=0)
     pages = -(-600 // PAGE)
+    assert len(c.pages) == pages  # no capacity margin: only the last page is partly used
     kp = torch.nn.functional.pad(k, (0, 0, 0, pages * PAGE - 600), value=float("nan")).unflatten(2, (pages, PAGE))
-    torch.testing.assert_close(c.store["kmin"][:, :, :pages].float(), kp.nan_to_num(float("inf")).amin(3).half().float())
-    torch.testing.assert_close(c.store["kmax"][:, :, :pages].float(), kp.nan_to_num(float("-inf")).amax(3).half().float())
+    phys = torch.tensor(c.pages)
+    torch.testing.assert_close(pool.kmin[0][phys].float().transpose(0, 1),
+                               kp.nan_to_num(float("inf")).amin(3).half().float()[0])
+    torch.testing.assert_close(pool.kmax[0][phys].float().transpose(0, 1),
+                               kp.nan_to_num(float("-inf")).amax(3).half().float()[0])
 
 
 def test_quest_bound_is_an_upper_bound_and_forces_first_and_last_page():
-    k, v = _kv(200, H=2)
-    c = LayerKVCache("native", track_pages=True)
-    c.append(k, v)
+    k, v = _kv(200)
+    pool = _pool(track=True)
+    c = _fill(pool, k, v)
     q = torch.randn(1, 4, 1, 64)  # 2 query heads per KV head
-    pos = c.select_pages(q, budget=0.25)
-    pages = (pos[..., ::PAGE] // PAGE)
+    sel = pool.select_pages(0, [c], [200], q, budget=0.25, min_tokens=0)[0]   # [Hkv, K]
     n_pages = -(-200 // PAGE)
-    assert pages.shape[-1] == max(2, -(-n_pages // 4))
-    assert (pages[..., 0] == 0).all() and (pages[..., -1] == n_pages - 1).all()
+    assert sel.shape[-1] == max(2, -(-n_pages // 4)) and (sel >= 0).all()
+    assert all({0, n_pages - 1} <= set(row.tolist()) for row in sel)
     qg = q.view(1, 2, 2, 64)
-    exact = (qg @ k.transpose(-1, -2)).amax(2)  # [1, Hkv, T]
-    kmin, kmax = c.store["kmin"][:, :, :n_pages].float(), c.store["kmax"][:, :, :n_pages].float()
-    bound = (qg.clamp(min=0) @ kmax.transpose(-1, -2) + qg.clamp(max=0) @ kmin.transpose(-1, -2)).amax(2)
-    per_page = torch.nn.functional.pad(exact, (0, n_pages * PAGE - 200), value=float("-inf")).unflatten(-1, (n_pages, PAGE))
-    assert (per_page.amax(-1) <= bound + 1e-2).all()
+    exact = (qg @ k.transpose(-1, -2)).amax(2)[0]                                       # [Hkv, T]
+    per_page = torch.nn.functional.pad(exact, (0, n_pages * PAGE - 200), value=float("-inf"))
+    per_page = per_page.unflatten(-1, (n_pages, PAGE)).amax(-1)
+    phys = torch.tensor(c.pages)
+    kmin, kmax = pool.kmin[0][phys].float().transpose(0, 1), pool.kmax[0][phys].float().transpose(0, 1)
+    bound = (qg[0].clamp(min=0) @ kmax.transpose(-1, -2) + qg[0].clamp(max=0) @ kmin.transpose(-1, -2)).amax(1)
+    assert (per_page <= bound + 1e-2).all()
 
 
-def test_clone_is_independent():
-    k, v = _kv(20)
-    a = KVCache(1, "int8")
-    a[0].append(k, v)
-    b = a.clone()
-    b[0].append(k[:, :, :3], v[:, :, :3])
-    assert a.length == 20 and b.length == 23
-    torch.testing.assert_close(a[0].read()[0], b[0].read()[0][:, :, :20])
+def test_batched_selection_equals_per_row_selection():
+    pool = _pool(track=True, pages=256)
+    caches, lengths = [], (30, 300, 1000)
+    for i, T in enumerate(lengths):
+        k, v = _kv(T, seed=i)
+        caches.append(_fill(pool, k, v))
+    q = torch.randn(3, 4, 1, 64)
+    batched = pool.select_pages(0, caches, list(lengths), q, 0.25, min_tokens=64)
+    for b, (c, T) in enumerate(zip(caches, lengths)):
+        alone = pool.select_pages(0, [c], [T], q[b:b + 1], 0.25, min_tokens=64)[0]
+        assert [set(r.tolist()) - {-1} for r in batched[b]] == [set(r.tolist()) - {-1} for r in alone]
+    assert (batched[0] >= 0).sum(-1).tolist() == [2, 2]  # 30 tokens < min_tokens: both of its pages kept
+
+
+def test_fork_shares_full_pages_and_isolates_writes():
+    k, v = _kv(40)
+    pool = _pool("int8")
+    parent = _fill(pool, k, v)
+    child = parent.clone()
+    assert child.pages[:2] == parent.pages[:2] and child.pages[2] != parent.pages[2]  # 2 full pages shared
+    free_before = pool.num_free_pages
+    for c, seed in ((parent, 1), (child, 2)):
+        nk, nv = _kv(9, seed=seed)
+        c.reserve(c.length + 9)
+        pool.append(0, c, nk, nv)
+        c.length += 9
+    kp, _ = pool.read(0, parent, 49)
+    kc, _ = pool.read(0, child, 49)
+    torch.testing.assert_close(kp[:, :, :40], kc[:, :, :40], rtol=0, atol=0)     # the shared prefix
+    assert not torch.equal(kp[:, :, 40:], kc[:, :, 40:])                          # each fork's own tokens
+    assert pool.num_free_pages == free_before - 2  # one new page each for token 48
+    child.free()
+    parent.free()
+    assert pool.num_free_pages == pool.num_pages
+
+
+def test_independent_copy_and_exhaustion():
+    k, v = _kv(32)
+    pool = _pool(pages=4)
+    a = _fill(pool, k, v)
+    b = a.clone(share=False)
+    assert set(a.pages).isdisjoint(b.pages)
+    torch.testing.assert_close(pool.read(0, a, 32)[0], pool.read(0, b, 32)[0], rtol=0, atol=0)
+    with pytest.raises(KVPoolExhausted):
+        a.clone(share=False)
+    del b  # garbage collection returns the pages
+    assert pool.num_free_pages == 2
 
 
 @torch.no_grad()
@@ -75,7 +133,7 @@ def test_chunked_prefill_equals_step_decode_and_full_budget_equals_no_selection(
     hf = _tiny_llama()
     ids = torch.randint(0, 128, (1, 40), generator=torch.Generator().manual_seed(2))
     model = RealHuggingFaceLoader.convert_hf_model(hf, sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
-    model.config.kv_cache_dtype = kv_cache_dtype
+    model.config.kv_cache_dtype, model.config.kv_pool_gib = kv_cache_dtype, 0.01
 
     chunked, cache = model(ids[:, :24])
     tail, _ = model(ids[:, 24:], past_key_values=cache)
@@ -91,16 +149,10 @@ def test_chunked_prefill_equals_step_decode_and_full_budget_equals_no_selection(
     torch.testing.assert_close(torch.cat(selected, 1), chunked[:, 24:], atol=1e-4, rtol=0)
 
 
-@torch.no_grad()
-def test_legacy_tuple_cache_still_matches():
-    hf = _tiny_llama()
-    ids = torch.randint(0, 128, (1, 12), generator=torch.Generator().manual_seed(3))
-    model = RealHuggingFaceLoader.convert_hf_model(hf, sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
-    empty = [(None, None)] * len(model.layers)
-    logits, past = model(ids[:, :8], past_key_values=empty)
-    assert isinstance(past, list) and past[0][0].shape[2] == 8
-    step, _ = model(ids[:, 8:9], past_key_values=past)
-    torch.testing.assert_close(step, hf(ids[:, :9]).logits[:, 8:9], atol=1e-3, rtol=0)
+def test_tuple_caches_are_rejected():
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny_llama(), sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
+    with pytest.raises(TypeError, match="tuples are not supported"):
+        model(torch.tensor([[1]]), past_key_values=[(None, None)] * len(model.layers))
 
 
 @torch.no_grad()
@@ -108,7 +160,7 @@ def test_legacy_tuple_cache_still_matches():
 def test_batched_decode_across_requests_matches_each_request_alone(kv_cache_dtype):
     hf = _tiny_llama()
     model = RealHuggingFaceLoader.convert_hf_model(hf, sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
-    model.config.kv_cache_dtype = kv_cache_dtype
+    model.config.kv_cache_dtype, model.config.kv_pool_gib = kv_cache_dtype, 0.01
     g = torch.Generator().manual_seed(4)
     prompts = [torch.randint(0, 128, (1, n), generator=g) for n in (5, 17, 33)]  # different lengths and positions
     nxt = torch.randint(0, 128, (3, 3), generator=g)
@@ -125,10 +177,41 @@ def test_batched_decode_across_requests_matches_each_request_alone(kv_cache_dtyp
 
 
 @pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
-def test_kv_bytes_per_token_matches_what_the_cache_holds(kv_cache_dtype):
-    from turing.core.kv_cache import kv_bytes_per_token
-    k, v = _kv(48, H=3, D=64)
-    cache = KVCache(2, kv_cache_dtype)
-    for layer in cache.layers:
-        layer.append(k, v)
-    assert cache.nbytes() == 48 * kv_bytes_per_token(2, 3, 64, kv_cache_dtype, native_bytes=4)
+def test_kv_bytes_per_token_matches_what_a_page_holds(kv_cache_dtype):
+    pool = _pool(kv_cache_dtype, H=3, layers=2)
+    k, v = _kv(48, H=3)
+    c = _fill(pool, k, v)
+    assert c.nbytes() == 48 * kv_bytes_per_token(2, 3, 64, kv_cache_dtype, native_bytes=4)
+
+
+def test_engine_reserves_pages_at_admission_frees_them_at_finish_and_rejects_what_cannot_fit():
+    import asyncio
+    import dataclasses
+    import time
+    from turing.config import TuringConfig
+    from turing.models.registry import get_model_config
+    from turing.serving.engine import ContinuousBatchEngine
+    cfg = dataclasses.replace(get_model_config("test-tiny"), kv_pool_gib=0.002)  # the registry's object is shared
+    engine = ContinuousBatchEngine(cfg, TuringConfig(device="cpu", max_batch_size=4))
+    pool = engine.kv_pool
+    req = asyncio.run(engine.add_request(prompt_tokens=list(range(20)), max_new_tokens=12))
+    assert pool.used_pages == 2 and req.past_kv.length == 0  # 32 tokens -> 2 pages, held before prefill
+    engine._finish_request(req, time.time())
+    assert pool.used_pages == 0 and req.past_kv is None
+    with pytest.raises(RuntimeError, match="rejected"):
+        asyncio.run(engine.add_request(prompt_tokens=[1], max_new_tokens=pool.num_pages * PAGE + 1))
+    assert pool.used_pages == 0
+
+
+def test_elastic_manager_drives_the_serving_pool():
+    from turing.core.elastic_memory import ElasticMemoryBudgetManager
+    from turing.core.expert_cache import GPULRUExpertCache
+    experts = GPULRUExpertCache(num_slots=32, hidden_dim=256, active_subspace_dim=128, device=torch.device("cpu"),
+                                dtype=torch.float32)
+    pool = _pool(pages=256, layers=4)
+    manager = ElasticMemoryBudgetManager(expert_cache=experts, kv_pool=pool, min_kv_pages=32, max_kv_pages=256)
+    assert manager.bytes_per_page == max(1024, pool.page_bytes())
+    res = manager.evaluate_and_rebalance(current_active_tokens=256, force=True)
+    assert pool.page_limit == res["active_kv_pages"] == pool.get_stats()["total_pages"]
+    with pytest.raises(KVPoolExhausted):
+        KVCache(pool).reserve((pool.page_limit + 1) * PAGE)

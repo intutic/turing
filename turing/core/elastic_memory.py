@@ -2,10 +2,11 @@
 Elastic Memory Budget Manager (FreeToken / Turing Engine Co-Design).
 Dynamically rebalances memory between the MoE Expert Slot Cache (GPULRUExpertCache)
 and the KV Cache Page Pool (StaticPagedKVPool / HierarchicalVirtualPageManager)
-at runtime based on active batch context lengths without engine restarts.
+at runtime based on active batch context lengths without engine restarts. Works with the serving pool
+(turing.core.kv_cache.KVPool) or StaticPagedKVPool.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import math
 from .expert_cache import GPULRUExpertCache
 from .paging import StaticPagedKVPool
@@ -18,7 +19,7 @@ class ElasticMemoryBudgetManager:
     def __init__(
         self,
         expert_cache: GPULRUExpertCache,
-        kv_pool: StaticPagedKVPool,
+        kv_pool: Union[StaticPagedKVPool, "KVPool"],
         bytes_per_expert_slot: Optional[int] = None,
         bytes_per_kv_page: Optional[int] = None,
         min_expert_slots: int = 4,
@@ -40,7 +41,9 @@ class ElasticMemoryBudgetManager:
         else:
             self.bytes_per_slot = bytes_per_expert_slot
 
-        if bytes_per_kv_page is None:
+        if bytes_per_kv_page is None and hasattr(kv_pool, "page_bytes"):  # KVPool, the serving pool
+            self.bytes_per_page = max(1024, kv_pool.page_bytes())
+        elif bytes_per_kv_page is None:
             # layers * heads * page_size * head_dim * element_size * 2 (k and v)
             k_page_bytes = (
                 kv_pool.k_pool.shape[0] * kv_pool.k_pool.shape[2] * kv_pool.page_size * kv_pool.head_dim * kv_pool.k_pool.element_size()

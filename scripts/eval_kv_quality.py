@@ -15,6 +15,7 @@ Sanity rows: `exact_forward` vs HuggingFace's own model (`hf_native`), and `exac
 python scripts/eval_kv_quality.py --models HuggingFaceTB/SmolLM2-135M --arms exact_forward,served_default
 """
 import argparse
+import gc
 import json
 import math
 import platform
@@ -63,7 +64,7 @@ def score(model, win, s, mode, hf=False):
     if mode == "forward":
         logits = model(win).logits if hf else model(win)[0]
         return nll(logits[:, s:-1], win[:, s + 1:])
-    _, past = model(win[:, :s])
+    _, past = model(win[:, :s], logits_to_keep=1)
     if mode == "chunk":
         logits, _ = model(win[:, s:-1], past_key_values=past)
         return nll(logits, win[:, s + 1:])
@@ -98,6 +99,9 @@ def run_model(name, arms, T, D, n_win, device):
         rows.append(dict(model=name, arm=arm, mode=mode, metric="nll", value=m, se=se, n=len(wins), seconds=secs))
         if model is not hf:
             del model
+            gc.collect()  # free its KV pool before the next arm sizes one
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
     for arm in arms:
         ref = ARMS[arm][3]
         if ref in per_arm:
