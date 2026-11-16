@@ -80,6 +80,7 @@ def run_vllm(a, batches):
     tok = AutoTokenizer.from_pretrained(a.model)
     kv = {"native": "auto", "int8": "fp8"}.get(a.kv_cache_dtype, "auto")  # vLLM's 8-bit KV is fp8
     llm = LLM(a.model, dtype=a.dtype or "float16", kv_cache_dtype=kv, enable_prefix_caching=False,
+              disable_log_stats=False,  # request metrics (first-token time) are recorded only with stats on
               max_model_len=a.context + a.new_tokens + 16, gpu_memory_utilization=0.85)
     sp = SamplingParams(temperature=0.0, max_tokens=a.new_tokens, ignore_eos=True)
     for B in batches:  # warm-up at every batch size, as for Turing

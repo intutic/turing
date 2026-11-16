@@ -123,3 +123,19 @@ def test_cross_model_kv_pipeline_end_to_end():
     assert len(tgt_keys) == tgt_cfg.num_layers
     assert len(tgt_vals) == tgt_cfg.num_layers
     assert tgt_keys[0].shape == (1, seq_len, tgt_cfg.num_kv_heads, tgt_cfg.head_dim)
+
+
+@pytest.mark.parametrize("device", ["cpu"] + (["cuda"] if torch.cuda.is_available() else []))
+def test_rope_strip_and_apply_match_the_formula_on_multi_head_keys(device):
+    """[Batch, SeqLen, Heads, HeadDim]: every head of token t rotates by t (a CUDA kernel used to take the flattened
+    row as the position, so heads after the first rotated by the wrong angle and lineage residuals blew up on CUDA)."""
+    from turing.core.cross_model_kv import RoPEContentDecoupler
+    B, T, H, D, base = 2, 7, 3, 16, 10000.0
+    k = torch.randn(B, T, H, D, device=device)
+    inv = 1.0 / (base ** (torch.arange(0, D, 2, device=device).float() / D))
+    ang = torch.outer(torch.arange(T, device=device).float(), inv)[None, :, None, :]
+    cos, sin = ang.cos(), ang.sin()
+    k1, k2 = k[..., :D // 2], k[..., D // 2:]
+    want = torch.cat([k1 * cos - k2 * sin, k1 * sin + k2 * cos], -1)
+    torch.testing.assert_close(RoPEContentDecoupler.apply_rope(k, base), want, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(RoPEContentDecoupler.strip_rope(want, base), k, atol=1e-5, rtol=1e-5)

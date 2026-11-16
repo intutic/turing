@@ -77,17 +77,6 @@ def test_triton_matryoshka_fallback():
     torch.testing.assert_close(out, out_ref, rtol=1e-4, atol=1e-4)
 
 
-def test_triton_cross_kv_fallback():
-    from turing.kernels.triton_cross_kv import fused_inv_rope_cuda
-    from turing.core.cross_model_kv import RoPEContentDecoupler
-    k = torch.randn(2, 16, 4, 64, dtype=torch.float32)
-
-    k_unrot = fused_inv_rope_cuda(k, base=500000.0)
-    k_unrot_ref = RoPEContentDecoupler.strip_rope(k, base=500000.0)
-
-    torch.testing.assert_close(k_unrot, k_unrot_ref, rtol=1e-4, atol=1e-4)
-
-
 def test_triton_chunk_compression_fallback():
     from turing.kernels.triton_chunk_compression import hca_chunk_pool_cuda
     from turing.core.hierarchical_compression import HCAChunkCompressor

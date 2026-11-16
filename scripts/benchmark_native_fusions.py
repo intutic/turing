@@ -77,54 +77,6 @@ def benchmark_matryoshka_spec(device: torch.device):
     return results
 
 
-def benchmark_cross_kv(device: torch.device):
-    print("\n" + "=" * 80)
-    print(f"[*] 3. FUSED INVERSE-RoPE & RIDGE REPRESENTATION TRANSFER ({device.type.upper()})")
-    print("=" * 80)
-
-    from turing.core.cross_model_kv import RoPEContentDecoupler, ClosedFormRidgeMapper
-    from turing.kernels.triton_cross_kv import fused_inv_rope_cuda
-
-    seq_len = 2048
-    num_heads = 32
-    head_dim = 128
-    k = torch.randn(2, seq_len, num_heads, head_dim, device=device, dtype=torch.float32)
-
-    # Warmup
-    for _ in range(5):
-        _ = RoPEContentDecoupler.strip_rope(k)
-    sync_device(device)
-
-    N_ITERS = 50
-
-    # PyTorch baseline
-    sync_device(device)
-    t0 = time.perf_counter()
-    for _ in range(N_ITERS):
-        _ = RoPEContentDecoupler.strip_rope(k)
-    sync_device(device)
-    t1 = time.perf_counter()
-    py_ms = ((t1 - t0) / N_ITERS) * 1000.0
-
-    # Fused
-    sync_device(device)
-    t0 = time.perf_counter()
-    for _ in range(N_ITERS):
-        if device.type == "cuda":
-            _ = fused_inv_rope_cuda(k)
-        elif HAS_CSRC:
-            k_cpu = k.detach().cpu().numpy()
-            _ = turing_csrc.fused_rope_transform(k_cpu, 500000.0, 0, True)
-        else:
-            _ = RoPEContentDecoupler.strip_rope(k)
-    sync_device(device)
-    t1 = time.perf_counter()
-    fused_ms = ((t1 - t0) / N_ITERS) * 1000.0
-
-    speedup = py_ms / max(fused_ms, 1e-6)
-    print(f"Inverse-RoPE (2048 tokens): PyTorch = {py_ms:.3f} ms | Fused = {fused_ms:.3f} ms | Speedup = {speedup:.2f}x")
-
-
 def benchmark_hca_chunk_pool(device: torch.device):
     print("\n" + "=" * 80)
     print(f"[*] 4. FUSED HIERARCHICAL ATTENTION CHUNK POOLING ({device.type.upper()})")
@@ -496,7 +448,6 @@ def main():
         print(f"   GPU: {torch.cuda.get_device_name(0)} | VRAM: {torch.cuda.get_device_properties(0).total_memory / (1024**3):.1f} GB")
 
     benchmark_matryoshka_spec(device)
-    benchmark_cross_kv(device)
     benchmark_hca_chunk_pool(device)
     benchmark_mhc_hyperconnections(device)
     benchmark_linear_recurrence(device)
