@@ -20,6 +20,17 @@ step decode_360m python scripts/benchmark_kv_decode.py --model HuggingFaceTB/Smo
 step decode_1p7b python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-1.7B --settings "$KV_SETTINGS" --contexts 2048,8192,32768 --batches 1,8,32 --out results_kv_decode_cuda_smollm2_1p7b.json
 step quest_sweep python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M --settings int8,int8_quest25 --contexts 2048,4096,8192,16384,32768 --batches 1,8,64 --quest-min-tokens 0 --out results_quest_threshold_cuda_smollm2_360m.json
 step quality python scripts/eval_kv_quality.py --models HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B,Qwen/Qwen2.5-1.5B --arms exact_forward,int8,int4,quest25,rtn4,gptq4,teal25,teal40,teal50 --context 2048 --decode 256 --windows 16 --out results_quality_cuda.json
+NIAH="--model Qwen/Qwen2.5-1.5B-Instruct --context-len 2048 8192 16384 32768 --depths 0 0.25 0.5 0.75 1 --device cuda --dtype bf16 --out results_niah_cuda.json"
+step niah_native turing eval-niah $NIAH
+step niah_int8 turing eval-niah $NIAH --kv-cache-dtype int8
+step niah_int4 turing eval-niah $NIAH --kv-cache-dtype int4
+step niah_int8_quest25 turing eval-niah $NIAH --kv-cache-dtype int8 --kv-page-budget 0.25
+GSM="--model Qwen/Qwen2.5-1.5B-Instruct --samples 500 --batch-size 32 --device cuda --dtype bf16 --out results_gsm8k_cuda.json"
+step gsm_native turing eval-accuracy $GSM
+step gsm_int8 turing eval-accuracy $GSM --kv-cache-dtype int8
+step gsm_int4 turing eval-accuracy $GSM --kv-cache-dtype int4
+step gsm_gptq4 turing eval-accuracy $GSM --quantization w4a16-gptq
+step gsm_teal40 turing eval-accuracy $GSM --activation-sparsity 0.4
 step e2e_turing python scripts/benchmark_e2e_generation.py --engine turing --model HuggingFaceTB/SmolLM2-360M
 step e2e_turing_1p7b python scripts/benchmark_e2e_generation.py --engine turing --model HuggingFaceTB/SmolLM2-1.7B
 step vllm_venv bash -c "python3 -m venv ~/vllm-venv && ~/vllm-venv/bin/pip install -q vllm datasets"

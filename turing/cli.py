@@ -59,6 +59,26 @@ def _load_weights(args, dev):
         cfg.cuda_graphs, cfg.kv_pool_fraction = not args.no_cuda_graphs, args.kv_cache_memory_fraction
     return model, tokenizer
 
+def _eval_engine(args):
+    """Model and engine for eval-niah / eval-accuracy, with the serving settings under test."""
+    dev = TuringConfig(device=args.device).resolve_device()
+    model, tokenizer = _load_weights(args, dev)
+    if args.kv_select_min_tokens is not None:
+        model.config.kv_select_min_tokens = args.kv_select_min_tokens
+    return ContinuousBatchEngine(model.config, TuringConfig(device=args.device), model=model, tokenizer=tokenizer,
+                                 prefix_caching=False)
+
+
+def _write_eval(args, res):
+    res.update(model=args.model, kv_cache_dtype=args.kv_cache_dtype, kv_page_budget=args.kv_page_budget,
+               quantization=args.quantization, activation_sparsity=args.activation_sparsity, device=args.device)
+    print(json.dumps(res, indent=2))
+    if args.out:
+        runs = json.load(open(args.out)) if os.path.exists(args.out) else []
+        with open(args.out, "w") as f:
+            json.dump(runs + [res], f, indent=2)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="turing", description="Turing Engine: Subspace-Compressed LLM Serving Runtime")
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
@@ -131,6 +151,14 @@ def main():
     niah_parser.add_argument("--depths", type=float, nargs="+", default=[0.0, 0.25, 0.5, 0.75, 1.0], help="Needle depths, 0 = start, 1 = end")
     niah_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model (default: 0.0)")
     niah_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
+    niah_parser.add_argument("--kv-cache-dtype", type=str, default="native", choices=["native", "int8", "int4"], help="KV cache storage (default native)")
+    niah_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest page budget (1.0 reads all pages)")
+    niah_parser.add_argument("--kv-select-min-tokens", type=int, default=None, help="Quest only from this many tokens (default: the model config's 8192)")
+    niah_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load")
+    niah_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows")
+    niah_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style input sparsity (0 = off)")
+    niah_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight dtype")
+    niah_parser.add_argument("--out", type=str, default=None, help="Append the result to this JSON file (a list of runs)")
 
     # 6. Eval Accuracy (GSM8K)
     acc_parser = subparsers.add_parser("eval-accuracy", help="GSM8K test exact match through the engine on real weights (k-shot, greedy)")
@@ -141,6 +169,14 @@ def main():
     acc_parser.add_argument("--batch-size", type=int, default=8, help="Requests in flight at a time (default 8)")
     acc_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     acc_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
+    acc_parser.add_argument("--kv-cache-dtype", type=str, default="native", choices=["native", "int8", "int4"], help="KV cache storage (default native)")
+    acc_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest page budget (1.0 reads all pages)")
+    acc_parser.add_argument("--kv-select-min-tokens", type=int, default=None, help="Quest only from this many tokens (default: the model config's 8192)")
+    acc_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load")
+    acc_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows")
+    acc_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style input sparsity (0 = off)")
+    acc_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight dtype")
+    acc_parser.add_argument("--out", type=str, default=None, help="Append the result to this JSON file (a list of runs)")
 
     # 9. PCIe vs Host DRAM Bandwidth Calibration
     bw_parser = subparsers.add_parser("bench-bw", help="Calibrate live PCIe vs Host DRAM memory & SIMD bandwidth")
@@ -182,14 +218,10 @@ def main():
 
     elif args.command == "eval-accuracy":
         from .serving.accuracy_eval import GSM8KEvaluator, load_gsm8k
-        dev = TuringConfig(device=args.device).resolve_device()
-        model, tokenizer = _load_weights(args, dev)
-        engine = ContinuousBatchEngine(model.config, TuringConfig(device=args.device), model=model, tokenizer=tokenizer)
+        engine = _eval_engine(args)
         problems = load_gsm8k("test")[:args.samples]
         shots = load_gsm8k("train")[:args.shots]
-        res = GSM8KEvaluator(engine).evaluate(problems, shots, args.max_new_tokens, args.batch_size)
-        res["model"] = args.model
-        print(json.dumps(res, indent=2))
+        _write_eval(args, GSM8KEvaluator(engine).evaluate(problems, shots, args.max_new_tokens, args.batch_size))
 
     elif args.command == "chat":
         jcfg = TuringConfig(device=args.device)
@@ -353,12 +385,8 @@ def main():
 
     elif args.command == "eval-niah":
         from .serving.niah import LongContextNIAHEvaluator
-        dev = TuringConfig(device=args.device).resolve_device()
-        model, tokenizer = _load_weights(args, dev)
-        engine = ContinuousBatchEngine(model.config, TuringConfig(device=args.device), model=model, tokenizer=tokenizer)
-        res = LongContextNIAHEvaluator(engine).evaluate_retrieval(args.context_len, args.depths)
-        res["model"] = args.model
-        print(json.dumps(res, indent=2))
+        engine = _eval_engine(args)
+        _write_eval(args, LongContextNIAHEvaluator(engine).evaluate_retrieval(args.context_len, args.depths))
 
     elif args.command == "bench-bw":
         from .core.heterogeneous_moe import BandwidthAdaptiveDecider
