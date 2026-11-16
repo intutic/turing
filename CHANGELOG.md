@@ -4,6 +4,54 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 
 ## Unreleased (2.0.0)
 
+### Added
+- Models: every documented HuggingFace family (16 model types) loads with a parity test against HuggingFace; RoPE
+  linear, dynamic, YaRN, LongRoPE and Llama 3 scaling; sliding window and soft-capping in decode (baff9c5).
+- GGUF: exact dequantization of 14 types in Python and C++, and loading for every supported family, checked against
+  llama.cpp on real files (f90241b, 10384df).
+- 4-bit weights: GPTQ and RTN through `QuantLinear`, `.tgate4` v2, layer-by-layer `turing convert`; a Triton int4 GEMM
+  for decode and a Triton dequantize for prefill (cd3caa8, 27e9215).
+- TEAL-style activation sparsity (`--activation-sparsity`, opt-in) with input-sparse fp16 and int4 GEMV kernels
+  (44b29cd).
+- KV cache: per-channel key smoothing for int8/int4 pools (`kv_smoothing`, on by default); Qwen2.5-0.5B int4 goes
+  from +0.74 to +0.08 nats (5629e89). Quest page selection inside CUDA graphs (ddf24ad). `decode_attention`
+  kernel|sdpa switch (8675c3d).
+- Engine: prefix caching, exact prompt-lookup speculative decoding with a load gate, stop tokens, top-k/top-p, logits
+  processors, multi-LoRA per batch row (f9c7bfb, 3f4d12b, 8f185aa). Requests wait for KV pages instead of failing,
+  and prefill fills a token budget across requests (0a12693).
+- API: one generation core behind OpenAI, Anthropic and Ollama endpoints and the DSL: chat templates, tools, reasoning
+  budgets and thinking blocks, llguidance JSON-schema decoding, stop strings, usage, `--api-key`, admission and QoS
+  lanes, render endpoints (21b61e8). Real embeddings, rerank, extract and pull; vLLM-format llm-d KV events;
+  Prometheus `/metrics` (f9c3052).
+- Distributed: tensor and pipeline parallelism over torch.distributed and prefill/decode disaggregation over TCP
+  (639473d).
+- C++ engine: aligned SIMD forward pass with int8 KV, NEON, and a real HTTP server (9ba5199).
+- MoE offload: `HeterogeneousMoERunner` runs the model's own experts from host memory with hot experts cached on the
+  GPU (1c6416b).
+- Evaluation: `eval-niah` and `eval-accuracy` (GSM8K) through the engine with serving settings; `eval_parity.py`,
+  `eval_gguf_parity.py`, `benchmark_e2e_generation.py` (Turing vs vLLM), `benchmark_weight_formats.py`,
+  `benchmark_w4a16.py`; real-model evals for cross-model KV transfer, lineage, k-slot pooling and debate (d8dc852,
+  03b59f5). Results are in `docs/measured-differentiators.md`.
+
+### Changed
+- Documentation rewritten against the code; every number cites a committed results file (323a854, fd2cd21).
+- `turing` and `turing.core` import lazily (1c6416b).
+
+### Removed
+- The SVD-KV family (radix SVD forest, SVD paged kernel, SVD wire codec, hex quantizer) and the request fields that
+  never changed anything (`use_svd_kv`, `sparsity_ratio` and their headers now return 400) (1c6416b, 21b61e8).
+- CLI `bench`, `compare`, `transfer-bench`, `moe-bench`, `hybrid-bench`, `spec-bench` and the formula-printing
+  benchmarks (1c6416b).
+- The random-KV "XKV latent deliberation" demo and its fabricated 7.2x speedup; the demo's no-op KV-reuse flags
+  (03b59f5, ee0bb3f).
+
+### Fixed
+- Demo agents are scored on the plan they write, not on fixed configurations (ee0bb3f).
+- Cross-model KV: the native RoPE strip/apply was a no-op on 4-D tensors off CUDA (03b59f5).
+- CUDA graph capture and replay always run in inference mode; KV pool and int4 scratch tensors are normal tensors
+  (0350b68, 13d38dd, 41692f2).
+- Masked GQA prefill on CUDA no longer falls back to SDPA's math path (32K prefill ran out of memory) (93271c1).
+
 ### Fixed (c547190)
 - CLI: every `.gguf` path crashed with `UnboundLocalError` (missing module-level `import os`). `chat`, `serve` and
   `generate` share one weight loader, so GGUF models also get the KV cache flags. `--max-tokens` alias added;

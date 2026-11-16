@@ -117,7 +117,7 @@ python scripts/eval_gguf_parity.py --help
    - Each such sync stalls the CPU pipeline until the GPU catches up (unmeasured here; estimated at tens of microseconds per call). Speculative entropy and argmax must remain inside the fused Triton kernel (`triton_spec_entropy.py`) or in on-device tensor registers without CPU sync.
 
 2. **Multi-Turn `clean_base` Invariant (Lineage Drift Collapse)**:
-   - In multi-turn deliberation loops (`turing/core/lineage.py`), naive re-injection of translated KV residuals onto an already-drifted receiver cache makes the residual norms ($\|\Delta C_R\|_2$) compound turn after turn (the kvloom/XKV paper reports quality collapsing by turn 3; not measured on a real model in this repository).
+   - In multi-turn deliberation loops (`turing/core/lineage.py`), naive re-injection of translated KV residuals onto an already-drifted receiver cache makes the residual norms ($\|\Delta C_R\|_2$) compound turn after turn. Measured (`results_lineage_mps.json`, Qwen2.5-0.5B → 1.5B, α=1): the residual norm grows about 26× per turn (1,595 at turn 1, 5.7e9 at turn 6) and the receiver's WikiText NLL goes from 2.43 to 9.14 at turn 2; `clean_base` stays at 2.43 every turn.
    - Always recompute residuals against the frozen, original receiver cache (`clean_base`). Never chain residual translations on mutated caches.
 
 3. **Strict PyTorch Deprecation Sensitivity (`-W error`)**:
