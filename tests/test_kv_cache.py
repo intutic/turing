@@ -306,3 +306,29 @@ def test_native_layers_store_exactly_and_others_quantize(dtype):
     pool.copy_page(c.pages[0], dst)
     torch.testing.assert_close(pool.k_hi[0, dst], pool.k_hi[0, c.pages[0]], rtol=0, atol=0)
     assert KVPool(2, 2, 64, 16, torch.float32, "cpu", "native", native_layers=(0,)).k_hi is None
+
+
+@torch.no_grad()
+def test_full_precision_layer_selection():
+    from tests.test_hf_parity import _tiny
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cpu")
+    model.config.kv_cache_dtype = "int4"
+    ids = torch.randint(0, 128, (1, 12))
+    before = model._body(ids, 0, None, None)  # stateless: no pool, no KV storage
+    L = model.config.num_layers
+    assert model.select_kv_native_layers(threshold=1e9) == ()
+    assert len(model.select_kv_native_layers(threshold=0.0)) == max(1, L // 4)  # the cap, worst layers first
+    kls = model._kv_layer_kl
+    assert len(kls) == L and all(k >= 0 for k in kls)
+    if L < 8:
+        assert model.select_kv_native_layers(threshold=0.0) == (max(range(L), key=lambda i: kls[i]),)
+    torch.testing.assert_close(model._body(ids, 0, None, None), before, rtol=0, atol=0)  # round trip off again
+
+    model.config.kv_native_layers = ()  # explicit: kept
+    assert model.kv_pool().native_layers == ()
+    model.config.kv_native_layers = None  # automatic: chosen when the pool is made, again for another storage
+    model.kv_pool()
+    assert model.config.kv_native_layers is not None and model._kv_native_auto == "int4"
+    model.config.kv_cache_dtype = "int8"
+    model.kv_pool()
+    assert model._kv_native_auto == "int8"

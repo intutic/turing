@@ -14,7 +14,7 @@ import torch.nn.functional as F
 
 from ..config import ModelConfig
 from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
-from ..core.kv_cache import KVCache, KVPool
+from ..core.kv_cache import INT4_GROUP, KVCache, KVPool, _dequantize, _quantize
 from ..kernels.triton_kv_decode import pool_decode_supported, triton_pool_decode
 
 
@@ -201,6 +201,7 @@ class SubspaceAttention(nn.Module):
         self.register_buffer("k_smooth", None, persistent=False)   # [1, Hkv, 1, D]
         self.register_buffer("q_smooth", None, persistent=False)   # [1, H, 1, D]
         self._k_absmax = None  # running max |k| per (KV head, channel) during calibration
+        self._kv_roundtrip = None  # (bits, group) during select_kv_native_layers: K and V take a low-bit round trip
 
         self.rope = None
         if not config.learned_positions and config.rotary_dim != 0:
@@ -248,6 +249,9 @@ class SubspaceAttention(nn.Module):
             self._k_absmax = torch.maximum(self._k_absmax, m)
         if self.k_smooth is not None:
             k, q = k / self.k_smooth.to(k.dtype), q * self.q_smooth.to(q.dtype)
+        if self._kv_roundtrip is not None:
+            bits, group = self._kv_roundtrip
+            k, v = (_dequantize(*_quantize(x, bits, group), group, x.dtype) for x in (k, v))
 
         if step is not None:  # one decode token for each request of the step
             return self.o_proj(self._decode_step(q, k, v, step)), None, None
@@ -632,13 +636,48 @@ class SubspaceCausalLM(nn.Module):
                 a.q_smooth = scale.repeat_interleave(a.num_kv_groups, dim=0)[None, :, None, :].to(a.k_smooth.dtype)
         self._kv_smoothed = True
 
+    @torch.no_grad()
+    def select_kv_native_layers(self, threshold: float = 0.02, n: int = 4, tokens: int = 256, seed: int = 0) -> tuple:
+        """Choose the layers a low-bit KV pool keeps in the model dtype: for each layer, the mean KL divergence of the
+        next-token distribution when only that layer's K and V take the pool's int8/int4 round trip, on the random
+        token sequences calibrate_kv_smoothing uses; layers above `threshold` nats are kept (at most a quarter of the
+        layers, worst first). Measured: Qwen2.5-1.5B int4 layer 0 0.13 (median layer 0.0006), and on WikiText-2 that
+        layer alone cost +1.77 nats; no SmolLM2-360M layer above 0.002. Sets config.kv_native_layers."""
+        cfg = self.config
+        dev = self.embed_tokens.weight.device
+        attns = [layer.self_attn for layer in self.layers]
+        ids = torch.randint(0, cfg.vocab_size, (n, tokens), generator=torch.Generator().manual_seed(seed)).to(dev)
+
+        def logprobs():
+            return [F.log_softmax(self._body(ids[i:i + 1], 0, None, None).float(), -1) for i in range(n)]
+        with torch.inference_mode(False):
+            ref = logprobs()
+            kls = []
+            for a in attns:
+                a._kv_roundtrip = (8, a.head_dim) if cfg.kv_cache_dtype == "int8" else (4, INT4_GROUP)
+                try:
+                    lp = logprobs()
+                finally:
+                    a._kv_roundtrip = None
+                kls.append(sum((r.exp() * (r - x)).sum(-1).mean().item() for r, x in zip(ref, lp)) / n)
+        worst = sorted(range(len(attns)), key=lambda i: -kls[i])[:max(1, len(attns) // 4)]
+        cfg.kv_native_layers = tuple(sorted(i for i in worst if kls[i] > threshold))
+        self._kv_native_auto = cfg.kv_cache_dtype  # chosen for this storage; a different one chooses again
+        self._kv_layer_kl = kls
+        return cfg.kv_native_layers
+
     def kv_pool(self) -> KVPool:
         """This model's paged KV pool, created on first use (and again if the device, dtype or cache settings
         changed; caches of an older pool keep it alive)."""
         w, cfg = self.embed_tokens.weight, self.config
         pool = getattr(self, "_kv_pool", None)
+        auto = getattr(self, "_kv_native_auto", None)
+        if auto is not None and auto != cfg.kv_cache_dtype:
+            cfg.kv_native_layers, self._kv_native_auto = None, None  # chosen for another storage: choose again
         if (pool is None or pool.device != w.device or pool.dtype != w.dtype
-                or pool.kv_cache_dtype != cfg.kv_cache_dtype or pool.track_pages != (cfg.kv_page_budget < 1.0)):
+                or pool.kv_cache_dtype != cfg.kv_cache_dtype or pool.track_pages != (cfg.kv_page_budget < 1.0)
+                or (cfg.kv_cache_dtype != "native" and (cfg.kv_native_layers is None
+                                                        or pool.native_layers != tuple(cfg.kv_native_layers)))):
             self._kv_pool = None  # drop ours (and graphs captured on it) first, so its memory can back the new pool
             self._graphs.graphs.clear()
             gc.collect()
@@ -646,6 +685,8 @@ class SubspaceCausalLM(nn.Module):
                 torch.cuda.empty_cache()
             if cfg.kv_cache_dtype != "native" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False):
                 self.calibrate_kv_smoothing()
+            if cfg.kv_cache_dtype != "native" and cfg.kv_native_layers is None:
+                self.select_kv_native_layers()
             pool = KVPool.for_model(cfg, w.dtype, w.device)
             self._kv_pool = pool
         return pool
