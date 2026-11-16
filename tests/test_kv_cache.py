@@ -215,3 +215,32 @@ def test_elastic_manager_drives_the_serving_pool():
     assert pool.page_limit == res["active_kv_pages"] == pool.get_stats()["total_pages"]
     with pytest.raises(KVPoolExhausted):
         KVCache(pool).reserve((pool.page_limit + 1) * PAGE)
+
+
+@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
+def test_batched_read_and_append_equal_per_request(kv_cache_dtype):
+    pool = _pool(kv_cache_dtype, pages=64)
+    g = torch.Generator().manual_seed(0)
+    caches = []
+    for T in (3, 17, 40):
+        c = KVCache(pool)
+        c.reserve(T + 1)
+        H, D = pool.num_kv_heads, pool.head_dim
+        pool.append(0, c, torch.randn(1, H, T, D, generator=g), torch.randn(1, H, T, D, generator=g))
+        c.length = T
+        caches.append(c)
+    ref = [c.clone(share=False) for c in caches]
+    k = torch.randn(3, pool.num_kv_heads, 1, pool.head_dim, generator=g)
+    v = torch.randn(3, pool.num_kv_heads, 1, pool.head_dim, generator=g)
+    slots = torch.tensor([c.slot for c in caches], dtype=torch.int32)
+    starts = torch.tensor([c.length for c in caches], dtype=torch.int32)
+    pool.append_batch(0, slots, starts, k, v)
+    for b, r in enumerate(ref):
+        pool.append(0, r, k[b:b + 1], v[b:b + 1])
+    kb, vb, valid = pool.read_batch(0, slots, [c.length + 1 for c in caches])
+    for b, r in enumerate(ref):
+        n = r.length + 1
+        kr, vr = pool.read(0, r, n)
+        torch.testing.assert_close(kb[b:b + 1, :, :n], kr, rtol=0, atol=0)
+        torch.testing.assert_close(vb[b:b + 1, :, :n], vr, rtol=0, atol=0)
+        assert valid[b].sum() == n

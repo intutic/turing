@@ -233,6 +233,54 @@ class KVPool:
             self.kmin[layer].scatter_reduce_(0, idx, kt, reduce="amin")
             self.kmax[layer].scatter_reduce_(0, idx, kt, reduce="amax")
 
+    def append_batch(self, layer: int, slots: torch.Tensor, starts: torch.Tensor, k: torch.Tensor,
+                     v: torch.Tensor) -> None:
+        """One token for each of B requests: k, v [B, Hkv, 1, D] at position starts[b] of page-table row slots[b]
+        (device tensors; pages already reserved). The batched form of append, for decode off CUDA."""
+        pos = starts.long()
+        phys = self.page_table[slots.long(), pos // PAGE].long()
+        slot = pos % PAGE
+        for x, codes_t, scale_t, zero_t in ((k, self.k, self.k_scale, self.k_zero),
+                                            (v, self.v, self.v_scale, self.v_zero)):
+            xt = x[:, :, 0]  # [B, Hkv, D]
+            if self.kv_cache_dtype == "native":
+                codes_t[layer][phys, :, slot] = xt.to(codes_t.dtype)
+                continue
+            bits, group = (8, self.head_dim) if self.kv_cache_dtype == "int8" else (4, INT4_GROUP)
+            codes, scale, zero = _quantize(xt, bits, group)
+            codes_t[layer][phys, :, slot] = codes if bits == 8 else _pack4(codes)
+            scale_t[layer][phys, :, slot] = scale
+            zero_t[layer][phys, :, slot] = zero
+        if self.track_pages:
+            kt = k[:, :, 0].half()
+            idx = phys[:, None, None].expand_as(kt)
+            self.kmin[layer].scatter_reduce_(0, idx, kt, reduce="amin")
+            self.kmax[layer].scatter_reduce_(0, idx, kt, reduce="amax")
+
+    def read_batch(self, layer: int, slots: torch.Tensor, lengths: List[int]) -> Tuple[torch.Tensor, torch.Tensor,
+                                                                                         torch.Tensor]:
+        """K, V [B, Hkv, T, D] for B requests, padded to the longest (T = its pages * 16), and valid [B, T]: one
+        gather per field for the whole batch instead of one read per request."""
+        width = -(-max(lengths) // PAGE)
+        phys = self.page_table[slots.long(), :width].long()  # [B, W]; entries past a row's pages are masked below
+        B = phys.shape[0]
+        out = []
+        for which in ("k", "v"):
+            codes_t, scale_t, zero_t = ((self.k, self.k_scale, self.k_zero) if which == "k"
+                                        else (self.v, self.v_scale, self.v_zero))
+            g = lambda t: t[layer][phys].permute(0, 2, 1, 3, 4).flatten(2, 3)  # [B, W, Hkv, 16, w] -> [B, Hkv, W*16, w]
+            codes = g(codes_t)
+            if self.kv_cache_dtype != "native":
+                group = self.head_dim if self.kv_cache_dtype == "int8" else INT4_GROUP
+                if self.kv_cache_dtype == "int4":
+                    codes = _unpack4(codes)
+                codes = _dequantize(codes, g(scale_t), g(zero_t), group, self.dtype)
+            out.append(codes)
+        pos = torch.arange(width * PAGE, device=self.device)
+        valid = pos[None, :] < torch.tensor(lengths, device=self.device)[:, None]
+        k, v = (x.masked_fill(~valid[:, None, :, None], 0) for x in out)  # unwritten slots may hold NaN
+        return k, v, valid
+
     def _gather(self, t: torch.Tensor, layer: int, phys: torch.Tensor) -> torch.Tensor:
         """phys [N] -> [Hkv, N * 16, width]; phys [Hkv, N] (one page list per KV head) -> the same."""
         if phys.dim() == 1:

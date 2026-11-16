@@ -300,7 +300,22 @@ class SubspaceAttention(nn.Module):
         batch = q.shape[0]
         pool, layer, cfg = step.pool, self.layer_idx, self.config
         if not pool_decode_supported(pool, q):
-            return torch.cat([self._attend_one(q[b:b + 1], k[b:b + 1], v[b:b + 1], c) for b, c in enumerate(step.caches)])
+            quest = (self.window is None and cfg.kv_page_budget < 1.0 and pool.track_pages
+                     and max(step.starts) + 1 >= cfg.kv_select_min_tokens)
+            if quest:  # page selection per row
+                return torch.cat([self._attend_one(q[b:b + 1], k[b:b + 1], v[b:b + 1], c)
+                                  for b, c in enumerate(step.caches)])
+            # one gather and one attention for every row (MPS and CPU)
+            pool.append_batch(layer, step.slots, step.starts_t, k, v)
+            lengths = [n + 1 for n in step.starts]
+            k_all, v_all, valid = pool.read_batch(layer, step.slots, lengths)
+            mask = valid[:, None, None, :]
+            if self.window is not None:
+                kpos = torch.arange(valid.shape[1], device=q.device)
+                last = torch.tensor(step.starts, device=q.device)[:, None]
+                mask = mask & (kpos[None, :] > last - self.window)[:, None, None, :]
+            out = self._attend(q, k_all, v_all, mask, causal=False)
+            return out.transpose(1, 2).reshape(batch, 1, self.num_heads * self.head_dim)
         sel = None
         if (self.window is None and cfg.kv_page_budget < 1.0 and pool.track_pages
                 and max(step.starts) + 1 >= cfg.kv_select_min_tokens):
