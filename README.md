@@ -174,7 +174,7 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
    Automatically auto-dispatches between NVIDIA CUDA (Triton GPU kernels), Apple Silicon Metal (`mps`), and bare-metal C++20 AVX2 SIMD CPU routines.
 
 10. **🏎️ 6-Tier High-Velocity Cold Ingestion Engine (GPUDirect Storage & `io_uring`)**:
-   Features a unified 6-tier storage hierarchy (`TuringIngestEngine`) spanning Linux `io_uring` multi-queue rings, kernel DMA readahead (`MADV_WILLNEED`), Subspace wire compression (`.tgate4` int4 files), and an NVIDIA GPUDirect Storage (`cuFile`) path with layer pipelining. The tier timings in the ingest benchmark are partly synthetic and are being re-measured.
+   Features a unified 6-tier storage hierarchy (`TuringIngestEngine`) spanning a parallel `pread` reader (1 MiB requests, 64 in flight: 5.78 GB/s cold on an M4 Pro SSD, up from 2.22 GB/s), kernel DMA readahead (`MADV_WILLNEED`), Subspace wire compression (`.tgate4` int4 files), and an NVIDIA GPUDirect Storage (`cuFile`) path with layer pipelining. Tiers 0, 1, 2 and 5 are measured cold in [benchmarks §19](docs/benchmarks.md#19-storage-ingestion-ladder-measured-cold-apple-m4-pro-ssd); the compressed-container and GPUDirect tiers are not measured yet.
 
 11. **⚡ Fused GPU Kernels & Bare-Metal C++20 SIMD Acceleration (v5.0 & v6.0)**:
    Eliminates Python GIL contention and GPU-to-CPU `.item()` pipeline stalls with:

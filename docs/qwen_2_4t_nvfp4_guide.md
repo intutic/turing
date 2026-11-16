@@ -19,7 +19,7 @@ Turing Engine eliminates this limitation by treating NVMe, Host RAM, and VRAM as
 │    • MoE Router Gating Matrices (128 layers x 64 experts) pinned in VRAM.        │
 │    • int8 KV cache (about half the KV memory).                                   │
 │                                                                                  │
-│ 2. Tier 4 GPUDirect Storage (NVMe ➔ VRAM DMA @ 81.3 GB/s):                      │
+│ 2. Tier 4 GPUDirect Storage (NVMe ➔ VRAM DMA, throughput not measured):         │
 │    • 1.44 TB NVFP4 / W4A16 Expert weights reside on Local NVMe / Fast SSD.       │
 │    • For each token, the router selects Top-4 experts (out of 64).              │
 │    • Only the active 95B routed parameters stream directly into GPU SRAM.        │

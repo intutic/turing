@@ -48,6 +48,34 @@ def test_native_async_ring_reader_parallel_segments(tmp_path):
     assert extracted_bytes == payload
 
 
+def test_native_async_ring_reader_splits_large_segments(tmp_path):
+    """Segments larger than one 1 MiB request, at odd offsets and lengths, come back byte-exact."""
+    payload = np.random.default_rng(0).integers(0, 256, (5 << 20) + 12345, dtype=np.uint8).tobytes()
+    test_file = tmp_path / "large.bin"
+    test_file.write_bytes(payload)
+    offsets = [7, (3 << 20) + 1, 100]
+    lengths = [(3 << 20) - 6, (2 << 20) + 12000, 1]
+
+    for qd in (1, 3, 64):
+        reader = NativeAsyncRingReader(num_workers=8, queue_depth=qd)
+        got = reader.read_segments_parallel(str(test_file), offsets, lengths)
+        assert got == b"".join(payload[o:o + n] for o, n in zip(offsets, lengths))
+
+        out = np.zeros(sum(lengths) + 5, dtype=np.uint8)
+        assert reader.read_segments_into(str(test_file), offsets, lengths, out) == sum(lengths)
+        assert out[:sum(lengths)].tobytes() == got and not out[sum(lengths):].any()
+
+
+def test_native_async_ring_reader_errors(tmp_path):
+    test_file = tmp_path / "small.bin"
+    test_file.write_bytes(b"x" * 100)
+    reader = NativeAsyncRingReader()
+    with pytest.raises(RuntimeError):  # past EOF
+        reader.read_segments_parallel(str(test_file), [50], [100])
+    with pytest.raises(ValueError):  # destination too small
+        reader.read_segments_into(str(test_file), [0], [100], np.zeros(10, dtype=np.uint8))
+
+
 def test_native_gds_loader_initialization():
     """Verifies NativeGDSLoader initializes cleanly without crashes."""
     loader = NativeGDSLoader()

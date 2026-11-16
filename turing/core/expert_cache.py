@@ -169,21 +169,16 @@ class GPULRUExpertCache:
         self.slot_up_weights = torch.empty(num_slots, hidden_dim, active_subspace_dim, device=device, dtype=dtype)
         self.slot_down_weights = torch.empty(num_slots, active_subspace_dim, hidden_dim, device=device, dtype=dtype)
 
-        # Fast C++20 LRU / LFRU cache backend if available
+        # Fast C++20 LRU backend if available. It serves only eviction_policy="lru", so it must be the plain
+        # LRU cache: the LFRU one with candidate_heat=1 refuses every miss once full.
         try:
             import turing.turing_csrc as turing_csrc
-            if hasattr(turing_csrc, "LFRUExpertCacheFast"):
-                self.csrc_cache = turing_csrc.LFRUExpertCacheFast(num_slots)
-            else:
-                self.csrc_cache = turing_csrc.LRUExpertCacheFast(num_slots)
+            self.csrc_cache = turing_csrc.LRUExpertCacheFast(num_slots)
             self.has_csrc = True
         except ImportError:
             try:
                 import turing_csrc
-                if hasattr(turing_csrc, "LFRUExpertCacheFast"):
-                    self.csrc_cache = turing_csrc.LFRUExpertCacheFast(num_slots)
-                else:
-                    self.csrc_cache = turing_csrc.LRUExpertCacheFast(num_slots)
+                self.csrc_cache = turing_csrc.LRUExpertCacheFast(num_slots)
                 self.has_csrc = True
             except ImportError:
                 self.csrc_cache = None
@@ -313,10 +308,11 @@ class GPULRUExpertCache:
         threshold = cold_heat + (cold_heat >> 2) + 4
         return hot_heat > threshold
 
-    def allocate_or_evict_slot(self, layer_idx: int, expert_idx: int) -> Tuple[int, Optional[Tuple[int, int]]]:
+    def allocate_or_evict_slot(self, layer_idx: int, expert_idx: int) -> Tuple[Optional[int], Optional[Tuple[int, int]]]:
         """
         Allocates a slot for a missing expert. If full, evicts unpinned expert by LRU or LFRU.
-        Returns: (slot_idx, evicted_key)
+        Returns: (slot_idx, evicted_key). slot_idx is None when the LFRU hysteresis gate keeps the
+        resident expert; the request still adds heat, so a key that keeps coming back is admitted.
         """
         self.clock += 1
         key = (layer_idx, expert_idx)
@@ -327,7 +323,7 @@ class GPULRUExpertCache:
         if self.has_csrc and self.csrc_cache is not None and not self.pinned_keys and self.eviction_policy == "lru":
             slot, ev_layer, ev_expert = self.csrc_cache.allocate_or_evict_slot(layer_idx, expert_idx)
             evicted_key = (ev_layer, ev_expert) if ev_layer >= 0 else None
-            return slot, evicted_key
+            return (slot if slot >= 0 else None), evicted_key
 
         if key in self.cache_map:
             self.cache_map.move_to_end(key)
@@ -347,8 +343,10 @@ class GPULRUExpertCache:
                 coldest_key = min(candidates, key=self._calculate_lfru_score)
                 # Check hysteresis if incoming key has history
                 if key in self.access_heat and not self._should_promote(key, coldest_key):
-                    # Retain coldest if incoming does not meet hysteresis margin
-                    slot_idx = self.cache_map[coldest_key]
+                    # Retain coldest if incoming does not meet hysteresis margin; the key stays uncached.
+                    self.access_heat[key] += 1
+                    self.last_access_clock[key] = self.clock
+                    return None, None
                 else:
                     self._promotions += 1
                     evicted_key = coldest_key

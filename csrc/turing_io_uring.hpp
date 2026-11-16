@@ -10,6 +10,7 @@
 #include <mutex>
 #include <atomic>
 #include <algorithm>
+#include <exception>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -30,9 +31,10 @@
 namespace turing {
 
 /**
- * High-Velocity Asynchronous Ring Reader (Tier 2 Storage Ingestion).
- * Delivers bare-metal 3.5 - 6.5 GB/s throughput by bypassing Python GIL
- * and utilizing kernel readahead / multi-threaded aligned preadv queues.
+ * Parallel pread reader (Tier 2 storage ingestion).
+ * read_segments_parallel splits segments into requests of at most 1 MiB and keeps up to queue_depth of them
+ * in flight (one thread each). Large requests with many in flight are what an SSD needs to reach its rated
+ * bandwidth; see docs/benchmarks.md for the measured numbers. num_workers is kept for API compatibility.
  */
 class NativeAsyncRingReader {
 public:
@@ -109,32 +111,36 @@ public:
             read_exact(filepath, file_offsets[i], byte_lengths[i], dest_buffer + dest_offsets[i]);
         }
 #else
+        // Split every segment into requests of at most kMaxRequestBytes and keep up to queue_depth of them in
+        // flight. pread is synchronous, so each request in flight needs its own thread.
+        struct Request { uint64_t file_offset; uint64_t len; uint8_t* dest; };
+        std::vector<Request> requests;
+        for (size_t i = 0; i < num_segments; ++i) {
+            for (uint64_t done = 0; done < byte_lengths[i]; done += kMaxRequestBytes) {
+                requests.push_back({file_offsets[i] + done, std::min(kMaxRequestBytes, byte_lengths[i] - done),
+                                    dest_buffer + dest_offsets[i] + done});
+            }
+        }
+        if (requests.empty()) return;
+
         int fd = open(filepath.c_str(), O_RDONLY);
         if (fd < 0) {
             throw std::runtime_error("Failed to open file: " + filepath);
         }
 
-        size_t n_workers = std::min(static_cast<size_t>(num_workers_), num_segments);
+        size_t in_flight = std::min(std::max<size_t>(queue_depth_, 1), requests.size());
+        std::atomic<size_t> next{0};
         std::vector<std::future<void>> futures;
-        futures.reserve(n_workers);
-
-        size_t chunk_size = (num_segments + n_workers - 1) / n_workers;
-
-        for (size_t w = 0; w < n_workers; ++w) {
-            size_t start_idx = w * chunk_size;
-            size_t end_idx = std::min(start_idx + chunk_size, num_segments);
-            if (start_idx >= end_idx) continue;
-
-            futures.push_back(std::async(std::launch::async, [fd, &file_offsets, &byte_lengths, &dest_offsets, dest_buffer, start_idx, end_idx]() {
-                for (size_t i = start_idx; i < end_idx; ++i) {
-                    uint64_t offset = file_offsets[i];
-                    uint64_t len = byte_lengths[i];
-                    uint8_t* dest = dest_buffer + dest_offsets[i];
+        futures.reserve(in_flight);
+        for (size_t w = 0; w < in_flight; ++w) {
+            futures.push_back(std::async(std::launch::async, [fd, &requests, &next]() {
+                for (size_t i = next++; i < requests.size(); i = next++) {
+                    const Request& r = requests[i];
                     uint64_t bytes_done = 0;
-                    while (bytes_done < len) {
-                        ssize_t n = pread(fd, dest + bytes_done, len - bytes_done, offset + bytes_done);
+                    while (bytes_done < r.len) {
+                        ssize_t n = pread(fd, r.dest + bytes_done, r.len - bytes_done, r.file_offset + bytes_done);
                         if (n <= 0) {
-                            throw std::runtime_error("Parallel segment pread failed");
+                            throw std::runtime_error("Parallel segment pread failed or premature EOF");
                         }
                         bytes_done += static_cast<uint64_t>(n);
                     }
@@ -142,13 +148,16 @@ public:
             }));
         }
 
+        std::exception_ptr error;
         for (auto& f : futures) {
-            f.get();
+            try { f.get(); } catch (...) { if (!error) error = std::current_exception(); }
         }
-
         close(fd);
+        if (error) std::rethrow_exception(error);
 #endif
     }
+
+    static constexpr uint64_t kMaxRequestBytes = 1ull << 20;
 
     int get_num_workers() const { return num_workers_; }
     size_t get_queue_depth() const { return queue_depth_; }

@@ -1,0 +1,35 @@
+{
+  "script": "scripts/benchmark_ring_reader_ab.py",
+  "call": "read_segments_parallel (returns bytes)",
+  "args": {
+    "file_bytes": 2147483648,
+    "segments": 42,
+    "queue_depth": 64,
+    "workers": 8,
+    "pairs": 8,
+    "cold_method": "F_NOCACHE write",
+    "load_average_start": 8.83740234375,
+    "load_average_end": 10.208984375
+  },
+  "rows": [
+    {
+      "arm": "f936008",
+      "pythonpath": "/private/tmp/claude-501/-Users-ishangupta-jflux--claude-worktrees-lucid-taussig-2ac5f9/215bef8a-b356-4ee9-a9e5-ab972a7f42b8/scratchpad/base",
+      "n": 8,
+      "gb_per_s": 2.2232686564113484,
+      "gb_per_s_se": 0.35300271245428855,
+      "gb_per_s_median": 2.3303922160881707,
+      "latency_ms": 1224.6821198496036
+    },
+    {
+      "arm": "current",
+      "pythonpath": "/Users/ishangupta/jflux/.claude/worktrees/lucid-taussig-2ac5f9",
+      "n": 8,
+      "gb_per_s": 5.783850390233328,
+      "gb_per_s_se": 0.4095798025985127,
+      "gb_per_s_median": 6.226393261983781,
+      "latency_ms": 392.64608336088713
+    }
+  ],
+  "note": "GB/s = bytes / wall time of the read call, 1 GB = 1e9 bytes; se over n runs."
+}

@@ -69,7 +69,8 @@ def benchmark_pilot_prefetch(device_str="cpu"):
                         # Synchronous load from host memory
                         s_idx, _ = cache_sync.allocate_or_evict_slot(l, exp)
                         wg, wu, wd = weight_provider(l, exp)
-                        cache_sync.load_expert_weights(s_idx, wg.to(device), wu.to(device), wd.to(device))
+                        if s_idx is not None:  # None: LFRU gate kept the resident expert
+                            cache_sync.load_expert_weights(s_idx, wg.to(device), wu.to(device), wd.to(device))
                 # Compute simulation: small GEMM
                 x = torch.randn(1, hidden_dim, device=device)
                 _ = torch.matmul(x, x.t())
@@ -98,7 +99,8 @@ def benchmark_pilot_prefetch(device_str="cpu"):
                     if slot is None:
                         s_idx, _ = cache_pilot.allocate_or_evict_slot(l, exp)
                         wg, wu, wd = weight_provider(l, exp)
-                        cache_pilot.load_expert_weights(s_idx, wg.to(device), wu.to(device), wd.to(device))
+                        if s_idx is not None:  # None: LFRU gate kept the resident expert
+                            cache_pilot.load_expert_weights(s_idx, wg.to(device), wu.to(device), wd.to(device))
                 # Compute simulation
                 x = torch.randn(1, hidden_dim, device=device)
                 _ = torch.matmul(x, x.t())
