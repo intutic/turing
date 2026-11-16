@@ -3,7 +3,7 @@
 **HuggingFace-exact inference for Llama-family models, with an int8 KV cache that halves cache memory at no measured quality cost.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v1.6.0](https://img.shields.io/badge/Release-v1.6.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.6.0)
+[![Release: v1.7.0](https://img.shields.io/badge/Release-v1.7.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.7.0)
 
 
 
@@ -149,7 +149,7 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
    Llama-family checkpoints load with every weight (layer norms, RoPE base, head_dim) and reproduce HuggingFace's logits to 1.8e-7 in fp32, enforced by `tests/test_hf_parity.py`. FFN channel pruning is still available (`--sparsity`), but it is not lossless: at 50% it raises next-token NLL by +6.8 (SmolLM2-1.7B) to +15.8 nats (135M), so it is off by default. See [benchmarks](https://intutic.github.io/turing/benchmarks/).
 
 2. **💾 int8 / int4 KV Cache with Fused Batched CUDA Decode**:
-   An int8 cache (one fp16 scale and zero per token and KV head: 48% smaller at head_dim 128) changes NLL by at most ±0.0005 on SmolLM2 135M–1.7B; int4 with per-32-value scales costs +0.02. On CUDA one append + decode kernel per layer serves every running request: 1,274 tok/s at batch 64 against 833 for HuggingFace transformers on the same NVIDIA L4 (SmolLM2-360M, 2K context). Quest page selection is opt-in (`--kv-page-budget`).
+   An int8 cache (one fp16 scale and zero per token and KV head: 48% smaller at head_dim 128) changes NLL by at most ±0.0005 on SmolLM2 135M–1.7B; int4 with per-32-value scales costs +0.02. Requests share one paged pool (at most one partial 16-token page wasted each; forks share pages copy-on-write). On CUDA a decode step for every running request is one append + attention kernel per layer, replayed as a CUDA graph: on an NVIDIA L4, SmolLM2-360M at 2K context decodes 162 tok/s for one request (HuggingFace transformers: 29) and 1,715 tok/s at batch 64 (827). Quest page selection is opt-in (`--kv-page-budget`) and pays at large batches and long contexts.
 
 3. **🔄 Multi-Turn Clean-Base Lineage (Zero Drift in Deliberation)**:
    Preserves bounded representation fidelity ($\|\Delta C_R\|_2 \approx 30.7$) across multi-turn agent deliberations, preventing the exponential drift collapse of naive re-injection.

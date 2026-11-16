@@ -22,7 +22,9 @@ turing serve \
 | Flag | Default | Effect (measured in [benchmarks](benchmarks.md#2-quality-on-real-weights)) |
 | :--- | :--- | :--- |
 | `--kv-cache-dtype` | `auto` | `auto` = `int8` on CUDA, `native` elsewhere. `int8`: one fp16 scale and zero per token and KV head, about half the cache memory, no measurable quality cost. `int4`: per-32-value scales, about a quarter, +0.02 nats. On CUDA a decode step for every running request is one fused append + attention kernel per layer. |
-| `--kv-page-budget` | `1.0` | Quest page selection: each decode step reads this share of 16-token pages (first and last always kept). `0.25` costs +0.013 to +0.035 nats; it runs on the slower per-request path. |
+| `--kv-page-budget` | `1.0` | Quest page selection for requests of at least 8,192 tokens: each decode step reads this share of 16-token pages (first and last always kept), for every request at once on the device. `0.25` costs +0.013 to +0.035 nats at 2K context and +0.001 at 8K. Steps with Quest run without CUDA graphs, so it pays only at large batches and long contexts (measured 1.19× at batch 64, 8K; 5–10× slower at batch 1). |
+| `--kv-cache-memory-fraction` | `0.6` | Share of free GPU memory, after the weights, given to the paged KV pool. Requests reserve their pages at admission; one that cannot fit is rejected. |
+| `--no-cuda-graphs` | off | Run decode steps eagerly instead of replaying the captured CUDA graph (one per batch bucket). |
 | `--sparsity` | `0.0` | FFN channel pruning. `0.0` serves the model exactly (logits match HuggingFace). Pruning is not lossless: `0.5` raises NLL by +6.8 to +15.8 nats on SmolLM2. |
 
 ### Interactive Terminal Chat

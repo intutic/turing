@@ -7,11 +7,13 @@
   },
   "args": {
     "model": "HuggingFaceTB/SmolLM2-1.7B",
-    "settings": "hf_transformers,native,int8,int4,int8_quest25",
+    "settings": "hf_transformers,native_eager,native,int8,int4,int8_quest25",
     "contexts": "2048,8192,32768",
     "batches": "1,8,32,64",
     "steps": 32,
     "device": "cuda",
+    "pool_fraction": 0.85,
+    "quest_min_tokens": null,
     "out": "results_kv_decode_cuda_smollm2_1p7b.json"
   },
   "model_config": {
@@ -33,7 +35,13 @@
     "enable_recirculation": false,
     "kv_cache_dtype": "int8",
     "kv_page_budget": 0.25,
-    "kv_select_min_tokens": 1024
+    "kv_select_min_tokens": 8192,
+    "kv_pool_gib": null,
+    "kv_pool_fraction": 0.85,
+    "cuda_graphs": true,
+    "rope_scaling": null,
+    "attention_bias": false,
+    "qk_norm": false
   },
   "rows": [
     {
@@ -42,7 +50,7 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 40.95931350879881,
+      "tokens_per_s": 39.654949593927235,
       "kv_cache_bytes": 409141248,
       "fit": true
     },
@@ -52,7 +60,7 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 137.1718601485839,
+      "tokens_per_s": 137.240188595313,
       "kv_cache_bytes": 3273129984,
       "fit": true
     },
@@ -62,7 +70,7 @@
       "batch": 32,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 158.54077772605194,
+      "tokens_per_s": 158.71934225992692,
       "kv_cache_bytes": 13092519936,
       "fit": true
     },
@@ -72,7 +80,8 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "fit": false
+      "fit": false,
+      "limit": "cuda out of memory"
     },
     {
       "setting": "hf_transformers",
@@ -80,7 +89,7 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 28.640674459816704,
+      "tokens_per_s": 28.656316769193563,
       "kv_cache_bytes": 1617100800,
       "fit": true
     },
@@ -90,7 +99,7 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 42.894985694401306,
+      "tokens_per_s": 42.97129332342353,
       "kv_cache_bytes": 12936806400,
       "fit": true
     },
@@ -100,7 +109,8 @@
       "batch": 32,
       "steps": 32,
       "beyond_trained_context": false,
-      "fit": false
+      "fit": false,
+      "limit": "cuda out of memory"
     },
     {
       "setting": "hf_transformers",
@@ -108,7 +118,7 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": true,
-      "tokens_per_s": 10.236402030799205,
+      "tokens_per_s": 10.24011218575359,
       "kv_cache_bytes": 6448939008,
       "fit": true
     },
@@ -118,7 +128,104 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": true,
-      "fit": false
+      "fit": false,
+      "limit": "cuda out of memory"
+    },
+    {
+      "setting": "native_eager",
+      "context": 2048,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 31.293827433107776,
+      "kv_cache_bytes": 412090368,
+      "fit": true,
+      "kv_pool_tokens": 85472
+    },
+    {
+      "setting": "native_eager",
+      "context": 2048,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 227.81647893230254,
+      "kv_cache_bytes": 3296722944,
+      "fit": true,
+      "kv_pool_tokens": 85472
+    },
+    {
+      "setting": "native_eager",
+      "context": 2048,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 363.70811203561135,
+      "kv_cache_bytes": 13186891776,
+      "fit": true,
+      "kv_pool_tokens": 85472
+    },
+    {
+      "setting": "native_eager",
+      "context": 2048,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 85472
+    },
+    {
+      "setting": "native_eager",
+      "context": 8192,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 31.816633645250015,
+      "kv_cache_bytes": 1620049920,
+      "fit": true,
+      "kv_pool_tokens": 85472
+    },
+    {
+      "setting": "native_eager",
+      "context": 8192,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "tokens_per_s": 89.22287209505875,
+      "kv_cache_bytes": 12960399360,
+      "fit": true,
+      "kv_pool_tokens": 85472
+    },
+    {
+      "setting": "native_eager",
+      "context": 8192,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 85472
+    },
+    {
+      "setting": "native_eager",
+      "context": 32768,
+      "batch": 1,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "tokens_per_s": 18.935775834423307,
+      "kv_cache_bytes": 6451888128,
+      "fit": true,
+      "kv_pool_tokens": 85472
+    },
+    {
+      "setting": "native_eager",
+      "context": 32768,
+      "batch": 8,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 85472
     },
     {
       "setting": "native",
@@ -126,9 +233,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 32.95848155397682,
-      "kv_cache_bytes": 409141248,
-      "fit": true
+      "tokens_per_s": 56.40991873706459,
+      "kv_cache_bytes": 412090368,
+      "fit": true,
+      "kv_pool_tokens": 85392
     },
     {
       "setting": "native",
@@ -136,9 +244,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 193.184469280205,
-      "kv_cache_bytes": 3273129984,
-      "fit": true
+      "tokens_per_s": 234.18658921383405,
+      "kv_cache_bytes": 3296722944,
+      "fit": true,
+      "kv_pool_tokens": 85392
     },
     {
       "setting": "native",
@@ -146,7 +255,20 @@
       "batch": 32,
       "steps": 32,
       "beyond_trained_context": false,
-      "fit": false
+      "tokens_per_s": 365.70521165361936,
+      "kv_cache_bytes": 13186891776,
+      "fit": true,
+      "kv_pool_tokens": 85392
+    },
+    {
+      "setting": "native",
+      "context": 2048,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 85392
     },
     {
       "setting": "native",
@@ -154,9 +276,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 32.85896765350909,
-      "kv_cache_bytes": 1617100800,
-      "fit": true
+      "tokens_per_s": 41.146353084056976,
+      "kv_cache_bytes": 1620049920,
+      "fit": true,
+      "kv_pool_tokens": 85392
     },
     {
       "setting": "native",
@@ -164,7 +287,20 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "fit": false
+      "tokens_per_s": 89.93052907034397,
+      "kv_cache_bytes": 12960399360,
+      "fit": true,
+      "kv_pool_tokens": 85392
+    },
+    {
+      "setting": "native",
+      "context": 8192,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 85392
     },
     {
       "setting": "native",
@@ -172,9 +308,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": true,
-      "tokens_per_s": 15.516430339843353,
-      "kv_cache_bytes": 6448939008,
-      "fit": true
+      "tokens_per_s": 19.25828763405594,
+      "kv_cache_bytes": 6451888128,
+      "fit": true,
+      "kv_pool_tokens": 85392
     },
     {
       "setting": "native",
@@ -182,7 +319,9 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": true,
-      "fit": false
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 85392
     },
     {
       "setting": "int8",
@@ -190,9 +329,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 32.899285046513015,
-      "kv_cache_bytes": 217356288,
-      "fit": true
+      "tokens_per_s": 55.80508790909633,
+      "kv_cache_bytes": 218923008,
+      "fit": true,
+      "kv_pool_tokens": 159904
     },
     {
       "setting": "int8",
@@ -200,9 +340,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 180.73003745401095,
-      "kv_cache_bytes": 1738850304,
-      "fit": true
+      "tokens_per_s": 230.36160915489876,
+      "kv_cache_bytes": 1751384064,
+      "fit": true,
+      "kv_pool_tokens": 159904
     },
     {
       "setting": "int8",
@@ -210,9 +351,10 @@
       "batch": 32,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 265.8325986125196,
-      "kv_cache_bytes": 6955401216,
-      "fit": true
+      "tokens_per_s": 360.5116874756768,
+      "kv_cache_bytes": 7005536256,
+      "fit": true,
+      "kv_pool_tokens": 159904
     },
     {
       "setting": "int8",
@@ -220,7 +362,10 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "fit": false
+      "tokens_per_s": 393.99629469584306,
+      "kv_cache_bytes": 14011072512,
+      "fit": true,
+      "kv_pool_tokens": 159904
     },
     {
       "setting": "int8",
@@ -228,9 +373,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 32.54392566788167,
-      "kv_cache_bytes": 859084800,
-      "fit": true
+      "tokens_per_s": 40.61309446166965,
+      "kv_cache_bytes": 860651520,
+      "fit": true,
+      "kv_pool_tokens": 159904
     },
     {
       "setting": "int8",
@@ -238,9 +384,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 63.92552320162262,
-      "kv_cache_bytes": 6872678400,
-      "fit": true
+      "tokens_per_s": 87.92287996249883,
+      "kv_cache_bytes": 6885212160,
+      "fit": true,
+      "kv_pool_tokens": 159904
     },
     {
       "setting": "int8",
@@ -248,7 +395,9 @@
       "batch": 32,
       "steps": 32,
       "beyond_trained_context": false,
-      "fit": false
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 159904
     },
     {
       "setting": "int8",
@@ -256,9 +405,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": true,
-      "tokens_per_s": 14.23124590104825,
-      "kv_cache_bytes": 3425998848,
-      "fit": true
+      "tokens_per_s": 18.872823094182568,
+      "kv_cache_bytes": 3427565568,
+      "fit": true,
+      "kv_pool_tokens": 159904
     },
     {
       "setting": "int8",
@@ -266,7 +416,9 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": true,
-      "fit": false
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 159904
     },
     {
       "setting": "int4",
@@ -274,9 +426,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 32.7500557613183,
-      "kv_cache_bytes": 127856640,
-      "fit": true
+      "tokens_per_s": 54.84519628847239,
+      "kv_cache_bytes": 128778240,
+      "fit": true,
+      "kv_pool_tokens": 270976
     },
     {
       "setting": "int4",
@@ -284,9 +437,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 214.66495064733266,
-      "kv_cache_bytes": 1022853120,
-      "fit": true
+      "tokens_per_s": 215.23943439392733,
+      "kv_cache_bytes": 1030225920,
+      "fit": true,
+      "kv_pool_tokens": 270976
     },
     {
       "setting": "int4",
@@ -294,9 +448,10 @@
       "batch": 32,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 344.7143617705935,
-      "kv_cache_bytes": 4091412480,
-      "fit": true
+      "tokens_per_s": 328.93924130892793,
+      "kv_cache_bytes": 4120903680,
+      "fit": true,
+      "kv_pool_tokens": 270976
     },
     {
       "setting": "int4",
@@ -304,9 +459,10 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 376.96003348924455,
-      "kv_cache_bytes": 8182824960,
-      "fit": true
+      "tokens_per_s": 355.5902999382519,
+      "kv_cache_bytes": 8241807360,
+      "fit": true,
+      "kv_pool_tokens": 270976
     },
     {
       "setting": "int4",
@@ -314,9 +470,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 32.3185007315029,
-      "kv_cache_bytes": 505344000,
-      "fit": true
+      "tokens_per_s": 38.88316918151679,
+      "kv_cache_bytes": 506265600,
+      "fit": true,
+      "kv_pool_tokens": 270976
     },
     {
       "setting": "int4",
@@ -324,9 +481,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 83.70061848607095,
-      "kv_cache_bytes": 4042752000,
-      "fit": true
+      "tokens_per_s": 80.86518755849639,
+      "kv_cache_bytes": 4050124800,
+      "fit": true,
+      "kv_pool_tokens": 270976
     },
     {
       "setting": "int4",
@@ -334,7 +492,20 @@
       "batch": 32,
       "steps": 32,
       "beyond_trained_context": false,
-      "fit": false
+      "tokens_per_s": 96.7961942189046,
+      "kv_cache_bytes": 16200499200,
+      "fit": true,
+      "kv_pool_tokens": 270976
+    },
+    {
+      "setting": "int4",
+      "context": 8192,
+      "batch": 64,
+      "steps": 32,
+      "beyond_trained_context": false,
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 270976
     },
     {
       "setting": "int4",
@@ -342,9 +513,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": true,
-      "tokens_per_s": 17.797458395132626,
-      "kv_cache_bytes": 2015293440,
-      "fit": true
+      "tokens_per_s": 17.446442159469314,
+      "kv_cache_bytes": 2016215040,
+      "fit": true,
+      "kv_pool_tokens": 270976
     },
     {
       "setting": "int4",
@@ -352,7 +524,20 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": true,
-      "fit": false
+      "tokens_per_s": 23.04192609810221,
+      "kv_cache_bytes": 16129720320,
+      "fit": true,
+      "kv_pool_tokens": 270976
+    },
+    {
+      "setting": "int4",
+      "context": 32768,
+      "batch": 32,
+      "steps": 32,
+      "beyond_trained_context": true,
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 270976
     },
     {
       "setting": "int8_quest25",
@@ -360,9 +545,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 11.1553916986395,
-      "kv_cache_bytes": 217356288,
-      "fit": true
+      "tokens_per_s": 30.590211761388932,
+      "kv_cache_bytes": 218923008,
+      "fit": true,
+      "kv_pool_tokens": 142176
     },
     {
       "setting": "int8_quest25",
@@ -370,9 +556,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 25.263402712898316,
-      "kv_cache_bytes": 1738850304,
-      "fit": true
+      "tokens_per_s": 216.81569292852183,
+      "kv_cache_bytes": 1751384064,
+      "fit": true,
+      "kv_pool_tokens": 142176
     },
     {
       "setting": "int8_quest25",
@@ -380,9 +567,10 @@
       "batch": 32,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 26.736496056982425,
-      "kv_cache_bytes": 6955401216,
-      "fit": true
+      "tokens_per_s": 345.74302784472076,
+      "kv_cache_bytes": 7005536256,
+      "fit": true,
+      "kv_pool_tokens": 142176
     },
     {
       "setting": "int8_quest25",
@@ -390,7 +578,10 @@
       "batch": 64,
       "steps": 32,
       "beyond_trained_context": false,
-      "fit": false
+      "tokens_per_s": 382.31840040140645,
+      "kv_cache_bytes": 14011072512,
+      "fit": true,
+      "kv_pool_tokens": 142176
     },
     {
       "setting": "int8_quest25",
@@ -398,9 +589,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 11.106804547917587,
-      "kv_cache_bytes": 859084800,
-      "fit": true
+      "tokens_per_s": 19.396509878198653,
+      "kv_cache_bytes": 860651520,
+      "fit": true,
+      "kv_pool_tokens": 142176
     },
     {
       "setting": "int8_quest25",
@@ -408,9 +600,10 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": false,
-      "tokens_per_s": 25.265285742088892,
-      "kv_cache_bytes": 6872678400,
-      "fit": true
+      "tokens_per_s": 109.4289902828129,
+      "kv_cache_bytes": 6885212160,
+      "fit": true,
+      "kv_pool_tokens": 142176
     },
     {
       "setting": "int8_quest25",
@@ -418,7 +611,9 @@
       "batch": 32,
       "steps": 32,
       "beyond_trained_context": false,
-      "fit": false
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 142176
     },
     {
       "setting": "int8_quest25",
@@ -426,9 +621,10 @@
       "batch": 1,
       "steps": 32,
       "beyond_trained_context": true,
-      "tokens_per_s": 16.298486571433585,
-      "kv_cache_bytes": 3425998848,
-      "fit": true
+      "tokens_per_s": 20.004681820721295,
+      "kv_cache_bytes": 3427565568,
+      "fit": true,
+      "kv_pool_tokens": 142176
     },
     {
       "setting": "int8_quest25",
@@ -436,7 +632,9 @@
       "batch": 8,
       "steps": 32,
       "beyond_trained_context": true,
-      "fit": false
+      "fit": false,
+      "limit": "kv pool full",
+      "kv_pool_tokens": 142176
     }
   ]
 }

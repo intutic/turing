@@ -37,14 +37,16 @@ Every number below is a paired next-token NLL difference on real pretrained weig
 | Setting | SmolLM2-135M | SmolLM2-360M | SmolLM2-1.7B |
 | :--- | :---: | :---: | :---: |
 | HuggingFace vs Turing exact (sanity) | -0.0003 ± 0.0001 | -0.0000 ± 0.0002 | +0.0002 ± 0.0002 |
-| Token-by-token vs one pass (sanity) | -0.0001 ± 0.0001 | -0.0001 ± 0.0001 | +0.0001 ± 0.0001 |
+| Token-by-token vs one pass (sanity) | -0.0000 ± 0.0001 | -0.0002 ± 0.0001 | +0.0001 ± 0.0001 |
 | int8 KV (per token) | +0.0004 ± 0.0003 | -0.0001 ± 0.0005 | -0.0005 ± 0.0007 |
 | int4 KV (per 32 values) | +0.0246 ± 0.0072 | +0.0184 ± 0.0049 | +0.0245 ± 0.0051 |
-| Quest, 25% of pages | +0.0354 ± 0.0105 | +0.0235 ± 0.0050 | +0.0132 ± 0.0065 |
-| Quest, 10% of pages | +0.1472 ± 0.0224 | +0.1062 ± 0.0156 | +0.0450 ± 0.0139 |
-| int8 + Quest 25% | +0.0385 ± 0.0103 | +0.0246 ± 0.0053 | +0.0133 ± 0.0068 |
+| Quest, 25% of pages | +0.0356 ± 0.0105 | +0.0235 ± 0.0052 | +0.0136 ± 0.0065 |
+| Quest, 10% of pages | +0.1474 ± 0.0223 | +0.1071 ± 0.0158 | +0.0450 ± 0.0137 |
+| int8 + Quest 25% | +0.0378 ± 0.0105 | +0.0246 ± 0.0051 | +0.0132 ± 0.0067 |
 
-The int8 cache costs nothing measurable (every Δ is within two standard errors of zero), which is why `--kv-cache-dtype auto` uses it on CUDA. int4 with per-32-value scales costs about +0.02 nats; Quest page selection at 25% costs +0.013 to +0.035, less on the larger model; these reproduce the published results (KIVI-style grouped 4-bit, Quest) at this scale.
+**C. Quest at 8K context** (SmolLM2-1.7B, its trained length; 8 windows of 8,192 tokens, last 128 positions scored; `results_kv_quality_8k_cuda.json`): 25% of pages +0.0014 ± 0.0039, 10% of pages +0.0172 ± 0.0062. Page selection costs less as the context grows (+0.013 at 2K for the same model), as the Quest paper reports.
+
+The int8 cache costs nothing measurable (every Δ is within two standard errors of zero), which is why `--kv-cache-dtype auto` uses it on CUDA. int4 with per-32-value scales costs about +0.02 nats; Quest page selection at 25% costs +0.013 to +0.035 at 2K, less on the larger model and at longer context; these reproduce the published results (KIVI-style grouped 4-bit, Quest) at this scale.
 
 ### Reproduce
 ```bash
@@ -56,42 +58,57 @@ python scripts/eval_kv_quality.py --models HuggingFaceTB/SmolLM2-135M,HuggingFac
 
 ## 3. KV Cache: Memory and Decode Throughput
 
-**Memory.** K and V bytes per token, all layers, for a 70B-shaped model (80 layers, 8 KV heads, head_dim 128) at a 32K context: fp16 10.0 GiB; int8 5.16 GiB (−48%: head_dim + 4 bytes per head); int4 3.13 GiB (−69%). The cache grows by a quarter when full, so up to 25% of the latest growth can be unused capacity.
+**Memory.** K and V bytes per token, all layers, for a 70B-shaped model (80 layers, 8 KV heads, head_dim 128) at a 32K context: fp16 10.0 GiB; int8 5.16 GiB (−48%: head_dim + 4 bytes per head); int4 3.13 GiB (−69%). The cache is paged in 16-token pages from one pool, so a request leaves at most 15 token slots of a page unused.
 
-**Decode throughput** on one NVIDIA L4 (fp16), measured by `scripts/benchmark_kv_decode.py`: one WikiText-2 prompt is prefilled, its cache cloned B times, and 32 batched decode steps are timed through the serving path (`SubspaceCausalLM.forward` with one cache per request, as the engine runs it). The baseline is the same weights in HuggingFace transformers with its own cache, same GPU, batch and context.
+**Decode throughput** on one NVIDIA L4 (fp16), measured by `scripts/benchmark_kv_decode.py`: one WikiText-2 prompt is prefilled (in 2,048-token chunks, as the engine does), its cache is copied into B independent requests, and 32 batched decode steps are timed through the serving path (`SubspaceCausalLM.forward` with one cache per request, as the engine runs it). The paged KV pool takes 85% of the free GPU memory; each setting sizes its own. The baseline is the same weights in HuggingFace transformers with its own cache, same GPU, batch and context.
 
-**SmolLM2-360M** (32 layers, 15/5 heads, head_dim 64; `results_kv_decode_cuda_smollm2_360m.json`). Generated tokens per second; OOM = out of memory; contexts above 8,192 exceed the model's trained length (speed only).
-
-| Setting | 2K × B=1 | 2K × B=8 | 2K × B=32 | 2K × B=64 | 8K × B=1 | 8K × B=8 | 8K × B=32 | 8K × B=64 | 32K × B=1 | 32K × B=8 | 32K × B=32 | 32K × B=64 |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| HuggingFace transformers | 30 | 231 | 792 | 833 | 30 | 204 | 215 | OOM | 30 | 56 | OOM | OOM |
-| Turing, native cache | 25 | 192 | 705 | 1274 | 25 | 191 | 360 | OOM | 25 | 89 | OOM | OOM |
-| Turing, int8 | 25 | 187 | 652 | 1155 | 25 | 188 | 324 | 349 | 25 | 79 | OOM | OOM |
-| Turing, int4 | 26 | 195 | 690 | 1245 | 25 | 192 | 448 | 472 | 25 | 106 | OOM | OOM |
-| Turing, int8 + Quest 25% | 9 | 19 | 20 | 20 | 9 | 19 | 20 | 20 | 9 | 19 | OOM | OOM |
-
-**SmolLM2-1.7B** (24 layers, 32/32 heads, head_dim 64; `results_kv_decode_cuda_smollm2_1p7b.json`). Generated tokens per second; OOM = out of memory; contexts above 8,192 exceed the model's trained length (speed only).
+**SmolLM2-360M** (32 layers, 15/5 heads, head_dim 64; `results_kv_decode_cuda_smollm2_360m.json`). Generated tokens per second; 'pool full' = the KV pool (85% of free GPU memory) cannot hold the batch, OOM = CUDA out of memory, — = not run after a smaller batch did not fit; contexts above 8,192 exceed the model's trained length (speed only).
 
 | Setting | 2K × B=1 | 2K × B=8 | 2K × B=32 | 2K × B=64 | 8K × B=1 | 8K × B=8 | 8K × B=32 | 8K × B=64 | 32K × B=1 | 32K × B=8 | 32K × B=32 | 32K × B=64 |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| HuggingFace transformers | 41 | 137 | 159 | OOM | 29 | 43 | OOM | OOM | 10 | OOM | OOM | OOM |
-| Turing, native cache | 33 | 193 | OOM | OOM | 33 | OOM | OOM | OOM | 16 | OOM | OOM | OOM |
-| Turing, int8 | 33 | 181 | 266 | OOM | 33 | 64 | OOM | OOM | 14 | OOM | OOM | OOM |
-| Turing, int4 | 33 | 215 | 345 | 377 | 32 | 84 | OOM | OOM | 18 | OOM | OOM | OOM |
-| Turing, int8 + Quest 25% | 11 | 25 | 27 | OOM | 11 | 25 | OOM | OOM | 16 | OOM | OOM | OOM |
+| HuggingFace transformers | 29 | 228 | 783 | 827 | 30 | 202 | 213 | OOM | 30 | 56 | OOM | — |
+| Turing, native, no CUDA graph | 24 | 190 | 755 | 1501 | 24 | 191 | 463 | pool full | OOM | — | — | — |
+| Turing, native cache | 162 | 888 | 1506 | 1715 | 131 | 382 | 468 | pool full | OOM | — | — | — |
+| Turing, int8 | 163 | 882 | 1518 | 1713 | 129 | 383 | 465 | 496 | OOM | — | — | — |
+| Turing, int4 | 163 | 825 | 1431 | 1597 | 127 | 353 | 440 | 458 | OOM | — | — | — |
+| Turing, int8 + Quest 25% | 24 | 188 | 743 | 1453 | 16 | 121 | 478 | 594 | OOM | — | — | — |
 
+**SmolLM2-1.7B** (24 layers, 32/32 heads, head_dim 64; `results_kv_decode_cuda_smollm2_1p7b.json`). Generated tokens per second; 'pool full' = the KV pool (85% of free GPU memory) cannot hold the batch, OOM = CUDA out of memory, — = not run after a smaller batch did not fit; contexts above 8,192 exceed the model's trained length (speed only).
+
+| Setting | 2K × B=1 | 2K × B=8 | 2K × B=32 | 2K × B=64 | 8K × B=1 | 8K × B=8 | 8K × B=32 | 8K × B=64 | 32K × B=1 | 32K × B=8 | 32K × B=32 | 32K × B=64 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| HuggingFace transformers | 40 | 137 | 159 | OOM | 29 | 43 | OOM | — | 10 | OOM | — | — |
+| Turing, native, no CUDA graph | 31 | 228 | 364 | pool full | 32 | 89 | pool full | — | 19 | pool full | — | — |
+| Turing, native cache | 56 | 234 | 366 | pool full | 41 | 90 | pool full | — | 19 | pool full | — | — |
+| Turing, int8 | 56 | 230 | 361 | 394 | 41 | 88 | pool full | — | 19 | pool full | — | — |
+| Turing, int4 | 55 | 215 | 329 | 356 | 39 | 81 | 97 | pool full | 17 | 23 | pool full | — |
+| Turing, int8 + Quest 25% | 31 | 217 | 346 | 382 | 19 | 109 | pool full | — | 20 | pool full | — | — |
 
 What the tables show:
-* **Batched decode:** one fused append + attention launch per layer serves every request. At batch 64 and 2K context SmolLM2-360M decodes 1,274 tok/s against 833 for HuggingFace transformers (1.53×), and at 8K and batch 32, 360 against 215.
-* **Capacity:** the int8 and int4 caches fit batches the native cache and HuggingFace do not (SmolLM2-360M at 8K × 64; SmolLM2-1.7B int4 at 2K × 64).
-* **Batch 1 at short context** is limited by per-layer Python and kernel-launch overhead: SmolLM2-1.7B at 2K decodes 33 tok/s against 41 for HuggingFace.
-* **Quest page selection** runs on the per-request path today (about 20 tok/s regardless of batch), so it only pays where memory, not speed, is the limit.
+* **CUDA graphs** remove the per-layer launch overhead: SmolLM2-360M at batch 1 and 2K decodes 162 tok/s against 24 eagerly and 29 for HuggingFace transformers; SmolLM2-1.7B 56 against 40. At batch 64 and 2K SmolLM2-360M reaches 1,715 tok/s against 827 (2.1×).
+* **Capacity:** the pool wastes at most one partial page per request, and int8/int4 hold 1.87×/3.17× the tokens of the native cache in the same memory. int8 fits SmolLM2-360M at 8K × 64 and SmolLM2-1.7B at 2K × 64, int4 SmolLM2-1.7B at 32K × 8; HuggingFace runs out of memory on all three.
+* **Long context, one request:** SmolLM2-1.7B at 32K decodes 19 tok/s against 10.
+* **Quest page selection** runs outside the CUDA graph (the page lists change every step) and pays only where reading the cache dominates:
+
+Quest page selection at 25% against reading every page, both int8, SmolLM2-360M (`results_quest_threshold_cuda_smollm2_360m.json`; selection forced on at every length). Tokens per second; ratio > 1 means Quest is faster.
+
+| Batch | 1K | 2K | 4K | 8K | 16K | 32K |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| 1 | 0.09× | 0.09× | 0.10× | 0.13× | 0.15× | 0.21× |
+| 8 | 0.12× | 0.14× | 0.20× | 0.31× | 0.55× | 1.03× |
+| 64 | 0.31× | 0.54× | 0.99× | 1.19× | OOM | OOM |
+
+
+  So `kv_select_min_tokens` defaults to 8,192, and Quest stays opt-in (`--kv-page-budget`). At batch 1 it is 5–10× slower than reading every page.
 * **Not measured:** other engines (vLLM, SGLang, TensorRT-LLM, llama.cpp); this repository does not run them.
 
 ### Reproduce
 ```bash
 python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M \
-  --settings hf_transformers,native,int8,int4,int8_quest25 --contexts 2048,8192,32768 --batches 1,8,32,64
+  --settings hf_transformers,native_eager,native,int8,int4,int8_quest25 --contexts 2048,8192,32768 --batches 1,8,32,64
+# Quest against reading every page, selection forced on at every length:
+python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M --settings int8,int8_quest25 \
+  --contexts 1024,2048,4096,8192,16384,32768 --batches 1,8,64 --quest-min-tokens 0
 ```
 
 > **About the earlier NIAH section.** `scripts/stress_test_niah_breaking_point.py` quantizes one 512-token page of random vectors per row; the "context length" only labelled the row, and no model was involved. Its 1,000,000-token and rank-table claims were removed; the script now says what it tests.

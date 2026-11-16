@@ -17,7 +17,7 @@ python setup.py build_ext --inplace
 
 ### 2. Testing & Quality Verification (Strict 0-Warning Invariant)
 ```bash
-# Run the entire test suite with strict warning escalation (All 371 tests MUST pass with 0 warnings on CUDA; 28 of them need CUDA and skip on Mac/CPU)
+# Run the entire test suite with strict warning escalation (All 371 tests MUST pass with 0 warnings on CUDA; 18 of them need CUDA and skip on Mac/CPU)
 python -W error -m pytest -v
 
 # Run a specific test file
@@ -84,7 +84,7 @@ python scripts/run_all_documented_benchmarks_exhaustive.py
   - `moe.py` & `heterogeneous_moe.py`: Heterogeneous MoE routing and dynamic dispatch.
   - `paging.py` & `radix_svd.py`: SVD INT8 KV paging and Spectral Radix prefix cache trees.
   - `speculation.py`: Quadtree MRP speculative decoding and Matryoshka sliced draft heads.
-  - `kv_cache.py`: Serving KV cache (`KVCache`): preallocated per request, `native`/`int8`/`int4` storage, Quest page bounds.
+  - `kv_cache.py`: Serving KV cache: one paged pool per model (`KVPool`), a page table per request (`KVCache`, copy-on-write forks), `native`/`int8`/`int4` storage, Quest page bounds.
 - **`turing/dsl/`**: High-level programmatic workflow primitives (`@chain`, `gen`, `fork`, `join`, `select`, `constrain`) with prefix KV cache sharing and structured parsing executors.
 - **`turing/kernels/`**: Triton GPU kernels (`triton_swiglu.py`, `triton_flash_tree.py`, `triton_w4a16.py`, `triton_recirculation.py`, `triton_hybrid_anchor_fuse.py`, `triton_spec_entropy.py`, `triton_kslot_pool.py`, `triton_kv_decode.py` fused batched KV append + decode) and CUDA dispatch wrappers.
 - **`turing/models/`**: Subspace model architectures (`causal_lm.py`), native binary GGUF reader & dequantizer (`gguf_loader.py`, `gguf_tokenizer.py`), `.tgate` weight converters (`converter.py`), safetensors mmap loaders, HuggingFace loaders, tensor/pipeline parallelism (`tensor_parallel.py`), and vLLM integration adapters.

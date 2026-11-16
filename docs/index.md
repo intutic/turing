@@ -2,7 +2,7 @@
 
 **HuggingFace-exact inference for Llama-family models, with an int8 KV cache that halves cache memory at no measured quality cost.**
 
-[![Release](https://img.shields.io/badge/Release-v1.6.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.6.0)
+[![Release](https://img.shields.io/badge/Release-v1.7.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.7.0)
 
 
 
