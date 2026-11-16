@@ -89,6 +89,7 @@ class AsyncSequenceRequest:
         self.finish_reason: Optional[str] = None
         self.cached_prompt_tokens = 0  # prompt tokens served from the prefix cache
         self.uncacheable = False  # continues a caller's KVCache (prefix_kv): its pages are not keyed by its tokens
+        self.needs_pages = False  # admitted while the pool was short: reserves its pages when it reaches the front
         self.state = RequestState.WAITING
         self.generated_tokens: List[int] = []
         self.output_queue: asyncio.Queue[Optional[int]] = asyncio.Queue()
@@ -120,6 +121,7 @@ class ContinuousBatchEngine:
         draft_tokens: int = 0,
         eos_token_ids: Optional[Set[int]] = None,
         remote_prefill: Optional[Tuple[str, int]] = None,
+        max_waiting: int = 1024,
     ):
         self.model_config = model_config
         self.turing_config = turing_config or TuringConfig()
@@ -143,6 +145,7 @@ class ContinuousBatchEngine:
         self.default_draft_tokens = draft_tokens  # n-gram drafts per step when the gate allows (0 = off)
         self.spec_drafted = self.spec_accepted = 0
         self.remote_prefill = remote_prefill  # (host, port) of a PrefillWorker: prompts are prefilled there
+        self.max_waiting = max_waiting  # requests that may wait for KV pages before new ones get 503
 
         self.max_batch_size = self.turing_config.max_batch_size
         self.waiting_queue: List[AsyncSequenceRequest] = []
@@ -247,23 +250,23 @@ class ContinuousBatchEngine:
         if need > cap:
             reject(f"prompt plus max_tokens is {need} tokens, but this server holds at most {cap} per request", 400)
 
-        # Reserve every page the request can need, so it can never run out of pages mid-decode
-        try:
-            if isinstance(prefix_kv, KVCache):
+        # Reserve every page the request can need, so it can never run out of pages mid-decode. A request that fits
+        # the pool but not its free pages right now waits in the queue and reserves when pages free up.
+        if isinstance(prefix_kv, KVCache):
+            try:
                 req.past_kv = prefix_kv.clone()
                 req.uncacheable = True  # its cache starts with tokens this request does not know: never index it
-            elif self.prefix_cache is not None:  # reuse cached pages; at least one prompt token is prefilled
-                req.past_kv = self.prefix_cache.attach(req.prompt_tokens, adapter, limit=len(req.prompt_tokens) - 1)
-                req.prefill_offset = req.cached_prompt_tokens = req.past_kv.length
-            else:
-                req.past_kv = KVCache(self.kv_pool)
-            total = req.past_kv.length - req.prefill_offset + len(prompt_tokens) + max_new_tokens
-            self._reserve(req.past_kv, total)
-        except KVPoolExhausted as e:
-            if req.past_kv is not None:
-                req.past_kv.free()
-            req.past_kv = None
-            reject(str(e), 503, 1.0)
+                self._reserve(req.past_kv, req.past_kv.length + len(prompt_tokens) + max_new_tokens)
+            except KVPoolExhausted as e:
+                if req.past_kv is not None:
+                    req.past_kv.free()
+                req.past_kv = None
+                reject(str(e), 503, 1.0)
+        elif not self._try_reserve(req):
+            waiting = sum(1 for r in self.waiting_queue if r.needs_pages)
+            if waiting >= self.max_waiting:
+                reject(f"KV pool full and {waiting} requests already wait for pages", 503, 1.0)
+            req.needs_pages = True
 
         self.waiting_queue.append(req)
         return req
@@ -297,6 +300,21 @@ class ContinuousBatchEngine:
         req.generated_tokens.insert(0, token)
         req.remote_prompt_tokens = len(prompt_tokens)
         return req
+
+    def _try_reserve(self, req: AsyncSequenceRequest) -> bool:
+        """Give req a cache holding every page it can need (reusing cached prefix pages); False if the pool is short."""
+        if self.prefix_cache is not None:  # at least one prompt token is prefilled
+            req.past_kv = self.prefix_cache.attach(req.prompt_tokens, req.adapter, limit=len(req.prompt_tokens) - 1)
+            req.prefill_offset = req.cached_prompt_tokens = req.past_kv.length
+        else:
+            req.past_kv = KVCache(self.kv_pool)
+        try:
+            self._reserve(req.past_kv, len(req.prompt_tokens) + req.max_new_tokens)
+            return True
+        except KVPoolExhausted:
+            req.past_kv.free()
+            req.past_kv, req.prefill_offset, req.cached_prompt_tokens = None, 0, 0
+            return False
 
     def _reserve(self, cache: KVCache, tokens: int) -> None:
         """cache.reserve(tokens), evicting unused prefix-cache pages when the pool is short."""
@@ -352,7 +370,16 @@ class ContinuousBatchEngine:
             if self.lane_policy is not None and self.waiting_queue:
                 self.waiting_queue.sort(key=lambda r: self.lane_policy.priority(r.lane) if r.lane else 0)
             while len(self.running_batch) < self.max_batch_size and self.waiting_queue:
-                req = self.waiting_queue.pop(0)
+                req = self.waiting_queue[0]
+                if getattr(req, "cancelled", False):
+                    self.waiting_queue.pop(0)
+                    self._finish_request(req, time.time(), "cancelled")
+                    continue
+                if req.needs_pages:
+                    if not self._try_reserve(req):
+                        break  # first come, first served: later requests wait behind it
+                    req.needs_pages = False
+                self.waiting_queue.pop(0)
                 req.state = RequestState.PREFILLING
                 self.running_batch.append(req)
             if not self.running_batch:
@@ -378,13 +405,18 @@ class ContinuousBatchEngine:
         self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
 
         with torch.inference_mode():
-            # Prefill: one chunk of the highest-priority prefilling request (compute-bound)
+            # Prefill: chunks of the prefilling requests, in priority order, until this step's token budget is spent
+            # (compute-bound); a request's chunk is its remaining prompt, capped by what is left of the budget
             prefill = [r for r in self.running_batch if r.state == RequestState.PREFILLING]
-            if prefill:
-                req = prefill[0]
-                budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) \
-                    else self.prefill_chunk_size
+            budget = None
+            for req in prefill:
+                if budget is None:
+                    budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) \
+                        else self.prefill_chunk_size
+                if budget <= 0:
+                    break
                 end = min(req.prefill_offset + budget, len(req.prompt_tokens))
+                budget -= end - req.prefill_offset
                 chunk = torch.tensor([req.prompt_tokens[req.prefill_offset:end]], dtype=torch.long, device=self.device)
                 logits, req.past_kv = self._forward(chunk, req.past_kv, [req.adapter], logits_to_keep=1)
                 req.prefill_offset = end

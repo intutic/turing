@@ -80,6 +80,7 @@ def test_rejections_return_400_429_503_with_retry_after():
     """Pool full -> 503, admission QUEUE -> 429, never-fits -> 400; streaming requests are rejected before any 200."""
     from turing.serving.traffic import AdmissionController
     engine = _overloaded_app(kv_pool_gib=0.002)
+    engine.max_waiting = 0  # no waiting room: a full pool answers 503 at once
     pool = engine.kv_pool
     with TestClient(create_app(engine)) as client:
         too_big = pool.page_limit * 16 + 1

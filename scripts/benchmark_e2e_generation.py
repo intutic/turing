@@ -60,7 +60,8 @@ def run_turing(a, batches):
     async def main():
         await engine.start()
         try:
-            await batch(prompts(tok, 2, a.context, seed=99))  # warm-up: compilation and graph capture
+            for B in batches:
+                await batch(prompts(tok, B, a.context, seed=99))  # warm-up at this batch size: CUDA graph capture
             for B in batches:
                 secs, n, ttft = await batch(prompts(tok, B, a.context))
                 rows.append(dict(engine="turing", model=a.model, batch=B, context=a.context, new_tokens=a.new_tokens,
@@ -81,7 +82,8 @@ def run_vllm(a, batches):
     llm = LLM(a.model, dtype=a.dtype or "float16", kv_cache_dtype=kv, enable_prefix_caching=False,
               max_model_len=a.context + a.new_tokens + 16, gpu_memory_utilization=0.85)
     sp = SamplingParams(temperature=0.0, max_tokens=a.new_tokens, ignore_eos=True)
-    llm.generate([{"prompt_token_ids": p} for p in prompts(tok, 2, a.context, seed=99)], sp, use_tqdm=False)
+    for B in batches:  # warm-up at every batch size, as for Turing
+        llm.generate([{"prompt_token_ids": p} for p in prompts(tok, B, a.context, seed=99)], sp, use_tqdm=False)
     rows = []
     for B in batches:
         ps = prompts(tok, B, a.context)

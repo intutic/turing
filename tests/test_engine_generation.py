@@ -142,3 +142,14 @@ def test_requests_continuing_a_prefix_kv_are_not_indexed_by_their_suffix():
     (req,), _ = _run(engine, dict(prompt_tokens=suffix, max_new_tokens=2, temperature=0.0))
     assert req.cached_prompt_tokens == 0
     prefix.free()
+
+
+def test_requests_wait_for_pages_instead_of_failing_when_the_pool_is_full():
+    """More requests than the pool holds at once: the extra ones queue and run as earlier ones free their pages."""
+    engine = _engine(prefix_caching=False)
+    pages_per_req = -(-(len(PROMPT) + 30) // 16)
+    n = engine.kv_pool.page_limit // pages_per_req + 3  # 3 more than fit at once
+    reqs, outs = _run(engine, *[dict(prompt_tokens=PROMPT, max_new_tokens=30, temperature=0.0, stop_token_ids=set())
+                               for _ in range(n)])
+    assert all(len(o) == 30 for o in outs) and len({tuple(o) for o in outs}) == 1
+    assert engine.kv_pool.used_pages == 0

@@ -23,4 +23,10 @@ step gsm_int8_2 turing eval-accuracy $GSM --kv-cache-dtype int8
 step gsm_int4_2 turing eval-accuracy $GSM --kv-cache-dtype int4
 step gsm_gptq4_2 turing eval-accuracy $GSM --quantization w4a16-gptq
 step gsm_teal40_2 turing eval-accuracy $GSM --activation-sparsity 0.4
+rm -f results_e2e_generation_cuda.json  # first-pass numbers included graph capture in the timed run
+step e2e_turing2 python scripts/benchmark_e2e_generation.py --engine turing --model HuggingFaceTB/SmolLM2-360M
+step e2e_turing_1p7b2 python scripts/benchmark_e2e_generation.py --engine turing --model HuggingFaceTB/SmolLM2-1.7B
+step vllm_venv2 bash -c "python3 -m venv ~/vllm-venv && ~/vllm-venv/bin/pip install -q vllm datasets"
+step e2e_vllm2 ~/vllm-venv/bin/python scripts/benchmark_e2e_generation.py --engine vllm --model HuggingFaceTB/SmolLM2-360M
+step e2e_vllm_1p7b2 ~/vllm-venv/bin/python scripts/benchmark_e2e_generation.py --engine vllm --model HuggingFaceTB/SmolLM2-1.7B
 echo "PHASE2 DONE $(date -u +%H:%M:%S)" >> ~/l4_status.txt
