@@ -405,6 +405,10 @@ class DecodeGraphs:
                 and cfg.decode_attention == "kernel"  # the SDPA path reads lengths on the host
                 and pool_decode_supported(pool, model.embed_tokens.weight))
 
+    # Capture and replay always run in inference mode: the graph's static buffers and the CUDA generator's graph-safe
+    # state are created by the first capture, and an in-place update across modes (inference tensor touched outside
+    # inference mode) fails mid-capture and leaves the generator unusable.
+    @torch.inference_mode()
     def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, caches: List[KVCache]) -> torch.Tensor:
         B, pool, cfg = len(caches), caches[0].pool, model.config
         bucket = next(b for b in self.BUCKETS if b >= B)
@@ -425,6 +429,7 @@ class DecodeGraphs:
         graph.replay()
         return logits[:B].clone()  # the next replay overwrites the static output
 
+    @torch.inference_mode()
     def _capture(self, model: "SubspaceCausalLM", bucket: int, pool: KVPool, key, width: Optional[int] = None):
         device = pool.device
         torch.cuda.empty_cache()  # give capture the memory a long prefill left cached (rare: once per bucket and pool)

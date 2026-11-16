@@ -85,7 +85,8 @@ def test_model_batched_decode_on_cuda_matches_cpu(arch, kv_cache_dtype):
     for model, dev in ((cpu, "cpu"), (gpu, "cuda")):
         caches = [model(p.to(dev))[1] for p in prompts]
         outs.append(torch.cat([model(nxt[:, t:t + 1].to(dev), past_key_values=caches)[0].cpu() for t in range(4)], 1))
-    torch.testing.assert_close(outs[1], outs[0], atol=1e-3, rtol=0)
+    # int8: the two devices' fp32 activations differ in the last bits, so a few codes round to the neighbouring level
+    torch.testing.assert_close(outs[1], outs[0], atol=1e-3 if kv_cache_dtype == "native" else 1e-2, rtol=0)
 
 
 @torch.no_grad()
