@@ -42,6 +42,8 @@ _EXACT = dict(sparsity_ratio=0.0, enable_recirculation=False)
 ARMS |= {  # KV cache settings through the cache; low-bit arms vs exact_forward, Quest arms vs exact_decode
     "int8": ("chunk", _EXACT, dict(kv_cache_dtype="int8"), "exact_forward"),
     "int4": ("chunk", _EXACT, dict(kv_cache_dtype="int4"), "exact_forward"),
+    "int8_nosmooth": ("chunk", _EXACT, dict(kv_cache_dtype="int8", kv_smoothing=False), "exact_forward"),
+    "int4_nosmooth": ("chunk", _EXACT, dict(kv_cache_dtype="int4", kv_smoothing=False), "exact_forward"),
     "quest25": ("decode", _EXACT, dict(kv_page_budget=0.25), "exact_decode"),
     "quest10": ("decode", _EXACT, dict(kv_page_budget=0.10), "exact_decode"),
     "int8_quest25": ("decode", _EXACT, dict(kv_cache_dtype="int8", kv_page_budget=0.25), "exact_decode"),
@@ -88,8 +90,9 @@ def mean_se(v):
     return v.mean().item(), (v.std().item() / math.sqrt(len(v)) if len(v) > 1 else None)
 
 
-def run_model(name, arms, T, D, n_win, device):
-    dtype = torch.float16 if device.type == "cuda" else torch.float32
+def run_model(name, arms, T, D, n_win, device, dtype_name=None):
+    dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype_name] if dtype_name else (
+        torch.float16 if device.type == "cuda" else torch.float32)
     tok = AutoTokenizer.from_pretrained(name)
     # eager attention on MPS: its SDPA reuses one cached graph per shape with the first call's scale (PyTorch 2.9)
     hf = AutoModelForCausalLM.from_pretrained(name, dtype=dtype, **({"attn_implementation": "eager"}
@@ -116,7 +119,7 @@ def run_model(name, arms, T, D, n_win, device):
         per_arm[arm] = [score(model, wins[i:i + 1], s, mode, hf=load is None) for i in range(len(wins))]
         secs = time.perf_counter() - t0
         m, se = mean_se(per_arm[arm])
-        rows.append(dict(model=name, arm=arm, mode=mode, metric="nll", value=m, se=se, n=len(wins), seconds=secs))
+        rows.append(dict(model=name, arm=arm, mode=mode, metric="nll", value=m, se=se, n=len(wins), seconds=secs, dtype=str(dtype)[6:]))
         if model is not hf:
             del model
             gc.collect()  # free its KV pool before the next arm sizes one
@@ -126,7 +129,7 @@ def run_model(name, arms, T, D, n_win, device):
         ref = ARMS[arm][3]
         if ref in per_arm:
             d, se = mean_se([a - b for a, b in zip(per_arm[arm], per_arm[ref])])
-            rows.append(dict(model=name, arm=arm, metric="delta_nll_vs_" + ref, value=d, se=se, n=len(wins)))
+            rows.append(dict(model=name, arm=arm, metric="delta_nll_vs_" + ref, value=d, se=se, n=len(wins), dtype=str(dtype)[6:]))
     print(f"\n{name}  ({len(wins)} windows of {T}, last {D} positions scored, {device}, {str(dtype)[6:]})")
     for r in rows:
         se = f" ± {r['se']:.5f}" if r.get("se") is not None else ""
@@ -143,6 +146,7 @@ def main():
     ap.add_argument("--decode", type=int, default=256, help="positions scored at the end of each window")
     ap.add_argument("--windows", type=int, default=8)
     ap.add_argument("--device", default="auto")
+    ap.add_argument("--dtype", default=None, choices=["fp16", "bf16", "fp32"], help="default: fp16 on CUDA, fp32 elsewhere")
     ap.add_argument("--out", default=None, help="results JSON (default results_kv_quality_<device>.json)")
     a = ap.parse_args()
     arms = [x for x in a.arms.split(",") if x]
@@ -154,7 +158,7 @@ def main():
     device = torch.device(a.device)
     rows = []
     for name in [m for m in a.models.split(",") if m]:
-        rows += run_model(name, arms, a.context, a.decode, a.windows, device)
+        rows += run_model(name, arms, a.context, a.decode, a.windows, device, a.dtype)
     env = dict(device=a.device, torch=torch.__version__, platform=platform.platform(),
                gpu=torch.cuda.get_device_name(0) if device.type == "cuda" else platform.processor())
     out = a.out or f"results_kv_quality_{device.type}.json"

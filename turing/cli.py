@@ -56,6 +56,7 @@ def _load_weights(args, dev):
     cfg = model.config
     if hasattr(args, "kv_cache_dtype"):
         cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
+        cfg.kv_smoothing = not getattr(args, "no_kv_smoothing", False)
     if hasattr(args, "no_cuda_graphs"):
         cfg.cuda_graphs, cfg.kv_pool_fraction = not args.no_cuda_graphs, args.kv_cache_memory_fraction
     return model, tokenizer
@@ -96,6 +97,7 @@ def main():
     serve_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     serve_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     serve_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
+    serve_parser.add_argument("--no-kv-smoothing", action="store_true", help="int8/int4 KV: store keys without per-channel outlier smoothing")
     serve_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
     serve_parser.add_argument("--no-cuda-graphs", action="store_true", help="Run decode steps eagerly instead of replaying CUDA graphs")
     serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=0.6, help="Share of free GPU memory (after the weights) for the paged KV pool (default: 0.6)")
@@ -132,6 +134,7 @@ def main():
     gen_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     gen_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     gen_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
+    gen_parser.add_argument("--no-kv-smoothing", action="store_true", help="int8/int4 KV: store keys without per-channel outlier smoothing")
     gen_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
     gen_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
     gen_parser.add_argument("--mock", action="store_true", help="Run with dry-run synthetic architecture weights")
@@ -153,6 +156,7 @@ def main():
     niah_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model (default: 0.0)")
     niah_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
     niah_parser.add_argument("--kv-cache-dtype", type=str, default="native", choices=["native", "int8", "int4"], help="KV cache storage (default native)")
+    niah_parser.add_argument("--no-kv-smoothing", action="store_true", help="int8/int4 KV: store keys without per-channel outlier smoothing")
     niah_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest page budget (1.0 reads all pages)")
     niah_parser.add_argument("--kv-select-min-tokens", type=int, default=None, help="Quest only from this many tokens (default: the model config's 8192)")
     niah_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load")
@@ -171,6 +175,7 @@ def main():
     acc_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     acc_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
     acc_parser.add_argument("--kv-cache-dtype", type=str, default="native", choices=["native", "int8", "int4"], help="KV cache storage (default native)")
+    acc_parser.add_argument("--no-kv-smoothing", action="store_true", help="int8/int4 KV: store keys without per-channel outlier smoothing")
     acc_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest page budget (1.0 reads all pages)")
     acc_parser.add_argument("--kv-select-min-tokens", type=int, default=None, help="Quest only from this many tokens (default: the model config's 8192)")
     acc_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load")
