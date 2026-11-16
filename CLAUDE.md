@@ -47,7 +47,7 @@ python scripts/eval_gguf_parity.py --help
 - **No standing GPU VM.** `neollm-l4` is now a CPU-only `e2-small` running the user's `liberty` bots; never stop or resize it. `intutic-judge-l4` was deleted on 2026-11-14. Quota: `GPUS_ALL_REGIONS = 1`, on-demand L4 `0`, Spot L4 `3` in `us-central1`.
 - **Workflow (needs the user's OK each time; it costs money):** create a temporary Spot L4 VM, run, copy results back, delete it.
   ```bash
-  gcloud compute instances create turing-bench-l4 --zone us-central1-a --machine-type g2-standard-4 \
+  gcloud compute instances create turing-bench-l4 --zone us-central1-a --machine-type g2-standard-16 \
     --provisioning-model SPOT --instance-termination-action STOP --max-run-duration 6h \
     --image-family pytorch-2-9-cu129-ubuntu-2204-nvidia-580 --image-project deeplearning-platform-release \
     --boot-disk-size 150GB --maintenance-policy TERMINATE --metadata install-nvidia-driver=True \
