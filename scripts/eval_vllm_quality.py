@@ -70,6 +70,7 @@ def main():
     ap.add_argument("--context", type=int, default=2048)
     ap.add_argument("--decode", type=int, default=256)
     ap.add_argument("--windows", type=int, default=8)
+    ap.add_argument("--checks", default="gsm8k,niah,nll", help="any of gsm8k, niah, nll")
     ap.add_argument("--out", default="results_quality_vllm_cuda.json")
     a = ap.parse_args()
 
@@ -80,7 +81,8 @@ def main():
     acc_eval, niah = turing_evals()
     tok = AutoTokenizer.from_pretrained(a.model)
     llm = LLM(a.model, dtype=a.dtype, kv_cache_dtype=a.kv_cache_dtype, enable_prefix_caching=False,
-              max_model_len=max(a.context_len) + 32, gpu_memory_utilization=0.85)
+              max_model_len=(max(a.context_len) if "niah" in a.checks else 4096) + 32,
+              gpu_memory_utilization=0.85)
 
     def vllm_generate(engine, prompts, max_new_tokens, batch_size=8):
         sp = SamplingParams(temperature=0.0, max_tokens=max_new_tokens)
@@ -91,31 +93,36 @@ def main():
     row = dict(engine="vllm", runtime=f"vllm {vllm.__version__}", model=a.model, dtype=a.dtype,
                kv_cache_dtype=a.kv_cache_dtype)
 
+    checks = set(a.checks.split(","))
     t0 = time.perf_counter()
-    g = acc_eval.GSM8KEvaluator(engine).evaluate(acc_eval.load_gsm8k("test")[:a.samples],
-                                                 acc_eval.load_gsm8k("train")[:a.shots], 256)
-    row["gsm8k"] = {k: g[k] for k in ("n", "shots", "exact_match", "stderr")}
-    nh = niah.LongContextNIAHEvaluator(engine).evaluate_retrieval(a.context_len, a.depths)
-    row["niah"] = {"n": nh["n"], "accuracy": nh["accuracy"],
-                   "by_context": {c: sum(r["found"] for r in nh["results"] if r["context_length"] == c)
-                                  / sum(1 for r in nh["results"] if r["context_length"] == c) for c in a.context_len}}
-    wins = wikitext_windows(tok, a.context, a.windows)
-    outs = llm.generate([{"prompt_token_ids": w} for w in wins], SamplingParams(max_tokens=1, prompt_logprobs=0),
-                        use_tqdm=False)
-    per_window = [window_nll(w, o.prompt_logprobs, a.context - a.decode) for w, o in zip(wins, outs)]
-    m, se = mean_se(per_window)
-    row["wikitext_nll"] = {"n": len(per_window), "mean": m, "se": se, "per_window": per_window,
-                           "context": a.context, "scored": a.decode - 1}
+    if "gsm8k" in checks:
+        g = acc_eval.GSM8KEvaluator(engine).evaluate(acc_eval.load_gsm8k("test")[:a.samples],
+                                                     acc_eval.load_gsm8k("train")[:a.shots], 256)
+        row["gsm8k"] = {k: g[k] for k in ("n", "shots", "exact_match", "stderr")}
+    if "niah" in checks:
+        nh = niah.LongContextNIAHEvaluator(engine).evaluate_retrieval(a.context_len, a.depths)
+        row["niah"] = {"n": nh["n"], "accuracy": nh["accuracy"],
+                       "by_context": {c: sum(r["found"] for r in nh["results"] if r["context_length"] == c)
+                                      / sum(1 for r in nh["results"] if r["context_length"] == c)
+                                      for c in a.context_len}}
+    if "nll" in checks:
+        wins = wikitext_windows(tok, a.context, a.windows)
+        outs = llm.generate([{"prompt_token_ids": w} for w in wins], SamplingParams(max_tokens=1, prompt_logprobs=0),
+                            use_tqdm=False)
+        per_window = [window_nll(w, o.prompt_logprobs, a.context - a.decode) for w, o in zip(wins, outs)]
+        m, se = mean_se(per_window)
+        row["wikitext_nll"] = {"n": len(per_window), "mean": m, "se": se, "per_window": per_window,
+                               "context": a.context, "scored": a.decode - 1}
+        print(f"wikitext nll {m:.4f} ± {se:.4f}", flush=True)
     row["seconds"] = round(time.perf_counter() - t0, 1)
     print(json.dumps({k: v for k, v in row.items() if k != "wikitext_nll"}), flush=True)
-    print(f"wikitext nll {m:.4f} ± {se:.4f}", flush=True)
 
     old = json.load(open(a.out))["rows"] if os.path.exists(a.out) else []
     rows = [r for r in old if not (r["model"] == a.model and r["kv_cache_dtype"] == a.kv_cache_dtype
                                    and r["dtype"] == a.dtype)] + [row]
     # paired fp8-vs-fp16 NLL delta per window, once both runs exist
     by = {r["kv_cache_dtype"]: r for r in rows if r["model"] == a.model and r["dtype"] == a.dtype}
-    if "auto" in by and "fp8" in by:
+    if "auto" in by and "fp8" in by and "wikitext_nll" in by["auto"] and "wikitext_nll" in by["fp8"]:
         d = [x - y for x, y in zip(by["fp8"]["wikitext_nll"]["per_window"], by["auto"]["wikitext_nll"]["per_window"])]
         dm, dse = mean_se(d)
         by["fp8"]["wikitext_nll"]["delta_vs_auto"] = {"mean": dm, "se": dse, "n": len(d)}

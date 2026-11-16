@@ -43,6 +43,14 @@ def run_turing(a, batches):
     from turing.serving.engine import ContinuousBatchEngine
     tok = AutoTokenizer.from_pretrained(a.model)
     model, _ = RealHuggingFaceLoader.load_hf_model_into_turing(a.model, device="cuda", dtype=a.dtype)
+    if a.quantization != "none":  # as turing serve --quantization: GPTQ calibrated on WikiText-2 train windows
+        from turing.models.quant import calibration_windows, quantize_model
+        method = a.quantization.split("-")[-1]
+        quantize_model(model, method, calibration_windows(tok, a.calib_windows, 2048) if method == "gptq" else None)
+    if a.activation_sparsity:  # as --activation-sparsity: applies to one-row decode on CUDA (batch 1)
+        from turing.models.activation_sparsity import calibrate_and_apply
+        from turing.models.quant import calibration_windows
+        calibrate_and_apply(model, calibration_windows(tok, 16, 512), a.activation_sparsity)
     model.config.kv_cache_dtype, model.config.kv_page_budget = a.kv_cache_dtype, a.kv_page_budget
     if a.kv_pool_gib:
         model.config.kv_pool_gib = a.kv_pool_gib
@@ -79,7 +87,8 @@ def run_turing(a, batches):
                                  mean_ttft_s=round(sum(ttft) / len(ttft), 4), kv_cache_dtype=a.kv_cache_dtype,
                                  kv_page_budget=a.kv_page_budget, kv_capacity_tokens=pool.num_pages * pool.page_size,
                                  kv_pool_gib=round(pool.num_pages * pool.page_bytes() / 2 ** 30, 3),
-                                 kv_native_layers=list(pool.native_layers)))
+                                 kv_native_layers=list(pool.native_layers), quantization=a.quantization,
+                                 activation_sparsity=a.activation_sparsity))
                 print(json.dumps(rows[-1]), flush=True)
         finally:
             await engine.stop()
@@ -145,6 +154,9 @@ def main():
                     help="turing: take the KV budget vLLM recorded in this results file (same model and context)")
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.85, help="vllm")
     ap.add_argument("--warmup-context", type=int, default=None, help="prompt length of the warm-up batches")
+    ap.add_argument("--quantization", default="none", choices=["none", "w4a16-gptq", "w4a16-rtn"], help="turing")
+    ap.add_argument("--calib-windows", type=int, default=32, help="turing GPTQ calibration windows (speed only)")
+    ap.add_argument("--activation-sparsity", type=float, default=0.0, help="turing: TEAL sparsity")
     ap.add_argument("--out", default="results_e2e_generation_cuda.json")
     a = ap.parse_args()
     if a.engine == "vllm":
@@ -164,7 +176,10 @@ def main():
         else a.kv_cache_dtype
     keep = [r for r in old if not (r["engine"] == a.engine and r["model"] == a.model and r["context"] == a.context
                                    and r.get("kv_cache_dtype") == kvname
-                                   and r.get("kv_page_budget", 1.0) == (a.kv_page_budget if a.engine == "turing" else 1.0))]
+                                   and r.get("kv_page_budget", 1.0) == (a.kv_page_budget if a.engine == "turing" else 1.0)
+                                   and r.get("quantization", "none") == (a.quantization if a.engine == "turing" else "none")
+                                   and r.get("activation_sparsity", 0.0) == (a.activation_sparsity
+                                                                              if a.engine == "turing" else 0.0))]
     env = dict(platform=platform.platform(), runtime=version)
     with open(a.out, "w") as f:
         json.dump(dict(env=env, rows=keep + rows), f, indent=2)

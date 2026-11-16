@@ -175,6 +175,38 @@ def kl_select(name, T, device):
     return dict(model=name, rows=rows)
 
 
+@torch.no_grad()
+def smooth_kl(name, T, device):
+    """KL(exact || every layer's K and V int4 / int8 round-tripped at once), with and without key smoothing, on the
+    calibration random tokens and on real text: does the random-token batch predict when smoothing helps?"""
+    from datasets import load_dataset
+    import torch.nn.functional as F
+    model, tok = RealHuggingFaceLoader.load_hf_model_into_turing(name, device=device, dtype="fp32")
+    text = "\n\n".join(load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")["text"])
+    real = tok(text, return_tensors="pt").input_ids[:, :T].to(device)
+    rand = torch.randint(0, model.config.vocab_size, (4, 256), generator=torch.Generator().manual_seed(0)).to(device)
+    attns = [layer.self_attn for layer in model.layers]
+    model.calibrate_kv_smoothing()
+    smooth = [(a.k_smooth, a.q_smooth) for a in attns]
+    out = {}
+    for smoothed in (False, True):
+        for a, (ks, qs) in zip(attns, smooth):
+            a.k_smooth, a.q_smooth = (ks, qs) if smoothed else (None, None)
+        for src, ids in (("random", rand), ("real", real)):
+            for a in attns:
+                a._kv_roundtrip = None
+            ref = F.log_softmax(model._body(ids, 0, None, None).float(), -1)
+            for bits in (4, 8):
+                for a in attns:
+                    a._kv_roundtrip = (bits, INT4_GROUP if bits == 4 else a.head_dim)
+                lp = F.log_softmax(model._body(ids, 0, None, None).float(), -1)
+                out[f"{src}_int{bits}_{'smooth' if smoothed else 'raw'}"] = (ref.exp() * (ref - lp)).sum(-1).mean().item()
+            for a in attns:
+                a._kv_roundtrip = None
+    print(name, json.dumps({k: round(v, 5) for k, v in out.items()}), flush=True)
+    return dict(model=name, kl=out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", default="Qwen/Qwen2.5-0.5B,Qwen/Qwen2.5-1.5B")
@@ -185,7 +217,11 @@ def main():
     ap.add_argument("--windows", type=int, default=2)
     ap.add_argument("--sensitivity", action="store_true", help="per-layer attention-output error, random vs real text")
     ap.add_argument("--kl", action="store_true", help="per-layer KL of the next-token distribution, random vs real")
+    ap.add_argument("--smooth-kl", action="store_true", help="all-layer KL with and without smoothing")
     a = ap.parse_args()
+    if a.smooth_kl:
+        json.dump([smooth_kl(m, a.tokens, a.device) for m in a.models.split(",")], open(a.out, "w"), indent=1)
+        return
     if a.kl:
         res = [kl_select(m, a.tokens, a.device) for m in a.models.split(",")]
         json.dump(res, open(a.out, "w"), indent=1)
