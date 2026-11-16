@@ -3,7 +3,7 @@ Model architectures, tensor parallelism, converters, and upstream adapters for T
 """
 
 from .causal_lm import SubspaceCausalLM, SubspaceDecoderLayer, SubspaceAttention, SubspaceMLP
-from .tensor_parallel import ColumnParallelLinear, RowParallelLinear, init_tensor_parallel
+from .tensor_parallel import ColumnParallelLinear, RowParallelLinear
 from .registry import MODEL_REGISTRY, get_model_config
 from .converter import convert_checkpoint
 from .adapters import UncertaintyKnowledgeGate, TenantLoRAAdapter
@@ -19,7 +19,6 @@ __all__ = [
     "SubspaceMLP",
     "ColumnParallelLinear",
     "RowParallelLinear",
-    "init_tensor_parallel",
     "MODEL_REGISTRY",
     "get_model_config",
     "convert_checkpoint",

@@ -1,89 +1,111 @@
-"""
-Unit tests for SVD-Compressed Network KV Wire Format (cross-pod transfer).
-"""
+"""KV page export/import between pools, and prefill/decode disaggregation across two processes over TCP: the decode
+process continues from the prefill process's pages and first token with output identical to one engine."""
+import asyncio
+import multiprocessing as mp
 
 import pytest
 import torch
-from turing.serving.kv_transfer import (
-    SVDNetworkKVWireCodec,
-    serialize_kv_block_svd,
-    deserialize_kv_block_svd,
-)
-from turing.core.radix_svd import SpectralRadixSVDForest
+
+from turing.config import TuringConfig
+from turing.serving.disagg_sidecar import PrefillWorker, add_remote_prefilled_request
+from turing.serving.engine import ContinuousBatchEngine
+from turing.serving.kv_transfer import export_kv, import_kv
 
 
-def test_svd_wire_codec_encode_decode_roundtrip():
-    seq_len = 64
-    num_heads = 8
-    head_dim = 128
-    rank = 64
-
-    # Create dummy KV tensors and orthonormal projection basis
-    torch.manual_seed(42)
-    k = torch.randn(seq_len, num_heads, head_dim)
-    v = torch.randn(seq_len, num_heads, head_dim)
-    u_proj, _ = torch.linalg.qr(torch.randn(head_dim, rank))
-
-    toks = list(range(1000, 1000 + seq_len))
-
-    # Encode to wire format
-    wire_bytes = SVDNetworkKVWireCodec.encode(k, v, u_proj, token_ids=toks)
-    assert isinstance(wire_bytes, bytes)
-    assert len(wire_bytes) > 0
-
-    # Compression ratio check: raw FP16 payload size vs wire payload size
-    raw_fp16_bytes = (k.numel() + v.numel()) * 2  # 2 bytes per float16
-    wire_size = len(wire_bytes)
-    # Wire size should be substantially smaller than raw FP16
-    assert wire_size < raw_fp16_bytes
-
-    # Decode from wire format
-    k_recon, v_recon, decoded_toks = SVDNetworkKVWireCodec.decode(wire_bytes, u_proj=u_proj)
-
-    assert decoded_toks == toks
-    assert k_recon.shape == k.shape
-    assert v_recon.shape == v.shape
-
-    # Project original into subspace to verify reconstruction fidelity
-    k_sub_proj = torch.matmul(torch.matmul(k, u_proj), u_proj.t())
-    v_sub_proj = torch.matmul(torch.matmul(v, u_proj), u_proj.t())
-
-    # INT8 quantization error in subspace should be small
-    k_diff = (k_recon - k_sub_proj).abs().mean().item()
-    v_diff = (v_recon - v_sub_proj).abs().mean().item()
-    assert k_diff < 0.05
-    assert v_diff < 0.05
+def _model(kv_dtype):
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), sparsity_ratio=0.0, device="cpu",
+                                                   enable_recirculation=False)
+    model.config.kv_cache_dtype, model.config.kv_pool_gib = kv_dtype, 0.01
+    return model
 
 
-def test_svd_wire_codec_corrupted_magic():
-    u_proj = torch.eye(128, 64)
-    with pytest.raises(ValueError, match="Invalid SVDK magic"):
-        SVDNetworkKVWireCodec.decode(b"CORRUPTED_BYTES_1234567890", u_proj=u_proj)
+def _engine(kv_dtype):
+    model = _model(kv_dtype)
+    return ContinuousBatchEngine(model.config, TuringConfig(device="cpu"), model=model, prefix_caching=False)
 
 
-def test_radix_forest_list_hashes_and_compressed_insert():
-    forest = SpectralRadixSVDForest(rank=64)
-    u_proj = torch.eye(128, 64)
+PROMPT = [int(t) for t in torch.randint(0, 128, (37,), generator=torch.Generator().manual_seed(3))]
 
-    k = torch.randn(32, 8, 128)
-    v = torch.randn(32, 8, 128)
-    toks = list(range(100, 132))
 
-    forest.insert_prefix(toks, k, v, u_proj)
+@pytest.mark.parametrize("kv_dtype", ["native", "int8", "int4"])
+@torch.no_grad()
+def test_exported_pages_import_into_another_pool_bit_exact(kv_dtype):
+    src, dst = _model(kv_dtype), _model(kv_dtype)
+    _, cache = src(torch.tensor([PROMPT]))
+    cache.reserve(cache.length + 40)  # extra reserved pages are not exported
+    header, blob = export_kv(cache)
+    dst.kv_pool().alloc_pages(3)  # the importing pool hands out different page ids
+    got = import_kv(dst.kv_pool(), header, blob)
+    assert got.length == cache.length == len(PROMPT) and len(got.pages) == 3 and got.pages != cache.pages[:3]
+    for layer in range(src.config.num_layers):
+        for a, b in zip(src.kv_pool().read(layer, cache, cache.length), dst.kv_pool().read(layer, got, got.length)):
+            assert torch.equal(a, b)
+    # continuing from the imported cache gives the source's next-token logits
+    nxt = torch.tensor([[5]])
+    torch.testing.assert_close(dst(nxt, past_key_values=got)[0], src(nxt, past_key_values=cache)[0], atol=0, rtol=0)
 
-    # Test list_block_hashes
-    hashes = forest.list_block_hashes()
-    assert len(hashes) > 0
-    assert hashes[0][1] == toks
 
-    # Test insert_compressed_node directly
-    k_sub_int8 = torch.randint(-127, 127, (16, 8, 64), dtype=torch.int8)
-    k_scale = torch.ones(16, 8, 1) * 0.01
-    v_sub_int8 = torch.randint(-127, 127, (16, 8, 64), dtype=torch.int8)
-    v_scale = torch.ones(16, 8, 1) * 0.01
+def test_import_rejects_mismatched_or_malformed_payloads():
+    src, dst = _model("int8"), _model("native")
+    _, cache = src(torch.tensor([PROMPT]))
+    header, blob = export_kv(cache)
+    with pytest.raises(ValueError, match="kv_cache_dtype"):
+        import_kv(dst.kv_pool(), header, blob)
+    free = src.kv_pool().num_free_pages
+    for bad in (dict(header, tensors=header["tensors"][1:]),                        # a field missing
+                dict(header, tensors=[[n, d, [s[0], s[1] + 1, *s[2:]]] for n, d, s in header["tensors"]]),
+                dict(header, length=-1)):
+        with pytest.raises(ValueError):
+            import_kv(src.kv_pool(), bad, blob)
+    with pytest.raises(ValueError):
+        import_kv(src.kv_pool(), header, blob[:-1])                                    # truncated
+    assert src.kv_pool().num_free_pages == free                                        # nothing leaked
 
-    forest.insert_compressed_node([201, 202, 203], k_sub_int8[:3], k_scale[:3], v_sub_int8[:3], v_scale[:3])
-    matched, mk, mv = forest.match_prefix([201, 202, 203], u_proj)
-    assert matched == 3
-    assert mk is not None
-    assert mv is not None
+
+def _prefill_server(kv_dtype, port_q):
+    worker = PrefillWorker(_engine(kv_dtype))
+    port_q.put(worker.port)
+    worker.serve_forever()
+
+
+def _generate(engine, prompt, n):
+    async def go():
+        await engine.start()
+        try:
+            return [t async for t in engine.stream_generate(prompt, max_new_tokens=n, temperature=0.0)]
+        finally:
+            await engine.stop()
+    return asyncio.run(go())
+
+
+@pytest.mark.parametrize("kv_dtype", ["native", "int8"])
+def test_prefill_and_decode_in_two_processes_match_one_engine(kv_dtype):
+    ctx = mp.get_context("spawn")
+    port_q = ctx.Queue()
+    proc = ctx.Process(target=_prefill_server, args=(kv_dtype, port_q), daemon=True)
+    proc.start()
+    try:
+        addr = ("127.0.0.1", port_q.get(timeout=120))
+        ref = _generate(_engine(kv_dtype), PROMPT, 12)
+
+        decode = _engine(kv_dtype)
+
+        async def go():
+            await decode.start()
+            try:
+                outs = []
+                for prompt in (PROMPT, PROMPT[:5]):  # two requests over the same worker
+                    first, req = await add_remote_prefilled_request(decode, addr, prompt, max_new_tokens=12)
+                    outs.append([first] + [t async for t in decode.stream_request(req)])
+                return outs
+            finally:
+                await decode.stop()
+        got, short = asyncio.run(go())
+        assert got == ref and len(got) == 12
+        assert short == _generate(_engine(kv_dtype), PROMPT[:5], 12)
+        assert decode.kv_pool.used_pages == 0  # the imported pages were returned
+    finally:
+        proc.terminate()
+        proc.join(timeout=30)

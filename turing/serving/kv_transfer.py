@@ -1,190 +1,104 @@
 """
-SVD-Compressed Network KV Wire Format for Cross-Pod Transfer.
-Compresses KV cache blocks using Rank-64 Subspace Projection and Symmetric INT8 Quantization,
-yielding ~75% reduction in network payload size for P/D disaggregated and distributed serving.
+KV page transfer between processes: export one request's pages from a KVPool, import them into another pool.
+
+The payload carries the request's length and, for every layer, its pages exactly as the pool stores them: K and V in
+the pool's storage dtype (native, or int8 / int4 codes) plus the low-bit scales and zeros, and the Quest page bounds
+when both pools track them. Nothing is recomputed or re-quantized, so the importing pool reads the same values the
+exporting pool would have read.
+
+Wire format of a message (`send_msg` / `recv_msg`, over any connected socket):
+    [u64 header length][header: UTF-8 JSON][u64 blob length][blob]
+A KV payload's header lists each tensor's field name, dtype and shape; the blob is their raw bytes in that order.
 """
 
+import json
+import socket
 import struct
-from typing import Tuple, List, Optional
+from typing import Dict, Tuple
+
 import torch
 
-from ..core.hybrid_mesh import TensorSerializer
+from ..core.kv_cache import PAGE, KVCache, KVPool
+
+__all__ = ["export_kv", "import_kv", "send_msg", "recv_msg"]
+
+_FIELDS = ("k", "v", "k_scale", "k_zero", "v_scale", "v_zero")
 
 
-class SVDNetworkKVWireCodec:
-    """
-    Encodes and decodes KV cache blocks into SVD-compressed INT8 wire format
-    for high-speed cross-pod network transfer over TCP / RDMA side-channels.
-
-    Binary Wire Layout:
-    [Magic: uint32 (0x5356444B = 'SVDK')]
-    [Version: uint8 (1)]
-    [NumTokens: uint32]
-    [NumHeads: uint32]
-    [Rank: uint32]
-    [TokenIDs: uint32 * NumTokens]
-    [Serialized k_sub_int8 (TensorSerializer)]
-    [Serialized k_scale (TensorSerializer)]
-    [Serialized v_sub_int8 (TensorSerializer)]
-    [Serialized v_scale (TensorSerializer)]
-    """
-
-    MAGIC = 0x5356444B  # 'SVDK'
-    VERSION = 1
-
-    @classmethod
-    def encode(
-        cls,
-        k_tensor: torch.Tensor,  # [SeqLen, Heads, HeadDim]
-        v_tensor: torch.Tensor,  # [SeqLen, Heads, HeadDim]
-        u_proj: torch.Tensor,    # [HeadDim, Rank]
-        token_ids: Optional[List[int]] = None,
-    ) -> bytes:
-        """
-        Projects KV tensors into SVD subspace, quantizes to INT8, and serializes to bytes.
-        """
-        seq_len, num_heads, _ = k_tensor.shape
-        rank = u_proj.shape[1]
-        toks = token_ids if token_ids is not None else [0] * seq_len
-
-        # 1. Project into SVD subspace & INT8 Quantize
-        try:
-            import turing.turing_csrc as turing_csrc
-            HAS_CSRC = True
-        except ImportError:
-            HAS_CSRC = False
-
-        if HAS_CSRC and not k_tensor.is_cuda and k_tensor.dtype == torch.float32:
-            k_np = k_tensor.detach().cpu().contiguous().numpy()
-            v_np = v_tensor.detach().cpu().contiguous().numpy()
-            u_np = u_proj.detach().cpu().contiguous().numpy()
-
-            k_int8_np, k_scale_np = turing_csrc.svd_wire_project_quantize_cpu(k_np, u_np)
-            v_int8_np, v_scale_np = turing_csrc.svd_wire_project_quantize_cpu(v_np, u_np)
-
-            k_int8 = torch.from_numpy(k_int8_np)
-            k_scale = torch.from_numpy(k_scale_np)
-            v_int8 = torch.from_numpy(v_int8_np)
-            v_scale = torch.from_numpy(v_scale_np)
-        else:
-            k_sub = torch.matmul(k_tensor, u_proj)  # [SeqLen, Heads, Rank]
-            v_sub = torch.matmul(v_tensor, u_proj)
-
-            k_scale = torch.amax(torch.abs(k_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
-            v_scale = torch.amax(torch.abs(v_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
-
-            k_int8 = torch.clamp(torch.round(k_sub / k_scale), -128, 127).to(torch.int8)
-            v_int8 = torch.clamp(torch.round(v_sub / v_scale), -128, 127).to(torch.int8)
+def export_kv(cache: KVCache) -> Tuple[dict, bytes]:
+    """(header, blob) of the pages holding cache.length tokens, all layers."""
+    pool = cache.pool
+    pages = torch.tensor(cache.pages[:-(-cache.length // PAGE)], dtype=torch.long, device=pool.device)
+    names = [n for n in _FIELDS if getattr(pool, n) is not None] + (["kmin", "kmax"] if pool.track_pages else [])
+    tensors = [getattr(pool, n)[:, pages].contiguous().cpu() for n in names]
+    header = {"length": cache.length, "kv_cache_dtype": pool.kv_cache_dtype, "num_layers": pool.num_layers,
+              "num_kv_heads": pool.num_kv_heads, "head_dim": pool.head_dim,
+              "tensors": [[n, str(t.dtype).replace("torch.", ""), list(t.shape)] for n, t in zip(names, tensors)]}
+    return header, b"".join(t.view(torch.uint8).numpy().tobytes() for t in tensors)
 
 
-        # 3. Serialize tensors
-        k_int8_bytes = TensorSerializer.serialize(k_int8.to(torch.float32), compress_int8=True)
-        k_scale_bytes = TensorSerializer.serialize(k_scale, compress_int8=False)
-        v_int8_bytes = TensorSerializer.serialize(v_int8.to(torch.float32), compress_int8=True)
-        v_scale_bytes = TensorSerializer.serialize(v_scale, compress_int8=False)
-
-        # 4. Pack header + tokens + tensor payloads
-        header = struct.pack(
-            f"<IBIII{len(toks)}I",
-            cls.MAGIC,
-            cls.VERSION,
-            seq_len,
-            num_heads,
-            rank,
-            *toks,
-        )
-
-        return (
-            header
-            + struct.pack("<I", len(k_int8_bytes)) + k_int8_bytes
-            + struct.pack("<I", len(k_scale_bytes)) + k_scale_bytes
-            + struct.pack("<I", len(v_int8_bytes)) + v_int8_bytes
-            + struct.pack("<I", len(v_scale_bytes)) + v_scale_bytes
-        )
-
-    @classmethod
-    def decode(
-        cls,
-        payload: bytes,
-        u_proj: torch.Tensor,    # [HeadDim, Rank]
-        device: torch.device = torch.device("cpu"),
-    ) -> Tuple[torch.Tensor, torch.Tensor, List[int]]:
-        """
-        Deserializes SVD-compressed wire payload and reconstructs full-rank FP16 KV states.
-        Returns: (k_reconstructed, v_reconstructed, token_ids)
-        """
-        magic, version, seq_len, num_heads, rank = struct.unpack_from("<IBIII", payload, 0)
-        if magic != cls.MAGIC:
-            raise ValueError(f"Invalid SVDK magic: 0x{magic:08X}, expected 0x{cls.MAGIC:08X}")
-        if version != cls.VERSION:
-            raise ValueError(f"Unsupported SVDK version: {version}")
-
-        offset = struct.calcsize("<IBIII")
-        toks = list(struct.unpack_from(f"<{seq_len}I", payload, offset))
-        offset += struct.calcsize(f"<{seq_len}I")
-
-        # Unpack serialized tensor payloads
-        def _read_chunk(off: int) -> Tuple[bytes, int]:
-            chunk_len = struct.unpack_from("<I", payload, off)[0]
-            off += 4
-            chunk_data = payload[off : off + chunk_len]
-            return chunk_data, off + chunk_len
-
-        k_int8_bytes, offset = _read_chunk(offset)
-        k_scale_bytes, offset = _read_chunk(offset)
-        v_int8_bytes, offset = _read_chunk(offset)
-        v_scale_bytes, offset = _read_chunk(offset)
-
-        k_int8_t = TensorSerializer.deserialize(k_int8_bytes, device=device)
-        k_scale_t = TensorSerializer.deserialize(k_scale_bytes, device=device)
-        v_int8_t = TensorSerializer.deserialize(v_int8_bytes, device=device)
-        v_scale_t = TensorSerializer.deserialize(v_scale_bytes, device=device)
-
-        # Dequantize & reconstruct via u_proj.T
-        try:
-            import turing.turing_csrc as turing_csrc
-            HAS_CSRC = True
-        except ImportError:
-            HAS_CSRC = False
-
-        if HAS_CSRC and device.type == "cpu":
-            k_int8_np = k_int8_t.to(torch.int8).contiguous().numpy()
-            k_scale_np = k_scale_t.to(torch.float32).contiguous().numpy()
-            v_int8_np = v_int8_t.to(torch.int8).contiguous().numpy()
-            v_scale_np = v_scale_t.to(torch.float32).contiguous().numpy()
-            u_np = u_proj.detach().cpu().to(torch.float32).contiguous().numpy()
-
-            k_recon_np = turing_csrc.svd_wire_dequantize_reconstruct_cpu(k_int8_np, k_scale_np, u_np)
-            v_recon_np = turing_csrc.svd_wire_dequantize_reconstruct_cpu(v_int8_np, v_scale_np, u_np)
-
-            k_recon = torch.from_numpy(k_recon_np).to(device)
-            v_recon = torch.from_numpy(v_recon_np).to(device)
-        else:
-            u_proj_dev = u_proj.to(device)
-            k_sub_fp = k_int8_t * k_scale_t
-            v_sub_fp = v_int8_t * v_scale_t
-
-            k_recon = torch.matmul(k_sub_fp, u_proj_dev.t())
-            v_recon = torch.matmul(v_sub_fp, u_proj_dev.t())
-
-        return k_recon, v_recon, toks
+def import_kv(pool: KVPool, header: dict, blob: bytes) -> KVCache:
+    """A new request cache in `pool` holding the exported pages (the pools must agree on layers, KV heads, head size
+    and storage dtype)."""
+    for key in ("kv_cache_dtype", "num_layers", "num_kv_heads", "head_dim"):
+        if header[key] != getattr(pool, key):
+            raise ValueError(f"KV payload has {key}={header[key]!r}, this pool {getattr(pool, key)!r}")
+    if not isinstance(header["length"], int) or header["length"] < 0:
+        raise ValueError(f"KV payload length {header['length']!r}")
+    cache = KVCache(pool)
+    try:
+        cache.reserve(header["length"])
+        pages = torch.tensor(cache.pages, dtype=torch.long, device=pool.device)
+        buf = blob if isinstance(blob, bytearray) else bytearray(blob)  # torch.frombuffer wants a writable buffer
+        got, offset = set(), 0
+        for name, dtype, shape in header["tensors"]:
+            dst = getattr(pool, name) if name in _FIELDS + ("kmin", "kmax") else None
+            if dst is None and name in ("kmin", "kmax") and dtype == "float16":  # Quest bounds this pool skips
+                offset += torch.Size(shape).numel() * 2
+                continue
+            n = torch.Size(shape).numel() * (dst.element_size() if dst is not None else 0)
+            if dst is None or str(dst.dtype) != "torch." + dtype or offset + n > len(buf) \
+                    or shape != [dst.shape[0], len(cache.pages), *dst.shape[2:]]:
+                raise ValueError(f"malformed KV payload tensor {name} {dtype} {shape}")
+            if n:
+                t = torch.frombuffer(buf, dtype=torch.uint8, count=n, offset=offset)
+                dst[:, pages] = t.view(dst.dtype).view(shape).to(pool.device)
+            got.add(name)
+            offset += n
+        need = {n for n in _FIELDS if getattr(pool, n) is not None} | ({"kmin", "kmax"} if pool.track_pages else set())
+        if not need <= got:
+            raise ValueError(f"KV payload lacks {sorted(need - got)}")
+    except Exception:
+        cache.free()
+        raise
+    cache.length = header["length"]
+    return cache
 
 
+def _recv_exact(sock: socket.socket, n: int) -> bytearray:
+    buf = bytearray(n)
+    view, got = memoryview(buf), 0
+    while got < n:
+        k = sock.recv_into(view[got:], n - got)
+        if k == 0:
+            raise ConnectionError("peer closed the connection mid-message")
+        got += k
+    return buf
 
-def serialize_kv_block_svd(
-    k_tensor: torch.Tensor,
-    v_tensor: torch.Tensor,
-    u_proj: torch.Tensor,
-    token_ids: Optional[List[int]] = None,
-) -> bytes:
-    """Convenience functional wrapper for SVDNetworkKVWireCodec.encode."""
-    return SVDNetworkKVWireCodec.encode(k_tensor, v_tensor, u_proj, token_ids)
+
+def send_msg(sock: socket.socket, header: Dict, blob: bytes = b"") -> None:
+    h = json.dumps(header).encode()
+    sock.sendall(struct.pack("<Q", len(h)) + h + struct.pack("<Q", len(blob)))
+    sock.sendall(blob)
 
 
-def deserialize_kv_block_svd(
-    payload: bytes,
-    u_proj: torch.Tensor,
-    device: torch.device = torch.device("cpu"),
-) -> Tuple[torch.Tensor, torch.Tensor, List[int]]:
-    """Convenience functional wrapper for SVDNetworkKVWireCodec.decode."""
-    return SVDNetworkKVWireCodec.decode(payload, u_proj, device)
+def recv_msg(sock: socket.socket, max_header: int = 1 << 24, max_blob: int = 1 << 40) -> Tuple[dict, bytearray]:
+    """One message; a header or blob over its limit is refused before anything is allocated for it."""
+    (n,) = struct.unpack("<Q", _recv_exact(sock, 8))
+    if n > max_header:
+        raise ValueError(f"message header of {n} bytes")
+    header = json.loads(_recv_exact(sock, n))
+    (m,) = struct.unpack("<Q", _recv_exact(sock, 8))
+    if m > max_blob:
+        raise ValueError(f"message blob of {m} bytes")
+    return header, _recv_exact(sock, m)

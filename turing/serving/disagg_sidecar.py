@@ -1,105 +1,109 @@
 """
-P/D Disaggregation Sidecar for llm-d Router Integration.
-Handles request header inspection and cross-pod prefill/decode delegation when
-participating in llm-d disaggregated inference topologies.
+Prefill/decode disaggregation: one process prefills prompts, another decodes, and the request's KV pages travel
+between them over TCP (turing/serving/kv_transfer.py).
+
+- Prefill side: `PrefillWorker(engine).serve_forever()` listens on a port. Per request it runs the prompt through the
+  model into a fresh cache (in the engine's prefill chunks), samples the first token with the request's settings,
+  sends back the token and the cache's pages, and frees them.
+- Decode side: `add_remote_prefilled_request(engine, (host, port), prompt, ...)` asks a prefill worker for the
+  prompt, imports the pages into this engine's pool, and admits the request to continue after the first token:
+  the engine's output is every token after it. Greedy output is identical to one engine doing both.
+
+Both engines must run the same model with the same kv_cache_dtype (import_kv checks the pools agree).
 """
 
-import json
-import time
-from typing import Optional, Dict, Any
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
-import urllib.request
-import urllib.error
+import asyncio
+import socket
+from typing import List, Optional, Set, Tuple
+
+import torch
+
+from ..core.kv_cache import KVCache
+from .engine import AsyncSequenceRequest, ContinuousBatchEngine
+from .kv_transfer import export_kv, import_kv, recv_msg, send_msg
+
+__all__ = ["PrefillWorker", "remote_prefill", "add_remote_prefilled_request"]
 
 
-class DisaggRoutingCoordinator:
-    """
-    Coordinates prefill-decode disaggregation for Turing Engine pods.
-    Extracts x-prefiller-host-port from llm-d EPP, delegates prompt prefill to the
-    designated prefill worker, and drives local decoding on the target decode worker.
-    """
+class PrefillWorker:
+    """Answers prefill requests on a TCP port, one connection at a time; a connection may send several requests.
+    Request header: {"prompt": [ids], "temperature", "top_k", "top_p"}; reply: {"token": first token} plus the KV
+    payload header under "kv" and its blob, or {"error": message}. The worker owns its engine's model and pool: do
+    not run the engine's scheduler loop in the same process."""
 
-    def __init__(self, local_engine_port: int = 8000, timeout_s: float = 30.0):
-        self.local_engine_port = local_engine_port
-        self.timeout_s = timeout_s
+    def __init__(self, engine: ContinuousBatchEngine, host: str = "127.0.0.1", port: int = 0):
+        self.engine = engine
+        self.sock = socket.create_server((host, port))
+        self.port = self.sock.getsockname()[1]
 
-    def should_disaggregate(self, headers: Dict[str, str]) -> bool:
-        return "x-prefiller-host-port" in headers or "X-Prefiller-Host-Port" in headers
-
-    def extract_prefiller_endpoint(self, headers: Dict[str, str]) -> Optional[str]:
-        return headers.get("x-prefiller-host-port") or headers.get("X-Prefiller-Host-Port")
-
-    def execute_remote_prefill(
-        self,
-        prefiller_host_port: str,
-        payload: Dict[str, Any],
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Sends truncated prefill request (max_tokens=1) to the designated prefill pod.
-        """
-        prefill_payload = dict(payload)
-        prefill_payload["max_tokens"] = 1
-        prefill_payload["stream"] = False
-
-        req_data = json.dumps(prefill_payload).encode("utf-8")
-        url = f"http://{prefiller_host_port}/v1/completions"
-
-        req_headers = {"Content-Type": "application/json"}
-        if headers:
-            for k, v in headers.items():
-                if k.lower().startswith("x-turing-"):
-                    req_headers[k] = v
-
-        req = urllib.request.Request(url, data=req_data, headers=req_headers, method="POST")
+    def prefill(self, prompt: List[int], temperature: float = 0.0, top_k: int = 50,
+                top_p: float = 1.0) -> Tuple[int, dict, bytes]:
+        eng = self.engine
+        if not prompt or not all(isinstance(t, int) and 0 <= t < eng.model_config.vocab_size for t in prompt):
+            raise ValueError("prompt must be a non-empty list of token ids in the vocabulary")
+        cache = KVCache(eng.kv_pool)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_s) as response:
-                resp_bytes = response.read()
-                return json.loads(resp_bytes.decode("utf-8"))
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"Failed to delegate prefill to {prefiller_host_port}: {e}")
+            with torch.inference_mode():
+                for s in range(0, len(prompt), eng.prefill_chunk_size):
+                    ids = torch.tensor([prompt[s:s + eng.prefill_chunk_size]], dtype=torch.long, device=eng.device)
+                    logits, cache = eng.model(ids, past_key_values=cache, logits_to_keep=1)
+                req = AsyncSequenceRequest(prompt, temperature=temperature, top_k=top_k, top_p=top_p)
+                token = eng._sample([req], logits[:, -1])[0]
+            header, blob = export_kv(cache)
+        finally:
+            cache.free()
+        return token, header, blob
+
+    def handle(self, conn: socket.socket) -> None:
+        while True:
+            try:
+                msg, _ = recv_msg(conn, max_header=1 << 26, max_blob=0)  # a request is a prompt, no blob
+            except (ConnectionError, ValueError):  # the client is done, or sent something that is not a request
+                return
+            try:
+                token, header, blob = self.prefill(msg["prompt"], float(msg.get("temperature", 0.0)),
+                                                   int(msg.get("top_k", 50)), float(msg.get("top_p", 1.0)))
+            except Exception as e:  # a bad request or a full pool: report it, keep serving
+                send_msg(conn, {"error": f"{type(e).__name__}: {e}"})
+                continue
+            send_msg(conn, {"token": token, "kv": header}, blob)
+
+    def serve_forever(self) -> None:
+        while True:
+            conn, _ = self.sock.accept()
+            with conn:
+                self.handle(conn)
 
 
-def create_disagg_proxy_app(coordinator: DisaggRoutingCoordinator) -> FastAPI:
-    """Creates FastAPI proxy app for disaggregated sidecar deployment."""
-    app = FastAPI(title="Turing Disaggregation Proxy Sidecar", version="0.3.5")
+def remote_prefill(addr: Tuple[str, int], prompt: List[int], temperature: float = 0.0, top_k: int = 50,
+                   top_p: float = 1.0, timeout: float = 300.0) -> Tuple[int, dict, bytes]:
+    """(first token, KV header, KV blob) of a prompt from the PrefillWorker at addr."""
+    with socket.create_connection(addr, timeout=timeout) as sock:
+        send_msg(sock, {"prompt": list(prompt), "temperature": temperature, "top_k": top_k, "top_p": top_p})
+        reply, blob = recv_msg(sock)
+    if "error" in reply:
+        raise RuntimeError(f"prefill worker {addr[0]}:{addr[1]}: {reply['error']}")
+    return reply["token"], reply["kv"], blob
 
 
-
-
-
-
-
-
-    @app.get("/health")
-    async def health():
-        return {"status": "healthy", "mode": "disagg_sidecar"}
-
-    @app.post("/v1/completions")
-    async def proxy_completions(request: Request):
-        headers_dict = dict(request.headers)
-        body = await request.json()
-
-        if coordinator.should_disaggregate(headers_dict):
-            prefiller = coordinator.extract_prefiller_endpoint(headers_dict)
-            if prefiller:
-                coordinator.execute_remote_prefill(prefiller, body, headers_dict)
-
-        # Forward to local decode engine
-        local_url = f"http://127.0.0.1:{coordinator.local_engine_port}/v1/completions"
-        req_data = json.dumps(body).encode("utf-8")
-        fwd_headers = {"Content-Type": "application/json"}
-        for k, v in headers_dict.items():
-            if k.lower().startswith("x-turing-"):
-                fwd_headers[k] = v
-
-        req = urllib.request.Request(local_url, data=req_data, headers=fwd_headers, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=coordinator.timeout_s) as response:
-                resp_data = response.read()
-                return JSONResponse(content=json.loads(resp_data.decode("utf-8")))
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Local engine error: {e}")
-
-    return app
+async def add_remote_prefilled_request(engine: ContinuousBatchEngine, addr: Tuple[str, int], prompt: List[int],
+                                       max_new_tokens: int = 32, temperature: float = 0.0, top_k: int = 50,
+                                       top_p: float = 1.0, stop_token_ids: Optional[Set[int]] = None,
+                                       ) -> Tuple[int, Optional[AsyncSequenceRequest]]:
+    """Prefill `prompt` on the worker at addr and continue it on `engine`. Returns the first token and the engine
+    request producing the tokens after it, or None when the first token already ends the request (it is a stop token,
+    which is not part of the output, or max_new_tokens is 1)."""
+    if engine.prefix_cache is not None:
+        # the engine would index the imported pages under the continuation's tokens alone
+        raise ValueError("a decode engine for remote prefill needs prefix_caching=False")
+    token, header, blob = await asyncio.to_thread(remote_prefill, addr, prompt, temperature, top_k, top_p)
+    stop = engine.eos_token_ids if stop_token_ids is None else set(stop_token_ids)
+    if token in stop or max_new_tokens <= 1:
+        return token, None
+    cache = import_kv(engine.kv_pool, header, blob)
+    try:  # the request's cache shares the imported pages copy-on-write; ours is freed below
+        req = await engine.add_request([token], max_new_tokens=max_new_tokens - 1, temperature=temperature,
+                                       top_k=top_k, top_p=top_p, stop_token_ids=stop, prefix_kv=cache)
+    finally:
+        cache.free()
+    return token, req
