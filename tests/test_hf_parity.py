@@ -98,6 +98,8 @@ def _hf_incremental(hf, ids):
 def _tiny(arch):
     torch.manual_seed(0)
     model = ARCHS[arch]().eval()
+    if model.config.model_type.startswith("gemma"):  # HF's SDPA path skips Gemma 2's attention soft-capping
+        model.config._attn_implementation = "eager"
     with torch.no_grad():  # HF initialises norm weights to 1 (Gemma: 0) and biases to 0, hiding either being dropped
         for name, p in model.named_parameters():
             if "norm" in name and p.dim() == 1:
@@ -172,3 +174,15 @@ def test_pruning_keeps_contiguous_channels_and_changes_only_the_ffn():
 def test_loader_families_and_registry_list_the_same_architectures():
     from turing.models.architecture_registry import SUPPORTED
     assert set(FAMILIES) == set(SUPPORTED)
+
+
+@torch.no_grad()
+def test_gemma2_soft_capping_is_applied_when_scores_are_large():
+    """Large attention scores make soft-capping matter: the converted model follows HF's eager (correct) attention."""
+    hf = _tiny("gemma2")
+    for n, p in hf.named_parameters():
+        if "q_proj" in n:
+            p.mul_(6)
+    ids = torch.randint(0, V, (1, 12), generator=torch.Generator().manual_seed(4))
+    model = RealHuggingFaceLoader.convert_hf_model(hf)
+    torch.testing.assert_close(model(ids)[0], hf(ids).logits, atol=1e-3, rtol=0)

@@ -372,10 +372,10 @@ class DecodeGraphs:
         # frees its KV pool at once, and a deep-copied model gets graphs of its own
         self.graphs = {}  # bucket -> (key, graph, ids, rows, logits)
 
-    def eligible(self, model: "SubspaceCausalLM", caches: List[KVCache], tenant_id) -> bool:
+    def eligible(self, model: "SubspaceCausalLM", caches: List[KVCache], lora: bool) -> bool:
         cfg, pool = model.config, caches[0].pool
         return (cfg.cuda_graphs and pool.device.type == "cuda" and len(caches) <= self.BUCKETS[-1]
-                and tenant_id is None and not pool.track_pages and not torch.is_grad_enabled()
+                and not lora and not pool.track_pages and not torch.is_grad_enabled()
                 and cfg.num_experts == 0  # MoE routing picks experts on the host
                 and pool_decode_supported(pool, model.embed_tokens.weight))
 
@@ -421,12 +421,12 @@ class SubspaceCausalLM(nn.Module):
     """
     End-to-end Autoregressive Subspace Causal Language Model with stateful generation.
     """
-    def __init__(self, config: ModelConfig, adapter_manager: Optional[Any] = None):
+    def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
         self.vocab_size = config.vocab_size
         self.hidden_dim = config.hidden_dim
-        self.adapter_manager = adapter_manager
+        self.adapter_names: Tuple[str, ...] = ()  # LoRA adapters loaded by turing.models.adapters.load_lora_adapter
 
         emb_dim = config.embed_proj_dim or config.hidden_dim
         self.embed_tokens = nn.Embedding(config.vocab_size, emb_dim)
@@ -453,12 +453,24 @@ class SubspaceCausalLM(nn.Module):
         input_ids: torch.Tensor,
         past_key_values: Optional[Union[KVCache, List[KVCache]]] = None,
         start_pos: int = 0,
-        tenant_id: Optional[str] = None,
+        adapters: Optional[List[Optional[str]]] = None,
         logits_to_keep: int = 0
     ) -> Tuple[torch.Tensor, Union[KVCache, List[KVCache]]]:
         """past_key_values: None or a KVCache (filled in place and returned), or a list of KVCache, one per row of a
         [B, 1] decode step (batched decode across requests, returned as given). start_pos is taken from the cache.
-        logits_to_keep > 0 computes logits for the last that many positions only (a prefill needs one)."""
+        logits_to_keep > 0 computes logits for the last that many positions only (a prefill needs one).
+        adapters: a LoRA adapter name (or None for the base model) per row of input_ids."""
+        lora = adapters is not None and any(adapters)
+        if lora:
+            from .adapters import set_active_adapters
+            set_active_adapters(self, list(adapters))
+        try:
+            return self._forward(input_ids, past_key_values, logits_to_keep, lora)
+        finally:
+            if lora:
+                set_active_adapters(self, None)
+
+    def _forward(self, input_ids, past_key_values, logits_to_keep, lora):
         batch, seq_len = input_ids.shape
         cache, step = None, None
         if isinstance(past_key_values, list):
@@ -479,7 +491,7 @@ class SubspaceCausalLM(nn.Module):
         if step is not None:
             for c in step:
                 c.reserve(c.length + 1)
-            if self._graphs.eligible(self, step, tenant_id):
+            if self._graphs.eligible(self, step, lora):
                 logits = self._graphs.run(self, input_ids, step)
                 for c in step:
                     c.length += 1
@@ -491,7 +503,7 @@ class SubspaceCausalLM(nn.Module):
             start_pos = cache.length
         else:
             start_pos = 0
-        logits = self._body(input_ids, start_pos, cache, step, tenant_id, logits_to_keep)
+        logits = self._body(input_ids, start_pos, cache, step, logits_to_keep)
         if step is not None:
             for c in step.caches:
                 c.length += 1
@@ -499,7 +511,7 @@ class SubspaceCausalLM(nn.Module):
             cache.length += seq_len
         return logits, returned
 
-    def _body(self, input_ids, start_pos, cache, step, tenant_id=None, logits_to_keep: int = 0) -> torch.Tensor:
+    def _body(self, input_ids, start_pos, cache, step, logits_to_keep: int = 0) -> torch.Tensor:
         """Embedding, layers, norm and head for one forward (what a CUDA graph captures for a decode step)."""
         cfg = self.config
         hidden_states = self.embed_tokens(input_ids)
@@ -529,10 +541,6 @@ class SubspaceCausalLM(nn.Module):
             # Apply deep-to-shallow recurrence at the penultimate layer if state captured
             if self.config.enable_recirculation and i == len(self.layers) - 2 and shallow_state is not None:
                 hidden_states = self.recirculation(hidden_states, shallow_state)
-
-        # Apply multi-tenant dynamic LoRA adapter if active
-        if tenant_id is not None and self.adapter_manager is not None:
-            hidden_states = self.adapter_manager.forward_tenant(hidden_states, tenant_id)
 
         if logits_to_keep:
             hidden_states = hidden_states[:, -logits_to_keep:]
@@ -568,7 +576,7 @@ class SubspaceCausalLM(nn.Module):
         max_new_tokens: int = 32,
         temperature: float = 0.7,
         top_k: int = 50,
-        tenant_id: Optional[str] = None
+        adapter: Optional[str] = None
     ) -> List[int]:
         """
         Stateful autoregressive token generation loop with optional multi-tenant LoRA routing.
@@ -584,8 +592,7 @@ class SubspaceCausalLM(nn.Module):
             logits, past_kv = self.forward(
                 cur_input,
                 past_key_values=past_kv,
-                start_pos=start_pos,
-                tenant_id=tenant_id
+                adapters=[adapter] if adapter else None
             )
 
             next_token_logits = logits[:, -1, :]

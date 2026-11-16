@@ -6,7 +6,7 @@ from .causal_lm import SubspaceCausalLM, SubspaceDecoderLayer, SubspaceAttention
 from .tensor_parallel import ColumnParallelLinear, RowParallelLinear, init_tensor_parallel
 from .registry import MODEL_REGISTRY, get_model_config
 from .converter import convert_checkpoint
-from .adapters import UncertaintyKnowledgeGate, TenantLoRAAdapter
+from .adapters import LoRALinear, load_lora_adapter
 from .vllm_adapter import VLLMCustomModelRunnerHarness, VLLMSubspaceQuantWrapper
 from .gguf_loader import GGUFModelLoader, GGUFReader, GGUFDequantizer
 from .gguf_tokenizer import GGUFTokenizer
@@ -23,8 +23,8 @@ __all__ = [
     "MODEL_REGISTRY",
     "get_model_config",
     "convert_checkpoint",
-    "UncertaintyKnowledgeGate",
-    "TenantLoRAAdapter",
+    "LoRALinear",
+    "load_lora_adapter",
     "VLLMCustomModelRunnerHarness",
     "VLLMSubspaceQuantWrapper",
     "GGUFModelLoader",

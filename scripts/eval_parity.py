@@ -42,9 +42,9 @@ def run(name, device, dtype_name, T):
     tok = AutoTokenizer.from_pretrained(name)
     ids = window(tok, T).to(dev)
     t0 = time.perf_counter()
-    # eager attention on MPS: its SDPA reuses one cached graph per shape with the first call's scale (PyTorch 2.9)
-    hf = AutoModelForCausalLM.from_pretrained(name, dtype=dtype, **({"attn_implementation": "eager"} if dev.type == "mps"
-                                                                     else {})).to(dev).eval()
+    # eager attention for the reference: HF's SDPA path skips Gemma 2's attention soft-capping, and PyTorch 2.9's MPS
+    # SDPA reuses one cached graph per shape with the first call's scale
+    hf = AutoModelForCausalLM.from_pretrained(name, dtype=dtype, attn_implementation="eager").to(dev).eval()
     ref = hf(ids).logits.float()
     params = sum(p.numel() for p in hf.parameters())
     model = RealHuggingFaceLoader.convert_hf_model(hf, device=device, dtype=dtype)
