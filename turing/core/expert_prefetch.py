@@ -79,6 +79,8 @@ class OneLayerAheadExpertPrefetcher:
 
             # Missing: allocate or evict slot in GPU LRU/LFRU cache
             slot_idx, _ = self.expert_cache.allocate_or_evict_slot(next_layer_idx, exp_id)
+            if slot_idx is None:  # LFRU gate kept the resident expert: nothing to prefetch into
+                continue
             scheduled.append(exp_id)
 
             # Perform asynchronous copy if host bank or weight provider available

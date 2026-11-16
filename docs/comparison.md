@@ -127,8 +127,8 @@ This document provides a comprehensive technical and architectural comparison be
 * **vLLM & SGLang**: Default safetensors loaders rely on sequential file reads and demand-paging mmap, taking 5–15 seconds to load 70B models and causing severe latency spikes on serverless scale-from-zero.
 * **Ollama & llama.cpp**: Read large GGUF files from disk sequentially into CPU memory before allocating GPU layers.
 * **Turing Engine**:
-  - Unifies a **6-Tier High-Velocity Storage Hierarchy** (`TuringIngestEngine`): Linux `io_uring` multi-queue rings ($3.50\text{ GB/s}$), contiguous kernel DMA readahead (`MADV_WILLNEED`, $4.83\times$ faster), and NVIDIA GPUDirect Storage (`cuFile` PCIe DMA).
-  - Implements **Layer Pipelining & Graph Warmup**: Streams Layer 0 directly into VRAM to begin CUDA warmup while later layers are still in flight, achieving **$45.20\text{ ms}$ cold start Time-to-Ready** on physical NVMe.
+  - Unifies a **6-Tier High-Velocity Storage Hierarchy** (`TuringIngestEngine`): a parallel `pread` reader with 1 MiB requests and 64 in flight (5.78 GB/s cold on an M4 Pro SSD), kernel readahead (`MADV_WILLNEED`, 2.25 GB/s cold vs 0.75 GB/s demand paging), and an NVIDIA GPUDirect Storage (`cuFile`) path that is not measured yet. See [benchmarks §19](benchmarks.md#19-storage-ingestion-ladder-measured-cold-apple-m4-pro-ssd).
+  - Implements **Layer Pipelining & Graph Warmup**: Streams Layer 0 directly into VRAM to begin CUDA warmup while later layers are still in flight (cold-start time not measured yet).
 
 ---
 

@@ -410,30 +410,38 @@ Measurements from `scripts/benchmark_traffic_and_spec.py` on **GCP NVIDIA L4 GPU
 
 ---
 
-## 19. 6-Tier Storage & Cold Ingestion Speed Ladder (Physical GCP & Mac Benchmarks)
+## 19. Storage Ingestion Ladder (measured cold, Apple M4 Pro SSD)
 
-Empirical measurements from `scripts/benchmark_ingest_ladder_all_tiers.py` across physical **Google Cloud NVIDIA L4 GPU VM NVMe SSD** (3.67GB Qwen2.5-7B shard) and **Apple Silicon Unified Memory**:
+`scripts/benchmark_ingest_ladder_all_tiers.py` reads a 2048 MiB file laid out as tensor-sized segments (one 7B-layer pattern repeated, 42 segments) into host memory. Before every cold run the file is written fresh through an `F_NOCACHE` descriptor (macOS) or dropped with `posix_fadvise(POSIX_FADV_DONTNEED)` (Linux), and `mincore` confirms that none of it is in the file cache; the warm row reads it again once it is fully cached. GB/s is bytes / wall time with 1 GB = 10⁹ bytes; ± is the standard error over n runs. The machine was shared with other jobs (load average about 10), so the spread is wide. Results: `results_ingest_ladder.json`.
 
-| Storage Ingestion Tier | Primary Systems Technology | Physical Throughput | Ingestion Latency (3.67GB) | Measured Speedup |
-| :--- | :--- | :---: | :---: | :---: |
-| **Tier 0: Naive Demand-Paging** | Unadvised `mmap` (4KB synchronous page faults) | $0.41\text{--}1.94\text{ GB/s}$ | $1,892.08\text{--}8,925.73\text{ ms}$ | $1.00\times$ (Baseline) |
-| **Tier 1: Kernel Readahead** | `madvise(MADV_WILLNEED)` contiguous 2MB/64MB DMA | **$1.99\text{ GB/s}$** | **$1,844.98\text{ ms}$** | **$4.83\times$ FASTER** |
-| **Tier 2: Bare-Metal `io_uring`** | C++ multi-queue submission ring (`NativeAsyncRingReader`) | **$2.56\text{--}3.50\text{ GB/s}$** | **$1,050.00\text{ ms}$** | **$8.50\times$ FASTER** |
-| **Tier 3: Subspace Wire Compression** | $-75\%$ physical disk payload (`.tgate4` W4A16/INT8) | **$3.13\text{--}10.25\text{ GB/s}$ (eff.)** | **$1,172.98\text{ ms}$** | **$7.61\times$ FASTER** |
-| **Tier 4: GPUDirect Storage + Pipelining** | Direct NVMe-to-VRAM PCIe DMA (`cuFile`) & Layer Pipelining | **$17.09\text{--}81.29\text{ GB/s}$ (eff.)** | **$45.20\text{ ms}$** | **$41.86\times$ FASTER** |
-| **Tier 5: Warm / Apple Unified Memory** | In-VRAM / Apple Silicon Unified Memory Bus | **$812.02\text{--}87,487\text{ GB/s}$** | **$0.042\text{--}0.308\text{ ms}$** | **$>45,000\times$ FASTER** |
+| Row | Cache | GB/s | ms | n |
+| :--- | :---: | ---: | ---: | :---: |
+| Tier 0: mmap demand paging | cold | 0.75 ± 0.01 | 2,874 | 3 |
+| Tier 1: mmap + MADV_WILLNEED | cold | 2.25 ± 0.23 | 977 | 3 |
+| Tier 2: ring reader, read_segments_parallel (bytes) | cold | 3.28 ± 0.71 | 745 | 3 |
+| Tier 2: ring reader, read_segments_into (buffer) | cold | 4.44 ± 0.43 | 493 | 3 |
+| Tier 2: ring reader, read_segments_into, queue_depth=1 | cold | 4.37 ± 0.56 | 510 | 3 |
+| Tier 2: ring reader, read_segments_into, queue_depth=8 | cold | 5.26 ± 0.41 | 413 | 3 |
+| Tier 5: ring reader, file in page cache (warm) | warm | 51.29 ± 1.36 | 42 | 3 |
+| Tier 3: .tgate4 compressed container | — | not measured | — | — |
+| Tier 4: GPUDirect Storage + layer pipelining | — | not measured | — | — |
 
-### 🛠️ Architecture & Systems Highlights:
-1. **Tier 1 (`MADV_WILLNEED`)**: Eliminates demand-paging overhead, delivering a verified $4.83\times$ speedup on cold NVMe disks without requiring root drivers.
-2. **Tier 2 (`io_uring` Ring)**: C++ multi-worker ring reader (`csrc/turing_io_uring.hpp`) bypasses Python GIL and object allocation overhead.
-3. **Tier 3 (Subspace Compression)**: Slicing on-disk parameters down to INT4 / SVD INT8 active bases shrinks a 140GB 70B model to 35GB (and 16GB draft layers), slashing physical disk transit time by $75\%$.
-4. **Tier 4 (GPUDirect Storage `cuFile` & Layer Pipelining)**: Bypasses host CPU DRAM entirely, streaming NVMe bytes directly into GPU VRAM over PCIe lanes while Layer 0 begins CUDA graph warmup.
-5. **Tier 5 (Apple Unified Memory)**: Delivers instant sub-millisecond Time-to-Ready ($0.308\text{ ms}$) on Mac Studio with zero PCIe bottleneck.
+The earlier version of this table was not a cold measurement: it divided the whole file size by the time to read 10 tensors, derived Tier 3 as Tier 2 time × 0.25, hardcoded Tier 4 at 45.2 ms, and floored Tier 5 at 0.042 ms. Tier 3 has no loader that reads a `.tgate4` file end to end, and Tier 4 needs CUDA with cuFile, so neither is measured here. On this sequential layout queue depth 1 already reaches about 4.4 GB/s (kernel readahead helps sequential 1 MiB reads), which suggests most of the gain over the old reader below comes from capping requests at 1 MiB rather than from depth; random reads depend on depth far more (cift F1 on the same SSD: 1 MiB random reads went from 2.4 GB/s with 1 in flight to 6.0 GB/s with 64).
 
-### Reproduce on Your Hardware:
+### Ring reader before and after (cold, interleaved A/B)
+
+`NativeAsyncRingReader` used to give each of 8 threads a run of whole tensors to `pread`, and ignored `queue_depth`. It now splits reads into requests of at most 1 MiB and keeps up to `queue_depth` (default 64) in flight, which is what this SSD needs to reach its bandwidth. `scripts/benchmark_ring_reader_ab.py` alternates the two builds in child processes on the same cold 2048 MiB file, calling `read_segments_parallel`. Results: `results_ring_reader_ab_mps.json`.
+
+| Build | GB/s (mean ± se) | GB/s (median) | ms | n |
+| :--- | ---: | ---: | ---: | :---: |
+| f936008 | 2.22 ± 0.35 | 2.33 | 1,225 | 8 |
+| current | 5.78 ± 0.41 | 6.23 | 393 | 8 |
+
+### Reproduce on your hardware
 ```bash
-# Run full 6-tier benchmark ladder:
-python scripts/benchmark_ingest_ladder_all_tiers.py
+python scripts/benchmark_ingest_ladder_all_tiers.py --size-mib 2048 --repeats 3
+git archive f936008 | tar -x -C /tmp/base && (cd /tmp/base && python setup.py build_ext --inplace)
+python scripts/benchmark_ring_reader_ab.py --baseline /tmp/base --baseline-label f936008 --pairs 8
 ```
 
 ---

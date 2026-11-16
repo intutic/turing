@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <cstdint>
 #include <algorithm>
+#include <iterator>
 
 namespace turing {
 
@@ -213,6 +214,14 @@ public:
         evicted_layer = -1;
         evicted_expert = -1;
 
+        // A key missing from the cache keeps the heat of its earlier refused requests, so a key that keeps
+        // coming back clears the hysteresis gate instead of being refused forever once the cache is full.
+        auto ghost = ghost_heat_.find(key);
+        if (ghost != ghost_heat_.end()) {
+            candidate_heat += ghost->second;
+            ghost_heat_.erase(ghost);
+        }
+
         // 1. Check for free slots
         if (!free_slots_.empty()) {
             int slot = free_slots_.back();
@@ -256,6 +265,7 @@ public:
             uint32_t required_heat = static_cast<uint32_t>(static_cast<double>(victim_heat) * (1.0 + hysteresis_threshold_)) + hysteresis_min_access_;
             if (candidate_heat < required_heat && victim_heat > 0) {
                 // Reject promotion; victim remains hot
+                ghost_heat_[key] = candidate_heat;
                 return -1;
             }
         }
@@ -309,6 +319,10 @@ public:
         for (auto& slot : slots_) {
             slot.heat = static_cast<uint32_t>(static_cast<double>(slot.heat) * factor);
         }
+        for (auto it = ghost_heat_.begin(); it != ghost_heat_.end();) {
+            it->second = static_cast<uint32_t>(static_cast<double>(it->second) * factor);
+            it = (it->second == 0) ? ghost_heat_.erase(it) : std::next(it);
+        }
     }
 
     float get_hit_rate() const {
@@ -336,6 +350,8 @@ private:
     int hysteresis_min_access_;
     std::vector<LFRUSlotEntry> slots_;
     std::unordered_map<uint64_t, int> key_to_slot_;
+    // shortcut: one entry per refused key, pruned only by decay(); bounded by layers x experts in practice.
+    std::unordered_map<uint64_t, uint32_t> ghost_heat_;
     std::vector<int> free_slots_;
 };
 

@@ -1548,10 +1548,39 @@ PYBIND11_MODULE(turing_csrc, m) {
                 dest_offsets[i] = total_bytes;
                 total_bytes += byte_lengths[i];
             }
-            std::vector<uint8_t> buffer(total_bytes);
-            self.read_segments_parallel(filepath, file_offsets, byte_lengths, dest_offsets, buffer.data());
-            return py::bytes(reinterpret_cast<const char*>(buffer.data()), total_bytes);
+            // Read straight into a fresh bytes object (no zero-filled staging vector, no second copy).
+            PyObject* obj = PyBytes_FromStringAndSize(nullptr, static_cast<Py_ssize_t>(total_bytes));
+            if (!obj) throw py::error_already_set();
+            py::bytes result = py::reinterpret_steal<py::bytes>(obj);
+            uint8_t* dest = reinterpret_cast<uint8_t*>(PyBytes_AS_STRING(obj));
+            {
+                py::gil_scoped_release release;
+                self.read_segments_parallel(filepath, file_offsets, byte_lengths, dest_offsets, dest);
+            }
+            return result;
         }, py::arg("filepath"), py::arg("file_offsets"), py::arg("byte_lengths"))
+        .def("read_segments_into", [](turing::NativeAsyncRingReader& self, const std::string& filepath,
+                                      const std::vector<uint64_t>& file_offsets,
+                                      const std::vector<uint64_t>& byte_lengths, py::buffer out) {
+            // Segments land back to back in `out` (any writable C-contiguous buffer), with no extra copy.
+            py::buffer_info info = out.request(true);
+            if (info.ndim > 0 && info.strides.back() != info.itemsize) {
+                throw std::invalid_argument("out must be C-contiguous");
+            }
+            uint64_t capacity = static_cast<uint64_t>(info.size) * static_cast<uint64_t>(info.itemsize);
+            std::vector<uint64_t> dest_offsets(file_offsets.size());
+            uint64_t total_bytes = 0;
+            for (size_t i = 0; i < file_offsets.size() && i < byte_lengths.size(); ++i) {
+                dest_offsets[i] = total_bytes;
+                total_bytes += byte_lengths[i];
+            }
+            if (total_bytes > capacity) {
+                throw std::invalid_argument("out is smaller than the sum of byte_lengths");
+            }
+            py::gil_scoped_release release;
+            self.read_segments_parallel(filepath, file_offsets, byte_lengths, dest_offsets, static_cast<uint8_t*>(info.ptr));
+            return total_bytes;
+        }, py::arg("filepath"), py::arg("file_offsets"), py::arg("byte_lengths"), py::arg("out"))
         .def_property_readonly("num_workers", &turing::NativeAsyncRingReader::get_num_workers)
         .def_property_readonly("queue_depth", &turing::NativeAsyncRingReader::get_queue_depth);
 

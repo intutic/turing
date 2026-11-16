@@ -57,3 +57,17 @@ def test_native_lfru_cache_hysteresis_rejection():
     # Cold candidate with heat=2 tries to evict without force_promote
     s_rejected, _, _ = cache.allocate_or_evict_slot(0, 3, candidate_heat=2, force_promote=False)
     assert s_rejected == -1  # Rejected by hysteresis gate
+
+
+def test_native_lfru_cache_keeps_admitting_once_full():
+    """A full cache must not refuse every default-heat miss forever: repeated misses accumulate heat."""
+    cache = turing_csrc.LFRUExpertCacheFast(num_slots=2)
+    cache.allocate_or_evict_slot(0, 1)
+    cache.allocate_or_evict_slot(0, 2)
+    for e in range(3, 6):
+        tries = 0
+        while cache.allocate_or_evict_slot(0, e)[0] < 0:
+            tries += 1
+            assert tries < 16, f"expert {e} was never admitted"
+        assert cache.contains(0, e)
+        assert cache.used_slots == 2

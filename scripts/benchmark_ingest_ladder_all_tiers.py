@@ -1,192 +1,219 @@
 #!/usr/bin/env python3
 """
-Comprehensive 6-Tier Ingestion Speed Ladder Benchmark (Turing Engine).
-Measures and compares physical throughput, Time-to-Ready, and page-fault behaviors across all 6 storage tiers:
-- Tier 0: Naive Demand-Paging mmap (4KB faults)
-- Tier 1: Kernel Readahead (MADV_WILLNEED async DMA)
-- Tier 2: Bare-Metal C++ io_uring / pread multi-queue ring
-- Tier 3: Subspace Wire Compression (-75% bytes)
-- Tier 4: NVIDIA GPUDirect Storage (cuFile GDS) + Layer Pipelining
-- Tier 5: Warm Page Cache / Apple Unified Memory
-"""
+Storage ingestion ladder, measured cold.
 
+Every cold row reads a file none of which is in the OS file cache, checked with mincore before and after:
+- macOS: the file is written fresh through an F_NOCACHE descriptor before each run (a new inode has no cached pages).
+- Linux: the file is written, fsynced, then dropped with posix_fadvise(POSIX_FADV_DONTNEED).
+A run is reported only if the resident fraction before it is below 1%.
+
+Rows, each reading the same tensor-shaped segments of the file into host memory:
+- Tier 0: plain mmap, copied page by page (demand paging, default kernel readahead)
+- Tier 1: mmap + madvise(MADV_WILLNEED), then copied
+- Tier 2: NativeAsyncRingReader.read_segments_parallel (returns bytes; available in every build)
+- Tier 2: NativeAsyncRingReader.read_segments_into (reads straight into a caller buffer; new builds only),
+  also at queue depths 1 and 8
+- Tier 5: Tier 2 into a buffer again, with the file fully in the page cache (warm)
+Tier 3 (.tgate4 compressed container) and Tier 4 (GPUDirect Storage) are reported as not measured, with the reason.
+
+python scripts/benchmark_ingest_ladder_all_tiers.py [--size-mib 1024] [--repeats 3] [--queue-depth 64] [--out FILE]
+"""
+import argparse
+import ctypes
+import json
+import mmap
 import os
+import platform
+import statistics
 import sys
 import time
-import mmap
-import glob
-import json
-import struct
-import torch
+
 import numpy as np
-from typing import Dict, Any, List
 
-from turing.models.ingest import TuringIngestEngine, StorageTier
-from turing.models.safetensors_mmap import SafetensorsMmapReader
-from turing.kernels.gds_loader import PipelinedLayerLoader
+PAGE = mmap.PAGESIZE
+# One transformer layer of a 7B model in bf16 (q, k, v, o, gate, up, down, two norms), in bytes.
+LAYER = [28 << 20, 4 << 20, 4 << 20, 28 << 20, 130 << 20, 130 << 20, 130 << 20, 7 << 10, 7 << 10]
 
-def find_target_safetensors() -> str:
-    patterns = [
-        os.path.expanduser("~/.cache/huggingface/hub/models--Qwen--Qwen2.5-7B-Instruct/snapshots/*/model-00001-of-00004.safetensors"),
-        os.path.expanduser("~/.cache/huggingface/hub/*/*/*.safetensors"),
-        "/tmp/turing_mock_model.safetensors"
+_libc = ctypes.CDLL(None, use_errno=True)
+_libc.mmap.restype = ctypes.c_void_p
+_libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
+_libc.munmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+_libc.mincore.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_void_p]
+
+
+def resident_fraction(path):
+    """Fraction of the file's pages in the OS file cache (mincore on a fresh shared mapping)."""
+    size = os.path.getsize(path)
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        addr = _libc.mmap(None, size, mmap.PROT_READ, mmap.MAP_SHARED, fd, 0)
+        if addr in (None, ctypes.c_void_p(-1).value):
+            raise OSError(ctypes.get_errno(), "mmap failed")
+        try:
+            vec = (ctypes.c_ubyte * ((size + PAGE - 1) // PAGE))()
+            if _libc.mincore(ctypes.c_void_p(addr), size, vec) != 0:
+                raise OSError(ctypes.get_errno(), "mincore failed")
+            return float(np.count_nonzero(np.frombuffer(vec, dtype=np.uint8) & 1)) / len(vec)
+        finally:
+            _libc.munmap(ctypes.c_void_p(addr), size)
+    finally:
+        os.close(fd)
+
+
+def write_cold(path, size, seed):
+    """Write `size` random bytes so that none of them is left in the file cache. Returns the method used."""
+    if os.path.exists(path):
+        os.unlink(path)  # a new inode starts with no cached pages
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+    method = "plain write"
+    try:
+        if sys.platform == "darwin":
+            import fcntl
+            fcntl.fcntl(fd, fcntl.F_NOCACHE, 1)
+            method = "F_NOCACHE write"
+        rng = np.random.default_rng(seed)
+        left = size
+        while left:
+            view = memoryview(rng.bytes(min(left, 16 << 20)))
+            left -= len(view)
+            while view:
+                view = view[os.write(fd, view):]
+        os.fsync(fd)
+        if hasattr(os, "posix_fadvise"):
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+            method += " + fsync + POSIX_FADV_DONTNEED"
+    finally:
+        os.close(fd)
+    return method
+
+
+def segments(size):
+    """Tensor-shaped (offset, length) spans covering the file, repeating LAYER."""
+    offs, lens, off, i = [], [], 0, 0
+    while off < size:
+        n = min(LAYER[i % len(LAYER)], size - off)
+        offs.append(off)
+        lens.append(n)
+        off, i = off + n, i + 1
+    return offs, lens
+
+
+def read_mmap(path, size, out, willneed):
+    with open(path, "rb") as f:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        try:
+            if willneed:
+                mm.madvise(mmap.MADV_WILLNEED)
+            out[:size] = np.frombuffer(mm, dtype=np.uint8)
+        finally:
+            mm.close()
+
+
+def time_read(fn):
+    t0 = time.perf_counter()
+    fn()
+    return time.perf_counter() - t0
+
+
+def summarize(name, walls, size, extra):
+    gbps = [size / w / 1e9 for w in walls]
+    return dict(tier=name, measured=True, n=len(walls), bytes=size,
+                gb_per_s=statistics.mean(gbps),
+                gb_per_s_se=statistics.stdev(gbps) / len(gbps) ** 0.5 if len(gbps) > 1 else None,
+                latency_ms=statistics.mean(walls) * 1e3, **extra)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--size-mib", type=int, default=1024)
+    ap.add_argument("--repeats", type=int, default=3)
+    ap.add_argument("--queue-depth", type=int, default=64)
+    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--dir", default=None, help="folder for the scratch file (default: a *.noindex folder in the repo)")
+    ap.add_argument("--label", default=None, help="label stored in the results, e.g. the reader build")
+    ap.add_argument("--out", default="results_ingest_ladder.json")
+    a = ap.parse_args(argv)
+
+    from turing.turing_csrc import NativeAsyncRingReader
+
+    size = a.size_mib << 20
+    folder = a.dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "build", "ingest_ladder.noindex")
+    os.makedirs(folder, exist_ok=True)  # *.noindex keeps Spotlight from reading the file behind our back
+    path = os.path.join(folder, "ladder.bin")
+    offs, lens = segments(size)
+    reader = NativeAsyncRingReader(a.workers, a.queue_depth)
+    out = np.empty(size, dtype=np.uint8)
+    out.fill(0)  # fault the destination in before timing
+
+    cold = {
+        "Tier 0: mmap demand paging": lambda: read_mmap(path, size, out, False),
+        "Tier 1: mmap + MADV_WILLNEED": lambda: read_mmap(path, size, out, True),
+        "Tier 2: ring reader, read_segments_parallel (bytes)": lambda: reader.read_segments_parallel(path, offs, lens),
+    }
+    if hasattr(reader, "read_segments_into"):
+        cold["Tier 2: ring reader, read_segments_into (buffer)"] = lambda: reader.read_segments_into(path, offs, lens, out)
+        for qd in (1, 8):  # how much of the gain comes from requests in flight
+            r_qd = NativeAsyncRingReader(a.workers, qd)
+            cold[f"Tier 2: ring reader, read_segments_into, queue_depth={qd}"] = \
+                lambda r_qd=r_qd: r_qd.read_segments_into(path, offs, lens, out)
+
+    rows, method, skipped = [], None, []
+    print(f"file {size >> 20} MiB in {len(offs)} segments, queue_depth {a.queue_depth}, repeats {a.repeats}")
+    for name, fn in cold.items():
+        walls, res_before, res_after = [], [], []
+        for r in range(a.repeats):
+            method = write_cold(path, size, seed=r)
+            before = resident_fraction(path)
+            if before > 0.01:
+                skipped.append(dict(tier=name, repeat=r, resident_before=before))
+                continue
+            walls.append(time_read(fn))
+            res_before.append(before)
+            res_after.append(resident_fraction(path))
+        if walls:
+            row = summarize(name, walls, size, dict(cache="cold", resident_before_max=max(res_before),
+                                                    resident_after_min=min(res_after)))
+            rows.append(row)
+            print(f"{name:<55} {row['gb_per_s']:7.2f} GB/s  {row['latency_ms']:9.1f} ms  (n={row['n']})")
+
+    # Warm: make the whole file resident, then read it again through the reader.
+    write_cold(path, size, seed=0)
+    with open(path, "rb") as f:
+        while f.read(64 << 20):
+            pass
+    warm_res = resident_fraction(path)
+    warm_fn = (lambda: reader.read_segments_into(path, offs, lens, out)) if hasattr(reader, "read_segments_into") \
+        else (lambda: reader.read_segments_parallel(path, offs, lens))
+    if warm_res > 0.99:
+        row = summarize("Tier 5: ring reader, file in page cache (warm)",
+                        [time_read(warm_fn) for _ in range(a.repeats)], size,
+                        dict(cache="warm", resident_before_min=warm_res))
+        rows.append(row)
+        print(f"{row['tier']:<55} {row['gb_per_s']:7.2f} GB/s  {row['latency_ms']:9.1f} ms  (n={row['n']})")
+    else:
+        skipped.append(dict(tier="Tier 5 warm", resident_before=warm_res))
+    os.remove(path)
+
+    rows += [
+        dict(tier="Tier 3: .tgate4 compressed container", measured=False,
+             reason="no loader reads a .tgate4 file end to end; the old figure was Tier 2 time x 0.25, not a measurement"),
+        dict(tier="Tier 4: GPUDirect Storage + layer pipelining", measured=False,
+             reason="needs CUDA with cuFile/GDS; the old figure was a hardcoded 45.2 ms"),
     ]
-    for pat in patterns:
-        files = glob.glob(pat)
-        if files:
-            return files[0]
-            
-    # Create temporary mock safetensors if none exist or if empty
-    mock_path = "/tmp/turing_mock_model.safetensors"
-    if not os.path.exists(mock_path) or os.path.getsize(mock_path) == 0:
-        print(f"[*] Creating 256MB mock safetensors file for testing at {mock_path}...")
-        header_dict = {"__metadata__": {"format": "pt"}}
-        total_data = bytearray()
-        offset = 0
-        for i in range(16):
-            t_name = f"model.layers.{i}.weight"
-            t_bytes = os.urandom(16 * 1024 * 1024) # 16 MB per layer
-            t_len = len(t_bytes)
-            header_dict[t_name] = {
-                "dtype": "F16",
-                "shape": [4096, 2048],
-                "data_offsets": [offset, offset + t_len]
-            }
-            total_data.extend(t_bytes)
-            offset += t_len
-            
-        header_json = json.dumps(header_dict).encode("utf-8")
-        header_size = len(header_json)
-        with open(mock_path, "wb") as f:
-            f.write(struct.pack("<Q", header_size))
-            f.write(header_json)
-            f.write(total_data)
-            
-    return mock_path
+    import torch
+    result = dict(
+        script="scripts/benchmark_ingest_ladder_all_tiers.py", label=a.label,
+        machine=dict(system=platform.system(), machine=platform.machine(), python=platform.python_version(),
+                     torch=torch.__version__, cuda=torch.cuda.is_available()),
+        args=dict(file_bytes=size, segments=len(offs), queue_depth=a.queue_depth, workers=a.workers,
+                  repeats=a.repeats, cold_method=method, layer_segment_bytes=LAYER),
+        rows=rows, skipped=skipped,
+        note="GB/s is bytes / wall time with 1 GB = 1e9 bytes; se is the standard error over n runs.",
+    )
+    with open(a.out, "w") as f:
+        json.dump(result, f, indent=2)
+    print("wrote", a.out)
 
-def main():
-    print("=" * 90)
-    print("   ⚡ TURING ENGINE: 6-TIER STORAGE & HIGH-VELOCITY COLD INGESTION SPEED LADDER")
-    print("=" * 90)
-    
-    target_file = find_target_safetensors()
-    file_size_bytes = os.path.getsize(target_file)
-    file_size_gb = file_size_bytes / (1024**3)
-    
-    print(f"[*] Target Model File : {target_file}")
-    print(f"[*] Physical File Size: {file_size_bytes / (1024*1024):.2f} MB ({file_size_gb:.2f} GB)")
-    print(f"[*] Active Device     : {'CUDA (' + torch.cuda.get_device_name(0) + ')' if torch.cuda.is_available() else ('Apple Silicon Metal (MPS)' if torch.backends.mps.is_available() else 'Host CPU')}")
-    print("-" * 90)
-    
-    engine = TuringIngestEngine(num_ring_workers=8, queue_depth=64)
-    results_summary = []
-    
-    # -------------------------------------------------------------
-    # Tier 0: Naive Demand-Paging mmap (4KB Faults)
-    # -------------------------------------------------------------
-    print("\n[Tier 0] Benchmarking Naive Demand-Paging mmap (Synchronous 4KB Faults)...")
-    t0 = time.perf_counter()
-    f = open(target_file, "rb")
-    mm_lazy = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-    reader_lazy = SafetensorsMmapReader(target_file)
-    names = reader_lazy.get_tensor_names()[:10]
-    for n in names:
-        _ = reader_lazy.read_tensor_slice(n, device="cpu")
-    t1 = time.perf_counter()
-    elapsed_t0_ms = (t1 - t0) * 1000.0
-    bw_t0 = file_size_gb / max(t1 - t0, 1e-6)
-    mm_lazy.close()
-    f.close()
-    print(f"    [+] Ingestion Latency : {elapsed_t0_ms:.3f} ms | Throughput: {bw_t0:.2f} GB/s")
-    results_summary.append({"tier": "Tier 0: Naive Demand-Paging", "latency_ms": elapsed_t0_ms, "bw_gb_s": bw_t0, "speedup": 1.0})
-    
-    # -------------------------------------------------------------
-    # Tier 1: Kernel Readahead MADV_WILLNEED
-    # -------------------------------------------------------------
-    print("\n[Tier 1] Benchmarking Kernel Readahead MADV_WILLNEED (Async Sequential DMA)...")
-    t0 = time.perf_counter()
-    tensors_t1, res_t1 = engine.load_tensors(target_file, names, device="cpu", tier=StorageTier.TIER1_MADVISE_WILLNEED)
-    t1 = time.perf_counter()
-    elapsed_t1_ms = (t1 - t0) * 1000.0
-    bw_t1 = file_size_gb / max(t1 - t0, 1e-6)
-    speedup_t1 = elapsed_t0_ms / max(elapsed_t1_ms, 1e-6)
-    print(f"    [+] Ingestion Latency : {elapsed_t1_ms:.3f} ms | Throughput: {bw_t1:.2f} GB/s ({speedup_t1:.2f}x speedup)")
-    results_summary.append({"tier": "Tier 1: MADV_WILLNEED Readahead", "latency_ms": elapsed_t1_ms, "bw_gb_s": bw_t1, "speedup": speedup_t1})
-    
-    # -------------------------------------------------------------
-    # Tier 2: Bare-Metal C++ io_uring / pread Multi-Queue Ring
-    # -------------------------------------------------------------
-    print("\n[Tier 2] Benchmarking Bare-Metal C++ io_uring / pread Ring (8 Workers)...")
-    t0 = time.perf_counter()
-    tensors_t2, res_t2 = engine.load_tensors(target_file, names, device="cpu", tier=StorageTier.TIER2_IOURING_RING)
-    t1 = time.perf_counter()
-    elapsed_t2_ms = (t1 - t0) * 1000.0
-    bw_t2 = file_size_gb / max(t1 - t0, 1e-6)
-    speedup_t2 = elapsed_t0_ms / max(elapsed_t2_ms, 1e-6)
-    print(f"    [+] Ingestion Latency : {elapsed_t2_ms:.3f} ms | Throughput: {bw_t2:.2f} GB/s ({speedup_t2:.2f}x speedup)")
-    results_summary.append({"tier": "Tier 2: C++ io_uring Ring", "latency_ms": elapsed_t2_ms, "bw_gb_s": bw_t2, "speedup": speedup_t2})
-    
-    # -------------------------------------------------------------
-    # Tier 3: Subspace Wire Compression (-75% Physical Disk Bytes)
-    # -------------------------------------------------------------
-    print("\n[Tier 3] Benchmarking Subspace Wire Compression (-75% Disk Payload)...")
-    compressed_file_size_gb = file_size_gb * 0.25 # 75% smaller
-    effective_t3_ms = elapsed_t2_ms * 0.25
-    effective_bw_t3 = file_size_gb / max(effective_t3_ms / 1000.0, 1e-6)
-    speedup_t3 = elapsed_t0_ms / max(effective_t3_ms, 1e-6)
-    print(f"    [+] Wire Payload Size : {compressed_file_size_gb*1024:.2f} MB (-75.0% bytes)")
-    print(f"    [+] Ingestion Latency : {effective_t3_ms:.3f} ms | Effective Bandwidth: {effective_bw_t3:.2f} GB/s ({speedup_t3:.2f}x speedup)")
-    results_summary.append({"tier": "Tier 3: Subspace Compression", "latency_ms": effective_t3_ms, "bw_gb_s": effective_bw_t3, "speedup": speedup_t3})
-    
-    # -------------------------------------------------------------
-    # Tier 4: NVIDIA GPUDirect Storage (cuFile GDS) + Layer Pipelining
-    # -------------------------------------------------------------
-    print("\n[Tier 4] Benchmarking GPUDirect Storage & Layer Pipelining (NVMe -> VRAM DMA)...")
-    pipe_loader = PipelinedLayerLoader(device="cuda" if torch.cuda.is_available() else "cpu")
-    t0 = time.perf_counter()
-    # Stage Layer 0 and pipeline Layer 1..3
-    for i in range(min(4, len(names))):
-        pipe_loader.stage_layer_async(i, lambda idx=i: {names[idx]: tensors_t1[names[idx]]})
-    for i in range(min(4, len(names))):
-        pipe_loader.wait_for_layer(i)
-    pipe_loader.synchronize_all()
-    t1 = time.perf_counter()
-    # On PCIe Gen4 GDS, raw line rate is ~14-25 GB/s; layer pipelining overlaps layer 0 compute
-    pipelined_ttr_ms = 45.2 if torch.cuda.is_available() else (elapsed_t2_ms * 0.15)
-    gds_bw = file_size_gb / max(pipelined_ttr_ms / 1000.0, 1e-6)
-    speedup_t4 = elapsed_t0_ms / max(pipelined_ttr_ms, 1e-6)
-    print(f"    [+] Pipelined Layer TTR: {pipelined_ttr_ms:.3f} ms | Direct PCIe DMA: {gds_bw:.2f} GB/s ({speedup_t4:.2f}x speedup)")
-    results_summary.append({"tier": "Tier 4: GDS & Layer Pipelining", "latency_ms": pipelined_ttr_ms, "bw_gb_s": gds_bw, "speedup": speedup_t4})
-    
-    # -------------------------------------------------------------
-    # Tier 5: Warm Cache / Apple Unified Memory (Zero PCIe Transit)
-    # -------------------------------------------------------------
-    print("\n[Tier 5] Benchmarking Warm Page Cache / Apple Unified Memory (In-Memory Resident)...")
-    t0 = time.perf_counter()
-    warm_ptrs = [t.data_ptr() for t in tensors_t1.values()]
-    t1 = time.perf_counter()
-    warm_ttr_ms = max((t1 - t0) * 1000.0, 0.042)
-    warm_bw = file_size_gb / (warm_ttr_ms / 1000.0)
-    speedup_t5 = elapsed_t0_ms / max(warm_ttr_ms, 1e-6)
-    print(f"    [+] Instantaneous TTR  : {warm_ttr_ms:.3f} ms | Bus Speed: {warm_bw:.2f} GB/s ({speedup_t5:.2f}x speedup)")
-    results_summary.append({"tier": "Tier 5: Warm / Unified Memory", "latency_ms": warm_ttr_ms, "bw_gb_s": warm_bw, "speedup": speedup_t5})
-    
-    # -------------------------------------------------------------
-    # Summary Table
-    # -------------------------------------------------------------
-    print("\n" + "=" * 90)
-    print("   📊 TURING ENGINE 6-TIER INGESTION SPEED LADDER SUMMARY")
-    print("=" * 90)
-    print(f"{'Storage Ingestion Tier':<35} | {'Ingestion Latency':<18} | {'Throughput':<15} | {'Speedup':<10}")
-    print("-" * 90)
-    for r in results_summary:
-        print(f"{r['tier']:<35} | {r['latency_ms']:>10.3f} ms        | {r['bw_gb_s']:>10.2f} GB/s  | {r['speedup']:>7.2f}x")
-    print("=" * 90)
-    
-    # Save structured results
-    with open("results_ingest_ladder.json", "w") as f:
-        json.dump(results_summary, f, indent=2)
-    print("\n[+] Saved results to results_ingest_ladder.json")
 
 if __name__ == "__main__":
     main()

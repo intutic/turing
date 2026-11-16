@@ -1,38 +1,127 @@
-[
-  {
-    "tier": "Tier 0: Naive Demand-Paging",
-    "latency_ms": 161.68562500388362,
-    "bw_gb_s": 1.5462203733743112,
-    "speedup": 1.0
+{
+  "script": "scripts/benchmark_ingest_ladder_all_tiers.py",
+  "label": "after: 1 MiB requests, up to queue_depth in flight",
+  "machine": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "python": "3.11.9",
+    "torch": "2.9.1",
+    "cuda": false
   },
-  {
-    "tier": "Tier 1: MADV_WILLNEED Readahead",
-    "latency_ms": 354.62920801364817,
-    "bw_gb_s": 0.7049662064303014,
-    "speedup": 0.455928675219727
+  "args": {
+    "file_bytes": 2147483648,
+    "segments": 42,
+    "queue_depth": 64,
+    "workers": 8,
+    "repeats": 3,
+    "cold_method": "F_NOCACHE write",
+    "layer_segment_bytes": [
+      29360128,
+      4194304,
+      4194304,
+      29360128,
+      136314880,
+      136314880,
+      136314880,
+      7168,
+      7168
+    ]
   },
-  {
-    "tier": "Tier 2: C++ io_uring Ring",
-    "latency_ms": 599.8611670074752,
-    "bw_gb_s": 0.4167657805054222,
-    "speedup": 0.2695384097131741
-  },
-  {
-    "tier": "Tier 3: Subspace Compression",
-    "latency_ms": 149.9652917518688,
-    "bw_gb_s": 1.6670631220216887,
-    "speedup": 1.0781536388526964
-  },
-  {
-    "tier": "Tier 4: GDS & Layer Pipelining",
-    "latency_ms": 89.97917505112127,
-    "bw_gb_s": 2.7784385367028146,
-    "speedup": 1.7969227314211609
-  },
-  {
-    "tier": "Tier 5: Warm / Unified Memory",
-    "latency_ms": 1.266291001229547,
-    "bw_gb_s": 197.42824297102047,
-    "speedup": 127.68441444098524
-  }
-]
+  "rows": [
+    {
+      "tier": "Tier 0: mmap demand paging",
+      "measured": true,
+      "n": 3,
+      "bytes": 2147483648,
+      "gb_per_s": 0.7473455773879432,
+      "gb_per_s_se": 0.009061477051312616,
+      "latency_ms": 2874.316458318693,
+      "cache": "cold",
+      "resident_before_max": 0.0,
+      "resident_after_min": 1.0
+    },
+    {
+      "tier": "Tier 1: mmap + MADV_WILLNEED",
+      "measured": true,
+      "n": 3,
+      "bytes": 2147483648,
+      "gb_per_s": 2.248120317310491,
+      "gb_per_s_se": 0.2266419564423,
+      "latency_ms": 976.5011113292227,
+      "cache": "cold",
+      "resident_before_max": 0.0,
+      "resident_after_min": 1.0
+    },
+    {
+      "tier": "Tier 2: ring reader, read_segments_parallel (bytes)",
+      "measured": true,
+      "n": 3,
+      "bytes": 2147483648,
+      "gb_per_s": 3.2786332818252837,
+      "gb_per_s_se": 0.713822921224613,
+      "latency_ms": 745.3174726106226,
+      "cache": "cold",
+      "resident_before_max": 0.0,
+      "resident_after_min": 1.0
+    },
+    {
+      "tier": "Tier 2: ring reader, read_segments_into (buffer)",
+      "measured": true,
+      "n": 3,
+      "bytes": 2147483648,
+      "gb_per_s": 4.435499909404394,
+      "gb_per_s_se": 0.43068096115522714,
+      "latency_ms": 492.671472641329,
+      "cache": "cold",
+      "resident_before_max": 0.0,
+      "resident_after_min": 1.0
+    },
+    {
+      "tier": "Tier 2: ring reader, read_segments_into, queue_depth=1",
+      "measured": true,
+      "n": 3,
+      "bytes": 2147483648,
+      "gb_per_s": 4.368224811857124,
+      "gb_per_s_se": 0.5556446646370408,
+      "latency_ms": 510.31116632899887,
+      "cache": "cold",
+      "resident_before_max": 0.0,
+      "resident_after_min": 1.0
+    },
+    {
+      "tier": "Tier 2: ring reader, read_segments_into, queue_depth=8",
+      "measured": true,
+      "n": 3,
+      "bytes": 2147483648,
+      "gb_per_s": 5.262345651195799,
+      "gb_per_s_se": 0.4146403104864592,
+      "latency_ms": 413.24912500567734,
+      "cache": "cold",
+      "resident_before_max": 0.0,
+      "resident_after_min": 1.0
+    },
+    {
+      "tier": "Tier 5: ring reader, file in page cache (warm)",
+      "measured": true,
+      "n": 3,
+      "bytes": 2147483648,
+      "gb_per_s": 51.29420578597587,
+      "gb_per_s_se": 1.355905020987841,
+      "latency_ms": 41.92458333758017,
+      "cache": "warm",
+      "resident_before_min": 1.0
+    },
+    {
+      "tier": "Tier 3: .tgate4 compressed container",
+      "measured": false,
+      "reason": "no loader reads a .tgate4 file end to end; the old figure was Tier 2 time x 0.25, not a measurement"
+    },
+    {
+      "tier": "Tier 4: GPUDirect Storage + layer pipelining",
+      "measured": false,
+      "reason": "needs CUDA with cuFile/GDS; the old figure was a hardcoded 45.2 ms"
+    }
+  ],
+  "skipped": [],
+  "note": "GB/s is bytes / wall time with 1 GB = 1e9 bytes; se is the standard error over n runs."
+}
