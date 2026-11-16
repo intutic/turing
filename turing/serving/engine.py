@@ -119,6 +119,7 @@ class ContinuousBatchEngine:
         prefix_caching: bool = True,
         draft_tokens: int = 0,
         eos_token_ids: Optional[Set[int]] = None,
+        remote_prefill: Optional[Tuple[str, int]] = None,
     ):
         self.model_config = model_config
         self.turing_config = turing_config or TuringConfig()
@@ -141,6 +142,7 @@ class ContinuousBatchEngine:
         self.eos_token_ids = set(eos_token_ids) if eos_token_ids is not None else _eos_ids(tokenizer)
         self.default_draft_tokens = draft_tokens  # n-gram drafts per step when the gate allows (0 = off)
         self.spec_drafted = self.spec_accepted = 0
+        self.remote_prefill = remote_prefill  # (host, port) of a PrefillWorker: prompts are prefilled there
 
         self.max_batch_size = self.turing_config.max_batch_size
         self.waiting_queue: List[AsyncSequenceRequest] = []
@@ -209,6 +211,9 @@ class ContinuousBatchEngine:
             lane = self.lane_policy.classify_request(max_tokens=max_new_tokens, stream=True)
         if adapter is not None and adapter not in getattr(self.model, "adapter_names", ()):
             raise RequestRejected(f"unknown LoRA adapter '{adapter}'", status_code=400)
+        if self.remote_prefill is not None and prefix_kv is None and adapter is None and logits_processor is None:
+            return await self._add_remote_prefilled(prompt_tokens, max_new_tokens, temperature, top_k, top_p,
+                                                    stop_token_ids, lane)
         req = AsyncSequenceRequest(
             prompt_tokens=prompt_tokens, max_new_tokens=max_new_tokens, temperature=temperature, top_k=top_k,
             draft_tokens=draft_tokens, lane=lane, top_p=top_p,
@@ -261,6 +266,36 @@ class ContinuousBatchEngine:
             reject(str(e), 503, 1.0)
 
         self.waiting_queue.append(req)
+        return req
+
+    async def _add_remote_prefilled(self, prompt_tokens, max_new_tokens, temperature, top_k, top_p, stop_token_ids,
+                                    lane) -> AsyncSequenceRequest:
+        """Prefill/decode disaggregation: the prefill worker at self.remote_prefill computes the prompt and its first
+        token; its KV pages are imported here and decoding continues. The returned request streams the first token
+        too, as a local request would."""
+        from .disagg_sidecar import remote_prefill
+        from .kv_transfer import import_kv
+        token, header, blob = await asyncio.to_thread(remote_prefill, self.remote_prefill, list(prompt_tokens),
+                                                      temperature, top_k, top_p)
+        stop = self.eos_token_ids if stop_token_ids is None else set(stop_token_ids)
+        if token in stop or max_new_tokens <= 1:
+            req = AsyncSequenceRequest(list(prompt_tokens), max_new_tokens, temperature, top_k, lane=lane)
+            if token not in stop:
+                req.generated_tokens.append(token)
+                req.output_queue.put_nowait(token)
+            req.state, req.finish_reason = RequestState.FINISHED, "stop" if token in stop else "length"
+            req.output_queue.put_nowait(None)
+            return req
+        cache = import_kv(self.kv_pool, header, blob)
+        try:
+            req = await self.add_request([token], max_new_tokens=max_new_tokens - 1, temperature=temperature,
+                                         top_k=top_k, top_p=top_p, stop_token_ids=stop, lane=lane, prefix_kv=cache)
+        finally:
+            cache.free()  # the request holds its own references to the imported pages
+        req.output_queue.put_nowait(token)  # nothing has run since admission: the first token streams first
+        req.max_new_tokens += 1
+        req.generated_tokens.insert(0, token)
+        req.remote_prompt_tokens = len(prompt_tokens)
         return req
 
     def _reserve(self, cache: KVCache, tokens: int) -> None:

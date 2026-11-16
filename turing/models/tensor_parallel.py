@@ -1,297 +1,249 @@
 """
-Megatron-Style Tensor Parallelism & Pipeline Parallelism for Multi-Node Serving.
-Provides ColumnParallelLinear, RowParallelLinear, PipelineStage, and MicroBatchScheduler.
+Tensor parallelism (Megatron style) and pipeline stages for a SubspaceCausalLM, applied to an existing model in place.
+
+Tensor parallelism (`shard_tensor_parallel`): every rank of a TP group holds a slice of each layer.
+- Attention: q_proj, k_proj, v_proj column-parallel by heads (each rank its num_heads / tp query heads and their KV
+  heads; when num_kv_heads % tp != 0 each rank keeps a copy of the one KV head its query heads share), o_proj
+  row-parallel followed by an all-reduce. Each rank's KV pool holds only its KV heads.
+- MLP: gate_proj and up_proj column-parallel, down_proj row-parallel + all-reduce.
+- MoE: every expert's intermediate dimension (and the shared expert's) is split across ranks; the router is
+  replicated, so every rank picks the same experts, and the block's output is all-reduced once.
+- Embedding replicated; lm_head vocab-parallel (all-gathered logits) when vocab % tp == 0, else replicated.
+
+Pipeline stages (`keep_pipeline_stage`): a rank keeps a contiguous range of layers, renumbered so its KV pool holds
+only those layers; the first stage keeps the embedding, the last the final norm and head. `stage_forward` runs one
+stage over a request's cache (or a decode step's list of caches).
 """
 
-from typing import Optional, Tuple, List, Dict, Any, Union
-import os
+import copy
+from typing import List, Optional, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
 
+from .causal_lm import DecodeStep, SparseMoE, SubspaceAttention, SubspaceCausalLM, SubspaceMLP
+from ..core.kv_cache import KVCache
+
 __all__ = [
-    "init_tensor_parallel",
     "ColumnParallelLinear",
     "RowParallelLinear",
-    "ParallelEmbedding",
-    "ParallelLMHead",
-    "PipelineStage",
-    "partition_model_for_pipeline",
-    "MicroBatchScheduler",
+    "shard_tensor_parallel",
+    "keep_pipeline_stage",
+    "stage_forward",
+    "stage_layer_range",
 ]
 
 
-def init_tensor_parallel() -> Tuple[int, int, str]:
-    """
-    Initializes distributed process group if running in multi-GPU NCCL environment,
-    otherwise cleanly returns single-node defaults (rank=0, world_size=1).
-    """
-    if "RANK" in os.environ and "WORLD_SIZE" in os.environ and torch.cuda.is_available() and torch.cuda.device_count() > 1:
-        if not dist.is_initialized():
-            dist.init_process_group(backend="nccl")
-        rank = dist.get_rank()
-        world_size = dist.get_world_size()
-        local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        torch.cuda.set_device(local_rank)
-        return rank, world_size, "cuda"
-    return 0, 1, ("cuda" if torch.cuda.is_available() else "cpu")
-
-
 class ColumnParallelLinear(nn.Module):
-    """
-    Linear layer with weight matrix partitioned along output dimension.
-    """
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        bias: bool = True,
-        tp_world_size: int = 1,
-        tp_rank: int = 0
-    ):
+    """Output features [lo, hi) of a Linear (its rows of weight and bias). gather=True all-gathers the slices of every
+    rank of `group` along the last dimension (a vocab-parallel lm_head)."""
+
+    def __init__(self, linear: nn.Linear, lo: int, hi: int, group=None, gather: bool = False):
         super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.tp_world_size = max(1, tp_world_size)
-        self.tp_rank = tp_rank
-
-        assert out_features % self.tp_world_size == 0, f"out_features ({out_features}) must divide tp_world_size ({self.tp_world_size})"
-        self.split_out_features = out_features // self.tp_world_size
-
-        self.weight = nn.Parameter(torch.empty(self.split_out_features, in_features))
-        if bias:
-            self.bias = nn.Parameter(torch.empty(self.split_out_features))
-        else:
-            self.register_parameter("bias", None)
-
-        self._init_parameters()
-
-    def _init_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=5**0.5)
-        if self.bias is not None:
-            nn.init.zeros_(self.bias)
+        self.weight = nn.Parameter(linear.weight.data[lo:hi].clone(), requires_grad=False)
+        self.bias = None if linear.bias is None else nn.Parameter(linear.bias.data[lo:hi].clone(), requires_grad=False)
+        self.group, self.gather = group, gather
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.linear(x, self.weight, self.bias)
+        out = F.linear(x, self.weight, self.bias)
+        if not self.gather:
+            return out
+        parts = [torch.empty_like(out) for _ in range(dist.get_world_size(self.group))]
+        dist.all_gather(parts, out.contiguous(), group=self.group)
+        return torch.cat(parts, dim=-1)
 
 
 class RowParallelLinear(nn.Module):
-    """
-    Linear layer with weight matrix partitioned along input dimension,
-    followed by an all-reduce collective sum across TP ranks.
-    """
-    def __init__(
-        self,
-        in_features: int,
-        out_features: int,
-        bias: bool = True,
-        tp_world_size: int = 1,
-        tp_rank: int = 0
-    ):
+    """Input features [lo, hi) of a Linear (its columns of weight). reduce=True all-reduces the partial products over
+    `group` and then adds the full bias; reduce=False leaves the sum to the caller (the bias is added on TP rank 0
+    only, so the caller's sum counts it once)."""
+
+    def __init__(self, linear: nn.Linear, lo: int, hi: int, group=None, reduce: bool = True, first: bool = True):
         super().__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.tp_world_size = max(1, tp_world_size)
-        self.tp_rank = tp_rank
-
-        assert in_features % self.tp_world_size == 0, f"in_features ({in_features}) must divide tp_world_size ({self.tp_world_size})"
-        self.split_in_features = in_features // self.tp_world_size
-
-        self.weight = nn.Parameter(torch.empty(out_features, self.split_in_features))
-        if bias:
-            self.bias = nn.Parameter(torch.empty(out_features))
-        else:
-            self.register_parameter("bias", None)
-
-        self._init_parameters()
-
-    def _init_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=5**0.5)
-        if self.bias is not None:
-            nn.init.zeros_(self.bias)
+        self.weight = nn.Parameter(linear.weight.data[:, lo:hi].clone(), requires_grad=False)
+        keep_bias = linear.bias is not None and (reduce or first)
+        self.bias = nn.Parameter(linear.bias.data.clone(), requires_grad=False) if keep_bias else None
+        self.group, self.reduce = group, reduce
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = F.linear(x, self.weight)
-        if self.tp_world_size > 1 and dist.is_initialized():
-            dist.all_reduce(out, op=dist.ReduceOp.SUM)
-        if self.bias is not None:
-            out = out + self.bias
+        if self.reduce:
+            dist.all_reduce(out, group=self.group)
+        return out if self.bias is None else out + self.bias
+
+
+class _AllReduce(nn.Module):
+    """Sums a module's output over a TP group (an MoE block whose experts each return a partial sum)."""
+
+    def __init__(self, inner: nn.Module, group):
+        super().__init__()
+        self.inner, self.group = inner, group
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.inner(x).contiguous()
+        dist.all_reduce(out, group=self.group)
         return out
 
 
-class ParallelEmbedding(nn.Module):
-    """
-    Vocabulary embedding layer sharded across tensor parallel ranks.
-    """
-    def __init__(self, num_embeddings: int, embedding_dim: int, tp_world_size: int = 1, tp_rank: int = 0):
-        super().__init__()
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-        self.tp_world_size = max(1, tp_world_size)
-        self.tp_rank = tp_rank
-        
-        self.vocab_start_idx = (num_embeddings // self.tp_world_size) * tp_rank
-        self.vocab_end_idx = (num_embeddings // self.tp_world_size) * (tp_rank + 1)
-        self.split_vocab_size = self.vocab_end_idx - self.vocab_start_idx
-        
-        self.weight = nn.Parameter(torch.empty(self.split_vocab_size, embedding_dim))
-        nn.init.normal_(self.weight, std=0.02)
-
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        if self.tp_world_size == 1:
-            return F.embedding(input_ids, self.weight)
-            
-        # Mask tokens belonging to this rank's partition
-        mask = (input_ids >= self.vocab_start_idx) & (input_ids < self.vocab_end_idx)
-        local_ids = torch.clamp(input_ids - self.vocab_start_idx, 0, self.split_vocab_size - 1)
-        local_embeds = F.embedding(local_ids, self.weight)
-        local_embeds = local_embeds * mask.unsqueeze(-1).to(local_embeds.dtype)
-        
-        if dist.is_initialized():
-            dist.all_reduce(local_embeds, op=dist.ReduceOp.SUM)
-        return local_embeds
+def _split(n: int, rank: int, world: int, what: str):
+    if n % world:
+        raise ValueError(f"tensor parallelism over {world} ranks needs {what} ({n}) divisible by {world}")
+    size = n // world
+    return rank * size, (rank + 1) * size
 
 
-class ParallelLMHead(nn.Module):
-    """
-    LM Head projection partitioned across tensor parallel ranks.
-    """
-    def __init__(self, hidden_dim: int, vocab_size: int, tp_world_size: int = 1, tp_rank: int = 0):
-        super().__init__()
-        self.hidden_dim = hidden_dim
-        self.vocab_size = vocab_size
-        self.tp_world_size = max(1, tp_world_size)
-        self.tp_rank = tp_rank
-        
-        assert vocab_size % self.tp_world_size == 0 or self.tp_world_size == 1
-        self.split_vocab = vocab_size // self.tp_world_size
-        self.weight = nn.Parameter(torch.empty(self.split_vocab, hidden_dim))
-        nn.init.normal_(self.weight, std=0.02)
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        local_logits = F.linear(hidden_states, self.weight)
-        return local_logits
+def _shard_mlp(mlp: SubspaceMLP, rank: int, world: int, group, reduce: bool) -> None:
+    lo, hi = _split(mlp.up_proj.out_features, rank, world, "the MLP intermediate size")
+    if mlp.gate_proj is not None:
+        mlp.gate_proj = ColumnParallelLinear(mlp.gate_proj, lo, hi)
+    mlp.up_proj = ColumnParallelLinear(mlp.up_proj, lo, hi)
+    mlp.down_proj = RowParallelLinear(mlp.down_proj, lo, hi, group, reduce=reduce, first=rank == 0)
+    mlp.ffn_dim = hi - lo
 
 
-class PipelineStage(nn.Module):
-    """
-    Wraps a contiguous subset of decoder layers as one pipeline parallelism stage.
-    """
-    def __init__(
-        self,
-        layers: nn.ModuleList,
-        stage_id: int,
-        num_stages: int,
-        is_first_stage: bool = False,
-        is_last_stage: bool = False,
-        embed_tokens: Optional[nn.Module] = None,
-        norm: Optional[nn.Module] = None,
-        lm_head: Optional[nn.Module] = None
-    ):
-        super().__init__()
-        self.layers = layers
-        self.stage_id = stage_id
-        self.num_stages = num_stages
-        self.is_first_stage = is_first_stage
-        self.is_last_stage = is_last_stage
-        self.embed_tokens = embed_tokens
-        self.norm = norm
-        self.lm_head = lm_head
+def _shard_moe(moe: SparseMoE, rank: int, world: int, group) -> None:
+    ffn = moe.down.shape[2]
+    lo, hi = _split(ffn, rank, world, "the expert intermediate size")
+    gate_up = moe.gate_up.data  # [E, 2F, H]: gate rows then up rows
+    moe.gate_up = nn.Parameter(torch.cat([gate_up[:, lo:hi], gate_up[:, ffn + lo:ffn + hi]], dim=1).clone(),
+                               requires_grad=False)
+    moe.down = nn.Parameter(moe.down.data[:, :, lo:hi].clone(), requires_grad=False)
+    if moe.shared_expert is not None:  # sigmoid(gate(x)) * shared(x) is linear in shared(x): one reduce covers it
+        _shard_mlp(moe.shared_expert, rank, world, group, reduce=False)
 
-    def forward(
-        self,
-        hidden_or_ids: torch.Tensor,
-        past_key_values: Optional[Any] = None,
-        start_pos: int = 0
-    ) -> Tuple[torch.Tensor, Optional[Any]]:
-        """past_key_values: the request's KVCache (each layer writes its own layer of the pool; the caller reserves
-        pages and advances the length after the last stage), or None for causal attention over these tokens alone."""
-        # 1. First stage embedding
-        if self.is_first_stage and self.embed_tokens is not None:
-            hidden_states = self.embed_tokens(hidden_or_ids)
+
+def _shard_attention(attn: SubspaceAttention, rank: int, world: int, group) -> None:
+    H, Hkv, D = attn.num_heads, attn.num_kv_heads, attn.head_dim
+    if getattr(attn.config, "qk_norm_full", False):
+        raise NotImplementedError("tensor parallelism does not support a q/k norm over all heads (OLMoE)")
+    q_lo, q_hi = _split(H, rank, world, "num_heads")
+    groups = H // Hkv  # query heads per KV head
+    hq = q_hi - q_lo
+    if hq % groups and groups % hq:
+        raise ValueError(f"{world} ranks split the {H} query heads unevenly over the {Hkv} KV heads")
+    kv_lo, kv_hi = q_lo // groups, (q_hi - 1) // groups + 1  # a whole share of KV heads, or one copied head
+    attn.q_proj = ColumnParallelLinear(attn.q_proj, q_lo * D, q_hi * D)
+    attn.k_proj = ColumnParallelLinear(attn.k_proj, kv_lo * D, kv_hi * D)
+    attn.v_proj = ColumnParallelLinear(attn.v_proj, kv_lo * D, kv_hi * D)
+    attn.o_proj = RowParallelLinear(attn.o_proj, q_lo * D, q_hi * D, group)
+    attn.num_heads, attn.num_kv_heads = hq, kv_hi - kv_lo
+    attn.num_kv_groups = hq // attn.num_kv_heads
+
+
+def _own_config(model: SubspaceCausalLM):
+    """Give the model (and every submodule sharing its config) a private copy, so per-rank head and layer counts size
+    this rank's KV pool without touching the caller's config."""
+    old, cfg = model.config, copy.deepcopy(model.config)
+    for m in model.modules():
+        if getattr(m, "config", None) is old:
+            m.config = cfg
+    cfg.cuda_graphs = False  # decode-step graphs are not captured around collectives or stage boundaries
+    model._kv_pool = None
+    return cfg
+
+
+def shard_tensor_parallel(model: SubspaceCausalLM, rank: int, world: int, group=None) -> SubspaceCausalLM:
+    """Keep this rank's slice of every layer (see the module docstring). Every rank must call it on the same full
+    model; collectives run over `group` (None = the default group)."""
+    if world == 1:
+        return model
+    cfg = _own_config(model)
+    for layer in model.layers:
+        _shard_attention(layer.self_attn, rank, world, group)
+        if isinstance(layer.mlp, SparseMoE):
+            _shard_moe(layer.mlp, rank, world, group)
+            layer.mlp = _AllReduce(layer.mlp, group)
         else:
-            hidden_states = hidden_or_ids
-
-        # 2. Stage decoder layers; the cached length is the new tokens' first RoPE position
-        cache = past_key_values
-        if cache is not None:
-            start_pos = cache.length
-        for layer in self.layers:
-            hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, cache=cache)
-
-        # 3. Last stage norm + head
-        if self.is_last_stage:
-            if self.norm is not None:
-                hidden_states = self.norm(hidden_states)
-            if self.lm_head is not None:
-                logits = self.lm_head(hidden_states)
-                return logits, cache
-
-        return hidden_states, cache
+            _shard_mlp(layer.mlp, rank, world, group, reduce=True)
+    attn = model.layers[0].self_attn
+    cfg.num_heads, cfg.num_kv_heads = attn.num_heads, attn.num_kv_heads
+    if model.lm_head.out_features % world == 0:
+        lo, hi = _split(model.lm_head.out_features, rank, world, "vocab_size")
+        model.lm_head = ColumnParallelLinear(model.lm_head, lo, hi, group, gather=True)
+    return model
 
 
-def partition_model_for_pipeline(model: Any, num_stages: int) -> List[PipelineStage]:
-    """
-    Partitions a SubspaceCausalLM model across num_stages pipeline stages.
-    """
-    total_layers = len(model.layers)
-    layers_per_stage = max(1, total_layers // num_stages)
-    stages = []
-
-    for i in range(num_stages):
-        start_idx = i * layers_per_stage
-        end_idx = start_idx + layers_per_stage if i < num_stages - 1 else total_layers
-        stage_layers = nn.ModuleList([model.layers[j] for j in range(start_idx, end_idx)])
-        
-        is_first = (i == 0)
-        is_last = (i == num_stages - 1)
-        
-        stage = PipelineStage(
-            layers=stage_layers,
-            stage_id=i,
-            num_stages=num_stages,
-            is_first_stage=is_first,
-            is_last_stage=is_last,
-            embed_tokens=model.embed_tokens if is_first else None,
-            norm=model.norm if is_last else None,
-            lm_head=model.lm_head if is_last else None
-        )
-        stages.append(stage)
-
-    return stages
+def stage_layer_range(num_layers: int, stage: int, num_stages: int):
+    """Contiguous layers [lo, hi) of a stage; the first num_layers % num_stages stages take one extra."""
+    if num_layers < num_stages:
+        raise ValueError(f"{num_stages} pipeline stages need at least {num_stages} layers, the model has {num_layers}")
+    base, extra = divmod(num_layers, num_stages)
+    lo = stage * base + min(stage, extra)
+    return lo, lo + base + (stage < extra)
 
 
-class MicroBatchScheduler:
-    """
-    1F1B (One-Forward-One-Backward / Micro-Batch) scheduling for pipeline parallelism.
-    Overlaps micro-batches across stages to minimize bubble latency.
-    """
-    def __init__(self, num_stages: int, num_micro_batches: int = 4):
-        self.num_stages = num_stages
-        self.num_micro_batches = max(1, num_micro_batches)
+def keep_pipeline_stage(model: SubspaceCausalLM, stage: int, num_stages: int) -> SubspaceCausalLM:
+    """Drop every layer outside this stage's range and renumber the rest from 0, so the stage's KV pool holds only its
+    layers. Non-first stages keep a one-row embedding (only so model.kv_pool() knows the dtype and device);
+    non-last stages drop the final norm and head."""
+    if num_stages == 1:
+        return model
+    if model.config.enable_recirculation:
+        raise NotImplementedError("pipeline parallelism does not support recirculation (it spans stages)")
+    cfg = _own_config(model)
+    lo, hi = stage_layer_range(len(model.layers), stage, num_stages)
+    model.layers = nn.ModuleList(model.layers[lo:hi])
+    for i, layer in enumerate(model.layers):
+        layer.layer_idx = layer.self_attn.layer_idx = i  # the pool layer it reads and writes
+    cfg.num_layers = hi - lo
+    w = model.embed_tokens.weight
+    if stage > 0:
+        model.embed_tokens = nn.Embedding(1, w.shape[1], device=w.device, dtype=w.dtype)
+        if cfg.learned_positions:
+            del model.embed_positions
+    if stage < num_stages - 1:
+        model.norm = model.lm_head = None
+    return model
 
-    @property
-    def bubble_ratio(self) -> float:
-        """Computes theoretical idle bubble fraction: (p - 1) / (m + p - 1)."""
-        p = self.num_stages
-        m = self.num_micro_batches
-        return float(p - 1) / float(m + p - 1)
 
-    def schedule_forward(
-        self,
-        micro_batches: List[torch.Tensor],
-        stages: List[PipelineStage],
-        start_pos: int = 0
-    ) -> List[torch.Tensor]:
-        """
-        Executes micro-batches through all pipeline stages sequentially or concurrently.
-        """
-        current_activations = micro_batches
-        for stage in stages:
-            next_activations = []
-            for mb in current_activations:
-                out, _ = stage(mb, start_pos=start_pos)
-                next_activations.append(out)
-            current_activations = next_activations
-        return current_activations
+def _embed(model: SubspaceCausalLM, ids: torch.Tensor, start_pos, step: Optional[DecodeStep]) -> torch.Tensor:
+    """The embedding part of SubspaceCausalLM._body."""
+    cfg = model.config
+    h = model.embed_tokens(ids)
+    if cfg.embed_proj_dim:
+        h = model.project_in(h)
+    if cfg.embed_scale is not None:
+        h = h * torch.tensor(cfg.embed_scale, dtype=h.dtype)
+    if cfg.learned_positions:
+        if step is not None:
+            pos = step.starts_t.long()[:, None]
+        else:
+            pos = torch.arange(start_pos, start_pos + ids.shape[1], device=ids.device)[None]
+        h = h + model.embed_positions(pos + cfg.position_offset)
+    return h
+
+
+def _head(model: SubspaceCausalLM, h: torch.Tensor, logits_to_keep: int) -> torch.Tensor:
+    """The final norm and head part of SubspaceCausalLM._body."""
+    cfg = model.config
+    if logits_to_keep:
+        h = h[:, -logits_to_keep:]
+    if model.norm is not None:
+        h = model.norm(h)
+    if cfg.embed_proj_dim:
+        h = model.project_out(h)
+    logits = model.lm_head(h)
+    if cfg.final_softcap is not None:
+        logits = torch.tanh(logits / cfg.final_softcap) * cfg.final_softcap
+    return logits
+
+
+def stage_forward(model: SubspaceCausalLM, x: torch.Tensor, caches: Union[KVCache, List[KVCache]], first: bool,
+                  last: bool, logits_to_keep: int = 0) -> torch.Tensor:
+    """One pipeline stage for one request (caches a KVCache, x [1, L]) or one decode step (caches a list, x [B, 1]):
+    x is token ids on the first stage and the previous stage's hidden states [B, L, hidden] otherwise. Writes this
+    stage's layers into the caches and advances their lengths. Returns hidden states, or logits on the last stage."""
+    rows = caches if isinstance(caches, list) else [caches]
+    n = x.shape[1]
+    for c in rows:
+        c.reserve(c.length + n)
+    step = DecodeStep.of(rows, x.device) if isinstance(caches, list) else None
+    start = step.starts if step is not None else rows[0].length
+    h = _embed(model, x, start, step) if first else x
+    for layer in model.layers:
+        h = layer(h, start_pos=start, cache=None if step is not None else rows[0], step=step)[0]
+    for c in rows:
+        c.length += n
+    return _head(model, h, logits_to_keep) if last else h

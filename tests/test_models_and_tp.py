@@ -20,12 +20,15 @@ def test_subspace_causal_lm_forward_and_generate():
     out_tokens = model.generate(prompt, max_new_tokens=8, temperature=0.0)
     assert len(out_tokens) == len(prompt) + 8
 
-def test_tensor_parallel_linear():
-    col_lin = ColumnParallelLinear(in_features=64, out_features=128, tp_world_size=1)
-    row_lin = RowParallelLinear(in_features=128, out_features=64, tp_world_size=1)
-
+def test_tensor_parallel_linear_slices():
+    """Single-process: column slices concatenate to the full output; row slices' partial products sum to it (the
+    all-reduce is covered by the multi-process tests in test_distributed_inference.py)."""
+    torch.manual_seed(0)
+    lin = torch.nn.Linear(64, 128)
     x = torch.randn(2, 64)
-    h = col_lin(x)
-    assert h.shape == (2, 128)
-    out = row_lin(h)
-    assert out.shape == (2, 64)
+    cols = [ColumnParallelLinear(lin, i * 64, (i + 1) * 64) for i in range(2)]
+    torch.testing.assert_close(torch.cat([c(x) for c in cols], -1), lin(x))
+    down = torch.nn.Linear(128, 64)
+    h = lin(x)
+    rows = [RowParallelLinear(down, i * 64, (i + 1) * 64, reduce=False, first=i == 0) for i in range(2)]
+    torch.testing.assert_close(rows[0](h[:, :64]) + rows[1](h[:, 64:]), down(h))

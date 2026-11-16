@@ -85,6 +85,9 @@ def main():
     serve_parser.add_argument("--api-key", type=str, default=os.getenv("TURING_API_KEY"), help="Require this key (Authorization: Bearer or x-api-key) on every endpoint but /health (default: $TURING_API_KEY; off when unset)")
     serve_parser.add_argument("--no-admission-control", action="store_true", help="Do not reject requests the KV pool cannot hold soon (429/503)")
     serve_parser.add_argument("--no-lanes", action="store_true", help="Disable the interactive/batch/background QoS lanes")
+    serve_parser.add_argument("--prefill-worker", action="store_true", help="Prefill/decode disaggregation: run as a prefill worker that ships KV pages to decode servers over TCP (no HTTP server)")
+    serve_parser.add_argument("--prefill-server", type=str, default=None, metavar="HOST:PORT", help="Prefill/decode disaggregation: prefill every prompt on this --prefill-worker and decode here")
+    serve_parser.add_argument("--kv-port", type=int, default=5600, help="TCP port of --prefill-worker (default 5600)")
     serve_parser.add_argument("--no-prefix-caching", action="store_true", help="Disable automatic prefix caching")
     serve_parser.add_argument("--lora", action="append", default=[], metavar="NAME=PATH", help="Load a PEFT LoRA adapter (repeatable); select it per request with model 'base:NAME' or X-Turing-Adapter")
     serve_parser.add_argument("--enable-kv-events", action="store_true", help="Enable ZeroMQ KV block event publisher for llm-d EPP prefix cache routing")
@@ -254,15 +257,25 @@ def main():
             cfg = model_inst.config
 
         # Multi-GPU / Multi-Node Distributed Driver setup
+        # Under torchrun every rank runs this command with the same model; rank 0 serves HTTP, the others run steps.
         tp_size = getattr(args, "tensor_parallel", 1)
         pp_size = getattr(args, "pipeline_parallel", 1)
         dist_driver = None
-        if tp_size > 1 or pp_size > 1:
+        if tp_size > 1 or pp_size > 1 or int(os.getenv("WORLD_SIZE", "1")) > 1:
             from .serving.distributed import DistributedInferenceDriver, DistributedConfig
+            if tp_size * pp_size != int(os.getenv("WORLD_SIZE", "1")):
+                raise SystemExit(f"[!] --tp {tp_size} x --pp {pp_size} must equal WORLD_SIZE "
+                                 f"{os.getenv('WORLD_SIZE', '1')}: launch with scripts/launch_distributed.sh (torchrun)")
             dist_cfg = DistributedConfig.from_env(tp_size=tp_size, pp_size=pp_size)
             if model_inst is None:
-                model_inst = SubspaceCausalLM(cfg).to(dev).eval()
+                torch.manual_seed(0)  # synthetic weights must be identical on every rank
+                model_inst = SubspaceCausalLM(cfg).eval()
             dist_driver = DistributedInferenceDriver(model=model_inst, config=cfg, dist_config=dist_cfg)
+            if dist_driver.rank != 0:
+                dist_driver.worker_loop()
+                import torch.distributed as torch_dist
+                torch_dist.destroy_process_group()
+                return
             print(f"[+] Initialized DistributedInferenceDriver (TP: {tp_size}, PP: {pp_size})")
 
         for spec in args.lora:
@@ -273,7 +286,17 @@ def main():
             load_lora_adapter(model_inst, name, path)
             print(f"[+] Loaded LoRA adapter '{name}' from {path}")
         engine = ContinuousBatchEngine(cfg, jcfg, model=model_inst, tokenizer=tokenizer_inst, dist_driver=dist_driver,
-                                       prefix_caching=not args.no_prefix_caching, draft_tokens=args.draft_tokens)
+                                       prefix_caching=not args.no_prefix_caching and dist_driver is None
+                                       and not args.prefill_worker, draft_tokens=args.draft_tokens,
+                                       remote_prefill=(args.prefill_server.rsplit(":", 1)[0],
+                                                       int(args.prefill_server.rsplit(":", 1)[1]))
+                                       if args.prefill_server else None)
+        if args.prefill_worker:  # prefill/decode disaggregation: serve prefills to decode servers over TCP
+            from .serving.disagg_sidecar import PrefillWorker
+            worker = PrefillWorker(engine, args.host, args.kv_port)
+            print(f"[*] Prefill worker on {args.host}:{worker.port} (decode servers call add_remote_prefilled_request)")
+            worker.serve_forever()
+            return
 
         kv_pub = None
         if getattr(args, "enable_kv_events", False) or os.getenv("ENABLE_KV_EVENTS", "0").lower() in ("1", "true", "yes"):
@@ -297,6 +320,8 @@ def main():
                          admission=not args.no_admission_control, lanes=not args.no_lanes)
         print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} (Model: {cfg.name}, Device: {dev})")
         uvicorn.run(app, host=args.host, port=args.port)
+        if dist_driver is not None:
+            dist_driver.shutdown()
 
 
     elif args.command == "generate":
