@@ -1,6 +1,6 @@
 """
 Turing Ingestion Engine: 6-Tier Storage Hierarchy & High-Velocity Cold Ingestion.
-Coordinates io_uring, GPUDirect Storage (cuFile), MADV_WILLNEED readahead,
+Coordinates the parallel reader (io_uring or pread), GPUDirect Storage (cuFile), MADV_WILLNEED readahead,
 and Subspace layer pipelining for ultra-low latency cold model starts.
 """
 
@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple, Any, Union
 import torch
 
 try:
-    from turing.turing_csrc import NativeAsyncRingReader, NativeGDSLoader
+    from turing.turing_csrc import ParallelReader, NativeGDSLoader
     HAS_NATIVE_IO = True
 except ImportError:
     HAS_NATIVE_IO = False
@@ -50,7 +50,7 @@ class TuringIngestEngine:
     def __init__(self, num_ring_workers: int = 8, queue_depth: int = 64):
         self.num_ring_workers = num_ring_workers
         self.queue_depth = queue_depth
-        self.ring_reader = NativeAsyncRingReader(num_ring_workers, queue_depth) if HAS_NATIVE_IO else None
+        self.ring_reader = ParallelReader(num_ring_workers, queue_depth) if HAS_NATIVE_IO else None
         self.gds_loader = NativeGDSLoader() if HAS_NATIVE_IO else None
 
     def detect_optimal_tier(self, filepath: str, device: Union[str, torch.device] = "auto") -> StorageTier:
@@ -71,7 +71,7 @@ class TuringIngestEngine:
         if filepath.endswith(".tgate4") or filepath.endswith(".tgate"):
             return StorageTier.TIER3_SUBSPACE_COMPRESSED
             
-        # Tier 2: Native Async Ring Reader (io_uring / pread parallel queue)
+        # Tier 2: ParallelReader (io_uring when built with liburing on Linux, else pread / ReadFile threads)
         if HAS_NATIVE_IO:
             return StorageTier.TIER2_IOURING_RING
             
@@ -159,7 +159,8 @@ class TuringIngestEngine:
             elapsed_ms=elapsed_ms,
             throughput_gb_s=throughput_gb_s,
             tensors_loaded=len(tensors),
-            metadata={"num_workers": self.num_ring_workers}
+            metadata={"num_workers": self.num_ring_workers,
+                      "reader_backend": self.ring_reader.backend if self.ring_reader else None}
         )
 
         return tensors, result

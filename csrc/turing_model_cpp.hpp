@@ -5,10 +5,10 @@
 #include <cmath>
 #include <algorithm>
 #include <memory>
+#include <random>
 #include <iostream>
 #include <stdexcept>
 #include "turing_simd.hpp"
-#include "turing_rope.hpp"
 #include "turing_sampler.hpp"
 #include "turing_gguf_cpp.hpp"
 
@@ -23,409 +23,298 @@ struct ModelConfigCpp {
     uint32_t num_kv_heads = 4;
     uint32_t head_dim = 16;
     uint32_t vocab_size = 128;
-    uint32_t max_pos = 512;
+    uint32_t max_pos = 512;          // KV cache length: GGUF {arch}.context_length, capped by the caller (--ctx)
     float rope_theta = 10000.0f;
     float rms_norm_eps = 1e-5f;
+    int32_t eos_token_id = -1;       // GGUF tokenizer.ggml.eos_token_id; -1 = none (generation stops on length only)
+    bool int8_kv = false;            // per-token asymmetric int8 K/V, fp32 scale and zero per KV head
 };
 
 struct TransformerLayerWeightsCpp {
-    float* attn_norm = nullptr;
-    float* ffn_norm = nullptr;
-    float* w_q = nullptr;     // [num_heads * head_dim, hidden_dim]
-    float* w_k = nullptr;     // [num_kv_heads * head_dim, hidden_dim]
-    float* w_v = nullptr;     // [num_kv_heads * head_dim, hidden_dim]
-    float* w_o = nullptr;     // [hidden_dim, num_heads * head_dim]
-    float* w_gate = nullptr;  // [ffn_dim, hidden_dim]
-    float* w_up = nullptr;    // [ffn_dim, hidden_dim]
-    float* w_down = nullptr;  // [hidden_dim, ffn_dim]
+    AlignedArray<float> attn_norm, ffn_norm;
+    AlignedArray<float> w_q;     // [num_heads * head_dim, hidden_dim]
+    AlignedArray<float> w_k;     // [num_kv_heads * head_dim, hidden_dim]
+    AlignedArray<float> w_v;     // [num_kv_heads * head_dim, hidden_dim]
+    AlignedArray<float> w_o;     // [hidden_dim, num_heads * head_dim]
+    AlignedArray<float> w_gate;  // [ffn_dim, hidden_dim]
+    AlignedArray<float> w_up;    // [ffn_dim, hidden_dim]
+    AlignedArray<float> w_down;  // [hidden_dim, ffn_dim]
 };
 
+/**
+ * Single-sequence Llama-style decoder (GQA, interleaved-pair RoPE on GGUF's q/k layout, SwiGLU).
+ * Weights, KV cache and every per-token scratch buffer are allocated once, 64-byte aligned; the hot loops run on
+ * the AVX2+FMA / NEON kernels of turing_simd.hpp.
+ */
 class TransformerModelCpp {
 public:
     ModelConfigCpp config;
-    float* w_embed = nullptr;  // [vocab_size, hidden_dim]
-    float* w_norm = nullptr;   // [hidden_dim]
-    float* w_head = nullptr;   // [vocab_size, hidden_dim]
+    AlignedArray<float> w_embed;  // [vocab_size, hidden_dim]
+    AlignedArray<float> w_norm;   // [hidden_dim]
+    AlignedArray<float> w_head;   // [vocab_size, hidden_dim]
     std::vector<TransformerLayerWeightsCpp> layers;
 
-    // KV cache per layer: [max_pos, num_kv_heads * head_dim]
-    std::vector<std::vector<float>> k_cache;
-    std::vector<std::vector<float>> v_cache;
-
-    TransformerModelCpp(const ModelConfigCpp& cfg) : config(cfg) {
+    explicit TransformerModelCpp(const ModelConfigCpp& cfg) : config(cfg), rng_(0) {
         layers.resize(config.num_layers);
-        size_t kv_dim = config.num_kv_heads * config.head_dim;
-        k_cache.resize(config.num_layers, std::vector<float>(config.max_pos * kv_dim, 0.0f));
-        v_cache.resize(config.num_layers, std::vector<float>(config.max_pos * kv_dim, 0.0f));
-    }
-
-    ~TransformerModelCpp() {
-        if (w_embed) aligned_free_64(w_embed);
-        if (w_norm) aligned_free_64(w_norm);
-        if (w_head) aligned_free_64(w_head);
-        for (auto& l : layers) {
-            if (l.attn_norm) aligned_free_64(l.attn_norm);
-            if (l.ffn_norm) aligned_free_64(l.ffn_norm);
-            if (l.w_q) aligned_free_64(l.w_q);
-            if (l.w_k) aligned_free_64(l.w_k);
-            if (l.w_v) aligned_free_64(l.w_v);
-            if (l.w_o) aligned_free_64(l.w_o);
-            if (l.w_gate) aligned_free_64(l.w_gate);
-            if (l.w_up) aligned_free_64(l.w_up);
-            if (l.w_down) aligned_free_64(l.w_down);
+        const size_t H = config.hidden_dim, D = config.head_dim, kv_dim = config.num_kv_heads * D;
+        const size_t cache_elems = static_cast<size_t>(config.num_layers) * config.max_pos * kv_dim;
+        if (config.int8_kv) {
+            k_codes_ = make_aligned<uint8_t>(cache_elems);
+            v_codes_ = make_aligned<uint8_t>(cache_elems);
+            const size_t scale_elems = static_cast<size_t>(config.num_layers) * config.max_pos * config.num_kv_heads;
+            k_scale_ = make_aligned<float>(scale_elems);
+            k_zero_ = make_aligned<float>(scale_elems);
+            v_scale_ = make_aligned<float>(scale_elems);
+            v_zero_ = make_aligned<float>(scale_elems);
+        } else {
+            k_cache_ = make_aligned<float>(cache_elems);
+            v_cache_ = make_aligned<float>(cache_elems);
+        }
+        x_ = make_aligned<float>(H);
+        x_norm_ = make_aligned<float>(H);
+        q_ = make_aligned<float>(config.num_heads * D);
+        k_ = make_aligned<float>(kv_dim);
+        v_ = make_aligned<float>(kv_dim);
+        attn_out_ = make_aligned<float>(config.num_heads * D);
+        proj_ = make_aligned<float>(H);
+        gate_ = make_aligned<float>(config.ffn_dim);
+        up_ = make_aligned<float>(config.ffn_dim);
+        scores_ = make_aligned<float>(config.max_pos);
+        rope_cos_ = make_aligned<float>(D / 2);
+        rope_sin_ = make_aligned<float>(D / 2);
+        inv_freq_ = make_aligned<float>(D / 2);
+        for (size_t i = 0; i < D / 2; ++i) {
+            inv_freq_[i] = 1.0f / std::pow(config.rope_theta, static_cast<float>(2 * i) / static_cast<float>(D));
         }
     }
 
-    static std::unique_ptr<TransformerModelCpp> load_from_gguf(const GGUFReaderCpp& reader) {
+    TransformerModelCpp(const TransformerModelCpp&) = delete;
+    TransformerModelCpp& operator=(const TransformerModelCpp&) = delete;
+
+    void seed(uint32_t s) { rng_.seed(s); }
+
+    /** ctx_cap bounds the KV cache (and so the context) below the GGUF's trained context_length. */
+    static std::unique_ptr<TransformerModelCpp> load_from_gguf(const GGUFReaderCpp& reader, size_t ctx_cap = 4096,
+                                                               bool int8_kv = false) {
+        auto meta_int = [&](const std::string& key, int64_t fallback) {
+            auto it = reader.metadata_ints.find(key);
+            return it != reader.metadata_ints.end() ? it->second : fallback;
+        };
+        auto meta_float = [&](const std::string& key, float fallback) {
+            auto it = reader.metadata_floats.find(key);
+            return it != reader.metadata_floats.end() ? it->second : fallback;
+        };
         ModelConfigCpp cfg;
         std::string arch = "llama";
-        if (reader.metadata_strings.find("general.architecture") != reader.metadata_strings.end()) {
-            arch = reader.metadata_strings.at("general.architecture");
-        }
-        if (reader.metadata_strings.find("general.name") != reader.metadata_strings.end()) {
-            cfg.name = reader.metadata_strings.at("general.name");
-        }
-        if (reader.metadata_ints.find(arch + ".embedding_length") != reader.metadata_ints.end()) {
-            cfg.hidden_dim = static_cast<uint32_t>(reader.metadata_ints.at(arch + ".embedding_length"));
-        }
-        if (reader.metadata_ints.find(arch + ".block_count") != reader.metadata_ints.end()) {
-            cfg.num_layers = static_cast<uint32_t>(reader.metadata_ints.at(arch + ".block_count"));
-        }
-        if (reader.metadata_ints.find(arch + ".attention.head_count") != reader.metadata_ints.end()) {
-            cfg.num_heads = static_cast<uint32_t>(reader.metadata_ints.at(arch + ".attention.head_count"));
-        }
-        if (reader.metadata_ints.find(arch + ".attention.head_count_kv") != reader.metadata_ints.end()) {
-            cfg.num_kv_heads = static_cast<uint32_t>(reader.metadata_ints.at(arch + ".attention.head_count_kv"));
-        } else {
-            cfg.num_kv_heads = cfg.num_heads;
-        }
-        cfg.head_dim = cfg.hidden_dim / cfg.num_heads;
-        if (reader.metadata_ints.find(arch + ".feed_forward_length") != reader.metadata_ints.end()) {
-            cfg.ffn_dim = static_cast<uint32_t>(reader.metadata_ints.at(arch + ".feed_forward_length"));
-        } else {
-            cfg.ffn_dim = cfg.hidden_dim * 4;
-        }
+        if (reader.metadata_strings.count("general.architecture")) arch = reader.metadata_strings.at("general.architecture");
+        if (reader.metadata_strings.count("general.name")) cfg.name = reader.metadata_strings.at("general.name");
+        cfg.hidden_dim = static_cast<uint32_t>(meta_int(arch + ".embedding_length", cfg.hidden_dim));
+        cfg.num_layers = static_cast<uint32_t>(meta_int(arch + ".block_count", cfg.num_layers));
+        cfg.num_heads = static_cast<uint32_t>(meta_int(arch + ".attention.head_count", cfg.num_heads));
+        cfg.num_kv_heads = static_cast<uint32_t>(meta_int(arch + ".attention.head_count_kv", cfg.num_heads));
+        cfg.head_dim = static_cast<uint32_t>(meta_int(arch + ".attention.key_length", cfg.hidden_dim / cfg.num_heads));
+        cfg.ffn_dim = static_cast<uint32_t>(meta_int(arch + ".feed_forward_length", int64_t(cfg.hidden_dim) * 4));
+        cfg.rope_theta = meta_float(arch + ".rope.freq_base", cfg.rope_theta);
+        cfg.rms_norm_eps = meta_float(arch + ".attention.layer_norm_rms_epsilon", cfg.rms_norm_eps);
+        cfg.eos_token_id = static_cast<int32_t>(meta_int("tokenizer.ggml.eos_token_id", -1));
         if (!reader.tokenizer_tokens.empty()) {
             cfg.vocab_size = static_cast<uint32_t>(reader.tokenizer_tokens.size());
+        } else {
+            cfg.vocab_size = static_cast<uint32_t>(meta_int(arch + ".vocab_size", cfg.vocab_size));
+        }
+        int64_t trained_ctx = meta_int(arch + ".context_length", 4096);
+        cfg.max_pos = static_cast<uint32_t>(std::max<int64_t>(1, std::min<int64_t>(trained_ctx, static_cast<int64_t>(ctx_cap))));
+        cfg.int8_kv = int8_kv;
+        if (cfg.num_heads == 0 || cfg.num_kv_heads == 0 || cfg.num_heads % cfg.num_kv_heads != 0 || cfg.head_dim % 2 != 0) {
+            throw std::runtime_error("unsupported attention shape in GGUF metadata");
         }
 
         auto model = std::make_unique<TransformerModelCpp>(cfg);
-
-        // Load embeddings
-        size_t embed_elems = cfg.vocab_size * cfg.hidden_dim;
-        model->w_embed = static_cast<float*>(aligned_alloc_64(embed_elems * sizeof(float)));
-        if (reader.has_tensor("token_embd.weight")) {
-            reader.read_tensor_fp32("token_embd.weight", model->w_embed, embed_elems);
-        } else {
-            std::memset(model->w_embed, 0, embed_elems * sizeof(float));
-        }
-
-        // Load norm
-        model->w_norm = static_cast<float*>(aligned_alloc_64(cfg.hidden_dim * sizeof(float)));
-        if (reader.has_tensor("output_norm.weight")) {
-            reader.read_tensor_fp32("output_norm.weight", model->w_norm, cfg.hidden_dim);
-        } else if (reader.has_tensor("norm.weight")) {
-            reader.read_tensor_fp32("norm.weight", model->w_norm, cfg.hidden_dim);
-        } else {
-            for (size_t i = 0; i < cfg.hidden_dim; ++i) model->w_norm[i] = 1.0f;
-        }
-
-        // Load output / lm_head
-        model->w_head = static_cast<float*>(aligned_alloc_64(embed_elems * sizeof(float)));
+        // A tensor the file lacks is filled (1 for norms, 0 for projections) rather than left uninitialised.
+        auto load = [&](const std::string& name, size_t n, float fill) {
+            AlignedArray<float> t = make_aligned<float>(n);
+            if (reader.has_tensor(name)) {
+                reader.read_tensor_fp32(name, t.get(), n);
+            } else if (fill != 0.0f) {
+                std::fill(t.get(), t.get() + n, fill);
+            }
+            return t;
+        };
+        const size_t H = cfg.hidden_dim, q_dim = size_t(cfg.num_heads) * cfg.head_dim;
+        const size_t kv_dim = size_t(cfg.num_kv_heads) * cfg.head_dim, embed = size_t(cfg.vocab_size) * H;
+        model->w_embed = load("token_embd.weight", embed, 0.0f);
+        model->w_norm = load(reader.has_tensor("output_norm.weight") ? "output_norm.weight" : "norm.weight", H, 1.0f);
         if (reader.has_tensor("output.weight")) {
-            reader.read_tensor_fp32("output.weight", model->w_head, embed_elems);
-        } else {
-            // Tied weights
-            std::memcpy(model->w_head, model->w_embed, embed_elems * sizeof(float));
+            model->w_head = load("output.weight", embed, 0.0f);
+        } else {  // tied embeddings
+            model->w_head = make_aligned<float>(embed);
+            std::memcpy(model->w_head.get(), model->w_embed.get(), embed * sizeof(float));
         }
-
-        // Load layers
         for (uint32_t l = 0; l < cfg.num_layers; ++l) {
-            std::string prefix = "blk." + std::to_string(l) + ".";
+            const std::string p = "blk." + std::to_string(l) + ".";
             auto& lay = model->layers[l];
-
-            lay.attn_norm = static_cast<float*>(aligned_alloc_64(cfg.hidden_dim * sizeof(float)));
-            if (reader.has_tensor(prefix + "attn_norm.weight")) {
-                reader.read_tensor_fp32(prefix + "attn_norm.weight", lay.attn_norm, cfg.hidden_dim);
-            } else {
-                for (size_t i = 0; i < cfg.hidden_dim; ++i) lay.attn_norm[i] = 1.0f;
-            }
-
-            lay.ffn_norm = static_cast<float*>(aligned_alloc_64(cfg.hidden_dim * sizeof(float)));
-            if (reader.has_tensor(prefix + "ffn_norm.weight")) {
-                reader.read_tensor_fp32(prefix + "ffn_norm.weight", lay.ffn_norm, cfg.hidden_dim);
-            } else {
-                for (size_t i = 0; i < cfg.hidden_dim; ++i) lay.ffn_norm[i] = 1.0f;
-            }
-
-            size_t q_elems = cfg.num_heads * cfg.head_dim * cfg.hidden_dim;
-            lay.w_q = static_cast<float*>(aligned_alloc_64(q_elems * sizeof(float)));
-            if (reader.has_tensor(prefix + "attn_q.weight")) {
-                reader.read_tensor_fp32(prefix + "attn_q.weight", lay.w_q, q_elems);
-            }
-
-            size_t kv_elems = cfg.num_kv_heads * cfg.head_dim * cfg.hidden_dim;
-            lay.w_k = static_cast<float*>(aligned_alloc_64(kv_elems * sizeof(float)));
-            if (reader.has_tensor(prefix + "attn_k.weight")) {
-                reader.read_tensor_fp32(prefix + "attn_k.weight", lay.w_k, kv_elems);
-            }
-            lay.w_v = static_cast<float*>(aligned_alloc_64(kv_elems * sizeof(float)));
-            if (reader.has_tensor(prefix + "attn_v.weight")) {
-                reader.read_tensor_fp32(prefix + "attn_v.weight", lay.w_v, kv_elems);
-            }
-
-            lay.w_o = static_cast<float*>(aligned_alloc_64(q_elems * sizeof(float)));
-            if (reader.has_tensor(prefix + "attn_output.weight")) {
-                reader.read_tensor_fp32(prefix + "attn_output.weight", lay.w_o, q_elems);
-            }
-
-            size_t ffn_elems = cfg.ffn_dim * cfg.hidden_dim;
-            lay.w_gate = static_cast<float*>(aligned_alloc_64(ffn_elems * sizeof(float)));
-            if (reader.has_tensor(prefix + "ffn_gate.weight")) {
-                reader.read_tensor_fp32(prefix + "ffn_gate.weight", lay.w_gate, ffn_elems);
-            }
-            lay.w_up = static_cast<float*>(aligned_alloc_64(ffn_elems * sizeof(float)));
-            if (reader.has_tensor(prefix + "ffn_up.weight")) {
-                reader.read_tensor_fp32(prefix + "ffn_up.weight", lay.w_up, ffn_elems);
-            }
-            lay.w_down = static_cast<float*>(aligned_alloc_64(ffn_elems * sizeof(float)));
-            if (reader.has_tensor(prefix + "ffn_down.weight")) {
-                reader.read_tensor_fp32(prefix + "ffn_down.weight", lay.w_down, ffn_elems);
-            }
+            lay.attn_norm = load(p + "attn_norm.weight", H, 1.0f);
+            lay.ffn_norm = load(p + "ffn_norm.weight", H, 1.0f);
+            lay.w_q = load(p + "attn_q.weight", q_dim * H, 0.0f);
+            lay.w_k = load(p + "attn_k.weight", kv_dim * H, 0.0f);
+            lay.w_v = load(p + "attn_v.weight", kv_dim * H, 0.0f);
+            lay.w_o = load(p + "attn_output.weight", H * q_dim, 0.0f);
+            lay.w_gate = load(p + "ffn_gate.weight", size_t(cfg.ffn_dim) * H, 0.0f);
+            lay.w_up = load(p + "ffn_up.weight", size_t(cfg.ffn_dim) * H, 0.0f);
+            lay.w_down = load(p + "ffn_down.weight", H * cfg.ffn_dim, 0.0f);
         }
-
         return model;
     }
 
-    // Evaluates 1 token forward step at pos, updates KV caches, and produces logits [vocab_size]
+    // Evaluates 1 token at pos, writes its K/V into the cache, and produces logits [vocab_size]
     void forward_token(int32_t token_id, size_t pos, float* logits_out) {
         // Attention reads cache rows 0..pos; past max_pos those rows do not exist.
         if (pos >= config.max_pos) {
             throw std::out_of_range("position " + std::to_string(pos) + " exceeds the model's context of " +
                                     std::to_string(config.max_pos) + " tokens");
         }
-        size_t H = config.hidden_dim;
-        size_t V = config.vocab_size;
-        size_t n_heads = config.num_heads;
-        size_t n_kv_heads = config.num_kv_heads;
-        size_t head_dim = config.head_dim;
-        size_t ffn_dim = config.ffn_dim;
+        const size_t H = config.hidden_dim, V = config.vocab_size, D = config.head_dim;
+        const size_t n_heads = config.num_heads, n_kv = config.num_kv_heads, ffn = config.ffn_dim;
+        const size_t kv_dim = n_kv * D, group = n_heads / n_kv;
+        float* x = x_.get();
+        float* xn = x_norm_.get();
 
-        std::vector<float> x(H);
-        std::vector<float> x_norm(H);
-        std::vector<float> q(n_heads * head_dim);
-        std::vector<float> k(n_kv_heads * head_dim);
-        std::vector<float> v(n_kv_heads * head_dim);
-        std::vector<float> attn_out(n_heads * head_dim);
-        std::vector<float> o_out(H);
-        std::vector<float> gate(ffn_dim);
-        std::vector<float> up(ffn_dim);
-        std::vector<float> down(H);
-
-        // 1. Embedding lookup
-        if (token_id >= 0 && static_cast<size_t>(token_id) < V && w_embed) {
-            std::memcpy(x.data(), w_embed + token_id * H, H * sizeof(float));
+        if (token_id >= 0 && static_cast<size_t>(token_id) < V) {
+            std::memcpy(x, w_embed.get() + static_cast<size_t>(token_id) * H, H * sizeof(float));
         } else {
-            std::fill(x.begin(), x.end(), 0.0f);
+            std::fill(x, x + H, 0.0f);
         }
+        for (size_t i = 0; i < D / 2; ++i) {
+            float angle = static_cast<float>(pos) * inv_freq_[i];
+            rope_cos_[i] = std::cos(angle);
+            rope_sin_[i] = std::sin(angle);
+        }
+        const float scale = 1.0f / std::sqrt(static_cast<float>(D));
 
-        // 2. Transformer layers
         for (uint32_t l = 0; l < config.num_layers; ++l) {
             const auto& lay = layers[l];
+            rmsnorm_f32(x, lay.attn_norm.get(), xn, H, config.rms_norm_eps);
+            gemv_f32(lay.w_q.get(), xn, q_.get(), n_heads * D, H);
+            gemv_f32(lay.w_k.get(), xn, k_.get(), kv_dim, H);
+            gemv_f32(lay.w_v.get(), xn, v_.get(), kv_dim, H);
+            apply_rope(q_.get(), n_heads);
+            apply_rope(k_.get(), n_kv);
 
-            // RMSNorm 1
-            rmsnorm(x.data(), lay.attn_norm, x_norm.data(), H, config.rms_norm_eps);
-
-            // QKV GEMV
-            gemv(lay.w_q, x_norm.data(), q.data(), n_heads * head_dim, H);
-            gemv(lay.w_k, x_norm.data(), k.data(), n_kv_heads * head_dim, H);
-            gemv(lay.w_v, x_norm.data(), v.data(), n_kv_heads * head_dim, H);
-
-            // RoPE on Q and K
-            apply_rope(q.data(), n_heads, head_dim, pos, config.rope_theta);
-            apply_rope(k.data(), n_kv_heads, head_dim, pos, config.rope_theta);
-
-            // Store in KV cache
-            size_t kv_dim = n_kv_heads * head_dim;
-            size_t cache_offset = pos * kv_dim;
-            if (cache_offset + kv_dim <= k_cache[l].size()) {
-                std::memcpy(k_cache[l].data() + cache_offset, k.data(), kv_dim * sizeof(float));
-                std::memcpy(v_cache[l].data() + cache_offset, v.data(), kv_dim * sizeof(float));
+            const size_t row = (static_cast<size_t>(l) * config.max_pos + pos);  // this token's cache row
+            if (config.int8_kv) {
+                for (size_t h = 0; h < n_kv; ++h) {
+                    quantize_u8(k_.get() + h * D, D, k_codes_.get() + row * kv_dim + h * D, k_scale_[row * n_kv + h], k_zero_[row * n_kv + h]);
+                    quantize_u8(v_.get() + h * D, D, v_codes_.get() + row * kv_dim + h * D, v_scale_[row * n_kv + h], v_zero_[row * n_kv + h]);
+                }
+            } else {
+                std::memcpy(k_cache_.get() + row * kv_dim, k_.get(), kv_dim * sizeof(float));
+                std::memcpy(v_cache_.get() + row * kv_dim, v_.get(), kv_dim * sizeof(float));
             }
 
-            // GQA Attention
-            size_t kv_group = n_heads / n_kv_heads;
-            float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
-            std::fill(attn_out.begin(), attn_out.end(), 0.0f);
-
+            const size_t base = static_cast<size_t>(l) * config.max_pos;  // first cache row of this layer
+            float* scores = scores_.get();
+            std::fill(attn_out_.get(), attn_out_.get() + n_heads * D, 0.0f);
             for (size_t h = 0; h < n_heads; ++h) {
-                size_t kv_h = h / kv_group;
-                const float* q_h = q.data() + h * head_dim;
-
-                // Compute scores for past positions 0..pos
-                std::vector<float> scores(pos + 1);
-                float max_score = -1e9f;
-                for (size_t t = 0; t <= pos; ++t) {
-                    const float* k_t = k_cache[l].data() + t * kv_dim + kv_h * head_dim;
-                    float dot = 0.0f;
-                    for (size_t d = 0; d < head_dim; ++d) dot += q_h[d] * k_t[d];
-                    scores[t] = dot * scale;
-                    if (scores[t] > max_score) max_score = scores[t];
-                }
-
-                // Softmax
-                float sum_exp = 0.0f;
-                for (size_t t = 0; t <= pos; ++t) {
-                    scores[t] = std::exp(scores[t] - max_score);
-                    sum_exp += scores[t];
-                }
-                float inv_sum = 1.0f / (sum_exp + 1e-10f);
-                for (size_t t = 0; t <= pos; ++t) scores[t] *= inv_sum;
-
-                // Weighted sum of V
-                float* out_h = attn_out.data() + h * head_dim;
-                for (size_t t = 0; t <= pos; ++t) {
-                    const float* v_t = v_cache[l].data() + t * kv_dim + kv_h * head_dim;
-                    float weight = scores[t];
-                    for (size_t d = 0; d < head_dim; ++d) {
-                        out_h[d] += weight * v_t[d];
+                const size_t kh = h / group;
+                const float* qh = q_.get() + h * D;
+                float* out_h = attn_out_.get() + h * D;
+                if (config.int8_kv) {
+                    // q . (codes * s + z) = s * (q . codes) + z * sum(q)
+                    float q_sum = 0.0f;
+                    for (size_t d = 0; d < D; ++d) q_sum += qh[d];
+                    for (size_t t = 0; t <= pos; ++t) {
+                        const size_t r = base + t;
+                        scores[t] = (k_scale_[r * n_kv + kh] * dot_f32_u8(qh, k_codes_.get() + r * kv_dim + kh * D, D)
+                                     + k_zero_[r * n_kv + kh] * q_sum) * scale;
+                    }
+                    softmax_f32(scores, pos + 1);
+                    for (size_t t = 0; t <= pos; ++t) {
+                        const size_t r = base + t;
+                        axpby_u8_f32(scores[t] * v_scale_[r * n_kv + kh], scores[t] * v_zero_[r * n_kv + kh],
+                                     v_codes_.get() + r * kv_dim + kh * D, out_h, D);
+                    }
+                } else {
+                    for (size_t t = 0; t <= pos; ++t) {
+                        scores[t] = dot_f32(qh, k_cache_.get() + (base + t) * kv_dim + kh * D, D) * scale;
+                    }
+                    softmax_f32(scores, pos + 1);
+                    for (size_t t = 0; t <= pos; ++t) {
+                        axpy_f32(scores[t], v_cache_.get() + (base + t) * kv_dim + kh * D, out_h, D);
                     }
                 }
             }
 
-            // Output projection
-            gemv(lay.w_o, attn_out.data(), o_out.data(), H, n_heads * head_dim);
+            gemv_f32(lay.w_o.get(), attn_out_.get(), proj_.get(), H, n_heads * D);
+            axpy_f32(1.0f, proj_.get(), x, H);
 
-            // Residual 1
-            for (size_t i = 0; i < H; ++i) x[i] += o_out[i];
-
-            // RMSNorm 2
-            rmsnorm(x.data(), lay.ffn_norm, x_norm.data(), H, config.rms_norm_eps);
-
-            // SwiGLU MLP
-            gemv(lay.w_gate, x_norm.data(), gate.data(), ffn_dim, H);
-            gemv(lay.w_up, x_norm.data(), up.data(), ffn_dim, H);
-
-            // SiLU(gate) * up
-            for (size_t i = 0; i < ffn_dim; ++i) {
-                float g = gate[i];
-                float silu_g = g / (1.0f + std::exp(-g));
-                gate[i] = silu_g * up[i];
-            }
-
-            // Down projection
-            gemv(lay.w_down, gate.data(), down.data(), H, ffn_dim);
-
-            // Residual 2
-            for (size_t i = 0; i < H; ++i) x[i] += down[i];
+            rmsnorm_f32(x, lay.ffn_norm.get(), xn, H, config.rms_norm_eps);
+            gemv_f32(lay.w_gate.get(), xn, gate_.get(), ffn, H);
+            gemv_f32(lay.w_up.get(), xn, up_.get(), ffn, H);
+            silu_mul_f32(gate_.get(), up_.get(), ffn);
+            gemv_f32(lay.w_down.get(), gate_.get(), proj_.get(), H, ffn);
+            axpy_f32(1.0f, proj_.get(), x, H);
         }
 
-        // Final Norm
-        rmsnorm(x.data(), w_norm, x_norm.data(), H, config.rms_norm_eps);
-
-        // LM Head GEMV
-        gemv(w_head, x_norm.data(), logits_out, V, H);
+        rmsnorm_f32(x, w_norm.get(), xn, H, config.rms_norm_eps);
+        gemv_f32(w_head.get(), xn, logits_out, V, H);
     }
 
+    /** Prompt plus up to max_new_tokens sampled tokens; stops early on the GGUF's EOS token or the context end. */
     std::vector<int32_t> generate(
         const std::vector<int32_t>& prompt_tokens,
         size_t max_new_tokens = 32,
         float temperature = 0.7f
     ) {
         std::vector<int32_t> result = prompt_tokens;
-        if (prompt_tokens.empty()) return result;
+        if (prompt_tokens.empty() || max_new_tokens == 0) return result;
 
         std::vector<float> logits(config.vocab_size);
-
-        // Prefill
         for (size_t i = 0; i < prompt_tokens.size(); ++i) {
             forward_token(prompt_tokens[i], i, logits.data());
         }
 
-        // Autoregressive decode
+        std::uniform_real_distribution<float> uniform(0.0f, 1.0f);
         size_t cur_pos = prompt_tokens.size();
-        for (size_t step = 0; step < max_new_tokens && cur_pos < config.max_pos; ++step) {
-            int32_t next_tok = sample_logits(logits.data(), config.vocab_size, temperature);
+        for (size_t step = 0; step < max_new_tokens; ++step) {
+            int32_t next_tok = sample_single_logits_simd_cpp(logits.data(), config.vocab_size, temperature, 0, uniform(rng_));
             result.push_back(next_tok);
-            if (next_tok == 2) break; // EOS
-
-            forward_token(next_tok, cur_pos, logits.data());
-            cur_pos++;
+            if (next_tok == config.eos_token_id || step + 1 == max_new_tokens || cur_pos >= config.max_pos) break;
+            forward_token(next_tok, cur_pos++, logits.data());
         }
-
         return result;
     }
 
 private:
-    static inline void rmsnorm(const float* x, const float* weight, float* out, size_t dim, float eps) {
-        float sum_sq = 0.0f;
-        for (size_t i = 0; i < dim; ++i) sum_sq += x[i] * x[i];
-        float inv_rms = 1.0f / std::sqrt(sum_sq / static_cast<float>(dim) + eps);
-        for (size_t i = 0; i < dim; ++i) out[i] = x[i] * inv_rms * weight[i];
-    }
+    AlignedArray<float> k_cache_, v_cache_;                    // fp32: [layer][pos][kv_head * head_dim]
+    AlignedArray<uint8_t> k_codes_, v_codes_;                  // int8: same layout, uint8 codes
+    AlignedArray<float> k_scale_, k_zero_, v_scale_, v_zero_;  // int8: [layer][pos][kv_head]
+    AlignedArray<float> x_, x_norm_, q_, k_, v_, attn_out_, proj_, gate_, up_, scores_;
+    AlignedArray<float> rope_cos_, rope_sin_, inv_freq_;
+    std::mt19937 rng_;
 
-    static inline void gemv(const float* W, const float* x, float* y, size_t M, size_t K) {
-        if (!W) {
-            std::fill(y, y + M, 0.0f);
-            return;
-        }
-        for (size_t i = 0; i < M; ++i) {
-            float sum = 0.0f;
-            const float* row = W + i * K;
-            for (size_t j = 0; j < K; ++j) {
-                sum += row[j] * x[j];
-            }
-            y[i] = sum;
-        }
-    }
-
-    static inline void apply_rope(float* vec, size_t n_heads, size_t head_dim, size_t pos, float theta) {
+    // Interleaved pairs (2i, 2i + 1): GGUF stores llama q/k rows permuted for exactly this rotation.
+    void apply_rope(float* vec, size_t n_heads) const {
+        const size_t D = config.head_dim;
         for (size_t h = 0; h < n_heads; ++h) {
-            float* h_ptr = vec + h * head_dim;
-            for (size_t i = 0; i < head_dim / 2; ++i) {
-                float freq = 1.0f / std::pow(theta, static_cast<float>(2 * i) / static_cast<float>(head_dim));
-                float angle = static_cast<float>(pos) * freq;
-                float cos_a = std::cos(angle);
-                float sin_a = std::sin(angle);
-
-                float v0 = h_ptr[2 * i];
-                float v1 = h_ptr[2 * i + 1];
-                h_ptr[2 * i]     = v0 * cos_a - v1 * sin_a;
-                h_ptr[2 * i + 1] = v0 * sin_a + v1 * cos_a;
+            float* p = vec + h * D;
+            for (size_t i = 0; i < D / 2; ++i) {
+                float v0 = p[2 * i], v1 = p[2 * i + 1];
+                p[2 * i]     = v0 * rope_cos_[i] - v1 * rope_sin_[i];
+                p[2 * i + 1] = v0 * rope_sin_[i] + v1 * rope_cos_[i];
             }
         }
     }
 
-    static inline int32_t sample_logits(const float* logits, size_t vocab_size, float temperature) {
-        if (temperature <= 0.0f) {
-            // Greedy
-            int32_t best_idx = 0;
-            float max_val = logits[0];
-            for (size_t i = 1; i < vocab_size; ++i) {
-                if (logits[i] > max_val) {
-                    max_val = logits[i];
-                    best_idx = static_cast<int32_t>(i);
-                }
-            }
-            return best_idx;
+    // Asymmetric round-to-nearest-even over one head's vector, as turing/core/kv_cache.py's int8 mode does.
+    static void quantize_u8(const float* x, size_t n, uint8_t* codes, float& scale, float& zero) {
+        float lo = x[0], hi = x[0];
+        for (size_t i = 1; i < n; ++i) { lo = std::min(lo, x[i]); hi = std::max(hi, x[i]); }
+        scale = std::max((hi - lo) / 255.0f, 1e-8f);
+        zero = lo;
+        for (size_t i = 0; i < n; ++i) {
+            float c = std::nearbyint((x[i] - lo) / scale);
+            codes[i] = static_cast<uint8_t>(std::min(255.0f, std::max(0.0f, c)));
         }
-
-        // Softmax with temperature
-        float max_l = *std::max_element(logits, logits + vocab_size);
-        std::vector<float> probs(vocab_size);
-        float sum = 0.0f;
-        for (size_t i = 0; i < vocab_size; ++i) {
-            probs[i] = std::exp((logits[i] - max_l) / temperature);
-            sum += probs[i];
-        }
-
-        float r = (static_cast<float>(std::rand()) / static_cast<float>(RAND_MAX)) * sum;
-        float acc = 0.0f;
-        for (size_t i = 0; i < vocab_size; ++i) {
-            acc += probs[i];
-            if (acc >= r) return static_cast<int32_t>(i);
-        }
-        return static_cast<int32_t>(vocab_size - 1);
     }
 };
 

@@ -86,13 +86,20 @@ inline void sinkhorn_ot_eviction_cpp(
         }
     }
 
-    // 4. Marginal key mass: m_j = sum_i (u_i * K_ij * v_j)
+    // 4. Key score. The plan diag(u) K diag(v) has uniform column sums (the last v update sets each to 1/N), so its
+    // marginals cannot rank keys. Score each key by the mass the queries send it under the final row scaling,
+    // before the column constraint: sum_i u_i K_ij (= 1 / (N v_j)), normalised to sum 1.
+    float total = 0.0f;
     for (int j = 0; j < n_keys; ++j) {
         float mass = 0.0f;
         for (int i = 0; i < m_queries; ++i) {
-            mass += u[i] * gibbs[i * n_keys + j] * v[j];
+            mass += u[i] * gibbs[i * n_keys + j];
         }
         key_mass_out[j] = mass;
+        total += mass;
+    }
+    for (int j = 0; j < n_keys; ++j) {
+        key_mass_out[j] /= total;
     }
 
     // 5. Top-K selection

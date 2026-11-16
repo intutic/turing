@@ -1,5 +1,6 @@
 """
-Fused in-SRAM Entropic Optimal Transport (OT) KV Cache Eviction CUDA Triton Kernel.
+Entropic Optimal Transport (OT) KV cache eviction in PyTorch tensor ops (no Triton kernel): it runs on whatever
+device q and k are on, and turing/core/optimal_transport.py uses it for CUDA tensors and for the CPU fallback.
 """
 
 import math
@@ -21,7 +22,12 @@ def sinkhorn_ot_eviction_cuda(
     num_iters: int = 15
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    High-performance GPU Entropic OT KV eviction with top-k selection.
+    Entropic OT KV eviction with top-k selection: (retained key indices, sorted, int32; key scores [N], sum 1).
+
+    The balanced plan P = diag(u) K diag(v) has uniform column sums (the last v update sets every one to 1/N), so
+    its marginals cannot rank keys. A key's score is the mass the queries send it under the final row scaling,
+    before that column constraint: sum_i u_i K_ij (= 1 / (N v_j)). Keys the queries attend to strongly need the
+    smallest v to be held to 1/N and score highest.
     """
     m_queries, head_dim = q.shape
     n_keys, _ = k.shape
@@ -45,8 +51,8 @@ def sinkhorn_ot_eviction_cuda(
         ktu = torch.matmul(gibbs.t(), u.unsqueeze(-1)).squeeze(-1).clamp(min=1e-8)
         v = (1.0 / n_keys) / ktu
 
-    p = u.unsqueeze(-1) * gibbs * v.unsqueeze(0)
-    key_mass = torch.sum(p, dim=0)
+    key_mass = torch.matmul(gibbs.t(), u.unsqueeze(-1)).squeeze(-1)
+    key_mass = key_mass / key_mass.sum()
 
     _, keep_indices = torch.topk(key_mass, k=budget)
     sorted_indices, _ = torch.sort(keep_indices)

@@ -3,7 +3,6 @@ In-SRAM Sinkhorn-Knopp Entropic Optimal Transport (OT) KV Cache Eviction.
 """
 
 from typing import Tuple
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -33,7 +32,8 @@ def sinkhorn_knopp_eviction(
     k: [N_keys, HeadDim]
     budget: Target number of keys to retain
     epsilon: Entropic regularization parameter (0.05)
-    Returns: (retained_k_indices, marginal_key_mass)
+    Returns: (retained_k_indices, key_scores): each key's incoming transported mass before the column constraint,
+    normalised to sum 1 (see sinkhorn_ot_eviction_cuda for why the plan's own marginals cannot rank keys).
     """
     m_queries, head_dim = q.shape
     n_keys, _ = k.shape
@@ -54,39 +54,8 @@ def sinkhorn_knopp_eviction(
             torch.from_numpy(mass_np).to(device=k.device, dtype=k.dtype)
         )
 
-    scale = 1.0 / math.sqrt(head_dim) if "math" in globals() else 1.0 / (head_dim ** 0.5)
-
-    # Cost Matrix: C_ij = - (q_i . k_j) / sqrt(D)
-    cost = -torch.matmul(q, k.t()) * scale # [M, N]
-
-    # Gibbs kernel: K = exp(- (C - min(C)) / epsilon)
-    cost_min = cost.min()
-    gibbs = torch.exp(-(cost - cost_min) / epsilon)
-
-    # Sinkhorn-Knopp matrix scaling iterations
-    # Uniform query prior u_0 = 1 / M
-    u = torch.ones(m_queries, device=q.device) / m_queries
-    v = torch.ones(n_keys, device=k.device) / n_keys
-
-    for _ in range(num_iters):
-        # Update u: u = mu / (K @ v)
-        kv = torch.matmul(gibbs, v.unsqueeze(-1)).squeeze(-1).clamp(min=1e-8)
-        u = (1.0 / m_queries) / kv
-
-        # Update v: v = 1 / (K.T @ u)
-        ktu = torch.matmul(gibbs.t(), u.unsqueeze(-1)).squeeze(-1).clamp(min=1e-8)
-        v = (1.0 / n_keys) / ktu
-
-    # Transport plan P = diag(u) @ K @ diag(v)
-    # Marginal key mass: m_j = sum_i P_ij
-    p = u.unsqueeze(-1) * gibbs * v.unsqueeze(0)
-    key_mass = torch.sum(p, dim=0) # [N_keys]
-
-    # Top-K selection by highest attention transport mass
-    _, keep_indices = torch.topk(key_mass, k=budget)
-    sorted_indices, _ = torch.sort(keep_indices)
-
-    return sorted_indices, key_mass
+    retained, key_mass = sinkhorn_ot_eviction_cuda(q, k, budget, epsilon, num_iters)  # device-agnostic tensor ops
+    return retained.long(), key_mass
 
 class OptimalTransportEviction(nn.Module):
     """
