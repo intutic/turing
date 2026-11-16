@@ -17,7 +17,7 @@ Turing Engine eliminates this limitation by treating NVMe, Host RAM, and VRAM as
 │ 1. In-VRAM Static Cache (<= 4.2 GB):                                             │
 │    • Shared Dense Attention Matrices (Q, K, V, O) permanently pinned.            │
 │    • MoE Router Gating Matrices (128 layers x 64 experts) pinned in VRAM.        │
-│    • SVD INT8 Paged Attention KV Cache (75% VRAM reduction).                     │
+│    • int8 KV cache (about half the KV memory).                                   │
 │                                                                                  │
 │ 2. Tier 4 GPUDirect Storage (NVMe ➔ VRAM DMA @ 81.3 GB/s):                      │
 │    • 1.44 TB NVFP4 / W4A16 Expert weights reside on Local NVMe / Fast SSD.       │
@@ -124,4 +124,4 @@ python scripts/test_qwen_2_4t_moe_streaming.py --device mps
 * **Mean Decode Latency**: **21.61 ms / token**
 * **Active Throughput**: **46.3 tokens / sec**
 * **Total VRAM Allocated**: **< 4.2 GB**
-* **KV Cache Savings**: **75.0%** (via SVD INT8 Paged Attention)
+* **KV Cache Savings**: about 48% with the int8 KV cache (`--kv-cache-dtype int8`)

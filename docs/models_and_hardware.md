@@ -6,6 +6,8 @@ Turing Engine runs frontier 70B–320B models on single consumer GPUs (24GB VRAM
 
 ## 1. Supported Models & VRAM Requirements
 
+> **What is measured today:** exact parity with HuggingFace is tested for **Llama-architecture** models (e.g. SmolLM2, Llama-style GQA). Not yet mapped by the loader: Qwen2 attention biases, Qwen3 q/k norms, and Llama-3 RoPE frequency scaling, so those families do not yet reproduce their reference outputs. The "Turing" memory column below assumes 4-bit weights plus FFN pruning; the serving path currently keeps fp16 weights (int4 weight loading is not wired) and pruning costs quality ([benchmarks](benchmarks.md#2-quality-on-real-weights)), so read that column as a target, not a measured requirement.
+
 Turing Engine features a **Universal Dynamic Model Resolver** (`ModelResolver`) and **Architecture Registry** (`ArchitectureRegistry`). It can load and serve **literally ANY open-weight causal language model on Hugging Face Hub** or local disk out of the box without waiting for hardcoded model configs or engine updates.
 
 ### A. Popular Open-Weight Models & VRAM Requirements

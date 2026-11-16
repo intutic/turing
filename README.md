@@ -1,9 +1,9 @@
 # ⚡ Turing Engine
 
-**Serve Frontier 70B+ Models on a Single Consumer GPU (24GB) or Mac Workstation with 75% Less Memory.**
+**HuggingFace-exact inference for Llama-family models, with an int8 KV cache that halves cache memory at no measured quality cost.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
-[![Release: v1.5.0](https://img.shields.io/badge/Release-v1.5.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.5.0)
+[![Release: v1.6.0](https://img.shields.io/badge/Release-v1.6.0-blue.svg)](https://github.com/intutic/turing/releases/tag/v1.6.0)
 
 
 
@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 327/327 Passing](https://img.shields.io/badge/Tests-327%2F327%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 371/371 Passing](https://img.shields.io/badge/Tests-371%2F371%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -136,20 +136,20 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
           |                               |                             |
           v                               v                             v
 +-----------------------------+ +-----------------------------+ +-----------------------------+
-|   57% Subspace Channel      | |    SVD INT8 KV Cache        | |   Matryoshka Slicing &      |
-|   Activation Pruning        | |    Memory Compression       | |   Elastic MoE Memory        |
+|   Exact HF-Parity Mode      | |    int8 / int4 KV Cache     | |   Matryoshka Slicing &      |
+|   (the default)             | |    + Fused CUDA Decode      | |   Elastic MoE Memory        |
 |                             | |                             | |                             |
-|  * Bypasses inactive FFN    | |  * 32K context memory drops | |  * 7.8x Faster Draft Tokens |
-|    channels during decode   | |    from 10.0 GB -> 2.5 GB   | |  * 96.5% Deliberation Reuse |
-|  * 2.32x CUDA Layer Speedup | |  * -75% VRAM KV footprint   | |  * Dynamic Slot-Page Budget |
+|  * Logits match HF (2e-7)   | |  * int8: ~half the KV bytes | |  * 7.8x Faster Draft Tokens |
+|  * FFN pruning is opt-in    | |    at no measured loss      | |  * 96.5% Deliberation Reuse |
+|    and costs quality        | |  * 1 kernel/layer per batch | |  * Dynamic Slot-Page Budget |
 +-----------------------------+ +-----------------------------+ +-----------------------------+
 ```
 
-1. **⚡ 57% Subspace Activation Pruning (2.32× Layer Speedup)**:
-   Dynamically slices out inactive feed-forward channels during generation, delivering a measured **2.32× CUDA layer speedup** with zero loss in reasoning accuracy.
+1. **🎯 Exact HuggingFace Parity (the default)**:
+   Llama-family checkpoints load with every weight (layer norms, RoPE base, head_dim) and reproduce HuggingFace's logits to 1.8e-7 in fp32, enforced by `tests/test_hf_parity.py`. FFN channel pruning is still available (`--sparsity`), but it is not lossless: at 50% it raises next-token NLL by +6.8 (SmolLM2-1.7B) to +15.8 nats (135M), so it is off by default. See [benchmarks](https://intutic.github.io/turing/benchmarks/).
 
-2. **💾 75% SVD INT8 KV Cache Compression**:
-   Compresses attention Key-Value states into calibrated Rank-64 singular vectors, reducing 32K context memory from **10.0 GB down to 2.5 GB (-75%)**.
+2. **💾 int8 / int4 KV Cache with Fused Batched CUDA Decode**:
+   An int8 cache (one fp16 scale and zero per token and KV head: 48% smaller at head_dim 128) changes NLL by at most ±0.0005 on SmolLM2 135M–1.7B; int4 with per-32-value scales costs +0.02. On CUDA one append + decode kernel per layer serves every running request: 1,274 tok/s at batch 64 against 833 for HuggingFace transformers on the same NVIDIA L4 (SmolLM2-360M, 2K context). Quest page selection is opt-in (`--kv-page-budget`).
 
 3. **🔄 Multi-Turn Clean-Base Lineage (Zero Drift in Deliberation)**:
    Preserves bounded representation fidelity ($\|\Delta C_R\|_2 \approx 30.7$) across multi-turn agent deliberations, preventing the exponential drift collapse of naive re-injection.
@@ -164,7 +164,7 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
    Automatically shifts from full speculative decoding at low concurrency ($1.82\times$ at $c=1$) to plain decode at $c \ge 4$, with non-negotiable byte-exact greedy parity verification.
 
 7. **🏎️ Split-K Paged Flash-Decode & Micro-Scaling (1.36× Faster Decode)**:
-   Auto-dispatches parallel 16-block sequence reductions ($13,966\text{ tok/s}$) and NVFP4-style sub-block scaling ($gs=32/64$) preserving $99.999\%$ signal fidelity with $-75.0\%$ VRAM footprint.
+   Auto-dispatches parallel 16-block sequence reductions ($13,966\text{ tok/s}$) and NVFP4-style sub-block scaling ($gs=32/64$) (an int8 page pool with an fp16 scale per 32 values: 47% smaller than fp16; not used by the serving path).
 
 8. **⚡ Exact Fed-Token Prefix Bypass (94.1% Prompt Compute Saved)**:
    $O(1)$ SIMD common prefix matcher evaluating multi-turn dialogue history in $<155\,\mu\text{s}$ and bypassing prompt prefill compute on recurring turns.
@@ -174,7 +174,7 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
    Automatically auto-dispatches between NVIDIA CUDA (Triton GPU kernels), Apple Silicon Metal (`mps`), and bare-metal C++20 AVX2 SIMD CPU routines.
 
 10. **🏎️ 6-Tier High-Velocity Cold Ingestion Engine (GPUDirect Storage & `io_uring`)**:
-   Features a unified 6-tier storage hierarchy (`TuringIngestEngine`) spanning Linux `io_uring` multi-queue rings, kernel DMA readahead (`MADV_WILLNEED`), Subspace wire compression (-75% bytes), and NVIDIA GPUDirect Storage (`cuFile` PCIe DMA) with layer pipelining ($45.2\text{ ms}$ cold start Time-to-Ready).
+   Features a unified 6-tier storage hierarchy (`TuringIngestEngine`) spanning Linux `io_uring` multi-queue rings, kernel DMA readahead (`MADV_WILLNEED`), Subspace wire compression (`.tgate4` int4 files), and an NVIDIA GPUDirect Storage (`cuFile`) path with layer pipelining. The tier timings in the ingest benchmark are partly synthetic and are being re-measured.
 
 11. **⚡ Fused GPU Kernels & Bare-Metal C++20 SIMD Acceleration (v5.0 & v6.0)**:
    Eliminates Python GIL contention and GPU-to-CPU `.item()` pipeline stalls with:
@@ -201,10 +201,10 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
 | **Model Ingestion** | Direct Hugging Face Hub Streaming | ✅ **Universal** | ✅ Universal | ✅ Universal | ❌ (GGUF Hub) | ❌ (GGUF only) |
 | | Offline GGUF Conversion Required | 🚀 **Zero Conversion** | 🚀 Zero Conversion | 🚀 Zero Conversion | ⚠️ Yes | ⚠️ Yes |
-| **Memory & KV Cache** | Attention KV Management | ✅ **SVD INT8 Paged** | ✅ PagedAttention | ✅ RadixAttention | ⚠️ Ring buffer | ⚠️ Ring / Paged |
-| | KV Memory Reduction (32K Context) | 🚀 **-75% (2.5GB)** | ⚠️ FP8 (5.0GB) | ⚠️ FP8 (5.0GB) | ⚠️ Q4/Q8 (5GB) | ⚠️ Q4/Q8 (5GB) |
+| **Memory & KV Cache** | Attention KV Management | ✅ **int8 / int4 per-request cache** | ✅ PagedAttention | ✅ RadixAttention | ⚠️ Ring buffer | ⚠️ Ring / Paged |
+| | KV Memory Reduction (32K Context) | ✅ **int8: -48% (5.2GB)** | ⚠️ FP8 (5.0GB) | ⚠️ FP8 (5.0GB) | ⚠️ Q4/Q8 (5GB) | ⚠️ Q4/Q8 (5GB) |
 | | Multi-Turn Clean-Base Lineage (Zero Drift) | 🚀 **Exclusive** | ❌ | ❌ | ❌ | ❌ |
-| **Compute Optimization**| Activation Channel Pruning | 🚀 **-57% FFN (2.32×)**| ❌ None | ❌ None | ❌ None | ❌ None |
+| **Compute Optimization**| Activation Channel Pruning | ⚠️ **Opt-in, costs quality**| ❌ None | ❌ None | ❌ None | ❌ None |
 | | MoE Host Offload (320B Scale on 24GB GPU) | 🚀 **18–50 tok/s** | ⚠️ 1–3 tok/s | ⚠️ 1–3 tok/s | ⚠️ 1–5 tok/s | ⚠️ 1–5 tok/s |
 | **Serving & Gateway** | Triple Serving Gateway (OpenAI + Anthropic + Ollama) | ✅ **Triple Native** | ❌ (OpenAI only) | ⚠️ Partial | ❌ (Ollama only) | ❌ (OpenAI only) |
 | | Structured Outputs (JSON Schema & Auto-Repair) | ✅ **Native + Repair** | ✅ Outlines / FSM | ✅ `xGrammar` | ⚠️ Format string | ✅ GBNF Grammars |
@@ -292,7 +292,7 @@ Explore the complete documentation at [**intutic.github.io/turing**](https://int
 * ⚡ **[Production Serving](https://intutic.github.io/turing/serving/)** — High-concurrency continuous batching, streaming API, and SLAs.
 * ☸️ **[Kubernetes & llm-d](https://intutic.github.io/turing/llmd-integration/)** — Distributed multi-pod serving, prefix-cache aware routing, and P/D disaggregation.
 * 🧠 **[Architecture Deep-Dive](https://intutic.github.io/turing/architecture/)** — Subspace channel pruning, SVD INT8 KV cache paging, and Triton kernels.
-* 📊 **[Empirical Benchmarks](https://intutic.github.io/turing/benchmarks/)** — Unmocked physical GPU layer latency speedups, NIAH 1M context analysis, and real-weight throughput.
+* 📊 **[Empirical Benchmarks](https://intutic.github.io/turing/benchmarks/)** — Real-weight quality against the exact model, and decode throughput against HuggingFace transformers on an NVIDIA L4.
 * 🔌 **[Integrations](https://intutic.github.io/turing/integrations/)** — Native guides for LangChain, LlamaIndex, LiteLLM, vLLM, Open WebUI, and Docker.
 * 📜 **[Licensing](https://intutic.github.io/turing/licensing/)** — BSL 1.1 terms (Free for all single-node development, testing, and research).
 

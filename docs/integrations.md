@@ -28,7 +28,7 @@ Turing Engine provides native drop-in support via `langchain-openai` or built-in
     llm = ChatTuring(
         model="deepseek-r1-7b",
         base_url="http://localhost:8000/v1",
-        sparsity_ratio=0.57, # 57% FFN channel pruning
+        sparsity_ratio=0.0, # exact model; pruning costs quality
         svd_rank=64          # Rank-64 SVD INT8 KV cache
     )
     print(llm.invoke("Write a quick C++ SIMD routine:")["content"])
@@ -63,7 +63,7 @@ model_list:
     llm = Turing(
         model="deepseek-r1-7b",
         api_base="http://localhost:8000/v1",
-        sparsity_ratio=0.57,  # 57% FFN channel pruning
+        sparsity_ratio=0.0,  # exact model; pruning costs quality
         svd_rank=64           # Calibrated SVD INT8 KV cache
     )
     response = llm.complete("Summarize the main architectural trade-offs of microservices:")

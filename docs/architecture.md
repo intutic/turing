@@ -1,32 +1,32 @@
 # 🧠 Architecture Deep-Dive
 
-Turing Engine fits 70B–320B parameter models onto single consumer GPUs (24GB VRAM) and Mac workstations through three core systems pillars:
+Turing Engine's serving path rests on three systems pillars:
 
 ```mermaid
 graph TD
-    A["Frontier Model (70B-320B)"] --> B["1. Subspace Pruning (-57% FFN Compute)"]
-    A --> C["2. SVD INT8 KV Paging (-75% VRAM)"]
+    A["HuggingFace checkpoint"] --> B["1. Exact-parity model (pruning opt-in)"]
+    A --> C["2. int8 / int4 KV cache + fused batched CUDA decode"]
     A --> D["3. Heterogeneous MoE Offload (GPU + Host RAM)"]
-    B --> E["Single 24GB GPU Execution (2.32x Speedup)"]
+    B --> E["Serving engine (continuous batching)"]
     C --> E
     D --> E
 ```
 
 ---
 
-## 1. ⚡ Dynamic Subspace Channel Pruning (-57% Compute)
+## 1. 🎯 Exact-Parity Model, with Optional Subspace Channel Pruning
 
-* **The Problem**: In standard SwiGLU feed-forward networks (FFN), over 50% of intermediate activations evaluate to zero or near-zero for any given token during autoregressive generation.
-* **How It Works**: Turing Engine calculates optimal channel bitmasks offline or via lightweight dynamic gating. Custom fused Triton kernels slice out dead channel tiles before Tensor Core execution.
-* **The Result**: Layer execution time drops from **5.40 ms down to 2.32 ms (2.32× speedup)** on physical NVIDIA L4 GPUs with zero loss of reasoning fidelity.
+* **Exact mode (default)**: `RealHuggingFaceLoader.convert_hf_model` maps every weight of a Llama-family checkpoint, including the per-layer norms, the RoPE base (`rope_parameters` in transformers 5) and an explicit `head_dim`. With `sparsity_ratio=0` and recirculation off, logits match HuggingFace's to 1.8e-7 (fp32); `tests/test_hf_parity.py` enforces this through prefill, chunked prefill and decode.
+* **Channel pruning (opt-in)**: keeps the FFN channel tiles with the largest weight norms. A pruned layer runs faster because its matrix multiplies are smaller (e.g. 2.32× for a 70B-shaped layer at 57% pruned), but pruning without retraining is not lossless: at 50% it raises next-token NLL by +6.8 to +15.8 nats on SmolLM2 ([benchmarks](benchmarks.md#2-quality-on-real-weights)).
 
 ---
 
-## 2. 💾 Calibrated SVD INT8 KV Cache Paging (-75% VRAM)
+## 2. 💾 KV Cache: int8 / int4 Storage and Fused Batched Decode
 
-* **The Problem**: Long-context inference is severely memory-bound. At 32,768 tokens, an uncompressed FP16 KV cache consumes over **10.0 GB of VRAM per stream**.
-* **How It Works**: Projects Key and Value heads into a calibrated Rank-64 singular vector basis with symmetric INT8 quantization. Memory is managed using a two-tier virtual page pool (Huge 512-token pages for prefill, Medium 64-token pages for generation).
-* **The Result**: 32K context memory drops from **10.0 GB down to 2.5 GB (-75%)** while maintaining **100% Top-1 exact needle retrieval** on Needle-In-A-Haystack (NIAH) tests.
+* **The Problem**: Long-context and high-batch decode is bound by the bytes of the KV cache, not the weights.
+* **How It Works** (`turing/core/kv_cache.py`): each request owns a preallocated cache `[1, Hkv, capacity, D]` per layer that grows by a quarter when full. Storage is `native`, `int8` (asymmetric per token and KV head, fp16 scale and zero) or `int4` (per group of 32 values). On CUDA, one decode step for every running request is three Triton launches per layer (`turing/kernels/triton_kv_decode.py`): a fused quantize-and-append, a split-K attention over each request's own cache addressed through a pointer table, and a split reduction. Quest page selection (per-page key min/max bounds) is optional.
+* **The Result**: int8 halves the cache (−48% at head_dim 128) with no measurable quality cost (ΔNLL within ±0.0005 on SmolLM2 135M–1.7B); see [benchmarks](benchmarks.md#3-kv-cache-memory-and-decode-throughput) for throughput on an NVIDIA L4.
+* **Not in the serving path**: the SVD rank-64 subspace codecs (`subspace.py`, `radix_svd.py`, `triton_svd_paged.py`) remain as library code; their basis comes from random data, and at head_dim 64 rank 64 does not compress.
 
 ---
 

@@ -10,7 +10,7 @@ This document provides a comprehensive technical and architectural comparison be
 * **SGLang**: The **agentic multi-turn specialist** optimized for dynamic prefix caching (`RadixAttention`) and FSM-guided decoding (`xGrammar`).
 * **Ollama**: The **local developer desktop champion** built on `llama.cpp` for single-user zero-config CLI execution with GGUF format.
 * **llama.cpp**: The **bare-metal C/C++ foundational runtime** for edge CPU/GPU execution using quantized GGUF weights.
-* **Turing Engine**: The **Subspace-compressed edge-to-cloud inference & serving engine** engineered to run **70B–320B frontier models on single 24GB GPUs and consumer Macs** with **-57% compute**, **-75% KV memory**, **zero-token cross-model representation transfer**, and a **Triple API Gateway (OpenAI + Anthropic + Ollama)**.
+* **Turing Engine**: The **Subspace-compressed edge-to-cloud inference & serving engine** with **HuggingFace-exact model execution**, an **int8 KV cache (about half the memory, no measured quality cost)**, **zero-token cross-model representation transfer**, and a **Triple API Gateway (OpenAI + Anthropic + Ollama)**.
 
 ---
 
@@ -24,11 +24,11 @@ This document provides a comprehensive technical and architectural comparison be
 | | Tri-Part Namespace (`provider/model/effort`) | ✅ **Native** | ❌ | ❌ | ❌ | ❌ |
 | | Zero Hardcoding (Dynamic AutoConfig) | ✅ **Yes** | ✅ Yes | ✅ Yes | ❌ | ❌ |
 | **Memory & KV Cache** | Attention KV Management | ✅ **SVD INT8 Paged** | ✅ PagedAttention | ✅ RadixAttention | ⚠️ Ring buffer | ⚠️ Ring / Paged |
-| | KV Footprint Reduction (32K Context) | 🚀 **-75% (2.5GB)** | ⚠️ FP8 (5.0GB) | ⚠️ FP8 (5.0GB) | ⚠️ Q4/Q8 (5GB) | ⚠️ Q4/Q8 (5GB) |
+| | KV Footprint Reduction (32K Context) | ✅ **int8: -48% (5.2GB)** | ⚠️ FP8 (5.0GB) | ⚠️ FP8 (5.0GB) | ⚠️ Q4/Q8 (5GB) | ⚠️ Q4/Q8 (5GB) |
 | | Multi-Turn Clean-Base Lineage (Zero Drift) | 🚀 **Exclusive** | ❌ | ❌ | ❌ | ❌ |
 | | $k$-Slot Cache Pooling ($O(1)$ transfer) | 🚀 **Exclusive** | ❌ | ❌ | ❌ | ❌ |
 | | Prefix Caching Across Requests | ✅ `SpectralRadixSVD` | ⚠️ Hash-based | ✅ `RadixAttention` | ⚠️ Prompt cache | ⚠️ Prompt cache |
-| **Compute Optimization**| Activation Channel Pruning | 🚀 **-57% FFN (2.32×)**| ❌ None | ❌ None | ❌ None | ❌ None |
+| **Compute Optimization**| Activation Channel Pruning | ⚠️ **Opt-in, costs quality**| ❌ None | ❌ None | ❌ None | ❌ None |
 | | MoE Host Offload (320B Scale on 24GB GPU) | 🚀 **18–50 tok/s** | ⚠️ 1–3 tok/s | ⚠️ 1–3 tok/s | ⚠️ 1–5 tok/s | ⚠️ 1–5 tok/s |
 | | Fused C++20 AVX2 SIMD Micro-Kernels | ✅ **Native** | ❌ | ❌ | ✅ Native | ✅ Native |
 | | Triton 3.x Tensor Core GPU Kernels | ✅ **Native** | ✅ Native | ✅ Native | ❌ | ❌ |
@@ -71,13 +71,13 @@ This document provides a comprehensive technical and architectural comparison be
 ### 2. Memory: SVD INT8 KV Paging vs. Dense & Quantized Vectors
 * **vLLM & SGLang**: Store full-dimensional KV states. Even with FP8 KV cache, a 32K context stream consumes ~5.0 GB VRAM.
 * **Ollama & llama.cpp**: Retain full head dimensions ($d=128$), consuming 5–10 GB per stream at 32K context.
-* **Turing Engine**: Projects Key and Value heads into a calibrated **Rank-64 singular vector basis** with symmetric INT8 quantization (`triton_svd_paged.py`). A 32K context stream requires only **2.5 GB (-75% VRAM)** while maintaining **100% Top-1 exact retrieval** across 1,000,000-token Needle-In-A-Haystack tests.
+* **Turing Engine**: Stores K and V as int8 per token and KV head (or int4 per 32 values). A 32K-context stream of a head_dim-128 model needs about 5.2 GB instead of 10 GB, comparable to an FP8 cache, with no measurable quality cost on SmolLM2 135M–1.7B ([benchmarks](benchmarks.md#2-quality-on-real-weights)).
 
 ---
 
 ### 3. Compute: Subspace Channel Pruning vs. Dense Execution
 * **vLLM, SGLang, Ollama & llama.cpp**: Compute all feed-forward network (FFN) channels across all layers regardless of token activation magnitude.
-* **Turing Engine**: Dynamically skips inactive intermediate SwiGLU channels (57.1% pruned), delivering a measured **2.32× per-layer CUDA speedup** with zero loss in reasoning fidelity (99.7% GSM8K/HumanEval retention).
+* **Turing Engine**: Can prune FFN channel tiles by weight norm (`--sparsity`). The pruned layer is faster because its matrices are smaller (2.32× at 57% for a 70B-shaped layer), but without retraining it is not lossless: at 50% next-token NLL rises by +6.8 to +15.8 nats on SmolLM2. It is off by default.
 
 ---
 
@@ -140,5 +140,5 @@ This document provides a comprehensive technical and architectural comparison be
 | **Complex Multi-Turn Prompt-Chaining Pipelines** | **SGLang** | Advanced RadixAttention tree-sharing and specialized SGLang DSL primitives. |
 | **Minimal CLI Desktop Chat via GGUF** | **Ollama** | Single-command installation with pre-packaged local GGUF catalog. |
 | **Standalone C/C++ Embedded Binary (Zero Python)** | **llama.cpp** | Minimal single-binary executable with GBNF grammar support for pure edge hardware. |
-| **Serving 70B–320B Models on Single 24GB GPUs / Macs with High-Velocity Cold Start & Triple API** | **Turing Engine** | **-57% compute**, **-75% KV memory**, **6-tier cold ingestion (<50ms Time-to-Ready)**, **Triple Gateway (OpenAI + Anthropic + Ollama)**, structured outputs, zero-token inter-agent deliberation, and continuous batching with 3-lane QoS. |
+| **Exact HF-parity serving with an int8 KV cache & Triple API** | **Turing Engine** | **HF-exact logits**, **int8 KV (−48%)**, **fused batched CUDA decode**, **Triple Gateway (OpenAI + Anthropic + Ollama)**, structured outputs, zero-token inter-agent deliberation, and continuous batching with 3-lane QoS. |
 

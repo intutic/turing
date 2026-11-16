@@ -17,7 +17,7 @@ python setup.py build_ext --inplace
 
 ### 2. Testing & Quality Verification (Strict 0-Warning Invariant)
 ```bash
-# Run the entire test suite with strict warning escalation (All 327 tests MUST pass with 0 warnings)
+# Run the entire test suite with strict warning escalation (All 371 tests MUST pass with 0 warnings on CUDA; 28 of them need CUDA and skip on Mac/CPU)
 python -W error -m pytest -v
 
 # Run a specific test file
@@ -44,31 +44,30 @@ python scripts/run_all_documented_benchmarks_exhaustive.py
 
 ---
 
-## ☁️ Remote GCP GPU Execution (NVIDIA L4 24GB, CUDA 13.0)
-- **Host**: `ishangupta@neollm-l4` (zone: `us-central1-a`, machine: `g2-standard-4` Spot, 1x L4). The external IP is ephemeral and changes on every start — always address the VM by name.
-- **Access is IAP-only**: the firewall allows tcp:22 only from IAP (`35.235.240.0/20`), so direct `ssh <ip>` times out. Never open port 22 to `0.0.0.0/0`.
-- **GPU Quota (one slot, shared)**: the project has `GPUS_ALL_REGIONS = 1` and on-demand L4 quota `0` (Spot L4 only). The slot is normally held by `intutic-judge-l4` (Terraform-managed Spot judge VM). To run on `neollm-l4`, get the user's OK, stop the judge, start `neollm-l4`, and restart the judge afterwards:
+## ☁️ Remote GCP GPU Execution (NVIDIA L4 24GB, temporary Spot VM)
+- **No standing GPU VM.** `neollm-l4` is now a CPU-only `e2-small` running the user's `liberty` bots; never stop or resize it. `intutic-judge-l4` was deleted on 2026-11-14. Quota: `GPUS_ALL_REGIONS = 1`, on-demand L4 `0`, Spot L4 `3` in `us-central1`.
+- **Workflow (needs the user's OK each time; it costs money):** create a temporary Spot L4 VM, run, copy results back, delete it.
   ```bash
-  gcloud compute instances stop intutic-judge-l4 --zone us-central1-a
-  gcloud compute instances start neollm-l4 --zone us-central1-a
-  # ... run tests / benchmarks ...
-  gcloud compute instances stop neollm-l4 --zone us-central1-a
-  gcloud compute instances start intutic-judge-l4 --zone us-central1-a
+  gcloud compute instances create turing-bench-l4 --zone us-central1-a --machine-type g2-standard-4 \
+    --provisioning-model SPOT --instance-termination-action STOP --max-run-duration 6h \
+    --image-family pytorch-2-9-cu129-ubuntu-2204-nvidia-580 --image-project deeplearning-platform-release \
+    --boot-disk-size 150GB --maintenance-policy TERMINATE --metadata install-nvidia-driver=True \
+    --labels purpose=turing-bench,owner=ishangupta,temporary=true
+  # first boot: sudo apt-get install -y build-essential python3.10-dev; sudo pip uninstall -y torchaudio
+  # (the image's torchaudio fails to load and transformers 5 imports it); then pip install -e '.[dev]'
+  gcloud compute instances delete turing-bench-l4 --zone us-central1-a --quiet   # when done
   ```
-  Spot L4 capacity in `us-central1-a` stocks out and can preempt within seconds of boot — retry `start` and confirm `RUNNING` after ~90s before syncing.
+  Spot L4 capacity stocks out; try zones `-a`, `-b`, `-c`.
+- **Access is IAP-only**: the firewall allows tcp:22 only from IAP (`35.235.240.0/20`), so direct `ssh <ip>` times out. Never open port 22 to `0.0.0.0/0`.
 - **SSH Command**:
   ```bash
-  gcloud compute ssh ishangupta@neollm-l4 --zone us-central1-a --tunnel-through-iap --ssh-key-file ~/.ssh/google_compute_engine
+  gcloud compute ssh ishangupta@turing-bench-l4 --zone us-central1-a --tunnel-through-iap --ssh-key-file ~/.ssh/google_compute_engine
   ```
 - **Code Sync (Rsync over IAP)**:
   ```bash
-  rsync -avz --exclude '.git' --exclude '__pycache__' --exclude 'build' --exclude '*.so' -e "ssh -i ~/.ssh/google_compute_engine -o HostKeyAlias=neollm-l4 -o ProxyCommand='gcloud compute start-iap-tunnel neollm-l4 22 --listen-on-stdin --zone us-central1-a --verbosity=warning'" ./ ishangupta@neollm-l4:~/jflux/
+  rsync -avz --exclude '.git' --exclude '__pycache__' --exclude 'build' --exclude '*.so' -e "ssh -i ~/.ssh/google_compute_engine -o HostKeyAlias=turing-bench-l4 -o ProxyCommand='gcloud compute start-iap-tunnel turing-bench-l4 22 --listen-on-stdin --zone us-central1-a --verbosity=warning'" ./ ishangupta@turing-bench-l4:~/jflux/
   ```
-- **Remote Benchmark Execution**:
-  ```bash
-  gcloud compute ssh ishangupta@neollm-l4 --zone us-central1-a --tunnel-through-iap --ssh-key-file ~/.ssh/google_compute_engine --command "cd ~/jflux && python3 scripts/run_all_documented_benchmarks_exhaustive.py"
-  ```
-- **Shared Host**: the VM also boots the `liberty` bots and `ollama` (CPU-only). They share the 4 vCPUs, so treat CPU-side timings as noisy.
+- **Long runs**: start them with `nohup` on the VM and poll a status file; IAP SSH sessions drop.
 
 ---
 
@@ -85,8 +84,9 @@ python scripts/run_all_documented_benchmarks_exhaustive.py
   - `moe.py` & `heterogeneous_moe.py`: Heterogeneous MoE routing and dynamic dispatch.
   - `paging.py` & `radix_svd.py`: SVD INT8 KV paging and Spectral Radix prefix cache trees.
   - `speculation.py`: Quadtree MRP speculative decoding and Matryoshka sliced draft heads.
+  - `kv_cache.py`: Serving KV cache (`KVCache`): preallocated per request, `native`/`int8`/`int4` storage, Quest page bounds.
 - **`turing/dsl/`**: High-level programmatic workflow primitives (`@chain`, `gen`, `fork`, `join`, `select`, `constrain`) with prefix KV cache sharing and structured parsing executors.
-- **`turing/kernels/`**: Triton GPU kernels (`triton_swiglu.py`, `triton_flash_tree.py`, `triton_w4a16.py`, `triton_recirculation.py`, `triton_hybrid_anchor_fuse.py`, `triton_spec_entropy.py`, `triton_kslot_pool.py`) and CUDA dispatch wrappers.
+- **`turing/kernels/`**: Triton GPU kernels (`triton_swiglu.py`, `triton_flash_tree.py`, `triton_w4a16.py`, `triton_recirculation.py`, `triton_hybrid_anchor_fuse.py`, `triton_spec_entropy.py`, `triton_kslot_pool.py`, `triton_kv_decode.py` fused batched KV append + decode) and CUDA dispatch wrappers.
 - **`turing/models/`**: Subspace model architectures (`causal_lm.py`), native binary GGUF reader & dequantizer (`gguf_loader.py`, `gguf_tokenizer.py`), `.tgate` weight converters (`converter.py`), safetensors mmap loaders, HuggingFace loaders, tensor/pipeline parallelism (`tensor_parallel.py`), and vLLM integration adapters.
 - **`turing/serving/`**: Continuous batching engine (`engine.py`), elastic multi-model serving (`multi_model.py`), distributed multi-GPU & multi-node driver (`distributed.py`), dual OpenAI + Anthropic `/v1/messages` server (`server.py`), AI traffic management & 3-lane QoS scheduling (`traffic.py`), concurrency-adaptive speculation gating (`spec_gate.py`), and NIAH evaluator (`niah.py`).
 - **`turing/demo/`**: Multi-agent deliberation coordinator (`agent_system.py`), dynamic environment model (`world_model.py`), epistemic uncertainty gate (`epistemic_gate.py`), and interactive CLI runner.
@@ -128,7 +128,7 @@ python scripts/run_all_documented_benchmarks_exhaustive.py
    - Always use modern, explicit PyTorch APIs (`torch.amp.autocast('cuda')`, explicit meshgrid indexing) to prevent warning escalation failures.
 
 4. **Remote GCP GPU VRAM Leakage & Orphaned PIDs**:
-   - When terminating or interrupting remote benchmark scripts on the GCP VM (`neollm-l4`), Python or PyTorch background worker processes occasionally hold onto VRAM allocations.
+   - When terminating or interrupting remote benchmark scripts on the temporary GCP L4 VM, Python or PyTorch background worker processes occasionally hold onto VRAM allocations.
    - Before running memory-intensive benchmarks or elastic multi-model serving, always verify free VRAM via `ssh ... "nvidia-smi"` and terminate any orphaned Python processes (`kill -9 <PID>`).
 
 5. **Triple-File Version Alignment Invariant**:

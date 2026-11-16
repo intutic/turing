@@ -13,10 +13,17 @@ turing serve \
   --host 0.0.0.0 \
   --port 8000 \
   --device auto \
-  --sparsity 0.57 \
+  --kv-cache-dtype auto \
   --reasoning-effort high \
   --max-batch-size 32
 ```
+
+### KV cache and exactness options
+| Flag | Default | Effect (measured in [benchmarks](benchmarks.md#2-quality-on-real-weights)) |
+| :--- | :--- | :--- |
+| `--kv-cache-dtype` | `auto` | `auto` = `int8` on CUDA, `native` elsewhere. `int8`: one fp16 scale and zero per token and KV head, about half the cache memory, no measurable quality cost. `int4`: per-32-value scales, about a quarter, +0.02 nats. On CUDA a decode step for every running request is one fused append + attention kernel per layer. |
+| `--kv-page-budget` | `1.0` | Quest page selection: each decode step reads this share of 16-token pages (first and last always kept). `0.25` costs +0.013 to +0.035 nats; it runs on the slower per-request path. |
+| `--sparsity` | `0.0` | FFN channel pruning. `0.0` serves the model exactly (logits match HuggingFace). Pruning is not lossless: `0.5` raises NLL by +6.8 to +15.8 nats on SmolLM2. |
 
 ### Interactive Terminal Chat
 ```bash
@@ -299,8 +306,8 @@ You can dynamically tune compression and routing parameters per-request via HTTP
 | HTTP Header | Default | Description |
 | :--- | :--- | :--- |
 | `X-Turing-Lane` | `interactive` | QoS Scheduling Priority: `interactive` (SLO-first), `batch`, or `background` (shed-first). |
-| `X-Turing-Sparsity` | `0.57` | Fraction of intermediate FFN channels to prune (0.0 to 0.75). |
-| `X-Turing-SVD-KV` | `1` | Enable/disable calibrated SVD INT8 KV cache paging. |
+| `X-Turing-Sparsity` | server `--sparsity` (`0.0`) | Reported FFN channel sparsity of the serving model. |
+| `X-Turing-SVD-KV` | `0` | Accepted for compatibility; it does not change cache storage (use `--kv-cache-dtype`). |
 | `X-Turing-Draft-Tokens` | `4` | Speculative draft token budget per verification step. |
 | `X-Turing-Tenant-ID` | `None` | Dynamic multi-tenant LoRA adapter ID (e.g. `tenant_sql`, `tenant_code`). |
 
