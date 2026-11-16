@@ -1,6 +1,9 @@
 """
 Comprehensive Benchmark: Multi-Task Pipeline Serving, Zero-Sync Segment Pooling & Compute-Cost Batching.
-Compares Turing Engine's optimized kernels and residency against standard SIE/TEI patterns on physical silicon.
+Synthetic: segment pooling runs on randn hidden states. The 5-stage "pipeline" runs the
+ElasticMultiModelManager placeholders, not real models: extract is a substring match, embeddings
+pool randn hidden states, rerank is word overlap, and the LM stage only registers a model entry.
+Its "VRAM" is the sum of the estimates passed to register_model, not memory read from the device.
 """
 
 import time
@@ -214,7 +217,7 @@ def benchmark_full_agent_pipeline(device: torch.device) -> Dict[str, Any]:
         "stage4_rerank_ms": round(t_stage4, 3),
         "stage5_gen_load_ms": round(t_stage5, 3),
         "total_pipeline_latency_ms": round(total_pipeline_ms, 3),
-        "peak_vram_allocated_gb": round(allocated_gb, 2),
+        "declared_vram_estimate_gb": round(allocated_gb, 2),
         "models_resident": mgr.stats["loaded_models"],
     }
 
@@ -244,15 +247,15 @@ def main():
     print(f"  • Adaptive Cost-Batching Waste   : {batch_res['adaptive_padding_waste_pct']:.2f}% of token FLOPs")
     print(f"  • Absolute Waste Reduction       : -{batch_res['padding_waste_reduction_pct']:.2f}% padding compute eliminated")
 
-    print("\n[3/3] Benchmarking Full 5-Stage Agent Pipeline on Single GPU...")
+    print("\n[3/3] Timing the 5-stage pipeline placeholders (no real models are loaded)...")
     pipe_res = benchmark_full_agent_pipeline(device=device)
-    print(f"  • Stage 1 (Docling Parse)        : {pipe_res['stage1_doc_parse_ms']:.2f} ms")
-    print(f"  • Stage 2 (GLiNER NER Extract)   : {pipe_res['stage2_ner_extract_ms']:.2f} ms")
-    print(f"  • Stage 3 (BGE Vector Embeddings): {pipe_res['stage3_embedding_ms']:.2f} ms")
-    print(f"  • Stage 4 (BGE Reranking)        : {pipe_res['stage4_rerank_ms']:.2f} ms")
-    print(f"  • Stage 5 (Generative LM Swapping): {pipe_res['stage5_gen_load_ms']:.2f} ms")
-    print(f"  • Total Pipeline End-to-End Latency: {pipe_res['total_pipeline_latency_ms']:.2f} ms")
-    print(f"  • Total VRAM Allocated Across 5 Models: {pipe_res['peak_vram_allocated_gb']:.2f} GB (fits in single 8GB/24GB card!)")
+    print(f"  • Stage 1 (extract placeholder: substring match)   : {pipe_res['stage1_doc_parse_ms']:.2f} ms")
+    print(f"  • Stage 2 (extract placeholder: substring match)   : {pipe_res['stage2_ner_extract_ms']:.2f} ms")
+    print(f"  • Stage 3 (embedding placeholder: randn + pooling) : {pipe_res['stage3_embedding_ms']:.2f} ms")
+    print(f"  • Stage 4 (rerank placeholder: word overlap)       : {pipe_res['stage4_rerank_ms']:.2f} ms")
+    print(f"  • Stage 5 (LM registry lookup, no generation)      : {pipe_res['stage5_gen_load_ms']:.2f} ms")
+    print(f"  • Total placeholder pipeline latency               : {pipe_res['total_pipeline_latency_ms']:.2f} ms")
+    print(f"  • Sum of declared VRAM estimates (not measured)    : {pipe_res['declared_vram_estimate_gb']:.2f} GB")
 
     print(f"\n================================================================================")
     print(f"   [+] All Multi-Model Pipeline benchmarks completed successfully!")

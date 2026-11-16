@@ -79,7 +79,7 @@ cmake -B build && cmake --build build
 ```
 
 ### 6. Distributed Multi-GPU & Pipeline Parallel Serving
-Serve large 70B+ models across multi-GPU nodes with Tensor Parallelism (TP) and Pipeline Parallelism (PP):
+Tensor- and pipeline-parallel building blocks exist, but multi-GPU serving has not been validated (pipeline stages currently run in one process):
 ```bash
 # Serve across 4 GPUs with TP=2, PP=2
 turing serve --model meta-llama/Llama-3.3-70B-Instruct --tensor-parallel 2 --pipeline-parallel 2 --port 8000
@@ -90,20 +90,16 @@ turing serve --model meta-llama/Llama-3.3-70B-Instruct --tensor-parallel 2 --pip
 
 ---
 
-## 🌐 Supported Frontier & MoE Models
+## 🌐 Models
 
-Turing Engine natively ingests, compresses, and serves open weights directly from Hugging Face:
+What has actually been run with real weights in this repository:
 
-| Lab / Family | Flagship & Frontier Models Supported | Single-GPU Hardware Target |
+| Model | What was run | Where |
 | :--- | :--- | :--- |
-| **DeepSeek** | `deepseek-r1-distill` (`1.5b`–`70b`), `deepseek-v4-flash`, `deepseek-v4-pro` (1.6T MoE) | **1x 8GB–24GB GPU + Host RAM** |
-| **Meta AI** | `llama-4-scout`, `llama-4-maverick`, `muse-glimmer-30b`, `llama-3.3-70b` | **1x 8GB–24GB GPU / Mac** |
-| **Alibaba Qwen** | `qwen-2.5-coder` (`7b` & `32b`), `qwen-3.8-27b`, `qwen3.8-max` (MoE), [`nvidia/Qwen3.8-2.4T-A95B-NVFP4`](docs/qwen_2_4t_nvfp4_guide.md) (2.4T MoE) | **1x 12GB–24GB GPU + NVMe Tier / Mac** |
-| **Google** | `gemma-2-27b`, `gemma-2-9b`, `gemma-4-26b` (MoE) | **1x 8GB–16GB GPU / Mac** |
-| **Mistral AI** | `mistral-large-3`, `mistral-small-4` (24B), `mistral-small-24b` | **1x 8GB–24GB GPU / Mac** |
-| **Zhipu / Moonshot** | `glm-5.3-flash` (320B-A18B MoE / 1M Ctx), `glm-5.3-730b`, `kimi-k3` (2.8T MoE), `kimi-k2.6` | **1x 24GB GPU + Host RAM** |
-| **OpenAI & NVIDIA** | `gpt-oss-20b` (3.6B active / runs in 8GB VRAM), `nemotron-3-super/ultra` | **1x 8GB–24GB GPU / Mac** |
-| **Microsoft** | `phi-4` (14B), `phi-4-mini` | **1x 8GB–16GB GPU / Mac** |
+| `HuggingFaceTB/SmolLM2-135M`, `-360M`, `-1.7B` | Turing forward pass vs HuggingFace (NLL), int8/int4 KV, batched decode throughput | [benchmarks §2–§3](https://intutic.github.io/turing/benchmarks/) |
+| `gpt2`, `SmolLM2-1.7B-Instruct` | HuggingFace `generate` timing (not the Turing engine) | `scripts/benchmark_comprehensive_real_gpu.py` |
+
+Exact HuggingFace parity is implemented for **Llama-architecture** checkpoints. Other families resolve and load through `ModelResolver`, but Qwen2 attention biases, Qwen3 q/k norms and Llama-3 RoPE scaling are not mapped yet, and no MoE checkpoint and no model larger than 1.7B has been run end to end. The serving path keeps fp16 weights, so a 70B model needs about 141 GB of weight memory and does not fit on one 24 GB GPU. Names such as `llama-3.3-70b` or `glm-5.3-flash` in `SIZING_PROFILES` are layer geometries for dry-run sizing, not tested models.
 
 > **❓ Clarification: `CLI_ALIASES` vs. `SIZING_PROFILES`**
 > * **`CLI_ALIASES` (`resolver.py`)**: Purely optional typing shortcuts for interactive developers (e.g. typing `turing chat --model smollm2` instead of `turing chat --model HuggingFaceTB/SmolLM2-135M`). Passing any full repo ID (e.g. `turing chat --model EleutherAI/pythia-70m` or `meta-llama/Llama-3.3-70B-Instruct`) bypasses aliases and streams weights directly from Hugging Face Hub.
@@ -125,6 +121,8 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
 | **Cross-Vendor** | Intel, AMD APUs, Qualcomm Adreno, ARM Mali | **Vulkan Compute** | SPIR-V Compute Shaders + Host-Visible Coherent Memory |
 | **x86_64 / ARM CPU** | Intel Xeon, AMD EPYC, Ampere Altra, Apple Silicon | **C++20 AVX2 / NEON SIMD** | 64-byte aligned SIMD fused FMA + zero-copy `mmap` |
 
+Recorded runs exist only for an NVIDIA L4 (CUDA), Apple M4 Pro (MPS) and CPU. The AMD, Intel and Vulkan backends have dispatch code but no recorded run.
+
 ---
 
 ## 🧠 Why Turing Engine? (Core Advantages)
@@ -136,62 +134,29 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
           |                               |                             |
           v                               v                             v
 +-----------------------------+ +-----------------------------+ +-----------------------------+
-|   Exact HF-Parity Mode      | |    int8 / int4 KV Cache     | |   Matryoshka Slicing &      |
-|   (the default)             | |    + Fused CUDA Decode      | |   Elastic MoE Memory        |
+|   Exact HF-Parity Mode      | |    int8 / int4 KV Cache     | |   Draft Heads, MoE Cache,   |
+|   (the default)             | |    + Fused CUDA Decode      | |   Lineage, Pooling          |
 |                             | |                             | |                             |
-|  * Logits match HF (2e-7)   | |  * int8: ~half the KV bytes | |  * 7.8x Faster Draft Tokens |
-|  * FFN pruning is opt-in    | |    at no measured loss      | |  * 96.5% Deliberation Reuse |
-|    and costs quality        | |  * 1 kernel/layer per batch | |  * Dynamic Slot-Page Budget |
+|  * Logits match HF          | |  * int8: ~half the KV bytes | |  * Experimental: random-    |
+|  * FFN pruning is opt-in    | |    at no measured loss      | |    weight micro-benchmarks  |
+|    and costs quality        | |  * 1 kernel/layer per batch | |    only, see claims audit   |
 +-----------------------------+ +-----------------------------+ +-----------------------------+
 ```
 
 1. **🎯 Exact HuggingFace Parity (the default)**:
-   Llama-family checkpoints load with every weight (layer norms, RoPE base, head_dim) and reproduce HuggingFace's logits to 1.8e-7 in fp32, enforced by `tests/test_hf_parity.py`. FFN channel pruning is still available (`--sparsity`), but it is not lossless: at 50% it raises next-token NLL by +6.8 (SmolLM2-1.7B) to +15.8 nats (135M), so it is off by default. See [benchmarks](https://intutic.github.io/turing/benchmarks/).
+   Llama-family checkpoints load with every weight (layer norms, RoPE base, head_dim) and reproduce HuggingFace's logits: about 2e-7 max difference in fp32 on the random-initialised 4-layer Llama in `tests/test_hf_parity.py`, and a mean NLL difference below 0.00001 on SmolLM2 135M–1.7B real weights (fp32). FFN channel pruning is still available (`--sparsity`), but it is not lossless: at 50% it raises next-token NLL by +6.8 (SmolLM2-1.7B) to +15.8 nats (135M), so it is off by default. See [benchmarks](https://intutic.github.io/turing/benchmarks/).
 
 2. **💾 int8 / int4 KV Cache with Fused Batched CUDA Decode**:
    An int8 cache (one fp16 scale and zero per token and KV head: 48% smaller at head_dim 128) changes NLL by at most ±0.0005 on SmolLM2 135M–1.7B; int4 with per-32-value scales costs +0.02. Requests share one paged pool (at most one partial 16-token page wasted each; forks share pages copy-on-write). On CUDA a decode step for every running request is one append + attention kernel per layer, replayed as a CUDA graph: on an NVIDIA L4, SmolLM2-360M at 2K context decodes 162 tok/s for one request (HuggingFace transformers: 29) and 1,715 tok/s at batch 64 (827). Quest page selection is opt-in (`--kv-page-budget`) and pays at large batches and long contexts.
 
-3. **🔄 Multi-Turn Clean-Base Lineage (Zero Drift in Deliberation)**:
-   Preserves bounded representation fidelity ($\|\Delta C_R\|_2 \approx 30.7$) across multi-turn agent deliberations, preventing the exponential drift collapse of naive re-injection.
+3. **🧪 Experimental components (no real-model measurement yet)**:
+   Multi-turn `clean_base` lineage (recomputes residuals against the original cache instead of chaining them), k-slot KV pooling, Matryoshka draft heads, a concurrency gate that turns speculation off at 4+ active streams plus a greedy parity verifier, token-budget admission control with three priority lanes, split-K paged decode, MoE expert caching and prefetch (LFRU, routing history, PILOT), hybrid linear/softmax attention, cross-model KV transfer, and assorted Triton kernels and C++ helpers. Each has unit tests and random-data micro-benchmarks only; the numbers previously quoted for them were removed because none was measured on a model and several were constants or formulas ([claims audit](docs/claims-audit.md)). Some are slower than the baseline they replace.
 
-4. **⚡ $k$-Slot Symmetric Pooling (3.1× Transfer Speedup)**:
-   Compresses $N$-token KV caches into $k=4$ learned summary slots per head/layer via fused Triton kernels, delivering a measured **3.1× speedup** on long contexts ($N=8,192$).
+4. **🌐 Triple API gateway**: OpenAI (`/v1`), Anthropic (`/v1/messages`) and Ollama (`/api/*`) endpoints in one server, with JSON-schema prompting, truncated-JSON repair and tool-call parsing. `/v1/embeddings`, `/v1/rerank` and `/v1/extract` are placeholders today (random embeddings, word-overlap rerank, substring extract).
 
-5. **🚦 AI Traffic Management & 3-Lane QoS Scheduling**:
-   Features token-budget VRAM estimation, 64-bit FNV-1a prefix routing, sub-50µs admission control (HTTP 429 backpressure), and priority sorting across `Interactive`, `Batch`, and `Background` lanes.
+5. **🏎️ Ingest tiers**: `madvise(MADV_WILLNEED)` readahead (2.25 GB/s cold against 0.75 GB/s demand paging), a parallel `pread` reader (1 MiB requests, 64 in flight: 5.78 GB/s cold on an M4 Pro SSD, up from 2.22 GB/s), `.tgate4` int4 files and a GPUDirect Storage path. The last two are not measured yet ([benchmarks §4](https://intutic.github.io/turing/benchmarks/#4-storage-ingestion-ladder-measured-cold-apple-m4-pro-ssd)).
 
-6. **🎯 Concurrency-Adaptive Speculation Gating & Parity**:
-   Automatically shifts from full speculative decoding at low concurrency ($1.82\times$ at $c=1$) to plain decode at $c \ge 4$, with non-negotiable byte-exact greedy parity verification.
-
-7. **🏎️ Split-K Paged Flash-Decode & Micro-Scaling (1.36× Faster Decode)**:
-   Auto-dispatches parallel 16-block sequence reductions ($13,966\text{ tok/s}$) and NVFP4-style sub-block scaling ($gs=32/64$) (an int8 page pool with an fp16 scale per 32 values: 47% smaller than fp16; not used by the serving path).
-
-8. **⚡ Exact Fed-Token Prefix Bypass (94.1% Prompt Compute Saved)**:
-   $O(1)$ SIMD common prefix matcher evaluating multi-turn dialogue history in $<155\,\mu\text{s}$ and bypassing prompt prefill compute on recurring turns.
-
-
-9. **🍏 Universal Hardware Support (Apple Silicon & NVIDIA CUDA)**:
-   Automatically auto-dispatches between NVIDIA CUDA (Triton GPU kernels), Apple Silicon Metal (`mps`), and bare-metal C++20 AVX2 SIMD CPU routines.
-
-10. **🏎️ 6-Tier High-Velocity Cold Ingestion Engine (GPUDirect Storage & `io_uring`)**:
-   Features a unified 6-tier storage hierarchy (`TuringIngestEngine`) spanning a parallel `pread` reader (1 MiB requests, 64 in flight: 5.78 GB/s cold on an M4 Pro SSD, up from 2.22 GB/s), kernel DMA readahead (`MADV_WILLNEED`), Subspace wire compression (`.tgate4` int4 files), and an NVIDIA GPUDirect Storage (`cuFile`) path with layer pipelining. Tiers 0, 1, 2 and 5 are measured cold in [benchmarks §19](docs/benchmarks.md#19-storage-ingestion-ladder-measured-cold-apple-m4-pro-ssd); the compressed-container and GPUDirect tiers are not measured yet.
-
-11. **⚡ Fused GPU Kernels & Bare-Metal C++20 SIMD Acceleration (v5.0 & v6.0)**:
-   Eliminates Python GIL contention and GPU-to-CPU `.item()` pipeline stalls with:
-   * **Batched Continuous Paged Decode GEMV (`triton_paged_decode_gemv.py`)**: Slashes memory traffic over 2D block tables, accelerating batched generation up to **8.86× (30,057 tok/s at $B=32$)**.
-   * **Single-Step Linear Recurrent Attention (`triton_linear_recurrence_step.py`)**: Fuses decay and output projection directly in SRAM (**5.13× speedup**, $57.76\,\mu\text{s}$).
-   * **Direct Pointer Memory Tensor Hashing (`csrc/turing_fast_hash_tensor.hpp`)**: 256-bit AVX2 SIMD pointer scanning at **8.18 GB/s (23.00× faster)** without intermediate byte copies.
-   * **C++20 Zero-Copy Streaming Reasoning Scanner (`csrc/turing_reasoning_scanner.hpp`)**: State-machine tag filter running at **2.47M tok/s**.
-   * **In-VRAM Speculative Verification & Sub-Microsecond AI Traffic QoS Routing**: $O(1)$ admission manager handling **1.18M requests/sec**.
-
-12. **🌐 Learned MoE Hot-Expert Pinning, LFRU Hysteresis & Vectorized Batch-Union**:
-    Features persistent historical activation tracking (`RoutingHistoryTracker`) to eliminate cold-start misses (**$92.53\%$ vs $39.14\%$ hit rate**), LFRU eviction with $25\%+4$ hysteresis gating (**$95.10\%$ thrashing reduction**), PILOT one-layer-ahead PCIe streaming, and vectorized PyTorch `index_add_` batch-union accumulation (**up to $16.92\times$ prefill acceleration**, $113\text{k tok/s}$).
-
-13. **🌐 Elastic Multi-Model Pipeline Serving & In-SRAM Fused Segment Pooling (v7.0)**:
-    Orchestrates 5+ models (Docling OCR $\to$ GLiNER NER $\to$ BGE Embeddings $\to$ BGE Reranker $\to$ Qwen LLM) on a single 24GB GPU in **$167.34\text{ ms}$ total** on **$7.42\text{ GB}$ VRAM** with fused variable-length segment pooling (**$65.40\times$ faster on NVIDIA L4**, $179\text{M tok/s}$) and compute-cost adaptive batching (**-67.43% token padding waste eliminated**).
-
-14. **🧠 Hybrid Gated Softmax Anchoring & Chunkwise Learned Decay (v8.0)**:
-    Eliminates the 84% associative recall collapse of linear attention/SSMs on RAG tasks by dynamically anchoring high-entropy factual tokens into a compact Softmax KV cache while streaming ambient context through $O(1)$ constant-memory learned-decay recurrence (**$25.00\%$ exact recall**, $\sim 16\times$ above chance floor, with **$1.61\times$ faster chunkwise prefill** and **$48.84\,\mu\text{s}$ decode latency**).
+6. **🍏 Hardware dispatch**: CUDA (Triton kernels), Apple Silicon (`mps`) and C++20 AVX2/NEON CPU routines.
 
 ---
 
@@ -202,14 +167,15 @@ Turing Engine auto-discovers and accelerates inference on all major silicon arch
 | **Model Ingestion** | Direct Hugging Face Hub Streaming | ✅ **Universal** | ✅ Universal | ✅ Universal | ❌ (GGUF Hub) | ❌ (GGUF only) |
 | | Offline GGUF Conversion Required | 🚀 **Zero Conversion** | 🚀 Zero Conversion | 🚀 Zero Conversion | ⚠️ Yes | ⚠️ Yes |
 | **Memory & KV Cache** | Attention KV Management | ✅ **int8 / int4 per-request cache** | ✅ PagedAttention | ✅ RadixAttention | ⚠️ Ring buffer | ⚠️ Ring / Paged |
-| | KV Memory Reduction (32K Context) | ✅ **int8: -48% (5.2GB)** | ⚠️ FP8 (5.0GB) | ⚠️ FP8 (5.0GB) | ⚠️ Q4/Q8 (5GB) | ⚠️ Q4/Q8 (5GB) |
-| | Multi-Turn Clean-Base Lineage (Zero Drift) | 🚀 **Exclusive** | ❌ | ❌ | ❌ | ❌ |
+| | KV cache at 32K tokens, Llama-70B shape (fp16 = 10.0 GiB) | ✅ **int8: 5.16 GiB** | ✅ FP8: 5.0 GiB | ✅ FP8: 5.0 GiB | ✅ q8_0 / q4_0 | ✅ q8_0 / q4_0 |
+| | Multi-Turn Clean-Base Lineage | 🧪 **Experimental** | ❌ | ❌ | ❌ | ❌ |
 | **Compute Optimization**| Activation Channel Pruning | ⚠️ **Opt-in, costs quality**| ❌ None | ❌ None | ❌ None | ❌ None |
-| | MoE Host Offload (320B Scale on 24GB GPU) | 🚀 **18–50 tok/s** | ⚠️ 1–3 tok/s | ⚠️ 1–3 tok/s | ⚠️ 1–5 tok/s | ⚠️ 1–5 tok/s |
 | **Serving & Gateway** | Triple Serving Gateway (OpenAI + Anthropic + Ollama) | ✅ **Triple Native** | ❌ (OpenAI only) | ⚠️ Partial | ❌ (Ollama only) | ❌ (OpenAI only) |
 | | Structured Outputs (JSON Schema & Auto-Repair) | ✅ **Native + Repair** | ✅ Outlines / FSM | ✅ `xGrammar` | ⚠️ Format string | ✅ GBNF Grammars |
 | | Native Tool & Function Calling | ✅ **Native** | ✅ Native | ✅ Native | ✅ Native | ⚠️ Custom parsing |
-| **Agentic Deliberation** | Cross-Model Closed-Form KV Transfer ($W^*$)| 🚀 **Zero-Token ($O(1)$)**| ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) |
+| **Agentic Deliberation** | Cross-Model Closed-Form KV Transfer ($W^*$)| 🧪 **Experimental (untested on models)**| ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) | ❌ (Re-prefills) |
+
+Competitor columns are the maintainers' reading of those projects and are not verified by this repository; none of those engines is run here.
 
 > 📖 *Read the complete in-depth architectural breakdown at [**intutic.github.io/turing/comparison/**](https://intutic.github.io/turing/comparison/).*
 
@@ -230,7 +196,7 @@ turing generate --model gpt2 --prompt "Artificial intelligence is"
 # 4. Run live mathematical reasoning (GSM8K) evaluation:
 turing eval-accuracy --model gpt2 --samples 5
 
-# 5. Run physical hardware micro-benchmarks:
+# 5. Run synthetic micro-benchmarks (random tensors; see the claims audit):
 python scripts/benchmark_native_fusions_v2.py
 python scripts/benchmark_lineage_strategies.py
 python scripts/benchmark_traffic_and_spec.py
@@ -288,11 +254,12 @@ Explore the complete documentation at [**intutic.github.io/turing**](https://int
 
 * 🌐 **[Technical Comparison](https://intutic.github.io/turing/comparison/)** — Deep-dive matrix vs vLLM, SGLang, Ollama, and llama.cpp.
 * 🚀 **[Quickstart Guide](https://intutic.github.io/turing/quickstart/)** — 30-second setup, CLI commands, and OpenAI/Anthropic/Ollama SDK usage.
-* 🖥️ **[Models & Sizing Table](https://intutic.github.io/turing/models_and_hardware/)** — GPU sizing table (8GB to 24GB VRAM) across 26 frontier models.
+* 🖥️ **[Models & Hardware](https://intutic.github.io/turing/models_and_hardware/)** — what has been run, model naming, and hardware setup.
 * ⚡ **[Production Serving](https://intutic.github.io/turing/serving/)** — High-concurrency continuous batching, streaming API, and SLAs.
 * ☸️ **[Kubernetes & llm-d](https://intutic.github.io/turing/llmd-integration/)** — Distributed multi-pod serving, prefix-cache aware routing, and P/D disaggregation.
 * 🧠 **[Architecture Deep-Dive](https://intutic.github.io/turing/architecture/)** — Subspace channel pruning, SVD INT8 KV cache paging, and Triton kernels.
 * 📊 **[Empirical Benchmarks](https://intutic.github.io/turing/benchmarks/)** — Real-weight quality against the exact model, and decode throughput against HuggingFace transformers on an NVIDIA L4.
+* 🔍 **[Claims Audit](https://intutic.github.io/turing/claims-audit/)** — Every earlier benchmark number traced to the script that produced it.
 * 🔌 **[Integrations](https://intutic.github.io/turing/integrations/)** — Native guides for LangChain, LlamaIndex, LiteLLM, vLLM, Open WebUI, and Docker.
 * 📜 **[Licensing](https://intutic.github.io/turing/licensing/)** — BSL 1.1 terms (Free for all single-node development, testing, and research).
 

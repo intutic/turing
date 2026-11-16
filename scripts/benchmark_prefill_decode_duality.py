@@ -21,7 +21,7 @@ from turing.serving.spec_gate import SpeculationGatePolicy, SpecGateDecision
 def benchmark_prefill_scaling(device: str = "cpu") -> dict:
     """Measures Prefill TTFT and Compute Scaling across sequence lengths."""
     print("\n" + "="*80)
-    print(f"📊 [BENCHMARK 1/5] PREFILL (ENCODER) COMPUTE SCALING ON {device.upper()}")
+    print(f"📊 [BENCHMARK 1/4] PREFILL (ENCODER) COMPUTE SCALING ON {device.upper()}")
     print("="*80)
 
     config = ModelConfig(
@@ -88,7 +88,7 @@ def benchmark_prefill_scaling(device: str = "cpu") -> dict:
 def benchmark_batched_decode_tps(device: str = "cpu") -> dict:
     """Measures Decode Throughput (TPS) scaling across concurrent batch sizes."""
     print("\n" + "="*80)
-    print(f"📊 [BENCHMARK 2/5] DECODE (BANDWIDTH-BOUND) BATCHED THROUGHPUT ON {device.upper()}")
+    print(f"📊 [BENCHMARK 2/4] DECODE (BANDWIDTH-BOUND) BATCHED THROUGHPUT ON {device.upper()}")
     print("="*80)
 
     config = ModelConfig(
@@ -150,7 +150,7 @@ def benchmark_batched_decode_tps(device: str = "cpu") -> dict:
 def benchmark_interleaved_prefill_decode_jitter(device: str = "cpu") -> dict:
     """Measures Inter-Token Latency (ITL) P50/P95/P99 stability during massive prompt bursts."""
     print("\n" + "="*80)
-    print(f"📊 [BENCHMARK 3/5] PREFILL-DECODE CO-SCHEDULING & ITL JITTER ON {device.upper()}")
+    print(f"📊 [BENCHMARK 3/4] PREFILL-DECODE CO-SCHEDULING & ITL JITTER ON {device.upper()}")
     print("="*80)
 
     config = ModelConfig(
@@ -211,7 +211,7 @@ def benchmark_interleaved_prefill_decode_jitter(device: str = "cpu") -> dict:
 def benchmark_speculation_concurrency_gating() -> dict:
     """Verifies Concurrency-Adaptive Speculation Gating state transitions."""
     print("\n" + "="*80)
-    print("📊 [BENCHMARK 4/5] CONCURRENCY-ADAPTIVE SPECULATION GATING POLICY")
+    print("📊 [BENCHMARK 4/4] CONCURRENCY-ADAPTIVE SPECULATION GATING POLICY")
     print("="*80)
 
     policy = SpeculationGatePolicy(low_threshold=2, high_threshold=4, default_tree_width=8, collapsed_tree_width=2)
@@ -225,53 +225,6 @@ def benchmark_speculation_concurrency_gating() -> dict:
         print(f"  • Active Sessions: {c:2d} ➔ Mode: {mode.value:10s} (Tree Width: {width:2d})")
 
     return {"transitions": transitions, "stats": policy.stats}
-
-
-def benchmark_svd_kv_bandwidth_reduction() -> dict:
-    """Calculates analytical KV Cache memory footprint & memory bandwidth reduction."""
-    print("\n" + "="*80)
-    print("📊 [BENCHMARK 5/5] SVD INT8 KV MEMORY & BANDWIDTH FOOTPRINT")
-    print("="*80)
-
-    contexts = [2048, 8192, 32768, 131072]
-    num_layers = 32
-    num_kv_heads = 8
-    head_dim = 128
-
-    results = {}
-    for ctx in contexts:
-        fp16_bytes = KVMemoryEstimator.estimate_kv_bytes(
-            num_prompt_tokens=ctx,
-            max_new_tokens=0,
-            num_layers=num_layers,
-            num_kv_heads=num_kv_heads,
-            head_dim=head_dim,
-            dtype_bytes=2,
-            svd_compression_ratio=0.0
-        )
-        svd_int8_bytes = KVMemoryEstimator.estimate_kv_bytes(
-            num_prompt_tokens=ctx,
-            max_new_tokens=0,
-            num_layers=num_layers,
-            num_kv_heads=num_kv_heads,
-            head_dim=head_dim,
-            dtype_bytes=2,
-            svd_compression_ratio=0.75
-        )
-
-        fp16_gb = fp16_bytes / (1024**3)
-        svd_gb = svd_int8_bytes / (1024**3)
-        reduction_pct = (1.0 - svd_bytes / fp16_bytes) * 100.0 if (svd_bytes := svd_int8_bytes) else 0.0
-
-        results[ctx] = {
-            "fp16_gb": round(fp16_gb, 3),
-            "svd_int8_gb": round(svd_gb, 3),
-            "memory_reduction_pct": round(reduction_pct, 1)
-        }
-
-        print(f"  • Context: {ctx:6d} tokens | FP16 KV: {fp16_gb:6.2f} GB | SVD INT8 KV: {svd_gb:6.2f} GB | Reduction: -{reduction_pct:.1f}%")
-
-    return results
 
 
 def main():
@@ -297,7 +250,6 @@ def main():
         "batched_decode": benchmark_batched_decode_tps(device),
         "interleaved_jitter": benchmark_interleaved_prefill_decode_jitter(device),
         "spec_gating": benchmark_speculation_concurrency_gating(),
-        "svd_kv_reduction": benchmark_svd_kv_bandwidth_reduction(),
         "total_benchmark_time_seconds": round(time.time() - t_start, 2)
     }
 

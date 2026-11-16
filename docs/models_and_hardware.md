@@ -1,52 +1,37 @@
 # 🌐 Supported Models & Hardware Setup
 
-Turing Engine runs frontier 70B–320B models on single consumer GPUs (24GB VRAM), Apple Silicon Macs, and multi-vendor hardware.
+Turing Engine resolves and loads HuggingFace and GGUF checkpoints on NVIDIA GPUs, Apple Silicon Macs and CPUs. This page separates what has been run from what is only named.
 
 ---
 
-## 1. Supported Models & VRAM Requirements
+## 1. Models and Memory
 
-> **What is measured today:** exact parity with HuggingFace is tested for **Llama-architecture** models (e.g. SmolLM2, Llama-style GQA). Not yet mapped by the loader: Qwen2 attention biases, Qwen3 q/k norms, and Llama-3 RoPE frequency scaling, so those families do not yet reproduce their reference outputs. The "Turing" memory column below assumes 4-bit weights plus FFN pruning; the serving path currently keeps fp16 weights (int4 weight loading is not wired) and pruning costs quality ([benchmarks](benchmarks.md#2-quality-on-real-weights)), so read that column as a target, not a measured requirement.
+> **What is measured today:** exact parity with HuggingFace is tested for **Llama-architecture** models (e.g. SmolLM2, Llama-style GQA). Not yet mapped by the loader: Qwen2 attention biases, Qwen3 q/k norms, and Llama-3 RoPE frequency scaling, so those families do not yet reproduce their reference outputs. Models run with real weights so far: SmolLM2 135M, 360M and 1.7B through the Turing engine, and GPT-2 and SmolLM2-1.7B-Instruct through HuggingFace `generate`. No MoE checkpoint and no model larger than 1.7B has been run end to end. The serving path keeps fp16 weights (int4 weight loading is not wired), so weight memory is about 2 bytes per parameter: a 70B model needs about 141 GB and does not fit on one 24 GB GPU.
 
-Turing Engine features a **Universal Dynamic Model Resolver** (`ModelResolver`) and **Architecture Registry** (`ArchitectureRegistry`). It can load and serve **literally ANY open-weight causal language model on Hugging Face Hub** or local disk out of the box without waiting for hardcoded model configs or engine updates.
+Turing Engine features a **Universal Dynamic Model Resolver** (`ModelResolver`) and **Architecture Registry** (`ArchitectureRegistry`). It resolves any Hugging Face Hub repository ID or local checkpoint and derives the architecture from its `config.json`; exact output parity is only implemented and tested for Llama-architecture models.
 
-### A. Popular Open-Weight Models & VRAM Requirements
+### A. Model Geometries and fp16 Weight Memory
 
-| Model Family | Model Repository ID / Identifier | Parameter Scale | Uncompressed FP16 | **Turing Engine VRAM** | Minimum Hardware Target |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | 1.5B Dense | 3.0 GB | **0.8 GB** | 1x 4GB GPU / Mac / Laptop |
-| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | 7.0B Dense | 14.0 GB | **2.2 GB** | 1x 6GB GPU / Mac |
-| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` | 14.0B Dense | 28.0 GB | **4.1 GB** | 1x 8GB GPU / Mac |
-| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B` | 32.0B Dense | 64.0 GB | **8.5 GB** | 1x 12GB GPU / Mac |
-| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Llama-70B` | 70.0B Dense | 140.0 GB | **15.7 GB** | **1x 24GB GPU (RTX 3090/4090, L4)** |
-| **Meta AI** | `meta-llama/Llama-3.1-8B-Instruct` | 8.0B Dense | 16.0 GB | **2.5 GB** | 1x 6GB GPU / Mac |
-| **Meta AI** | `meta-llama/Llama-3.3-70B-Instruct` | 70.6B Dense | 141.2 GB | **15.7 GB** | **1x 24GB GPU (RTX 3090/4090, L4)** |
-| **Meta AI** | `meta-llama/Llama-4-Scout-17B-16E` | 109B MoE (17B act) | 218.0 GB | **4.2 GB VRAM + 24 GB RAM** | 1x 16GB GPU / Mac Studio |
-| **Alibaba** | `Qwen/Qwen2.5-Coder-32B-Instruct` | 32.5B Dense | 65.0 GB | **8.5 GB** | 1x 12GB GPU / Mac |
-| **Alibaba** | `Qwen/Qwen2.5-72B-Instruct` | 72.7B Dense | 145.4 GB | **16.1 GB** | **1x 24GB GPU (RTX 3090/4090, L4)** |
-| **Mistral AI** | `mistralai/Mistral-Small-24B-Instruct-2501` | 24.0B Dense | 48.0 GB | **6.1 GB** | 1x 12GB GPU / Mac |
-| **Mistral AI** | `mistralai/Mistral-Large-Instruct-2407` | 123B Dense | 246.0 GB | **18.2 GB** | **1x 24GB GPU (RTX 3090/4090, L4)** |
-| **Google** | `google/gemma-2-27b-it` | 27.0B Dense | 54.0 GB | **6.8 GB** | 1x 12GB GPU / Mac |
-| **Google** | `google/gemma-4-26B-A4B` | 26B MoE (4B act) | 52.0 GB | **2.5 GB VRAM + 8 GB RAM** | 1x 8GB GPU / Mac |
-| **Zhipu** | `zai-org/GLM-5.2-753B` | 753B MoE (32B act) | 1,400 GB | **4.5 GB VRAM + 96 GB RAM** | **1x 24GB GPU + 128GB RAM** |
-| **Zhipu** | `zai-org/GLM-5.3-Flash` | 320B MoE (18B act) | 596.0 GB | **3.5 GB VRAM + 42 GB RAM** | **1x 24GB GPU + 64GB RAM / Mac Studio** |
-| **DeepSeek** | `deepseek-ai/DeepSeek-V3` | 671B MoE (37B act) | 1,342 GB | **4.8 GB VRAM + 80 GB RAM** | **1x 24GB GPU + 128GB RAM** |
-| **DeepSeek** | `deepseek-ai/DeepSeek-V4-Flash` | 284B MoE (13B act) | 528.9 GB | **2.5 GB VRAM + 35 GB RAM** | **1x 24GB GPU + 64GB RAM / Mac Studio** |
-| **Moonshot**| `moonshotai/Kimi-K2.6` | 1.04T MoE (48B act) | 2,080 GB | **4.2 GB VRAM + 128 GB RAM** | 1x 24GB GPU + 128GB RAM |
-| **Moonshot**| `moonshotai/Kimi-K3` | 2.8T MoE (104B act) | 5,200 GB | **5.0 GB VRAM + 240 GB RAM** | 1x 24GB GPU + 256GB RAM |
-| **Alibaba & NVIDIA** | [`nvidia/Qwen3.8-2.4T-A95B-NVFP4`](qwen_2_4t_nvfp4_guide.md) | 2.4T MoE (95B act) | 1,440 GB | **4.2 GB VRAM + NVMe Tier** | **1x 24GB GPU (L4/4090) + NVMe / Mac** |
-| **Turing** | `turing/turing-trillion-1t` | 1.0T MoE (48B act) | 2,000 GB | **4.5 GB VRAM + 128 GB RAM** | 1x 24GB GPU + 128GB RAM |
+The rows below are names the resolver and `SIZING_PROFILES` know about; **none of them has been run**. The fp16 column is parameters × 2 bytes. An earlier "Turing Engine VRAM" column (for example 15.7 GB for Llama-3.3-70B, 3.5 GB VRAM + 42 GB RAM for a 320B MoE) was removed: it was not computed by any script, and it implies 0.7–1.8 bits per parameter, below what 4-bit weights with FFN pruning would give.
 
-### B. Multi-Model Pipeline Co-Residency Models
+| Model Family | Model Repository ID | Parameters | fp16 weights | Fits one 24 GB GPU in fp16? |
+| :--- | :--- | :---: | :---: | :---: |
+| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | 1.5B | ~3 GB | Yes |
+| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | 7B | ~14 GB | Yes |
+| **Meta AI** | `meta-llama/Llama-3.1-8B-Instruct` | 8B | ~16 GB | Yes |
+| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` | 14B | ~28 GB | No |
+| **Mistral AI** | `mistralai/Mistral-Small-24B-Instruct-2501` | 24B | ~48 GB | No |
+| **Google** | `google/gemma-2-27b-it` | 27B | ~54 GB | No |
+| **Alibaba** | `Qwen/Qwen2.5-Coder-32B-Instruct` | 32.5B | ~65 GB | No |
+| **Meta AI** | `meta-llama/Llama-3.3-70B-Instruct` | 70.6B | ~141 GB | No |
+| **Alibaba** | `Qwen/Qwen2.5-72B-Instruct` | 72.7B | ~145 GB | No |
+| **DeepSeek** | `deepseek-ai/DeepSeek-V3` | 671B MoE (37B active) | ~1,342 GB | No |
 
-| Pipeline Role | Supported Model Architectures | Target Task | Single-GPU Memory |
-| :--- | :--- | :--- | :---: |
-| **Vector Embeddings** | `BAAI/bge-m3`, `BAAI/bge-large-en-v1.5`, `sentence-transformers/*` | `POST /v1/embeddings` | **~1.1 GB** |
-| **Cross-Encoder Reranking**| `BAAI/bge-reranker-large`, `BAAI/bge-reranker-base` | `POST /v1/rerank` | **~1.3 GB** |
-| **Zero-Shot Span Extraction**| `urchade/gliner_base`, `urchade/gliner_large` | `POST /v1/extract` | **~0.6 GB** |
-| **Document OCR Parsing** | `DS4SD/docling-parse`, `facebook/nougat-base` | `POST /v1/extract` | **~1.2 GB** |
-| **Generative LLM Engine** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`, `meta-llama/Llama-3.1-8B` | `POST /v1/chat/completions`| **~3.2 GB** |
-| **Full 5-Stage Agent Pipeline**| **All 5 Models Co-Resident on 1 GPU** | **End-to-End Pipeline** | **7.42 GB Total VRAM** |
+Qwen-family checkpoints load but do not yet reproduce their reference outputs (attention biases are not mapped). MoE checkpoints have no loader path.
+
+### B. Multi-Model Pipeline Endpoints
+
+`/v1/embeddings`, `/v1/rerank` and `/v1/extract` are served by `ElasticMultiModelManager`, whose model entries are placeholders today: embeddings pool random hidden states, rerank scores word overlap, and extract is a substring match. No embedding, reranker, NER or OCR model is loaded. The per-model and "7.42 GB total" figures shown in earlier versions were the sum of estimates declared in the benchmark script, not memory read from a device.
 
 ### C. Universal Model Identification & Tri-Part Namespaces
 
@@ -89,11 +74,8 @@ To ensure full transparency and avoid confusion regarding model loading:
   - **Zero Impact on Live Inference**: Live serving and chat **never use static sizing profiles**; they dynamically introspect the model's remote `config.json` on the fly via `ModelConfig.from_pretrained()`.
 
 
-!!! info "Why MoE Host Paging Is Fast (Avoiding Naive Offloading Latency)"
-    Traditional layer-by-layer offloading crawls at 1–2 tok/s because it transfers uncompressed weights over PCIe synchronously. Turing Engine sustains **18–50+ tok/s** through two distinct hardware paths:
-    
-    * **Apple Silicon (Mac Studio M-series)**: Leverages Unified Memory Architecture with **800 to 1,600 GB/s bandwidth**. There is zero PCIe bus copy overhead—the Metal GPU accesses active experts directly at memory-bus speeds (35–50 tok/s).
-    * **Discrete PCIe GPUs (RTX 4090 / L4 24GB)**: Attention and embeddings remain permanently pinned in VRAM (~4GB). An on-GPU **LFRU slot cache with 25%+4 hysteresis promotion** (`GPULRUExpertCache`) and **learned hot-expert pinning** (`RoutingHistoryTracker`) captures **>92% temporal routing locality**, while missing INT4-packed experts are prefetched asynchronously via `OneLayerAheadExpertPrefetcher` (PILOT) over background CUDA DMA streams during attention compute (18–32+ tok/s).
+!!! info "MoE host paging: components only"
+    The repository has an on-GPU LFRU expert slot cache (`GPULRUExpertCache`), routing-history pinning (`RoutingHistoryTracker`) and a one-layer-ahead prefetcher (`OneLayerAheadExpertPrefetcher`), tested on synthetic routing traces. No MoE checkpoint has been decoded, so there is no measured MoE throughput; earlier "18–50 tok/s" figures had no producing script. Apple M-series memory bandwidth tops out around 800 GB/s (Ultra parts), not 1,600 GB/s.
 
 ---
 

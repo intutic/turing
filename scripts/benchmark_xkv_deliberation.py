@@ -97,22 +97,15 @@ def run_xkv_deliberation_benchmark(device: str = "auto", num_runs: int = 50):
 
     avg_audit_ms = sum(audit_times) / len(audit_times)
 
-    # Benchmark 3: Baseline Text-to-Text Multi-Agent Latency (200 tokens generation + JSON + prefill)
-    # Average 70B generation speed: ~25 ms / token * 200 tokens = ~5,000 ms; on fast single layer: ~120 ms
-    text_baseline_ms = (avg_transfer_ms + avg_audit_ms) * 7.85
-
-    speedup = text_baseline_ms / (avg_transfer_ms + avg_audit_ms)
-
     print("\n📊 EMPIRICAL LATENCY & AUDIT RESULTS:")
     print("-" * 88)
     print(f"• XKV Zero-Token KV Transfer Latency (45 -> 32 layers) : {avg_transfer_ms:.3f} ms")
     print(f"• Auditable Semantic SVD Inspector Latency (Top-5 Concepts) : {avg_audit_ms:.3f} ms")
     print(f"• Total XKV Latent Inter-Agent Latency                  : {avg_transfer_ms + avg_audit_ms:.3f} ms")
-    print(f"• Conventional Text-to-Text Inter-Agent Serialization   : {text_baseline_ms:.3f} ms")
-    print(f"• Measured End-to-End Speedup                           : {speedup:.2f}x Faster")
+    print("• Text-to-text baseline                                  : not measured (no models are run)")
     print(f"• Semantic Audit Status                                 : {audit_res['audit_status']} (Entropy: {audit_res['semantic_entropy']} nats)")
     print("=" * 88)
-    print("✅ XKV Inter-Agent Latent Transfer verified on physical silicon!\n")
+    print("Synthetic: untrained bridge and inspector on torch.randn KV; latency only, no transfer quality.\n")
 
 if __name__ == "__main__":
     device_arg = sys.argv[1] if len(sys.argv) > 1 else "auto"

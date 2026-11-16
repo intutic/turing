@@ -32,8 +32,9 @@ def main():
     print(f"[*] Target Model File : {target_file}")
     print(f"[*] Physical File Size: {file_size_mb:.2f} MB ({file_size_mb/1024:.2f} GB)")
     
-    # 1. Benchmark without MADV_WILLNEED (simulate raw lazy mmap)
-    print("\n[1/2] Benchmarking Lazy Demand-Paging mmap...")
+    # Both arms use SafetensorsMmapReader, which always calls madvise(MADV_WILLNEED), and the page
+    # cache is not dropped between them: arm 1 is a cold read, arm 2 a warm re-read of the same bytes.
+    print("\n[1/2] First read (cold page cache, if the file was not read recently)...")
     t0 = time.perf_counter()
     f = open(target_file, "rb")
     mm_lazy = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
@@ -44,13 +45,14 @@ def main():
         tensors_lazy[name] = reader_lazy.read_tensor_slice(name, device="cpu")
     t1 = time.perf_counter()
     elapsed_lazy_ms = (t1 - t0) * 1000.0
-    throughput_lazy = (file_size_mb / 1024.0) / (t1 - t0)
+    read_gb = sum(t.numel() * t.element_size() for t in tensors_lazy.values()) / 1024**3
+    throughput_lazy = read_gb / (t1 - t0)
     print(f"    [+] Initial Ingestion + 10 Layers Read: {elapsed_lazy_ms:.3f} ms ({throughput_lazy:.2f} GB/s)")
     mm_lazy.close()
     f.close()
     
     # 2. Benchmark with Turing SafetensorsMmapReader (MADV_WILLNEED kernel hint)
-    print("\n[2/2] Benchmarking Turing SafetensorsMmapReader with MADV_WILLNEED...")
+    print("\n[2/2] Second read of the same tensors (warm page cache)...")
     t0 = time.perf_counter()
     reader_willneed = SafetensorsMmapReader(target_file)
     tensors_willneed = {}
@@ -58,7 +60,7 @@ def main():
         tensors_willneed[name] = reader_willneed.read_tensor_slice(name, device="cpu")
     t1 = time.perf_counter()
     elapsed_willneed_ms = (t1 - t0) * 1000.0
-    throughput_willneed = (file_size_mb / 1024.0) / (t1 - t0)
+    throughput_willneed = read_gb / (t1 - t0)
     print(f"    [+] Initial Ingestion + 10 Layers Read: {elapsed_willneed_ms:.3f} ms ({throughput_willneed:.2f} GB/s)")
     
     # Parity check
@@ -68,11 +70,11 @@ def main():
     print("\n" + "=" * 80)
     print("   📊 REAL MODEL WEIGHT INGESTION SUMMARY (GCP NVMe/SSD)")
     print("=" * 80)
-    speedup = elapsed_lazy_ms / max(elapsed_willneed_ms, 1e-6)
     print(f"  • Model File Shard Size       : {file_size_mb:.2f} MB")
-    print(f"  • Lazy Demand-Paging Latency  : {elapsed_lazy_ms:.3f} ms ({throughput_lazy:.2f} GB/s)")
-    print(f"  • Turing MADV_WILLNEED Latency: {elapsed_willneed_ms:.3f} ms ({throughput_willneed:.2f} GB/s)")
-    print(f"  • Numerical Tensor Parity     : 100% Exact Match")
+    print(f"  • Bytes read (10 tensors)     : {read_gb * 1024:.2f} MB")
+    print(f"  • First read (cold)           : {elapsed_lazy_ms:.3f} ms ({throughput_lazy:.2f} GB/s)")
+    print(f"  • Second read (warm cache)    : {elapsed_willneed_ms:.3f} ms ({throughput_willneed:.2f} GB/s)")
+    print(f"  • Tensors identical           : {len(tensors_lazy)}/{len(tensors_lazy)}")
     print("=" * 80)
 
 if __name__ == "__main__":

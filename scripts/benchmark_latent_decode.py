@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
 Comprehensive Latent Flash-Decode (Mode-B) & 3:1 Hybrid Attention Benchmark.
-Measures physical latency (ms), throughput (tok/s), and memory savings on real silicon.
+Synthetic: random int8 latent caches and randn fp32 dense K/V (no model). The dense
+baseline is full-head MHA without GQA or SDPA, and the hybrid's full-attention layer
+attends with one query, so neither comparison is like-for-like; read these as kernel timings.
 """
 
 import argparse
 import time
 import torch
 import torch.nn.functional as F
-
 from turing.kernels.triton_latent_decode import triton_latent_flash_decode
 from turing.core.hybrid_attention import LinearRecurrentAttention, ChunkContextScorer, HybridAttentionLayerRouter
 
@@ -17,6 +18,13 @@ try:
     HAS_CSRC = hasattr(turing_csrc, "latent_decode_cpu")
 except ImportError:
     HAS_CSRC = False
+
+
+def _sync(device):
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    elif device.type == "mps":
+        torch.mps.synchronize()
 
 
 def benchmark_latent_decode(device_name: str = "cpu"):
@@ -32,7 +40,7 @@ def benchmark_latent_decode(device_name: str = "cpu"):
     head_dim = 128
     R = 64 # Rank-64 Subspace
 
-    print(f"{'Context Length (L)':<22} | {'Dense Attn (FP16)':<18} | {'Latent Decode (INT8)':<22} | {'Speedup':<12} | {'VRAM Saved'}")
+    print(f"{'Context Length (L)':<22} | {'Dense Attn (fp32 MHA)':<18} | {'Latent Decode (INT8)':<22} | {'Speedup':<12} | {'Cache bytes vs fp16 MHA'}")
     print("-" * 95)
 
     for seq_len in [512, 2048, 8192, 32768]:
@@ -53,8 +61,7 @@ def benchmark_latent_decode(device_name: str = "cpu"):
             scores = torch.matmul(q_dense, k_dense.transpose(-1, -2)) * (1.0 / (head_dim ** 0.5))
             _ = torch.matmul(F.softmax(scores, dim=-1), v_dense)
 
-        if device.type == "cuda":
-            torch.cuda.synchronize()
+        _sync(device)
 
         # Measure Dense
         iters = 50 if seq_len <= 8192 else 20
@@ -62,21 +69,19 @@ def benchmark_latent_decode(device_name: str = "cpu"):
         for _ in range(iters):
             scores = torch.matmul(q_dense, k_dense.transpose(-1, -2)) * (1.0 / (head_dim ** 0.5))
             _ = torch.matmul(F.softmax(scores, dim=-1), v_dense)
-            if device.type == "cuda":
-                torch.cuda.synchronize()
+            _sync(device)
         dense_time = (time.perf_counter() - t0) / iters * 1000.0
 
         # Measure Latent Flash-Decode
         t0 = time.perf_counter()
         for _ in range(iters):
             _ = triton_latent_flash_decode(qp, ck, sk, cv, sv, head_dim=head_dim)
-            if device.type == "cuda":
-                torch.cuda.synchronize()
+            _sync(device)
         latent_time = (time.perf_counter() - t0) / iters * 1000.0
 
         speedup = dense_time / max(latent_time, 1e-6)
-        dense_bytes = 2 * seq_len * num_heads * head_dim * 2 # FP16 K+V
-        latent_bytes = seq_len * (R * 1 + 4) * 2              # INT8 + Scale K+V
+        dense_bytes = (k_dense.numel() + v_dense.numel()) * 2  # the same K/V stored as fp16
+        latent_bytes = sum(t.numel() * t.element_size() for t in (ck, sk, cv, sv))
         vram_saved = (1.0 - latent_bytes / dense_bytes) * 100.0
 
         print(f"{seq_len:<22} | {dense_time:>14.4f} ms | {latent_time:>18.4f} ms | {speedup:>10.2f}x | {vram_saved:>9.1f}%", flush=True)
@@ -124,15 +129,14 @@ def benchmark_hybrid_attention_prefill(device_name: str = "cpu"):
                         v = x.view(1, seq_len, num_heads, head_dim).transpose(1, 2)
                         scores = torch.matmul(q, k.transpose(-1, -2)) * (1.0 / (head_dim ** 0.5))
                         _ = torch.matmul(F.softmax(scores, dim=-1), v)
-                    if device.type == "cuda":
-                        torch.cuda.synchronize()
+                    _sync(device)
                 dense_time = (time.perf_counter() - t0) / iters * 1000.0
             except (torch.cuda.OutOfMemoryError, RuntimeError):
                 dense_time = None
                 if device.type == "cuda":
                     torch.cuda.empty_cache()
         else:
-            dense_time = None # OOM (>64GB) on Host Workstation
+            dense_time = "skipped"  # not attempted off CUDA at this length
 
 
         # 3:1 Hybrid
@@ -153,21 +157,20 @@ def benchmark_hybrid_attention_prefill(device_name: str = "cpu"):
                 v_t = v_f.transpose(1, 2)
                 scores = torch.matmul(q_t, k_t.transpose(-1, -2)) * (1.0 / (head_dim ** 0.5))
                 _ = torch.matmul(F.softmax(scores, dim=-1), v_t)
-                if device.type == "cuda":
-                    torch.cuda.synchronize()
+                _sync(device)
             hybrid_time = (time.perf_counter() - t0) / iters * 1000.0
         except (torch.cuda.OutOfMemoryError, RuntimeError):
             hybrid_time = None
             if device.type == "cuda":
                 torch.cuda.empty_cache()
 
-        if dense_time is not None and hybrid_time is not None:
+        if isinstance(dense_time, float) and hybrid_time is not None:
             speedup = dense_time / max(hybrid_time, 1e-6)
             print(f"{seq_len:<22} | {dense_time:>16.2f} ms | {hybrid_time:>21.2f} ms | {speedup:>13.2f}x")
-        elif hybrid_time is not None:
-            print(f"{seq_len:<22} | {'OOM (>64 GB)':>16} | {hybrid_time:>21.2f} ms | {'∞ (Prevents OOM)':>15}")
         else:
-            print(f"{seq_len:<22} | {'OOM (>64 GB)':>16} | {'OOM (Host Stream)':>21} | {'Subspace Paging':>15}")
+            dense_s = f"{dense_time:.2f} ms" if isinstance(dense_time, float) else (dense_time or "OOM")
+            hybrid_s = f"{hybrid_time:.2f} ms" if hybrid_time is not None else "OOM"
+            print(f"{seq_len:<22} | {dense_s:>16} | {hybrid_s:>21} | {'n/a':>15}")
 
 
 

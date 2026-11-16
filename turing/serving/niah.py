@@ -1,5 +1,8 @@
 """
-Needle-In-A-Haystack (NIAH) 32K to 128K Long-Context Retrieval Accuracy Evaluator.
+Synthetic needle-retrieval check for SVD INT8 compression.
+
+It scores one page of random keys per row; the context length only labels the row and
+no model or long context is involved, so it is not a long-context NIAH evaluation.
 """
 
 import math

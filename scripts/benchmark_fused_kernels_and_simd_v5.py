@@ -326,7 +326,8 @@ def benchmark_lfru_cache():
         t1 = time.perf_counter()
         cpp_ms = (t1 - t0) * 1000.0
     else:
-        cpp_ms = baseline_ms / 8.0
+        print("    • Native extension not built: C++ path not measured")
+        return {"name": "LFRU Cache", "baseline_ms": baseline_ms, "cpp_ms": None, "speedup": None}
 
     speedup = baseline_ms / max(cpp_ms, 1e-6)
     ops_per_sec = (iters / (cpp_ms / 1000.0))
@@ -377,7 +378,8 @@ def benchmark_reasoning_filter():
         t1 = time.perf_counter()
         cpp_ms = (t1 - t0) * 1000.0
     else:
-        cpp_ms = base_ms / 6.0
+        print("    • Native extension not built: C++ path not measured")
+        return {"name": "Reasoning Tag Filter", "baseline_ms": base_ms, "cpp_ms": None, "speedup": None}
 
     speedup = base_ms / max(cpp_ms, 1e-6)
     tok_per_sec = (iters / (cpp_ms / 1000.0))
@@ -411,8 +413,8 @@ def benchmark_tensor_pointer_hash():
         cpp_ms = ((t1 - t0) / iters) * 1000.0
         cpp_gb_s = (tensor_bytes / (1024**3)) / (cpp_ms / 1000.0)
     else:
-        cpp_ms = base_ms / 12.0
-        cpp_gb_s = base_gb_s * 12.0
+        print("    • Native extension not built: C++ path not measured")
+        return {"name": "Pointer Tensor Hash", "baseline_ms": base_ms, "cpp_ms": None, "speedup": None}
 
     speedup = base_ms / max(cpp_ms, 1e-6)
     print(f"    • NumPy tobytes() Baseline     : {base_ms:.2f} ms ({base_gb_s:.2f} GB/s)")
@@ -446,7 +448,8 @@ def benchmark_safetensors_parser():
         t1 = time.perf_counter()
         cpp_us = ((t1 - t0) / iters) * 1e6
     else:
-        cpp_us = base_us / 7.5
+        print("    • Native extension not built: C++ path not measured")
+        return {"name": "Safetensors Header Parser", "baseline_us": base_us, "cpp_us": None, "speedup": None}
 
     speedup = base_us / max(cpp_us, 1e-6)
     print(f"    • Python json.loads Baseline   : {base_us:.2f} µs")
@@ -485,7 +488,8 @@ def benchmark_traffic_manager():
         t1 = time.perf_counter()
         cpp_ms = (t1 - t0) * 1000.0
     else:
-        cpp_ms = base_ms / 5.0
+        print("    • Native extension not built: C++ path not measured")
+        return {"name": "AI Traffic Manager", "baseline_ms": base_ms, "cpp_ms": None, "speedup": None}
 
     speedup = base_ms / max(cpp_ms, 1e-6)
     print(f"    • Python Admission Baseline    : {base_ms:.2f} ms ({iters/base_ms*1e3:,.0f} req/s)")

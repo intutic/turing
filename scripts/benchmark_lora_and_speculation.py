@@ -1,6 +1,7 @@
 """
 Empirical Benchmark Suite: Speculative Drafting (EAGLE-3/DFlash/DSpark), Multi-Tenant LoRA Cache, and Pipelined Cold-Starts.
-Evaluates on physical silicon (Apple Silicon Metal MPS / NVIDIA CUDA / AVX2 CPU) with zero mocks and live hardware timers.
+All inputs are synthetic: random-init adapters and draft head, randn activations, unseeded 80/20 tenant traffic,
+constructed target logits, and random/empty weights for the cold-start path (no checkpoint is read).
 """
 
 import os
@@ -76,12 +77,14 @@ def benchmark_multi_tenant_lora_cache(device: str = "cpu", num_tenants: int = 10
 
     total_time_ms = (time.perf_counter() - t_start) * 1000.0
 
-    print(f"  • Total Tenant Pool Size    : {num_tenants} adapters (~600 MB in pinned host DRAM)")
-    print(f"  • Resident GPU Slots (LRU)  : {cache_capacity} active slots ({cache_capacity * 6.2:.1f} MB VRAM)")
+    host_mb = sum(a.nbytes + b.nbytes for a, b in cache.host_store.values()) / 1e6
+    slot_mb = sum(p.numel() * p.element_size() for ad in cache.gpu_slots.values() for p in ad.parameters()) / 1e6
+    print(f"  • Total Tenant Pool Size    : {num_tenants} adapters ({host_mb:.1f} MB in host memory)")
+    print(f"  • Resident Slots (LRU)      : {len(cache.gpu_slots)}/{cache_capacity} active slots ({slot_mb:.1f} MB on {dev.type})")
     print(f"  • Evaluated Requests        : {num_requests} requests")
     print(f"  • Measured Cache Hit Rate   : {cache.get_hit_rate() * 100.0:.2f}% ({cache.hits} hits, {cache.misses} misses, {cache.evictions} evictions)")
-    print(f"  • Cache-Hit Latency (P50)   : {np.percentile(hit_latencies_us, 50):.2f} µs (0.00 ms pointer route)")
-    print(f"  • Cold-Load Switch (P50)    : {np.percentile(miss_latencies_us, 50) / 1000.0:.3f} ms (Async DMA stream transfer)")
+    print(f"  • Cache-Hit Latency (P50)   : {np.percentile(hit_latencies_us, 50):.2f} µs (includes the LoRA forward on a 128x2048 input)")
+    print(f"  • Cold-Load Switch (P50)    : {np.percentile(miss_latencies_us, 50) / 1000.0:.3f} ms (synchronous host-to-device copy)")
     print(f"  • Cold-Load Switch (P99)    : {np.percentile(miss_latencies_us, 99) / 1000.0:.3f} ms")
     print(f"  • Overall Routing Throughput : {num_requests / (total_time_ms / 1000.0):.1f} req/sec")
 
@@ -128,9 +131,9 @@ def benchmark_speculative_drafting(device: str = "cpu", iters: int = 100):
         latencies_ms.append((t1 - t0) * 1000.0)
         widths.append(width)
 
-    # Simulate verification
+    # Verifier self-check only: the target logits are constructed so the first 6 drafts match,
+    # so the printed count is not an acceptance rate (that needs a real target model).
     target_logits = torch.randn(future_tokens, vocab_size, device=dev)
-    # Force 6 matching tokens
     for k in range(min(6, len(token_ids))):
         target_logits[k, token_ids[k]] = 50.0
 
@@ -138,11 +141,11 @@ def benchmark_speculative_drafting(device: str = "cpu", iters: int = 100):
 
     print(f"  • Hidden State Proj Dim     : {hidden_dim} -> Rank-{rank_subspace} Subspace")
     print(f"  • Draft Feature Synthesizer : 1D-Depthwise Dilated Conv (DFlash O(1) concurrent)")
-    print(f"  • Vocab Head Parameter Slice: Matryoshka W_slice = 64 (vs {vocab_size})")
+    print(f"  • Matryoshka Slice Width    : 64 of rank {rank_subspace} (vocab {vocab_size})")
     print(f"  • Dynamic Tree Width (DSpark): Avg {np.mean(widths):.1f} tokens (Entropy-gated)")
     print(f"  • Candidate Latency (P50)   : {np.percentile(latencies_ms, 50):.3f} ms / draft pass")
     print(f"  • Candidate Latency (P99)   : {np.percentile(latencies_ms, 99):.3f} ms")
-    print(f"  • Speculative Acceptance    : {len(accepted)} / {len(token_ids)} tokens accepted ({len(accepted) / len(token_ids) * 100:.1f}%)")
+    print(f"  • Verifier Self-Check       : {len(accepted)} / {len(token_ids)} accepted against constructed logits (not an acceptance rate)")
 
 
 def benchmark_pipelined_cold_start(device: str = "cpu"):
@@ -172,11 +175,10 @@ def benchmark_pipelined_cold_start(device: str = "cpu"):
     res = loader.pipelined_load_and_warmup()
 
     print(f"  • Target Model Profile      : {cfg.name} (80 layers, d_model=8192)")
-    print(f"  • Ingestion Architecture    : Stage 1 (Layers 0..3) -> Bucketed CUDA Graphs -> Stage 2 (Async mmap)")
-    print(f"  • Pre-captured Batch Buckets: {res['captured_buckets']}")
-    print(f"  • Time-To-Ready (Cold Start): {res['time_to_ready_ms']:.2f} ms (< 650 ms SLA target)")
-    print(f"  • Comparison Baseline       : 5,500.00 ms (Standard PyTorch uncompressed cold start)")
-    print(f"  • Cold-Start Speedup        : {5500.0 / max(res['time_to_ready_ms'], 1.0):.2f}x Faster Time-To-Ready")
+    print(f"  • Ingestion Architecture    : Stage 1 (layers 0..2 random) -> bucket warmup -> Stage 2 (empty buffers)")
+    print(f"  • Warmup Batch Buckets     : {res['captured_buckets']}")
+    # Synthetic: the loader fills 3 layers with torch.randn and allocates the rest empty; no file is read.
+    print(f"  • Time-To-Ready (synthetic) : {res['time_to_ready_ms']:.2f} ms (random/empty weights, no checkpoint I/O; no baseline measured)")
     print("=" * 80 + "\n")
 
 

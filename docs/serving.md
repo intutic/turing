@@ -328,8 +328,8 @@ curl http://localhost:8000/v1/chat/completions \
     "messages": [{"role": "user", "content": "SELECT count(*) FROM users WHERE active = 1;"}]
   }'
 ```
-* **Cache Hits**: $191.38\,\mu\text{s}$ ($0.00\,\text{ms}$ bubble).
-* **Cold Loads**: $<0.97\,\text{ms}$ async PCIe DMA stream transfer.
+* **Cache hits** use an adapter already resident in GPU memory; **cold loads** copy it from pinned host memory on a background stream.
+* **Status**: experimental. Timed only with random adapters and synthetic traffic, so no latency is claimed ([claims audit](claims-audit.md)).
 
 ---
 
@@ -337,7 +337,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 Turing Engine treats requests as heterogeneous token-budget workloads rather than uniform HTTP calls:
 
-1. **VRAM Admission Control**: Evaluates static memory footprints ($N_{\text{prompt}} + N_{\text{max\_tokens}}$) in $<42\,\mu\text{s}$.
+1. **VRAM Admission Control**: Evaluates static memory footprints ($N_{\text{prompt}} + N_{\text{max\_tokens}}$).
    - **High Watermark (0.90)**: Queues incoming requests with `Retry-After: 2.0s` (HTTP 429) before physical memory is exhausted.
    - **Shed Watermark (0.95)**: Rejects background/batch requests with HTTP 503 to maintain zero OOM crashes.
 2. **3-Lane QoS Prioritization**:
@@ -345,7 +345,7 @@ Turing Engine treats requests as heterogeneous token-budget workloads rather tha
    - **Batch**: Chunk size 256, admitted when Interactive P99 latency is within SLO ($\le 50\,\text{ms}$).
    - **Background**: Chunk size 128, automatically shed first under traffic surges.
 3. **Concurrency-Adaptive Speculation Gating**:
-   - Automatically collapses speculative tree width to plain decode when active concurrency exceeds 4, eliminating serialization bottlenecks and yielding **$162.65\text{ tok/s}$** vs $143.68\text{ tok/s}$ baseline (+13.2% throughput gain).
+   - Automatically collapses speculative tree width to plain decode when active concurrency exceeds 4, to avoid serializing verification. Experimental: no throughput gain has been measured on a model.
 
 ---
 
@@ -359,7 +359,6 @@ Turing Engine's continuous batch scheduler explicitly separates **Prefill (Compu
 2. **Parallel Interleaved Batched Decode (Phase 2)**:
    - Evaluates active decoding streams with full KV cache state persistence.
    - Measures real-time latency percentiles (TTFT P50/P95/P99 and ITL P50/P95/P99).
-   - Guarantees **Inter-Token Latency (ITL) P99 $\le 18.23\text{ ms}$ on NVIDIA L4 GPU** and $\le 24.25\text{ ms}$ median on Apple Silicon Mac, completely eliminating prompt burst jitter.
 
 ---
 
@@ -401,10 +400,11 @@ Provides `/v1/chat/completions` and `/health` endpoints with bare-metal C++ SIMD
 
 ## 16. Elastic Multi-Model Pipeline Serving (`/v1/embeddings`, `/v1/rerank`, `/v1/extract`)
 
-Execute full 5-stage agent pipelines (Docling OCR $\to$ GLiNER NER $\to$ BGE Embeddings $\to$ BGE-Reranker $\to$ Qwen LLM) on a **single 24GB GPU or Mac Studio** with zero multi-server memory overhead:
+Endpoints for a 5-stage agent pipeline (Docling OCR $\to$ GLiNER NER $\to$ BGE Embeddings $\to$ BGE-Reranker $\to$ Qwen LLM), served from one process.
+
+> **Placeholders.** No model is loaded behind these endpoints yet: embeddings are random, reranking is word overlap and extraction is a substring match with a fixed score. The request formats below are the intended API.
 
 ### A. OpenAI Embeddings (`POST /v1/embeddings`)
-Evaluated with zero-sync in-SRAM fused segment pooling (**179,034,785 tok/s**):
 ```bash
 curl http://localhost:8000/v1/embeddings \
   -H "Content-Type: application/json" \
@@ -446,7 +446,7 @@ curl http://localhost:8000/v1/extract \
 
 ## 17. Hybrid Gated Softmax Anchoring & Chunkwise Learned Decay
 
-For high-throughput RAG and document grounding workloads, configure hybrid memory mode to prevent the 84% associative recall collapse of standard linear attention:
+For high-throughput RAG and document grounding workloads, hybrid memory mode is meant to recover the associative recall that standard linear attention loses (experimental; evaluated only on toy models trained from scratch):
 
 ```bash
 turing serve \
@@ -456,7 +456,7 @@ turing serve \
   --chunk-size 64
 ```
 * **Recurrent Stream**: Ambient conversation runs in $O(1)$ constant-memory learned-decay recurrence ($S_t = b_t S_{t-1} + K_t^T V_t$).
-* **Factual Anchor Stream**: High-entropy tokens are dynamically anchored into a compact Softmax KV cache, maintaining **25.00% exact recall** ($\sim 16\times$ above chance).
+* **Factual Anchor Stream**: High-entropy tokens are dynamically anchored into a compact Softmax KV cache.
 
 
 

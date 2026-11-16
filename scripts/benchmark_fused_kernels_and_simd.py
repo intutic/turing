@@ -184,10 +184,11 @@ def main():
     print("\n" + "=" * 80)
     print("   📊 ACCELERATION & KERNEL FUSION SUMMARY")
     print("=" * 80)
-    print(f"  1. Speculative Verify : {r1['speedup']:.2f}x FASTER (Eliminated GPU-CPU sync barrier)")
-    print(f"  2. k-Slot Gate Fusion : {r2['speedup']:.2f}x FASTER (Single SRAM block pass)")
-    print(f"  3. Safetensors Header : {r3['speedup']:.2f}x FASTER (Zero Python dict allocations)")
-    print(f"  4. Traffic Prefix Hash: {r4['speedup']:.2f}x FASTER (Sub-microsecond routing)")
+    # Ratio = baseline time / fused time; below 1.0 the fused path is slower.
+    print(f"  1. Speculative Verify : {r1['speedup']:.2f}x baseline/fused time")
+    print(f"  2. k-Slot Gate Fusion : {r2['speedup']:.2f}x baseline/fused time")
+    print(f"  3. Safetensors Header : {r3['speedup']:.2f}x baseline/fused time")
+    print(f"  4. Traffic Prefix Hash: {r4['speedup']:.2f}x baseline/fused time")
     print("=" * 80)
 
 if __name__ == "__main__":
