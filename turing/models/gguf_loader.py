@@ -10,7 +10,7 @@ import mmap
 import struct
 from enum import IntEnum
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Callable, Dict, List, Tuple, Any, Optional, Union
 import numpy as np
 import torch
 import torch.nn as nn
@@ -394,27 +394,97 @@ class GGUFReader:
 
 class GGUFModelLoader:
     """
-    Loads a complete local .gguf file into a Turing SubspaceCausalLM model with tokenizer.
+    Loads a complete local .gguf file into a Turing SubspaceCausalLM model with tokenizer. Tensor names and metadata
+    follow llama.cpp (convert_hf_to_gguf.py writes them, src/models/<arch>.cpp reads them); tests/test_gguf_parity.py
+    checks every architecture against HuggingFace and scripts/eval_gguf_parity.py checks real files against llama.cpp.
     """
 
-    # GGUF architectures SubspaceCausalLM computes exactly (logit parity with HF is tested), and whether llama.cpp's
-    # convert_hf_to_gguf permuted their q/k rows for interleaved RoPE (Turing's RoPE rotates halves, as HF does).
-    # Mistral checkpoints convert to "llama". Others (gemma, phi3, deepseek2, ...) need model changes first.
-    ARCHS = {"llama": True, "qwen2": False, "qwen3": False}
+    # GGUF architecture -> the HF model_type SubspaceCausalLM reproduces for it. Mistral and Mixtral convert to "llama".
+    ARCHS = {"llama": "llama", "qwen2": "qwen2", "qwen3": "qwen3", "qwen2moe": "qwen2_moe", "qwen3moe": "qwen3_moe",
+             "olmoe": "olmoe", "gemma": "gemma", "gemma2": "gemma2", "gemma3": "gemma3_text", "phi2": "phi",
+             "phi3": "phi3", "gpt2": "gpt2", "gptneox": "gpt_neox"}
+    # convert_hf_to_gguf permutes q/k rows for llama.cpp's interleaved RoPE (LLAMA_ROPE_TYPE_NORM) only for these;
+    # the other archs above use NEOX RoPE, which rotates halves as HF and Turing do
+    PERMUTED = {"llama"}
+    # whether llama.cpp renormalises the top-k expert weights (build_moe_ffn's norm_w, fixed per arch)
+    NORM_TOPK = {"llama": True, "qwen2moe": False, "qwen3moe": True, "olmoe": False}
+    LAYER_NORM = {"phi2", "gpt2", "gptneox"}
+    GEMMA = {"gemma", "gemma2", "gemma3"}
 
     def __init__(self, filepath: str):
         self.filepath = filepath
         self.reader = GGUFReader(filepath)
 
-    def _rope_scaling(self, arch: str, head_dim: int, rope_theta: float) -> Optional[dict]:
-        """Llama-3 RoPE scaling as ModelConfig.rope_scaling, from the rope_freqs.weight tensor llama.cpp's converter
-        writes for it; None for plain RoPE. RoPE scaling types the model cannot compute yet raise."""
-        meta = self.reader.metadata
-        kind = meta.get(f"{arch}.rope.scaling.type", "none")
-        if kind != "none":
-            raise ValueError(f"RoPE scaling type '{kind}' ({arch}.rope.scaling.type in {self.filepath}) is not supported yet")
-        if "rope_freqs.weight" not in self.reader.tensor_infos:
+    @property
+    def arch(self) -> str:
+        arch = self.reader.metadata.get("general.architecture", "llama")
+        if arch not in self.ARCHS:
+            raise ValueError(f"GGUF architecture '{arch}' is not supported (supported: {', '.join(self.ARCHS)})")
+        return arch
+
+    def _meta(self, key: str, default=None, uniform: bool = False):
+        """{arch}.{key} from the metadata; uniform=True accepts a per-layer array only when every layer agrees."""
+        v = self.reader.metadata.get(f"{self.arch}.{key}", default)
+        if uniform and isinstance(v, list):
+            if len(set(v)) != 1:
+                raise ValueError(f"per-layer {self.arch}.{key} = {v} in {self.filepath} is not supported")
+            v = v[0]
+        return v
+
+    def _rope_scaling(self, arch: str, head_dim: int, rope_theta: float, max_pos: int = 2048) -> Optional[dict]:
+        """RoPE scaling as ModelConfig.rope_scaling (an HF rope-parameters dict), None for plain RoPE:
+        - longrope from rope_factors_long/short.weight (Phi-3), with rope.scaling.attn_factor;
+        - llama3 from rope_freqs.weight (convert_hf_to_gguf writes only the per-frequency factors);
+        - linear and yarn from rope.scaling.type / factor / original_context_length. llama.cpp scales YaRN's cos/sin by
+          rope.scaling.attn_factor times HF's default mscale (or the mscale ratio with yarn_log_multiplier);
+          yarn_attn_factor and yarn_beta_fast/slow are HF's attention_factor and beta_fast/slow as the converter copied
+          them (llama.cpp ignores those three for these archs, so it agrees only at HF's defaults)."""
+        meta, names = self.reader.metadata, self.reader.tensor_infos
+
+        def g(key, default=None):
+            return meta.get(f"{arch}.rope.{key}", default)
+        kind = g("scaling.type")
+        factor = float(g("scaling.factor", g("scale_linear", 0.0)) or 0.0)
+        orig = int(g("scaling.original_context_length", max_pos))
+        attn = g("scaling.attn_factor")
+        if "rope_factors_long.weight" in names:
+            if kind not in (None, "longrope"):
+                raise ValueError(f"{self.filepath} has LongRoPE factors and RoPE scaling type '{kind}'")
+            long, short = (self.reader.get_tensor_tensor(f"rope_factors_{s}.weight", torch.float32).tolist()
+                           for s in ("long", "short"))
+            p = {"rope_type": "longrope", "long_factor": long, "short_factor": short,
+                 "original_max_position_embeddings": orig}
+            if attn is not None:
+                p["attention_factor"] = float(attn)
+            return p
+        if "rope_freqs.weight" in names:
+            if kind not in (None, "none", "linear") or factor not in (0.0, 1.0):
+                raise ValueError(f"{self.filepath} has rope_freqs.weight and RoPE scaling '{kind}' x{factor}")
+            return self._llama3_scaling(arch, head_dim, rope_theta)
+        kind = kind or "linear"  # llama.cpp's default type; with no factor it does not scale
+        if kind == "none" or factor in (0.0, 1.0):
             return None
+        if kind == "linear":
+            return {"rope_type": "linear", "factor": factor}
+        if kind == "yarn":
+            if float(g("scaling.yarn_ext_factor", 1.0)) != 1.0:
+                raise ValueError(f"YaRN ext_factor != 1 ({arch}.rope.scaling.yarn_ext_factor in {self.filepath}) "
+                                 "is not supported")
+
+            def mscale(m):
+                return 0.1 * m * math.log(factor) + 1.0 if factor > 1 else 1.0
+            log_mul = float(g("scaling.yarn_log_multiplier", 0.0))
+            att = (mscale(1.0) / mscale(log_mul) if log_mul else mscale(1.0)) * float(1.0 if attn is None else attn)
+            p = {"rope_type": "yarn", "factor": factor, "original_max_position_embeddings": orig,
+                 "attention_factor": float(g("scaling.yarn_attn_factor", att))}
+            for key, hf in (("yarn_beta_fast", "beta_fast"), ("yarn_beta_slow", "beta_slow"), ("yarn_truncate", "truncate")):
+                if g(f"scaling.{key}") is not None:
+                    p[hf] = g(f"scaling.{key}")
+            return p
+        raise ValueError(f"RoPE scaling type '{kind}' ({arch}.rope.scaling.type in {self.filepath}) is not supported")
+
+    def _llama3_scaling(self, arch: str, head_dim: int, rope_theta: float) -> Optional[dict]:
+        meta = self.reader.metadata
         factors = self.reader.get_tensor_tensor("rope_freqs.weight", torch.float32).numpy()
         # The converter writes only the per-frequency factors; low/high_freq_factor 1/4 and an 8192-token original
         # context are its defaults (and every Llama 3.x's). Anything else fails the check below rather than load wrong.
@@ -435,73 +505,169 @@ class GGUFModelLoader:
                 "original_max_position_embeddings": orig}
 
     def extract_config(self, sparsity_ratio: float = 0.0) -> ModelConfig:
-        meta = self.reader.metadata
-        arch = meta.get("general.architecture", "llama")
-        if arch not in self.ARCHS:
-            raise ValueError(f"GGUF architecture '{arch}' is not supported (supported: {', '.join(self.ARCHS)})")
+        meta, names, arch, g = self.reader.metadata, self.reader.tensor_infos, self.arch, self._meta
         name = meta.get("general.name", os.path.basename(self.filepath).replace(".gguf", ""))
-        
-        hidden_dim = int(meta.get(f"{arch}.embedding_length", 2048))
-        num_layers = int(meta.get(f"{arch}.block_count", 16))
-        num_heads = int(meta.get(f"{arch}.attention.head_count", 16))
-        num_kv_heads = int(meta.get(f"{arch}.attention.head_count_kv", num_heads))
-        head_dim = int(meta.get(f"{arch}.attention.key_length", hidden_dim // num_heads))
-        ffn_dim = int(meta.get(f"{arch}.feed_forward_length", hidden_dim * 4))
-        
-        vocab_size = 32000
-        if "tokenizer.ggml.tokens" in meta:
-            vocab_size = len(meta["tokenizer.ggml.tokens"])
-        elif f"{arch}.vocab_size" in meta:
-            vocab_size = int(meta[f"{arch}.vocab_size"])
-            
-        max_pos = int(meta.get(f"{arch}.context_length", 4096))
-        rope_theta = float(meta.get(f"{arch}.rope.freq_base", 10000.0))
-        
+        hidden_dim = int(g("embedding_length"))
+        num_layers = int(g("block_count"))
+        num_heads = int(g("attention.head_count", uniform=True))
+        num_kv_heads = int(g("attention.head_count_kv", num_heads, uniform=True))
+        head_dim = int(g("attention.key_length", hidden_dim // num_heads))
+        if int(g("attention.value_length", head_dim)) != head_dim:
+            raise ValueError(f"{self.filepath}: key and value head sizes differ, which is not supported")
+        ffn_dim = int(g("feed_forward_length", hidden_dim * 4, uniform=True))
+        vocab_size = names["token_embd.weight"].shape[0] if "token_embd.weight" in names else \
+            len(meta.get("tokenizer.ggml.tokens", [])) or 32000
+        max_pos = int(g("context_length", 4096))
+        rope_theta = float(g("rope.freq_base", 10000.0))
+        rope_dim = int(g("rope.dimension_count", head_dim))
+        layer_norm = arch in self.LAYER_NORM
+
         tile_size = 64 if ffn_dim <= 4096 else 256
         total_tiles = ffn_dim // tile_size
-        active_tiles = max(1, int(total_tiles * (1.0 - sparsity_ratio)))
-        
-        return ModelConfig(
-            name=name,
-            hidden_dim=hidden_dim,
-            ffn_dim=ffn_dim,
-            num_heads=num_heads,
-            num_kv_heads=num_kv_heads,
-            head_dim=head_dim,
-            num_layers=num_layers,
-            vocab_size=vocab_size,
-            tile_size=tile_size,
-            active_tiles=active_tiles,
-            rank_sub=64 if hidden_dim >= 768 else 32,
-            max_position_embeddings=max_pos,
-            rope_theta=rope_theta,
-            rms_norm_eps=float(meta.get(f"{arch}.attention.layer_norm_rms_epsilon", 1e-6)),
-            rope_scaling=self._rope_scaling(arch, head_dim, rope_theta),
-            attention_bias="blk.0.attn_q.bias" in self.reader.tensor_infos,     # Qwen2
-            qk_norm="blk.0.attn_q_norm.weight" in self.reader.tensor_infos,     # Qwen3
+        kw = dict(
+            arch=self.ARCHS[arch], hidden_dim=hidden_dim, ffn_dim=ffn_dim, num_heads=num_heads,
+            num_kv_heads=num_kv_heads, head_dim=head_dim, num_layers=num_layers, vocab_size=vocab_size,
+            max_position_embeddings=max_pos, rope_theta=rope_theta,
+            rms_norm_eps=float(g("attention.layer_norm_epsilon" if layer_norm else "attention.layer_norm_rms_epsilon",
+                                 1e-5 if layer_norm else 1e-6)),
+            rope_scaling=None if arch == "gpt2" else self._rope_scaling(arch, rope_dim, rope_theta, max_pos),
+            rotary_dim=rope_dim if rope_dim != head_dim else None,
+            attention_bias="blk.0.attn_q.bias" in names or "blk.0.attn_qkv.bias" in names,
         )
+        q_norm = names.get("blk.0.attn_q_norm.weight")
+        if q_norm is not None:  # per head (Qwen3, Gemma 3) or over the whole projection (OLMoE)
+            kw["qk_norm" if int(np.prod(q_norm.shape)) == head_dim else "qk_norm_full"] = True
+        if g("attention.clamp_kqv"):
+            kw["clip_qkv"] = float(g("attention.clamp_kqv"))
+        if layer_norm:
+            kw.update(norm_type="layer", mlp_gated=False, mlp_bias=True, attention_bias=True,
+                      o_proj_bias="blk.0.attn_output.bias" in names, hidden_act="gelu_new")
+        if arch == "phi2":
+            kw.update(lm_head_bias="output.bias" in names, parallel_residual=True, shared_layer_norm=True)
+        elif arch == "gpt2":
+            kw.update(learned_positions=True, max_position_embeddings=names["position_embd.weight"].shape[0])
+        elif arch == "gptneox":
+            kw.update(hidden_act="gelu", parallel_residual=bool(g("use_parallel_residual", True)))
+        elif arch == "phi3" and int(g("attention.sliding_window", 0) or 0) > 0:
+            # HF's Phi-3 attends within the window; llama.cpp currently disables Phi-3's SWA (identical up to it)
+            kw["sliding_window"] = int(g("attention.sliding_window"))
+        if arch in self.GEMMA:
+            # the converter stores Gemma's RMSNorm weights as 1 + w, so the norms scale by the stored weight (offset 0)
+            kw.update(embed_scale=hidden_dim ** 0.5, hidden_act="gelu_pytorch_tanh")
+        if arch in ("gemma2", "gemma3"):
+            # llama.cpp: 1/sqrt(n_embd / n_head) for the 27B models (46 / 62 layers), else 1/sqrt(head_dim)
+            big = num_layers == {"gemma2": 46, "gemma3": 62}[arch]
+            kw.update(sandwich_norm=True, attn_scale=float(hidden_dim // num_heads if big else head_dim) ** -0.5)
+            if arch == "gemma2":
+                kw.update(attn_softcap=float(g("attn_logit_softcapping", 50.0)),
+                          final_softcap=float(g("final_logit_softcapping", 30.0)))
+                window, pattern, local_theta = int(g("attention.sliding_window", 4096)), 2, g("rope.freq_base_swa")
+            else:
+                kw["final_softcap"] = float(g("final_logit_softcapping", 0.0)) or None
+                window, pattern = int(g("attention.sliding_window", 0) or 0), 6
+                local_theta = g("rope.freq_base_swa", 10000.0)
+            if window > 0:
+                pattern = g("attention.sliding_window_pattern", pattern)
+                swa = list(map(bool, pattern)) if isinstance(pattern, list) else \
+                    [pattern == 0 or i % pattern < pattern - 1 for i in range(num_layers)]  # llama.cpp set_swa_pattern
+                kw.update(sliding_window=window, layer_types=["sliding_attention" if s else "full_attention" for s in swa],
+                          rope_local_theta=None if local_theta is None else float(local_theta))
+
+        num_experts = int(g("expert_count", 0) or 0)
+        if num_experts:
+            if arch not in self.NORM_TOPK:
+                raise ValueError(f"GGUF architecture '{arch}' with experts is not supported")
+            if int(g("expert_gating_func", 1)) != 1:
+                raise ValueError(f"{self.filepath}: expert gating other than softmax is not supported")
+            moe = [i for i in range(num_layers) if f"blk.{i}.ffn_gate_inp.weight" in names]
+            down = names.get(f"blk.{moe[0]}.ffn_down_exps.weight") if moe else None
+            if down is None:
+                raise ValueError(f"{self.filepath} declares {num_experts} experts but has no expert tensors")
+            shexp = names.get(f"blk.{moe[0]}.ffn_down_shexp.weight")
+            kw.update(num_experts=num_experts, num_experts_per_tok=int(g("expert_used_count")),
+                      moe_ffn_dim=down.shape[-1], norm_topk_prob=self.NORM_TOPK[arch],
+                      shared_expert_ffn_dim=shexp.shape[-1] if shexp is not None else 0,
+                      moe_layers=None if len(moe) == num_layers else moe)
+            if arch == "llama":
+                kw["arch"] = "mixtral"
+        return ModelConfig(name=name, tile_size=tile_size,
+                           active_tiles=max(1, int(total_tiles * (1.0 - sparsity_ratio))),
+                           rank_sub=64 if hidden_dim >= 768 else 32, **kw)
 
     def extract_tokenizer(self) -> Any:
         from .gguf_tokenizer import GGUFTokenizer
         return GGUFTokenizer(self.reader.metadata)
 
-    @staticmethod
-    def tensor_map(config: ModelConfig) -> Dict[str, str]:
-        """SubspaceCausalLM parameter name -> llama.cpp GGUF tensor name, for every weight a checkpoint holds."""
-        m = {"embed_tokens.weight": "token_embd.weight", "norm.weight": "output_norm.weight",
-             "lm_head.weight": "output.weight"}
-        per_layer = {"input_layernorm.weight": "attn_norm.weight", "post_attention_layernorm.weight": "ffn_norm.weight",
-                     "self_attn.q_proj.weight": "attn_q.weight", "self_attn.k_proj.weight": "attn_k.weight",
-                     "self_attn.v_proj.weight": "attn_v.weight", "self_attn.o_proj.weight": "attn_output.weight",
-                     "mlp.gate_proj.weight": "ffn_gate.weight", "mlp.up_proj.weight": "ffn_up.weight",
-                     "mlp.down_proj.weight": "ffn_down.weight"}
-        if config.attention_bias:
-            per_layer.update({f"self_attn.{p}_proj.bias": f"attn_{p}.bias" for p in "qkv"})
-        if config.qk_norm:
-            per_layer.update({f"self_attn.{p}_norm.weight": f"attn_{p}_norm.weight" for p in "qk"})
-        for l in range(config.num_layers):
-            m.update({f"layers.{l}.{k}": f"blk.{l}.{v}" for k, v in per_layer.items()})
-        return m
+    def tensor_map(self, config: ModelConfig) -> Dict[str, Tuple[Tuple[str, ...], Callable]]:
+        """SubspaceCausalLM parameter name -> (the llama.cpp GGUF tensors it is made from, a function of those tensors
+        giving the parameter). Fused tensors (attn_qkv, Phi-3's gate+up ffn_up, ffn_gate_up_exps) are split here, and
+        q/k rows un-permuted for the archs in PERMUTED."""
+        names, cfg = self.reader.tensor_infos, config
+        permuted, plan = self.arch in self.PERMUTED, {}
+
+        def take(param: str, *gnames: str, fn: Callable = lambda t: t):
+            plan[param] = (gnames, fn)
+
+        def norm(param: str, gname: str):
+            take(param + ".weight", gname + ".weight")
+            if cfg.norm_type == "layer":
+                take(param + ".bias", gname + ".bias")
+
+        take("embed_tokens.weight", "token_embd.weight")
+        take("lm_head.weight", "output.weight" if "output.weight" in names else "token_embd.weight")
+        if cfg.lm_head_bias:
+            take("lm_head.bias", "output.bias")
+        if cfg.learned_positions:
+            take("embed_positions.weight", "position_embd.weight")
+        norm("norm", "output_norm")
+        H, Q, K = cfg.num_heads, cfg.num_heads * cfg.head_dim, cfg.num_kv_heads * cfg.head_dim
+        for i in range(cfg.num_layers):
+            b, t = f"blk.{i}.", f"layers.{i}."
+            norm(t + "input_layernorm", b + "attn_norm")
+            if cfg.sandwich_norm:
+                take(t + "attn_out_norm.weight", b + "post_attention_norm.weight")
+                take(t + "mlp_out_norm.weight", b + "post_ffw_norm.weight")
+            if not cfg.shared_layer_norm:
+                norm(t + "post_attention_layernorm", b + "ffn_norm")
+            for kind in (("weight", "bias") if cfg.attention_bias else ("weight",)):
+                fused = f"{b}attn_qkv.{kind}" in names
+                for p, lo, hi, heads in (("q", 0, Q, H), ("k", Q, Q + K, cfg.num_kv_heads), ("v", Q + K, Q + 2 * K, 0)):
+                    def fn(x, lo=lo, hi=hi, heads=heads, fused=fused):
+                        x = x[lo:hi] if fused else x
+                        return unpermute_qk(x, heads) if permuted and heads else x
+                    take(f"{t}self_attn.{p}_proj.{kind}", f"{b}attn_qkv.{kind}" if fused else f"{b}attn_{p}.{kind}", fn=fn)
+            take(t + "self_attn.o_proj.weight", b + "attn_output.weight")
+            if cfg.o_proj_bias:
+                take(t + "self_attn.o_proj.bias", b + "attn_output.bias")
+            if cfg.qk_norm or cfg.qk_norm_full:
+                take(t + "self_attn.q_norm.weight", b + "attn_q_norm.weight")
+                take(t + "self_attn.k_norm.weight", b + "attn_k_norm.weight")
+            if cfg.layer_is_moe(i):
+                take(t + "mlp.router.weight", b + "ffn_gate_inp.weight")
+                if b + "ffn_gate_up_exps.weight" in names:
+                    take(t + "mlp.gate_up", b + "ffn_gate_up_exps.weight")
+                else:
+                    take(t + "mlp.gate_up", b + "ffn_gate_exps.weight", b + "ffn_up_exps.weight",
+                         fn=lambda gate, up: torch.cat([gate, up], dim=1))
+                take(t + "mlp.down", b + "ffn_down_exps.weight")
+                if cfg.shared_expert_ffn_dim:
+                    for p in ("gate", "up", "down"):
+                        take(f"{t}mlp.shared_expert.{p}_proj.weight", f"{b}ffn_{p}_shexp.weight")
+                    take(t + "mlp.shared_expert_gate.weight", b + "ffn_gate_inp_shexp.weight",
+                         fn=lambda x: x.reshape(1, -1))
+                continue
+            if cfg.mlp_gated and b + "ffn_gate.weight" not in names:  # Phi-3: gate and up rows fused in ffn_up
+                F = cfg.ffn_dim
+                take(t + "mlp.gate_proj.weight", b + "ffn_up.weight", fn=lambda x, F=F: x[:F])
+                take(t + "mlp.up_proj.weight", b + "ffn_up.weight", fn=lambda x, F=F: x[F:])
+                take(t + "mlp.down_proj.weight", b + "ffn_down.weight")
+            else:
+                for p in (("gate", "up", "down") if cfg.mlp_gated else ("up", "down")):
+                    take(f"{t}mlp.{p}_proj.weight", f"{b}ffn_{p}.weight")
+            if cfg.mlp_bias:
+                take(t + "mlp.up_proj.bias", b + "ffn_up.bias")
+                take(t + "mlp.down_proj.bias", b + "ffn_down.bias")
+        return plan
 
     def load(
         self,
@@ -516,15 +682,14 @@ class GGUFModelLoader:
         if dtype is None:
             dtype = torch.float16 if torch.device(device).type == "cuda" else torch.float32
         names = self.reader.tensor_infos
-        mapping = self.tensor_map(config)
-        if "output.weight" not in names:
-            mapping["lm_head.weight"] = "token_embd.weight"  # tied embeddings
-        missing = sorted(g for g in mapping.values() if g not in names)
-        unexpected = sorted(set(names) - set(mapping.values()) - {"rope_freqs.weight"})
+        plan = self.tensor_map(config)
+        used = {g for gnames, _ in plan.values() for g in gnames}
+        missing = sorted(g for g in used if g not in names)
+        unexpected = sorted(set(names) - used - {"rope_freqs.weight", "rope_factors_long.weight",
+                                                 "rope_factors_short.weight"})
         if missing or unexpected:
             raise ValueError(f"GGUF file {self.filepath} does not match a {config.num_layers}-layer "
-                             f"{self.reader.metadata.get('general.architecture', 'llama')} model: "
-                             f"missing tensors {missing}, unexpected tensors {unexpected}")
+                             f"{self.arch} model: missing tensors {missing}, unexpected tensors {unexpected}")
 
         # Built on the device in the target dtype: never a whole-model fp32 copy (a 70B model is 280 GB in fp32).
         # shortcut: the default dtype is process-wide while the model is built; build on "meta" if loads go concurrent.
@@ -536,20 +701,22 @@ class GGUFModelLoader:
         finally:
             torch.set_default_dtype(default_dtype)
 
-        permuted = self.ARCHS[self.reader.metadata.get("general.architecture", "llama")]
         params = dict(model.named_parameters())
+        last = (None, None)  # a fused tensor feeds consecutive parameters: dequantize it once
         with torch.no_grad():
-            for pname, gname in mapping.items():
-                t = self.reader.get_tensor_tensor(gname, torch.float32)
-                if permuted and gname.endswith(("attn_q.weight", "attn_q.bias")):
-                    t = unpermute_qk(t, config.num_heads)
-                elif permuted and gname.endswith(("attn_k.weight", "attn_k.bias")):
-                    t = unpermute_qk(t, config.num_kv_heads)
+            for pname, (gnames, fn) in plan.items():
+                parts = []
+                for gname in gnames:
+                    if last[0] != gname:
+                        last = (gname, self.reader.get_tensor_tensor(gname, torch.float32))
+                    parts.append(last[1])
+                t = fn(*parts)
                 p = params[pname]
                 if t.shape != p.shape:
-                    raise ValueError(f"GGUF tensor '{gname}' has shape {tuple(t.shape)}; {pname} is {tuple(p.shape)}")
+                    raise ValueError(f"GGUF tensor {'+'.join(gnames)} gives shape {tuple(t.shape)}; "
+                                     f"{pname} is {tuple(p.shape)}")
                 p.copy_(t)
-                del t
+                del t, parts
         tokenizer = self.extract_tokenizer()
         return model, tokenizer
 
