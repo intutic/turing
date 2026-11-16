@@ -244,3 +244,12 @@ def test_batched_read_and_append_equal_per_request(kv_cache_dtype):
         torch.testing.assert_close(kb[b:b + 1, :, :n], kr, rtol=0, atol=0)
         torch.testing.assert_close(vb[b:b + 1, :, :n], vr, rtol=0, atol=0)
         assert valid[b].sum() == n
+
+
+def test_pool_created_in_inference_mode_is_writable_outside_it():
+    with torch.inference_mode():
+        pool = _pool(pages=16)
+        c = KVCache(pool)
+    c.reserve(40)  # admission runs outside inference mode
+    for _ in range(9):  # grows the page table
+        KVCache(pool)

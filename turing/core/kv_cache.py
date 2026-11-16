@@ -72,6 +72,9 @@ def _unpack4(packed: torch.Tensor) -> torch.Tensor:
 class KVPool:
     """Every layer's K and V pages for one model, plus the page tables of the requests using it."""
 
+    # The pool lives for the whole process and is written both inside inference mode (forward passes) and outside it
+    # (admission, page tables): its tensors are always created as normal tensors.
+    @torch.inference_mode(False)
     def __init__(self, num_layers: int, num_kv_heads: int, head_dim: int, num_pages: int, dtype, device,
                  kv_cache_dtype: str = "native", track_pages: bool = False, max_tokens_per_request: int = 131072):
         if kv_cache_dtype not in KV_CACHE_DTYPES:
@@ -184,6 +187,7 @@ class KVPool:
             if self._refs[p] == 0:
                 self._free_pages.append(p)
 
+    @torch.inference_mode(False)
     def new_slot(self) -> int:
         if not self._free_slots:  # grow the page table by doubling its rows (a few KB; rare)
             rows = self.page_table.shape[0]
