@@ -1,148 +1,17 @@
 """
-Subspace projection, Rank-64 INT8 belief state compression, and deep-to-shallow recurrence.
+Deep-to-shallow activation recirculation through a low-rank INT8 projection (experimental, off by default).
 """
 
-import math
-from typing import Tuple, Optional, List
-import numpy as np
+from typing import Optional
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
-class SubspaceManager:
-    """
-    Manages SVD projection bases, active tile channel bitmasks, and INT8 subspace quantization.
-    """
-    def __init__(self, hidden_dim: int = 8192, rank: int = 64, device: torch.device = torch.device("cpu")):
-        self.hidden_dim = hidden_dim
-        self.rank = rank
-        self.device = device
-        self.u_proj = self._init_svd_basis(hidden_dim, rank, device)
-
-    def _init_svd_basis(self, hidden_dim: int, rank: int, device: torch.device) -> torch.Tensor:
-        """
-        Derives an orthogonal SVD principal subspace basis with anisotropic exponential decay.
-        """
-        # Synthesize anisotropic multi-head decay profile
-        decay = torch.exp(-3.5 * torch.arange(hidden_dim, dtype=torch.float32) / hidden_dim)
-        calib = torch.randn(min(4096, hidden_dim * 2), hidden_dim, dtype=torch.float32) * decay
-        # SVD decomposition
-        _, _, v_t = torch.linalg.svd(calib, full_matrices=False)
-        u_proj = v_t[:rank, :].t().contiguous().to(device) # [hidden_dim, rank]
-        return u_proj
-
-    def project_to_subspace(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Projects activations into the low-rank principal subspace.
-        x: [..., hidden_dim] -> out: [..., rank]
-        """
-        dtype = x.dtype
-        proj = self.u_proj.to(device=x.device, dtype=dtype)
-        return torch.matmul(x, proj)
-
-    def reconstruct_from_subspace(self, x_sub: torch.Tensor) -> torch.Tensor:
-        """
-        Reconstructs original activation dimensions from low-rank subspace.
-        x_sub: [..., rank] -> out: [..., hidden_dim]
-        """
-        dtype = x_sub.dtype
-        proj_t = self.u_proj.t().to(device=x_sub.device, dtype=dtype)
-        return torch.matmul(x_sub, proj_t)
-
-    def quantize_subspace_int8(self, x_sub: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Symmetric INT8 quantization of subspace activations.
-        Returns (q_int8, scale)
-        """
-        abs_max = torch.amax(torch.abs(x_sub), dim=-1, keepdim=True).clamp(min=1e-5)
-        scale = abs_max / 127.0
-        q_int8 = torch.clamp(torch.round(x_sub / scale), -128, 127).to(torch.int8)
-        return q_int8, scale
-
-    def dequantize_subspace_int8(self, q_int8: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:
-        """
-        Dequantizes INT8 subspace activations back to floating point.
-        """
-        return q_int8.to(scale.dtype) * scale
-
-    def compress_with_residual_correction(
-        self,
-        x: torch.Tensor,
-        top_k_residuals: int = 1
-    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
-        """
-        Compresses tensor into INT8 subspace coordinates plus an optional 1-sparse
-        top residual outlier correction vector for zero-error low-rank reconstruction.
-        """
-        x_sub = self.project_to_subspace(x)
-        q_int8, scale = self.quantize_subspace_int8(x_sub)
-        
-        if top_k_residuals <= 0:
-            return q_int8, scale, None
-            
-        recon_base = self.reconstruct_from_subspace(self.dequantize_subspace_int8(q_int8, scale))
-        residual = x - recon_base
-        
-        if top_k_residuals == 1:
-            try:
-                from ..kernels.triton_residual_outlier import find_residual_outlier_cuda
-                top_indices, signed_vals = find_residual_outlier_cuda(residual)
-                return q_int8, scale, (top_indices, signed_vals)
-            except Exception:
-                pass
-
-        top_vals, top_indices = torch.topk(torch.abs(residual), k=top_k_residuals, dim=-1)
-        signed_vals = torch.gather(residual, -1, top_indices)
-        return q_int8, scale, (top_indices, signed_vals)
-
-
-    def reconstruct_with_residual_correction(
-        self,
-        q_int8: torch.Tensor,
-        scale: torch.Tensor,
-        residual_corr: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
-    ) -> torch.Tensor:
-        """
-        Reconstructs tensor with exact residual outlier restoration.
-        """
-        x_sub_deq = self.dequantize_subspace_int8(q_int8, scale)
-        recon = self.reconstruct_from_subspace(x_sub_deq)
-        if residual_corr is not None:
-            top_indices, signed_vals = residual_corr
-            recon = recon.scatter_add(-1, top_indices, signed_vals)
-        return recon
-
-    @staticmethod
-    def encode_bitmask(active_tile_indices: List[int], total_tiles: int) -> Tuple[int, bytes]:
-        """
-        Encodes active tile indices into an integer bitmask and 16-byte little-endian array.
-        """
-        mask_int = 0
-        for idx in active_tile_indices:
-            if idx < total_tiles:
-                mask_int |= (1 << idx)
-        mask_bytes = mask_int.to_bytes(16, byteorder="little")
-        return mask_int, mask_bytes
-
-    @staticmethod
-    def decode_bitmask(mask_bytes: bytes, total_tiles: int) -> List[int]:
-        """
-        Decodes a 16-byte bitmask into a list of active tile indices.
-        """
-        mask_int = int.from_bytes(mask_bytes, byteorder="little")
-        active_indices = []
-        for t in range(total_tiles):
-            if (mask_int & (1 << t)) != 0:
-                active_indices.append(t)
-        return active_indices
-
 
 class SubspaceRecirculation(nn.Module):
     """
-    Subspace-Compressed Activation Recirculation Layer (arXiv:2608.17981 & DeepSeek V4 mHC).
-    Leverages inference-time deep-layer recurrence into a Rank-64 INT8 compressed subspace
-    without weight retraining, providing 9.33x memory bandwidth reduction, with optional
-    Birkhoff doubly stochastic normalization for non-expansive stability.
+    Adds a deep layer's hidden state, projected to `rank` dimensions, INT8-rounded and projected back, to a shallow
+    layer's hidden state. The projection basis is the top right singular vectors of a synthetic random matrix with
+    decaying column scale, not of the model's activations, and the model was not trained with this path: enabling it
+    (ModelConfig.enable_recirculation) changes the model's output. use_birkhoff clamps the energy ratio at 1.
     """
     def __init__(self, hidden_dim: int = 8192, rank: int = 64, alpha: float = 0.15, use_birkhoff: bool = False):
         super().__init__()

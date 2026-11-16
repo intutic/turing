@@ -147,7 +147,7 @@ class CrossLayerKVSharingManager:
     Later transformer layers reuse KV projections computed in earlier layers:
     - Sliding-window layers reuse KV from the most recent non-shared sliding-window layer.
     - Full-attention layers reuse KV from the most recent non-shared full-attention layer.
-    Saves ~50% of the active KV cache memory footprint.
+    Shared layers store no KV of their own, so KV memory falls by the share of shared layers.
     """
     def __init__(self, num_layers: int, num_shared_layers: int = 16, sliding_window_ratio: int = 4):
         self.num_layers = num_layers

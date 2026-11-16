@@ -1,7 +1,7 @@
 """
 Turing Engine Provider Adapter for LiteLLM.
 Translates LiteLLM generic completion requests into Turing Engine endpoints
-supporting subspace channel pruning, SVD INT8 KV compression, and speculative decoding.
+supporting subspace channel pruning and speculative decoding.
 """
 
 import os
@@ -19,7 +19,6 @@ class TuringEngineConfig:
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
         sparsity_ratio: float = 0.0,
-        use_svd_kv_cache: bool = True,
         speculative_draft_tokens: int = 4,
     ):
         self.api_base = api_base or os.getenv(
@@ -27,7 +26,6 @@ class TuringEngineConfig:
         )
         self.api_key = api_key or os.getenv("TURING_API_KEY", "turing-local")
         self.sparsity_ratio = sparsity_ratio
-        self.use_svd_kv_cache = use_svd_kv_cache
         self.speculative_draft_tokens = speculative_draft_tokens
 
     def get_supported_openai_params(self) -> List[str]:
@@ -48,7 +46,6 @@ class TuringEngineConfig:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "X-Turing-Sparsity": str(self.sparsity_ratio),
-            "X-Turing-SVD-KV": "1" if self.use_svd_kv_cache else "0",
             "X-Turing-Draft-Tokens": str(self.speculative_draft_tokens),
         }
 

@@ -3,7 +3,6 @@
 #include "turing_paged_attention.hpp"
 #include "turing_convolution_shared.hpp"
 #include "turing_nbody_attention.hpp"
-#include "turing_hex_bmu.hpp"
 #include "turing_pso.hpp"
 #include "turing_threadpool.hpp"
 #include "turing_adam_kernel.hpp"
@@ -20,7 +19,6 @@
 #include "turing_conv2d_shared.hpp"
 #include "turing_nbody_recirculator.hpp"
 #include "turing_pso_tuner.hpp"
-#include "turing_hex_quantizer.hpp"
 #include "turing_rope.hpp"
 #include "turing_lru_cache.hpp"
 #include "turing_paged_memory.hpp"
@@ -32,11 +30,9 @@
 #include "turing_laplacian_2d.hpp"
 #include "turing_welford_anneal.hpp"
 #include "turing_matryoshka_quadtree.hpp"
-#include "turing_svd_quant.hpp"
 #include "turing_ridge_solver.hpp"
 #include "turing_latent_decode.hpp"
 #include "turing_linear_recurrence.hpp"
-#include "turing_svd_wire_codec.hpp"
 #include "turing_fast_hash.hpp"
 #include "turing_dilated_conv1d.hpp"
 #include "turing_lora_gemv.hpp"
@@ -223,40 +219,6 @@ py::array_t<float> softened_nbody_attention_py(
     );
 
     return result;
-}
-
-// PyBind wrapper for Hexagonal BMU Search
-py::tuple hexagonal_bmu_search_py(
-    py::array_t<float, py::array::c_style> activations_arr,
-    py::array_t<float, py::array::c_style> codebook_arr
-) {
-    py::buffer_info act_buf = activations_arr.request();
-    py::buffer_info cb_buf = codebook_arr.request();
-
-    int batch = static_cast<int>(act_buf.shape[0]);
-    int codebook_dim = static_cast<int>(act_buf.shape[1]);
-    int total_cells = static_cast<int>(cb_buf.shape[0]);
-
-    auto out_indices = py::array_t<int64_t>(batch);
-    auto out_dists = py::array_t<float>(batch);
-
-    py::buffer_info idx_buf = out_indices.request();
-    py::buffer_info dist_buf = out_dists.request();
-
-    turing::hexagonal_bmu_search(
-        static_cast<const float*>(act_buf.ptr),
-        static_cast<const float*>(cb_buf.ptr),
-        static_cast<int64_t*>(idx_buf.ptr),
-        static_cast<float*>(dist_buf.ptr),
-        batch, codebook_dim, total_cells
-    );
-
-    return py::make_tuple(out_indices, out_dists);
-}
-
-// PyBind wrapper for Hexagonal Metric Distance
-float hexagonal_distance_py(float u1, float v1, float u2, float v2) {
-    return turing::hexagonal_distance(u1, v1, u2, v2);
 }
 
 // PyBind wrapper for Native Fused Adam Step (Fused High-Performance Kernel)
@@ -637,37 +599,6 @@ std::vector<float> pso_optimize_hyperparams_py(
     );
 }
 
-// Component 6: Hexagonal Spatial Codebook Quantizer
-std::pair<py::array_t<int32_t>, py::array_t<float>> hex_quantize_activations_py(
-    py::array_t<float, py::array::c_style> input_arr,
-    py::array_t<float, py::array::c_style> codebook_arr
-) {
-    py::buffer_info in_buf = input_arr.request();
-    py::buffer_info cd_buf = codebook_arr.request();
-
-    int num_vectors = static_cast<int>(in_buf.shape[0]);
-    int dim = static_cast<int>(in_buf.shape[1]);
-    int num_cells = static_cast<int>(cd_buf.shape[0]);
-
-    auto bmu_indices = py::array_t<int32_t>(num_vectors);
-    auto quantized = py::array_t<float>({num_vectors, dim});
-
-    py::buffer_info bmu_buf = bmu_indices.request();
-    py::buffer_info q_buf = quantized.request();
-
-    turing::hex_quantize_activations_cpp(
-        static_cast<const float*>(in_buf.ptr),
-        static_cast<const float*>(cd_buf.ptr),
-        static_cast<int32_t*>(bmu_buf.ptr),
-        static_cast<float*>(q_buf.ptr),
-        num_vectors,
-        num_cells,
-        dim
-    );
-
-    return {bmu_indices, quantized};
-}
-
 // Component 7: Fused In-Place RoPE Decoupler
 py::array_t<float> fused_rope_transform_py(
     py::array_t<float, py::array::c_style> data_arr,
@@ -791,14 +722,6 @@ PYBIND11_MODULE(turing_csrc, m) {
           py::arg("query_arr"), py::arg("key_arr"), py::arg("value_arr"),
           py::arg("softening_sq") = 1e-4f, py::arg("scale") = 1.0f);
 
-    m.def("hexagonal_bmu_search", &hexagonal_bmu_search_py,
-          "Execute Parallel Hexagonal BMU Search (Spatial HPC Stencil Engine)",
-          py::arg("activations_arr"), py::arg("codebook_arr"));
-
-    m.def("hexagonal_distance", &hexagonal_distance_py,
-          "Calculate Hexagonal Coordinate Metric Distance (Spatial HPC Stencil Engine)",
-          py::arg("u1"), py::arg("v1"), py::arg("u2"), py::arg("v2"));
-
     m.def("fused_adam_step", &fused_adam_step_py,
           "Execute Native Fused In-SRAM Adam Step (Fused High-Performance Kernel)",
           py::arg("param_arr"), py::arg("grad_arr"),
@@ -865,10 +788,6 @@ PYBIND11_MODULE(turing_csrc, m) {
           py::arg("num_particles"), py::arg("num_dims"), py::arg("num_iterations"),
           py::arg("lower_bounds"), py::arg("upper_bounds"),
           py::arg("w") = 0.729f, py::arg("c1") = 1.494f, py::arg("c2") = 1.494f);
-
-    m.def("hex_quantize_activations", &hex_quantize_activations_py,
-          "Execute Hexagonal Spatial Codebook Quantization (Spatial HPC Stencil Engine)",
-          py::arg("input_arr"), py::arg("codebook_arr"));
 
     // 4-Pillar Hot-Path Native Bindings
     m.def("fused_rope_transform", &fused_rope_transform_py,
@@ -1053,63 +972,6 @@ PYBIND11_MODULE(turing_csrc, m) {
         return py::make_tuple(tok_arr, parent_arr, mask_arr);
     }, "Native C++20 Matryoshka Sliced GEMV & Quadtree Generator");
 
-    // Fused SVD INT8 Quantizer
-    m.def("fused_svd_int8_quant", [](
-        py::array_t<float, py::array::c_style> k_input_arr,
-        py::array_t<float, py::array::c_style> u_proj_arr
-    ) {
-        py::buffer_info k_buf = k_input_arr.request();
-        py::buffer_info u_buf = u_proj_arr.request();
-
-        int seq_len = static_cast<int>(k_buf.shape[0]);
-        int head_dim = static_cast<int>(k_buf.shape[1]);
-        int rank = static_cast<int>(u_buf.shape[1]);
-
-        auto q_out = py::array_t<int8_t>({seq_len, rank});
-        auto scale_out = py::array_t<float>({seq_len, 1});
-
-        turing::fused_svd_int8_quant_cpp(
-            static_cast<const float*>(k_buf.ptr),
-            static_cast<const float*>(u_buf.ptr),
-            static_cast<int8_t*>(q_out.request().ptr),
-            static_cast<float*>(scale_out.request().ptr),
-            seq_len,
-            head_dim,
-            rank
-        );
-
-        return py::make_tuple(q_out, scale_out);
-    }, "Native C++20 Fused SVD INT8 Quantizer");
-
-    // Fused INT8 Dequantize & SVD Reconstruct GEMM
-    m.def("fused_int8_dequant_svd_recon", [](
-        py::array_t<int8_t, py::array::c_style> q_int8_arr,
-        py::array_t<float, py::array::c_style> scale_arr,
-        py::array_t<float, py::array::c_style> u_proj_arr
-    ) {
-        py::buffer_info q_buf = q_int8_arr.request();
-        py::buffer_info s_buf = scale_arr.request();
-        py::buffer_info u_buf = u_proj_arr.request();
-
-        int seq_len = static_cast<int>(q_buf.shape[0]);
-        int rank = static_cast<int>(q_buf.shape[1]);
-        int head_dim = static_cast<int>(u_buf.shape[0]);
-
-        auto out_recon = py::array_t<float>({seq_len, head_dim});
-
-        turing::fused_int8_dequant_svd_recon_cpp(
-            static_cast<const int8_t*>(q_buf.ptr),
-            static_cast<const float*>(s_buf.ptr),
-            static_cast<const float*>(u_buf.ptr),
-            static_cast<float*>(out_recon.request().ptr),
-            seq_len,
-            head_dim,
-            rank
-        );
-
-        return out_recon;
-    }, "Native C++20 Fused INT8 Dequantize & SVD Reconstruct GEMM");
-
     // Fused Ridge Forward
     m.def("fused_ridge_forward", [](
         py::array_t<float, py::array::c_style> x_source_arr,
@@ -1211,61 +1073,6 @@ PYBIND11_MODULE(turing_csrc, m) {
 
         return py::make_tuple(out_arr, next_state_arr);
     }, "Native C++20 AVX2 Linear Recurrent Attention Step");
-
-    // Native C++20 SVD Wire Project & Quantize
-    m.def("svd_wire_project_quantize_cpu", [](
-        py::array_t<float, py::array::c_style> input_arr,
-        py::array_t<float, py::array::c_style> u_proj_arr
-    ) {
-        py::buffer_info in_buf = input_arr.request();
-        py::buffer_info u_buf = u_proj_arr.request();
-
-        int N = static_cast<int>(in_buf.shape[0]);
-        int Heads = static_cast<int>(in_buf.shape[1]);
-        int HeadDim = static_cast<int>(in_buf.shape[2]);
-        int Rank = static_cast<int>(u_buf.shape[1]);
-
-        auto int8_out = py::array_t<int8_t>({N, Heads, Rank});
-        auto scale_out = py::array_t<float>({N, Heads, 1});
-
-        turing::svd_wire_project_quantize_avx2(
-            static_cast<const float*>(in_buf.ptr),
-            static_cast<const float*>(u_buf.ptr),
-            static_cast<int8_t*>(int8_out.request().ptr),
-            static_cast<float*>(scale_out.request().ptr),
-            N, Heads, HeadDim, Rank
-        );
-
-        return py::make_tuple(int8_out, scale_out);
-    }, "Native C++20 AVX2 SVD Wire Projection and INT8 Quantization");
-
-    // Native C++20 SVD Wire Dequantize & Reconstruct
-    m.def("svd_wire_dequantize_reconstruct_cpu", [](
-        py::array_t<int8_t, py::array::c_style> input_int8_arr,
-        py::array_t<float, py::array::c_style> scale_arr,
-        py::array_t<float, py::array::c_style> u_proj_arr
-    ) {
-        py::buffer_info in_buf = input_int8_arr.request();
-        py::buffer_info sc_buf = scale_arr.request();
-        py::buffer_info u_buf = u_proj_arr.request();
-
-        int N = static_cast<int>(in_buf.shape[0]);
-        int Heads = static_cast<int>(in_buf.shape[1]);
-        int Rank = static_cast<int>(in_buf.shape[2]);
-        int HeadDim = static_cast<int>(u_buf.shape[0]);
-
-        auto out_arr = py::array_t<float>({N, Heads, HeadDim});
-
-        turing::svd_wire_dequantize_reconstruct_avx2(
-            static_cast<const int8_t*>(in_buf.ptr),
-            static_cast<const float*>(sc_buf.ptr),
-            static_cast<const float*>(u_buf.ptr),
-            static_cast<float*>(out_arr.request().ptr),
-            N, Heads, HeadDim, Rank
-        );
-
-        return out_arr;
-    }, "Native C++20 AVX2 SVD Wire Dequantization and Full-Rank Reconstruction");
 
     // Native C++20 High-Throughput Deterministic Token Hasher
     m.def("deterministic_token_hash_cpu", [](

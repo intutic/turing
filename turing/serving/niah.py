@@ -1,77 +1,54 @@
 """
-Synthetic needle-retrieval check for SVD INT8 compression.
-
-It scores one page of random keys per row; the context length only labels the row and
-no model or long context is involved, so it is not a long-context NIAH evaluation.
+Needle-in-a-haystack (pass-key retrieval, Mohtashami & Jaggi 2023) through the serving engine: a random pass key
+is hidden at a chosen depth in filler text of a chosen token length, the model is asked for it, and a row passes when
+the greedy completion contains the key.
 """
 
-import math
-from typing import List, Dict, Any, Tuple
-import torch
-import torch.nn.functional as F
+import random
+import time
+from typing import Any, Dict, List
 
-from ..config import ModelConfig
-from ..core.subspace import SubspaceManager
+from .accuracy_eval import engine_generate
+
+INTRO = "There is an important pass key hidden inside a lot of irrelevant text. Find it and memorize it.\n\n"
+FILLER = "The grass is green. The sky is blue. The sun is yellow. Here we go. There and back again. "
+NEEDLE = "The pass key is {key}. Remember it. {key} is the pass key. "
+QUESTION = "\n\nWhat is the pass key? The pass key is"
+
 
 class LongContextNIAHEvaluator:
-    """
-    Evaluates retrieval accuracy across 32K to 128K context lengths under SVD INT8 subspace compression.
-    """
-    def __init__(self, config: ModelConfig, rank: int = 64, device: torch.device = torch.device("cpu")):
-        self.config = config
-        self.rank = rank
-        self.device = device
-        self.subspace_mgr = SubspaceManager(hidden_dim=config.head_dim, rank=rank, device=device)
+    """Pass-key retrieval over context lengths (prompt tokens) and depths (0 = start of the haystack, 1 = end)."""
 
-    def evaluate_retrieval(
-        self,
-        context_lengths: List[int] = [32768, 65536, 131072],
-        depth_fractions: List[float] = [0.25, 0.50, 0.75, 1.00],
-        page_size: int = 512
-    ) -> List[Dict[str, Any]]:
-        """
-        Executes Needle-In-A-Haystack evaluation across target context lengths and depths.
-        """
-        results = []
+    def __init__(self, engine, seed: int = 0):
+        if engine.tokenizer is None:
+            raise ValueError("needle-in-a-haystack needs the model's tokenizer; the engine has none")
+        self.engine = engine
+        self.seed = seed
 
-        for ctx_len in context_lengths:
-            num_pages = ctx_len // page_size
-            for depth in depth_fractions:
-                needle_page = int((num_pages - 1) * depth)
+    def build_prompt(self, context_len: int, depth: float, key: str) -> str:
+        """Filler sentences around the needle, sized so the whole prompt is about context_len tokens."""
+        tok = self.engine.tokenizer
+        fixed = len(tok.encode(INTRO + NEEDLE.format(key=key) + QUESTION))
+        n = max(0, (context_len - fixed) // len(tok.encode(FILLER)))
+        at = round(depth * n)
+        return INTRO + FILLER * at + NEEDLE.format(key=key) + FILLER * (n - at) + QUESTION
 
-                # Synthesize Haystack (anisotropic decaying background keys)
-                decay = torch.exp(-torch.linspace(0, 3.5, self.config.head_dim, device=self.device))
-                haystack_page = torch.randn(page_size, self.config.head_dim, device=self.device) * decay
-
-                # Distinct high-norm needle key
-                needle_key = torch.randn(1, self.config.head_dim, device=self.device) * 2.5
-                mid_slot = page_size // 2
-                haystack_page[mid_slot] = needle_key.squeeze(0) # Insert at midpoint slot
-
-                # SVD INT8 Compression
-                q_int8, scale = self.subspace_mgr.quantize_subspace_int8(
-                    self.subspace_mgr.project_to_subspace(haystack_page)
-                )
-
-                # Reconstruction
-                recon_page = self.subspace_mgr.reconstruct_from_subspace(
-                    self.subspace_mgr.dequantize_subspace_int8(q_int8, scale)
-                )
-
-                # Query retrieval
-                query = needle_key
-                scores = torch.matmul(recon_page, query.t()).squeeze(-1)
-                top_idx = torch.argmax(scores).item()
-
-                is_success = (top_idx == mid_slot)
-
-                results.append({
-                    "context_length": ctx_len,
-                    "depth_pct": f"{depth * 100:.0f}%",
-                    "needle_page": needle_page,
-                    "retrieved_token_slot": top_idx,
-                    "target_token_slot": mid_slot,
-                    "retrieval_status": "SUCCESS (Top-1 Match)" if is_success else "FAIL"
-                })
-
-        return results
+    def evaluate_retrieval(self, context_lengths: List[int], depth_fractions: List[float] = (0.0, 0.25, 0.5, 0.75, 1.0),
+                           batch_size: int = 1) -> Dict[str, Any]:
+        rng = random.Random(self.seed)
+        cases = [(c, d, str(rng.randint(10000, 99999))) for c in context_lengths for d in depth_fractions]
+        prompts = [self.engine.tokenizer.encode(self.build_prompt(c, d, k)) for c, d, k in cases]
+        start = time.perf_counter()
+        outputs = engine_generate(self.engine, prompts, max_new_tokens=8, batch_size=batch_size)
+        elapsed = time.perf_counter() - start
+        rows = []
+        for (c, d, key), prompt, ids in zip(cases, prompts, outputs):
+            text = self.engine.tokenizer.decode(ids, skip_special_tokens=True)
+            rows.append({"context_length": c, "prompt_tokens": len(prompt), "depth": d, "key": key,
+                         "completion": text, "found": key in text})
+        return {
+            "n": len(rows),
+            "accuracy": sum(r["found"] for r in rows) / len(rows) if rows else 0.0,
+            "wall_seconds": round(elapsed, 2),
+            "results": rows,
+        }

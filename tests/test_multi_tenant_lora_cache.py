@@ -23,7 +23,7 @@ def test_gpu_lru_adapter_cache_hit_miss_eviction():
 
     # 1. Register 4 tenant adapters into host store
     for i in range(1, 5):
-        cache.register_host_adapter(f"tenant_{i}")
+        cache.register_host_adapter(f"tenant_{i}", torch.randn(rank, hidden_dim), torch.randn(hidden_dim, rank))
 
     assert len(cache.host_store) == 4
     assert len(cache.gpu_slots) == 0
@@ -77,6 +77,9 @@ def test_subspace_causal_lm_dynamic_tenant_routing():
         device="cpu"
     )
 
+    for tenant in ("tenant_sql", "tenant_code"):
+        adapter_manager.cache.register_host_adapter(tenant, torch.randn(4, config.hidden_dim),
+                                                    torch.randn(config.hidden_dim, 4))
     model = SubspaceCausalLM(config, adapter_manager=adapter_manager)
 
     input_ids = torch.tensor([[10, 20, 30]], dtype=torch.long)
@@ -93,6 +96,9 @@ def test_subspace_causal_lm_dynamic_tenant_routing():
     # Tenant forward produces valid shapes
     assert logits_base.shape == logits_tenant_a.shape
     assert logits_tenant_a.shape == (1, 3, config.vocab_size)
+
+    with pytest.raises(KeyError):  # an unknown tenant is an error, not a fresh random adapter
+        model(input_ids, tenant_id="tenant_unknown")
 
     # Generation with tenant_id
     out_tokens = model.generate([10, 20], max_new_tokens=4, tenant_id="tenant_sql")

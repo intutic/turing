@@ -13,7 +13,6 @@ import torch
 import torch.nn.functional as F
 from turing.models.registry import MODEL_REGISTRY, get_model_config
 from turing.models.causal_lm import SubspaceDecoderLayer
-from turing.core.subspace import SubspaceManager
 
 def run_all_gpu_architecture_tests(device_str: str = "auto"):
     if device_str == "auto":

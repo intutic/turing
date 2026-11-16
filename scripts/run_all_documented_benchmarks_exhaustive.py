@@ -40,7 +40,7 @@ BENCHMARK_SUITES = [
     ("Latent Flash-Decode & Hybrid Prefill Scaling", "scripts/benchmark_latent_decode.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
     
     # 10. Matryoshka Parameter-Sliced Speculation & Semantic Anchors
-    ("Matryoshka Sliced Speculation & Semantic Anchors", "scripts/benchmark_freetoken_matryoshka.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
+    ("Matryoshka Sliced Speculation & Elastic Memory", "scripts/benchmark_freetoken_matryoshka.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
     
     # 11. Native C++20 SIMD & Fused GPU Kernel Micro-benchmarks
     ("Native C++20 SIMD & Fused Kernel Micro-benchmarks", "scripts/benchmark_native_fusions_v2.py", ["--device", "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
@@ -50,9 +50,6 @@ BENCHMARK_SUITES = [
     
     # 13. Multi-Tenant LoRA Hot-Swapping & Speculative Drafting
     ("Multi-Tenant LoRA Hot-Swapping & Cold Starts", "scripts/benchmark_lora_and_speculation.py", []),
-    
-    # 14. Long-Context NIAH Breaking Point Analysis
-    ("Long-Context NIAH Depth & Rank Breaking-Point", "scripts/stress_test_niah_breaking_point.py", ["cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")]),
     
     # 15. Universal Architecture & Hardware Verification
     ("Universal Architecture & Hardware Verification", "scripts/test_all_gpu_architectures.py", []),

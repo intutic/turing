@@ -1,170 +1,77 @@
 #!/usr/bin/env python3
 """
-Benchmark: Vectorized Batch-Union Accumulation (Colibrì Paradigm vs Python Loop).
-Measures:
-1. Multi-token encoder prefill throughput (tokens/sec) across prompt lengths (128 to 4096).
-2. Batched speculative draft decode verification throughput across batch sizes (1 to 64).
-3. Speedup multiplier of vectorized C++ index_add_ vs sequential Python per-token loop.
+Benchmark: MoE expert offload (HeterogeneousMoERunner) against the model's own SparseMoE, on the real weights of a
+small Mixtral checkpoint. For each token count it times layer 0's MoE block three ways and checks the outputs agree:
+1. SparseMoE (all experts resident on the device),
+2. the runner with every expert in device cache slots (second call, all hits),
+3. the runner with every expert run on the host CPU.
 """
 import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
+import json
 import sys
 import time
-import json
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
-from turing.config import ModelConfig
-from turing.core.heterogeneous_moe import (
-    BandwidthAdaptiveDecider,
-    HostExpertBank,
-    HeterogeneousMoERunner,
-)
+from turing.core.expert_cache import GPULRUExpertCache
+from turing.core.heterogeneous_moe import BandwidthAdaptiveDecider, HeterogeneousMoERunner
+from turing.models.hf_loader import RealHuggingFaceLoader
 
+MODEL = "axolotl-ai-co/tiny-mixtral-30m"
+
+
+def _sync(device):
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    elif device.type == "mps":
+        torch.mps.synchronize()
+
+
+def _time_ms(fn, device, iters=20):
+    fn()
+    _sync(device)
+    t0 = time.perf_counter()
+    for _ in range(iters):
+        out = fn()
+    _sync(device)
+    return (time.perf_counter() - t0) / iters * 1000.0, out
+
+
+@torch.no_grad()
 def benchmark_batch_union(device_str="cpu"):
     device = torch.device(device_str)
-    is_cuda = (device.type == "cuda")
-
-    hidden_dim = 128
-    ffn_dim = 512
-    active_dim = 256
-    num_experts = 32
-    top_k = 4
-
-    config = ModelConfig(
-        name="benchmark_moe",
-        hidden_dim=hidden_dim,
-        ffn_dim=ffn_dim,
-        num_heads=8,
-        num_kv_heads=4,
-        head_dim=16,
-        num_layers=4,
-        vocab_size=1000
-    )
-
-    host_bank = HostExpertBank(
-        num_layers=4,
-        num_experts=num_experts,
-        hidden_dim=hidden_dim,
-        ffn_dim=ffn_dim,
-        active_subspace_dim=active_dim
-    )
-
-    decider = BandwidthAdaptiveDecider(
-        device=device,
-        pcie_bandwidth_gb_s=25.0,
-        cpu_throughput_gflops=100.0,
-        gpu_throughput_gflops=1000.0
-    )
-
-    runner = HeterogeneousMoERunner(
-        config=config,
-        host_bank=host_bank,
-        decider=decider,
-        device=device
-    )
-
+    model, _ = RealHuggingFaceLoader.load_hf_model_into_turing(hf_model_id=MODEL, device=device_str, dtype="fp32")
+    cfg = model.config
+    moe = model.layers[0].mlp
     print("\n" + "=" * 80)
-    print("   [4/5] BENCHMARK: VECTORIZED BATCH-UNION ACCUMULATION")
-    print(f"   Hardware Target: {device_str.upper()} | Hidden: {hidden_dim} | Experts: {num_experts}")
+    print("   [4/5] BENCHMARK: MoE EXPERT OFFLOAD vs IN-MODEL SparseMoE")
+    print(f"   {MODEL} on {device_str.upper()} | hidden {cfg.hidden_dim} | experts {cfg.num_experts} "
+          f"top-{cfg.num_experts_per_tok}")
     print("=" * 80)
 
-    # 1. Prefill Scaling Matrix across Prompt Lengths
-    prefill_lengths = [128, 512, 1024, 2048]
-    prefill_results = []
+    def runner(decider):
+        cache = GPULRUExpertCache(num_slots=cfg.num_experts, hidden_dim=cfg.hidden_dim,
+                                  active_subspace_dim=moe.down.shape[-1], device=device, eviction_policy="lru")
+        return HeterogeneousMoERunner.from_model(model, cache, decider)
 
-    for seq_len in prefill_lengths:
-        batch = 1
-        x = torch.randn(batch, seq_len, hidden_dim, device=device)
-        logits = torch.randn(batch, seq_len, num_experts, device=device)
+    on_device = runner(BandwidthAdaptiveDecider(device, pcie_bandwidth_gb_s=1e9, cpu_throughput_gflops=1e-9,
+                                                gpu_throughput_gflops=1e9))
+    on_host = runner(BandwidthAdaptiveDecider(device, pcie_bandwidth_gb_s=1e-9, cpu_throughput_gflops=1e9,
+                                              gpu_throughput_gflops=1e-9))
+    rows = []
+    for n in (1, 16, 128, 512):
+        x = torch.randn(1, n, cfg.hidden_dim, device=device)
+        ref_ms, ref = _time_ms(lambda: moe(x), device)
+        dev_ms, dev_out = _time_ms(lambda: on_device.route_and_execute(x, 0)[0], device)
+        host_ms, host_out = _time_ms(lambda: on_host.route_and_execute(x, 0)[0], device)
+        err = max((dev_out - ref).abs().max().item(), (host_out - ref).abs().max().item())
+        rows.append({"tokens": n, "sparse_moe_ms": round(ref_ms, 3), "runner_cached_ms": round(dev_ms, 3),
+                     "runner_host_ms": round(host_ms, 3), "max_abs_diff": err})
+        print(f"    • N={n:4d}: SparseMoE {ref_ms:.3f} ms | runner, cached {dev_ms:.3f} ms | runner, host "
+              f"{host_ms:.3f} ms | max |diff| {err:.2e}", flush=True)
+    return {"model": MODEL, "device": device_str, "layer": 0, "rows": rows}
 
-        # Warmup
-        _ = runner.route_and_execute(x, logits, layer_idx=0, top_k=top_k)
-        if is_cuda: torch.cuda.synchronize()
-
-        # Vectorized Batch-Union Timing
-        iters = 10 if seq_len <= 512 else 5
-        t0 = time.perf_counter()
-        for _ in range(iters):
-            out, stats = runner.route_and_execute(x, logits, layer_idx=0, top_k=top_k)
-        if is_cuda: torch.cuda.synchronize()
-        t1 = time.perf_counter()
-
-        vec_ms = ((t1 - t0) / iters) * 1000.0
-        vec_tok_s = (seq_len * 1000.0) / max(vec_ms, 1e-6)
-
-        # Baseline: Un-vectorized Python loop simulation
-        topk_probs, topk_indices = torch.topk(F.softmax(logits.view(-1, num_experts), dim=-1), k=top_k, dim=-1)
-        x_flat = x.view(-1, hidden_dim)
-        unique_experts = torch.unique(topk_indices).tolist()
-        topk_indices_list = topk_indices.tolist()
-        topk_probs_list = topk_probs.tolist()
-
-        t0 = time.perf_counter()
-        for _ in range(iters):
-            final_output = torch.zeros_like(x_flat)
-            for exp_id in unique_experts:
-                mask = (topk_indices == exp_id).any(dim=-1)
-                token_sub_indices = torch.nonzero(mask).squeeze(-1)
-                if len(token_sub_indices) == 0: continue
-                sub_x = x_flat[token_sub_indices]
-                expert_out = runner.forward_expert_gpu(sub_x, 0, exp_id) if is_cuda else runner.forward_expert_cpu(sub_x, 0, exp_id)
-                # Python loop
-                tok_idx_list = token_sub_indices.tolist()
-                for i, tok_idx in enumerate(tok_idx_list):
-                    ranks = [r for r, e in enumerate(topk_indices_list[tok_idx]) if e == exp_id]
-                    weight = topk_probs_list[tok_idx][ranks[0]]
-                    final_output[tok_idx] += weight * expert_out[i]
-        if is_cuda: torch.cuda.synchronize()
-        t1 = time.perf_counter()
-
-        loop_ms = ((t1 - t0) / iters) * 1000.0
-        speedup = loop_ms / max(vec_ms, 1e-6)
-
-        print(f"    • Prefill N={seq_len:4d}: Vectorized {vec_ms:.2f} ms ({vec_tok_s:.0f} tok/s) vs Loop {loop_ms:.2f} ms | Speedup: {speedup:.2f}x", flush=True)
-        prefill_results.append({
-            "seq_len": seq_len,
-            "vectorized_ms": round(vec_ms, 2),
-            "loop_ms": round(loop_ms, 2),
-            "tokens_per_sec": round(vec_tok_s, 0),
-            "speedup_x": round(speedup, 2)
-        })
-
-
-    # 2. Batched Speculative Decode Verification Matrix
-    batch_sizes = [4, 16, 32, 64]
-    batch_results = []
-    for b in batch_sizes:
-        seq_len = 1
-        x = torch.randn(b, seq_len, hidden_dim, device=device)
-        logits = torch.randn(b, seq_len, num_experts, device=device)
-
-        iters = 50
-        t0 = time.perf_counter()
-        for _ in range(iters):
-            out, stats = runner.route_and_execute(x, logits, layer_idx=0, top_k=top_k)
-        if is_cuda: torch.cuda.synchronize()
-        t1 = time.perf_counter()
-        vec_ms = ((t1 - t0) / iters) * 1000.0
-
-        batch_results.append({
-            "batch_size": b,
-            "latency_ms": round(vec_ms, 3),
-            "throughput_tok_s": round((b * 1000.0) / max(vec_ms, 1e-6), 0)
-        })
-        print(f"    • Batched Spec B={b:2d}: Latency {vec_ms:.3f} ms | Throughput: {batch_results[-1]['throughput_tok_s']:.0f} tok/s")
-
-    return {
-        "suite": "vectorized_batch_union",
-        "prefill_matrix": prefill_results,
-        "batched_spec_matrix": batch_results,
-        "max_speedup_x": max(r["speedup_x"] for r in prefill_results)
-    }
 
 if __name__ == "__main__":
-    dev = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
-    if len(sys.argv) > 1:
-        dev = sys.argv[1]
-    res = benchmark_batch_union(dev)
+    res = benchmark_batch_union(sys.argv[1] if len(sys.argv) > 1 else "cpu")
     print(json.dumps(res, indent=2))

@@ -57,3 +57,36 @@ def test_manifold_hyper_connection_forward_step():
 
     assert not torch.isnan(curr_streams).any()
     assert not torch.isinf(curr_streams).any()
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_projection_is_doubly_stochastic_property(native, monkeypatch):
+    """Over 300 random inputs (n = 2..16, entries ~ N(0, 1)): entries >= 0, every row and column sums to 1 within
+    1e-4 after 50 Sinkhorn iterations, and the result never expands a vector (spectral norm <= 1)."""
+    import turing.core.mhc as mhc
+    if native and not mhc.HAS_CSRC:
+        pytest.skip("native extension not built")
+    monkeypatch.setattr(mhc, "HAS_CSRC", native)
+    for seed in range(300):
+        g = torch.Generator().manual_seed(seed)
+        n = (2, 3, 4, 8, 16)[seed % 5]
+        p = BirkhoffManifoldProjector.project(torch.randn(n, n, generator=g), num_iterations=50)
+        assert (p >= 0).all()
+        torch.testing.assert_close(p.sum(-1), torch.ones(n), atol=1e-4, rtol=0)
+        torch.testing.assert_close(p.sum(-2), torch.ones(n), atol=1e-4, rtol=0)
+        assert torch.linalg.matrix_norm(p, 2) <= 1 + 1e-4
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_hyper_connection_res_map_is_doubly_stochastic(native, monkeypatch):
+    """The mixing matrix the block actually uses (default 20 iterations on its initial parameters)."""
+    import turing.core.mhc as mhc
+    if native and not mhc.HAS_CSRC:
+        pytest.skip("native extension not built")
+    monkeypatch.setattr(mhc, "HAS_CSRC", native)
+    for seed in range(50):
+        torch.manual_seed(seed)
+        h = ManifoldHyperConnection(hidden_dim=8, num_streams=4).get_doubly_stochastic_res_map()
+        assert (h >= 0).all()
+        torch.testing.assert_close(h.sum(-1), torch.ones(4), atol=1e-5, rtol=0)
+        torch.testing.assert_close(h.sum(-2), torch.ones(4), atol=1e-5, rtol=0)

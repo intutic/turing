@@ -7,11 +7,6 @@ import torch.nn.functional as F
 from turing.config import ModelConfig
 from turing.core.expert_cache import GPULRUExpertCache, RoutingHistoryTracker
 from turing.core.expert_prefetch import OneLayerAheadExpertPrefetcher
-from turing.core.heterogeneous_moe import (
-    BandwidthAdaptiveDecider,
-    HostExpertBank,
-    HeterogeneousMoERunner,
-)
 
 
 def test_routing_history_tracker_basic():
@@ -156,61 +151,3 @@ def test_one_layer_ahead_expert_prefetcher():
     )
     stats = prefetcher.stats()
     assert stats["prefetch_hits"] >= 2
-
-
-def test_vectorized_batch_union_numerical_parity():
-    torch.manual_seed(42)
-    device = torch.device("cpu")
-    config = ModelConfig(
-        name="test_moe_model",
-        hidden_dim=32,
-        num_layers=2,
-        num_heads=4,
-        num_kv_heads=2,
-        head_dim=8,
-        ffn_dim=64,
-        vocab_size=100
-    )
-
-    host_bank = HostExpertBank(
-        num_layers=2,
-        num_experts=8,
-        hidden_dim=32,
-        ffn_dim=64,
-        active_subspace_dim=16
-    )
-
-    decider = BandwidthAdaptiveDecider(
-        device=device,
-        pcie_bandwidth_gb_s=25.0,
-        cpu_throughput_gflops=100.0,
-        gpu_throughput_gflops=1000.0
-    )
-
-    runner = HeterogeneousMoERunner(
-        config=config,
-        host_bank=host_bank,
-        decider=decider,
-        device=device
-    )
-
-    batch, seq_len = 2, 4
-    hidden_states = torch.randn(batch, seq_len, 32)
-    router_logits = torch.randn(batch, seq_len, 8)
-
-    # Run vectorized batch-union
-    out, stats = runner.route_and_execute(
-        hidden_states=hidden_states,
-        router_logits=router_logits,
-        layer_idx=0,
-        top_k=2
-    )
-
-    assert out.shape == (batch, seq_len, 32)
-    assert not torch.isnan(out).any()
-    assert stats["total_active_experts"] > 0
-
-    # Test EMA recalibration on decider
-    initial_bw = decider.pcie_bandwidth_gb_s
-    new_bw = decider.recalibrate_live_bus(ema_weight=0.2)
-    assert new_bw > 0.0

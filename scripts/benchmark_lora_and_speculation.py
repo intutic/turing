@@ -38,7 +38,7 @@ def benchmark_multi_tenant_lora_cache(device: str = "cpu", num_tenants: int = 10
 
     # 1. Register 100 tenant adapters in pinned host memory
     for i in range(num_tenants):
-        cache.register_host_adapter(f"tenant_{i:03d}")
+        cache.register_host_adapter(f"tenant_{i:03d}", torch.randn(rank, hidden_dim), torch.randn(hidden_dim, rank))
 
     # 2. Simulate traffic (80/20 zipfian distribution over 100 tenants)
     popular_tenants = [f"tenant_{i:03d}" for i in range(10)]

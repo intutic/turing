@@ -2,9 +2,8 @@
 Turing Engine Grand Comprehensive Benchmark Matrix.
 Executes live on-device hardware micro-benchmarks across:
 1. Live Subspace SwiGLU FFN Layer Speedup & FLOP Reduction
-2. Live SVD INT8 KV Cache Paging Memory Reduction & Reconstruction Error
-3. Live Multi-Batch Serving Throughput (Tokens/sec & Latency)
-4. Comparative Architecture Memory Footprint Analysis against vLLM, TRT-LLM, and Ollama.
+2. Live Multi-Batch Serving Throughput (Tokens/sec & Latency)
+3. Comparative Architecture Memory Footprint Analysis against vLLM, TRT-LLM, and Ollama.
 """
 import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
@@ -23,7 +22,6 @@ import torch.nn.functional as F
 from turing.config import ModelConfig
 from turing.models.registry import get_model_config, MODEL_REGISTRY
 from turing.models.causal_lm import SubspaceCausalLM
-from turing.core.subspace import SubspaceManager
 
 def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
     if device_str == "auto":
@@ -184,27 +182,6 @@ def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
     print(f"    • Subspace Pruned Latency     : {sub_layer_ms:.3f} ms / layer")
     print(f"    • Live Measured Speedup       : {swiglu_speedup:.2f}x\n")
 
-    # Micro-Benchmark B: Live SVD INT8 KV Compression & Reconstruction Error
-    hidden_dim_svd = 1024
-    raw_kv = torch.randn(1, 2048, hidden_dim_svd, device=device)
-    raw_bytes = raw_kv.numel() * 2 # FP16
-
-    svd_mgr = SubspaceManager(hidden_dim=hidden_dim_svd, rank=64, device=device)
-    k_sub = svd_mgr.project_to_subspace(raw_kv)
-    k_comp, s_scale = svd_mgr.quantize_subspace_int8(k_sub)
-    k_dequant = svd_mgr.dequantize_subspace_int8(k_comp, s_scale)
-    k_recon = svd_mgr.reconstruct_from_subspace(k_dequant)
-
-    reconstruction_mse = F.mse_loss(raw_kv, k_recon).item()
-    comp_bytes = k_comp.numel() + s_scale.numel() * 4
-    mem_reduction = (1.0 - (comp_bytes / raw_bytes)) * 100.0
-
-    print(f"[*] 2. Live SVD INT8 Subspace Compression (Rank=64, Dim={hidden_dim_svd}):")
-    print(f"    • Uncompressed Raw Activations: {raw_bytes / 1024:.1f} KB")
-    print(f"    • SVD INT8 Compressed Size    : {comp_bytes / 1024:.1f} KB")
-    print(f"    • Memory Footprint Reduction  : -{mem_reduction:.1f}%")
-    print(f"    • Live Reconstruction MSE     : {reconstruction_mse:.6f}\n")
-
     # Micro-Benchmark C: Multi-Batch End-to-End Serving Throughput
     cfg = get_model_config("test-tiny")
     model = SubspaceCausalLM(cfg).to(device).eval()
@@ -220,15 +197,9 @@ def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
     gen_elapsed_s = time.perf_counter() - start
     live_tok_per_sec = gen_tokens / max(1e-5, gen_elapsed_s)
 
-    print(f"[*] 3. Live End-to-End Serving Generation:")
+    print(f"[*] 2. Live End-to-End Serving Generation:")
     print(f"    • Generation Output           : {gen_tokens} tokens in {gen_elapsed_s * 1000:.1f} ms")
     print(f"    • Live Measured Throughput    : {live_tok_per_sec:.1f} tokens / second\n")
-
-    # Micro-Benchmark D: Unified Memory Bandwidth & Memory Traffic Reduction
-    print(f"[*] 4. Unified Memory / DRAM Bandwidth Efficiency:")
-    print(f"    • Memory Bus Architecture     : {'Apple Silicon Unified Memory (SoC Fabric)' if device.type == 'mps' else 'Direct GPU HBM / PCIe Interconnect'}")
-    print(f"    • DRAM Traffic Reduction      : -{mem_reduction:.1f}% per autoregressive step")
-    print(f"    • Bandwidth Sparing Factor    : {raw_bytes / max(1e-5, comp_bytes):.2f}x lower memory bus pressure\n")
 
     live_results = {
         "device": str(device),
@@ -236,10 +207,6 @@ def run_grand_benchmark_suite(device_str: str = "auto") -> Dict[str, Any]:
             "dense_latency_ms": round(dense_layer_ms, 3),
             "subspace_latency_ms": round(sub_layer_ms, 3),
             "measured_speedup": f"{swiglu_speedup:.2f}x"
-        },
-        "svd_kv_paging_microbench": {
-            "memory_reduction_pct": f"-{mem_reduction:.1f}%",
-            "reconstruction_mse": round(reconstruction_mse, 6)
         },
         "serving_throughput_microbench": {
             "tokens_generated": gen_tokens,

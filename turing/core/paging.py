@@ -7,7 +7,7 @@ from typing import List, Dict, Tuple, Optional, Any
 import torch
 
 class PageTier(Enum):
-    HUGE = 512     # For massive prompt prefixes & long-context history (eliminates 96.8% pointer tables)
+    HUGE = 512     # For long prompt prefixes: one page-table entry per 512 tokens
     MEDIUM = 64    # For multi-turn conversational turns
     SMALL = 16     # For decode tails to guarantee zero internal fragmentation
 

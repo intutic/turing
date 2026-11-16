@@ -1,31 +1,6 @@
 import pytest
 import torch
 import numpy as np
-from turing.core.subspace import SubspaceManager
-
-def test_subspace_quantization_math():
-    x = torch.randn(4, 64)
-    mgr = SubspaceManager(hidden_dim=64, rank=16)
-    q_int8, scale = mgr.quantize_subspace_int8(x)
-
-    assert q_int8.dtype == torch.int8
-    assert scale.shape == (4, 1)
-
-    recon = mgr.dequantize_subspace_int8(q_int8, scale)
-    # Cosine similarity should be > 0.99
-    cos_sim = torch.cosine_similarity(x.view(-1), recon.view(-1), dim=0)
-    assert cos_sim.item() > 0.98
-
-def test_bitmask_encoding_decoding():
-    active_tiles = [0, 3, 5, 7, 11]
-    total_tiles = 16
-    mask_int, mask_bytes = SubspaceManager.encode_bitmask(active_tiles, total_tiles)
-
-    assert mask_int == (1 << 0) | (1 << 3) | (1 << 5) | (1 << 7) | (1 << 11)
-    assert len(mask_bytes) == 16
-
-    decoded = SubspaceManager.decode_bitmask(mask_bytes, total_tiles)
-    assert decoded == active_tiles
 
 def test_native_csrc_extension():
     try:
@@ -255,5 +230,3 @@ def test_shannon_entropy_csrc():
     uniform = np.array([[1.0, 1.0, 1.0, 1.0]], dtype=np.float32)
     ent_uniform = turing_csrc.compute_shannon_entropy(uniform)
     assert np.allclose(ent_uniform, np.log(4.0), atol=1e-3)
-
-

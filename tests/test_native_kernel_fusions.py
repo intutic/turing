@@ -17,7 +17,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from turing.core.speculation import SubspaceEAGLEDraftHead
-from turing.core.subspace import SubspaceManager
 from turing.models.adapters import TenantLoRAAdapter
 from turing.core.elastic_memory import ElasticMemoryBudgetManager
 from turing.core.expert_cache import GPULRUExpertCache

@@ -1,6 +1,7 @@
 """
 Triton GPU Kernel: Fused Nested Matryoshka Sliced Draft Projection & Candidate Speculation.
 Computes O(W * V) logits directly in GPU SRAM without slicing/materializing intermediate global tensors.
+Serves the untrained Matryoshka draft heads in turing/core/speculation.py, which serving does not use.
 """
 
 import torch

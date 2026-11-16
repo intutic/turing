@@ -1,7 +1,7 @@
 """
 Asynchronous Continuous Swarm Optimizer for Active Inference Policy Search.
 Adapted from High-Performance Compute Engine (Asynchronous Master-Worker Particle Swarm Optimization).
-Provides < 0.5ms continuous policy optimization to minimize Expected Constraint Penalty G(π).
+Searches policy parameters to minimize the expected constraint penalty G(π).
 """
 
 import time
