@@ -559,7 +559,6 @@ class XKVLatentAgentBridge(nn.Module):
     """
     XKV Cross-Model Latent Agent Bridge (arXiv:2608.20617).
     Enables zero-token, sub-symbolic KV cache transfer between heterogeneous agents.
-    Provides 6.8x-8.2x lower latency than natural language message passing.
     """
     def __init__(
         self,

@@ -77,66 +77,6 @@ def benchmark_matryoshka_spec(device: torch.device):
     return results
 
 
-def benchmark_svd_int8_quant(device: torch.device):
-    print("\n" + "=" * 80)
-    print(f"[*] 2. FUSED SVD INT8 QUANTIZATION & RECONSTRUCTION ({device.type.upper()})")
-    print("=" * 80)
-
-    from turing.kernels.triton_svd_paged import fused_svd_int8_quant_cuda, fused_int8_dequant_svd_recon_cuda
-
-    seq_lens = [512, 2048, 8192, 32768]
-    head_dim = 128
-    rank = 64
-
-    print(f"{'Context Length':<15} | {'PyTorch (4-step)':<18} | {'Fused Kernel':<15} | {'Speedup':<10}")
-    print("-" * 65)
-
-    for seq_len in seq_lens:
-        k = torch.randn(seq_len, head_dim, device=device, dtype=torch.float32)
-        u_proj = torch.randn(head_dim, rank, device=device, dtype=torch.float32)
-
-        # Warmup
-        for _ in range(5):
-            _ = torch.matmul(k, u_proj)
-            if device.type == "cuda":
-                _ = fused_svd_int8_quant_cuda(k, u_proj)
-        sync_device(device)
-
-        N_ITERS = 50
-
-        # Benchmark PyTorch 4-step baseline
-        sync_device(device)
-        t0 = time.perf_counter()
-        for _ in range(N_ITERS):
-            k_sub = torch.matmul(k, u_proj)
-            scale = torch.amax(torch.abs(k_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
-            k_int8 = torch.clamp(torch.round(k_sub / scale), -128, 127).to(torch.int8)
-        sync_device(device)
-        t1 = time.perf_counter()
-        py_ms = ((t1 - t0) / N_ITERS) * 1000.0
-
-        # Benchmark Fused Kernel
-        sync_device(device)
-        t0 = time.perf_counter()
-        for _ in range(N_ITERS):
-            if device.type == "cuda":
-                _ = fused_svd_int8_quant_cuda(k, u_proj)
-            elif HAS_CSRC:
-                k_np = k.detach().cpu().numpy()
-                u_np = u_proj.detach().cpu().numpy()
-                _ = turing_csrc.fused_svd_int8_quant(k_np, u_np)
-            else:
-                k_sub = torch.matmul(k, u_proj)
-                scale = torch.amax(torch.abs(k_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
-                k_int8 = torch.clamp(torch.round(k_sub / scale), -128, 127).to(torch.int8)
-        sync_device(device)
-        t1 = time.perf_counter()
-        fused_ms = ((t1 - t0) / N_ITERS) * 1000.0
-
-        speedup = py_ms / max(fused_ms, 1e-6)
-        print(f"L = {seq_len:<11} | {py_ms:>13.3f} ms | {fused_ms:>10.3f} ms | {speedup:>8.2f}x")
-
-
 def benchmark_cross_kv(device: torch.device):
     print("\n" + "=" * 80)
     print(f"[*] 3. FUSED INVERSE-RoPE & RIDGE REPRESENTATION TRANSFER ({device.type.upper()})")
@@ -301,52 +241,6 @@ def benchmark_linear_recurrence(device: torch.device):
     print(f"Linear Recurrence Chunk Prefill (L=2048)       : {pref_ms:.3f} ms / pass ({2048.0/(pref_ms/1000.0):.1f} tok/s)")
 
 
-def benchmark_svd_wire_codec(device: torch.device):
-    print("\n" + "=" * 80)
-    print(f"[*] 7. ZERO-COPY SVD WIRE ENCODE & DECODE CODEC ({device.type.upper()})")
-    print("=" * 80)
-
-    from turing.serving.kv_transfer import SVDNetworkKVWireCodec
-
-    seq_len = 64
-    num_heads = 8
-    head_dim = 128
-    rank = 64
-
-    u_raw = torch.randn(head_dim, rank, dtype=torch.float32)
-    q_u, _ = torch.linalg.qr(u_raw)
-    u_proj = q_u[:, :rank].contiguous()
-
-    k = torch.randn(seq_len, num_heads, head_dim, dtype=torch.float32)
-    v = torch.randn(seq_len, num_heads, head_dim, dtype=torch.float32)
-    toks = list(range(seq_len))
-
-    # Encode benchmark
-    for _ in range(10):
-        payload = SVDNetworkKVWireCodec.encode(k, v, u_proj, token_ids=toks)
-
-    N_ITERS = 100
-    t0 = time.perf_counter()
-    for _ in range(N_ITERS):
-        payload = SVDNetworkKVWireCodec.encode(k, v, u_proj, token_ids=toks)
-    t1 = time.perf_counter()
-    enc_ms = ((t1 - t0) / N_ITERS) * 1000.0
-
-    # Decode benchmark
-    t0 = time.perf_counter()
-    for _ in range(N_ITERS):
-        _ = SVDNetworkKVWireCodec.decode(payload, u_proj, device=torch.device("cpu"))
-    t1 = time.perf_counter()
-    dec_ms = ((t1 - t0) / N_ITERS) * 1000.0
-
-    payload_kb = len(payload) / 1024.0
-    raw_fp16_kb = (2 * seq_len * num_heads * head_dim * 2) / 1024.0
-
-    print(f"SVD Wire Encode Latency (64 tokens, INT8)     : {enc_ms:.3f} ms / block")
-    print(f"SVD Wire Decode Latency (64 tokens, Full Recon): {dec_ms:.3f} ms / block")
-    print(f"Wire Payload Size                              : {payload_kb:.2f} KB vs Raw FP16 {raw_fp16_kb:.2f} KB (-{100*(1-payload_kb/raw_fp16_kb):.1f}%)")
-
-
 def benchmark_deterministic_fast_hash():
     print("\n" + "=" * 80)
     print(f"[*] 8. DETERMINISTIC TOKEN BLOCK HASHING (CPU SIMD / RAW POINTER)")
@@ -403,32 +297,6 @@ def benchmark_fused_shannon_entropy(device: torch.device):
     avg_ms = ((t1 - t0) / N_ITERS) * 1000.0
 
     print(f"Shannon Entropy & Epistemic Gate (Vocab=32000): {avg_ms:.4f} ms / step")
-
-
-def benchmark_hex_quant(device: torch.device):
-    print("\n" + "=" * 80)
-    print(f"[*] 10. HEXAGONAL TOPOLOGICAL CODEBOOK QUANTIZATION ({device.type.upper()})")
-    print("=" * 80)
-
-    from turing.core.hex_quant import HexagonalSubspaceQuantizer
-
-    quantizer = HexagonalSubspaceQuantizer(codebook_dim=64, grid_width=8, grid_height=8, device=device)
-    activations = torch.randn(256, 64, device=device, dtype=torch.float32)
-
-    # Warmup
-    for _ in range(10):
-        _, _ = quantizer.quantize_subspace(activations)
-    sync_device(device)
-
-    N_ITERS = 100
-    t0 = time.perf_counter()
-    for _ in range(N_ITERS):
-        _, _ = quantizer.quantize_subspace(activations)
-    sync_device(device)
-    t1 = time.perf_counter()
-    avg_ms = ((t1 - t0) / N_ITERS) * 1000.0
-
-    print(f"Hexagonal BMU Quantization (256 tokens, 64-D)  : {avg_ms:.4f} ms / pass")
 
 
 def benchmark_dilated_causal_conv(device: torch.device):
@@ -628,15 +496,12 @@ def main():
         print(f"   GPU: {torch.cuda.get_device_name(0)} | VRAM: {torch.cuda.get_device_properties(0).total_memory / (1024**3):.1f} GB")
 
     benchmark_matryoshka_spec(device)
-    benchmark_svd_int8_quant(device)
     benchmark_cross_kv(device)
     benchmark_hca_chunk_pool(device)
     benchmark_mhc_hyperconnections(device)
     benchmark_linear_recurrence(device)
-    benchmark_svd_wire_codec(device)
     benchmark_deterministic_fast_hash()
     benchmark_fused_shannon_entropy(device)
-    benchmark_hex_quant(device)
     benchmark_dilated_causal_conv(device)
     benchmark_fused_lora(device)
     benchmark_residual_outlier(device)
@@ -649,5 +514,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

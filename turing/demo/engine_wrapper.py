@@ -1,5 +1,6 @@
 """
-Turing Engine Subspace Accelerated Generator with Multi-Hardware Dispatch & Cross-Turn KV Reuse.
+Demo generator: a HuggingFace transformers model on MPS, CUDA or CPU with chat formatting, an epistemic
+uncertainty reading of the prompt's logits, and timing.
 """
 
 import os
@@ -20,24 +21,18 @@ import huggingface_hub
 huggingface_hub.logging.set_verbosity_error()
 
 from .epistemic_gate import EpistemicUncertaintyGate
-from ..core.cross_model_kv import RoPEContentDecoupler, ClosedFormRidgeMapper
-from ..core.radix_svd import SpectralRadixSVDForest
+from ..core.cross_model_kv import RoPEContentDecoupler
 
 
 class TuringAcceleratedGenerator:
     """
-    High-Performance Turing Engine Engine Wrapper:
-    • Native hardware acceleration across Apple Silicon Metal (MPS), NVIDIA CUDA, and CPU AVX2.
-    • 57.0% active FFN subspace channel pruning.
-    • Epistemic uncertainty evaluation during multi-agent deliberation.
-    • Cross-turn KV cache reuse via Closed-Form Ridge Mapper (W*).
-    • Semantic Anchor Checkpoints for zero-recompute agent turn transitions.
+    Runs a transformers causal LM (by id or instance) with its own generate(); the Turing engine is not involved.
+    Semantic anchor tags only record a prompt's token ids under a name; nothing is reused from them.
     """
     def __init__(
         self,
         model_id_or_instance: Union[str, nn.Module] = "HuggingFaceTB/SmolLM2-1.7B-Instruct",
         tokenizer: Optional[Any] = None,
-        sparsity_ratio: float = 0.0,
         device: str = "auto",
         token: Optional[str] = None
     ):
@@ -52,7 +47,6 @@ class TuringAcceleratedGenerator:
         else:
             self.device = torch.device(device)
 
-        self.sparsity_ratio = sparsity_ratio
         self.hf_token = token or os.environ.get("HF_TOKEN") or huggingface_hub.get_token()
         self.epistemic_gate = EpistemicUncertaintyGate(uncertainty_threshold=2.5)
 
@@ -78,10 +72,9 @@ class TuringAcceleratedGenerator:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # 3. Cross-Turn KV Reuse & Semantic Anchor Radix Forest
         self.kv_decoupler = RoPEContentDecoupler()
         self.cached_turn_kv = None
-        self.radix_forest = SpectralRadixSVDForest(rank=64)
+        self.anchors: Dict[str, List[int]] = {}  # semantic anchor tag -> prompt token ids
 
     def sync_device(self):
         """Synchronizes device compute queue for microsecond-precise latency metrics."""
@@ -103,7 +96,7 @@ class TuringAcceleratedGenerator:
         restore_anchor_tag: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Executes accelerated generation with chat formatting, subspace execution, and telemetry.
+        Generates a reply with chat formatting, timing and an uncertainty reading of the prompt logits.
         """
         # Format message conversation
         messages = [
@@ -119,12 +112,11 @@ class TuringAcceleratedGenerator:
 
         # Handle Semantic Anchor Checkpoint Registration / Restoration
         anchor_reused = False
-        if restore_anchor_tag and self.radix_forest.get_anchor_node(restore_anchor_tag) is not None:
+        if restore_anchor_tag and restore_anchor_tag in self.anchors:
             anchor_reused = True
 
         if semantic_anchor_tag:
-            tok_ids = inputs["input_ids"][0].tolist()
-            self.radix_forest.anchor_registry[semantic_anchor_tag] = (tok_ids, None)
+            self.anchors[semantic_anchor_tag] = inputs["input_ids"][0].tolist()
 
         # Evaluate Epistemic Uncertainty on prompt prefix
         with torch.no_grad():
@@ -151,9 +143,6 @@ class TuringAcceleratedGenerator:
         new_token_ids = outputs[0][inputs["input_ids"].shape[1]:]
         response_text = self.tokenizer.decode(new_token_ids, skip_special_tokens=True).strip()
 
-        if not response_text:
-            response_text = "Optimized FFN topology: 3,000 distributed nodes configured with zero-loss routing."
-
         new_tokens_count = len(new_token_ids)
         throughput = (new_tokens_count / (elapsed_ms / 1000.0)) if elapsed_ms > 0 else 0.0
 
@@ -163,7 +152,6 @@ class TuringAcceleratedGenerator:
             "tokens_generated": new_tokens_count,
             "throughput_tok_s": round(throughput, 1),
             "epistemic_diagnostics": epistemic_diagnostics,
-            "subspace_sparsity": f"{self.sparsity_ratio * 100:.1f}%",
             "semantic_anchor_reused": anchor_reused,
             "semantic_anchor_tag": semantic_anchor_tag or restore_anchor_tag,
             "device": str(self.device)

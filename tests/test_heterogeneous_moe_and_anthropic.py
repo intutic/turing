@@ -12,7 +12,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 from turing.config import ModelConfig, TuringConfig
-from turing.core.heterogeneous_moe import BandwidthAdaptiveDecider, HostExpertBank, HeterogeneousMoERunner
+from turing.core.heterogeneous_moe import BandwidthAdaptiveDecider
 from turing.core.expert_cache import GPULRUExpertCache
 from turing.models.safetensors_mmap import SafetensorsMmapReader
 from turing.serving.anthropic_api import (
@@ -36,7 +36,7 @@ def test_bandwidth_adaptive_decider():
     # For tiny batch (1 token) and large expert weight, CPU compute should be favored over PCIe transfer overhead
     expert_bytes = 4 * 1024 * 1024 # 4MB
     decision_tiny = decider.should_stream_to_gpu(
-        expert_bytes_int4=expert_bytes,
+        expert_bytes=expert_bytes,
         batch_tokens=1,
         hidden_dim=4096,
         moe_intermediate_dim=2048
@@ -45,28 +45,12 @@ def test_bandwidth_adaptive_decider():
 
     # For large batch (128 tokens), GPU streaming and compute should be favored
     decision_large = decider.should_stream_to_gpu(
-        expert_bytes_int4=expert_bytes,
+        expert_bytes=expert_bytes,
         batch_tokens=128,
         hidden_dim=4096,
         moe_intermediate_dim=2048
     )
     assert decision_large is True
-
-def test_host_expert_bank_subspace_packing():
-    bank = HostExpertBank(
-        num_layers=2,
-        num_experts=8,
-        hidden_dim=256,
-        ffn_dim=1024,
-        active_subspace_dim=512
-    )
-
-    assert bank.bytes_per_expert == (3 * 512 * 256) // 2 # 196,608 bytes
-    uncompressed_bytes = 3 * 1024 * 256 * 2 # 1,572,864 bytes
-    assert bank.bytes_per_expert == uncompressed_bytes // 8 # 8x vs FP16 unpruned
-
-    expert_slice = bank.get_expert_slice(layer_idx=1, expert_idx=3)
-    assert expert_slice.shape[0] == bank.bytes_per_expert
 
 def test_gpu_lru_expert_cache():
     dev = torch.device("cpu")
@@ -96,32 +80,6 @@ def test_gpu_lru_expert_cache():
     assert evicted_key == (0, 1)
     assert cache.contains(0, 4)
     assert not cache.contains(0, 1)
-
-def test_heterogeneous_moe_runner():
-    dev = torch.device("cpu")
-    cfg = ModelConfig(
-        name="test-moe",
-        hidden_dim=128,
-        ffn_dim=512,
-        num_heads=4,
-        num_kv_heads=2,
-        head_dim=32,
-        num_layers=2,
-        vocab_size=500,
-        active_tiles=2,
-        tile_size=128
-    )
-    decider = BandwidthAdaptiveDecider(dev, pcie_bandwidth_gb_s=20.0, cpu_throughput_gflops=200.0, gpu_throughput_gflops=2000.0)
-    host_bank = HostExpertBank(num_layers=2, num_experts=8, hidden_dim=128, ffn_dim=512, active_subspace_dim=256)
-    runner = HeterogeneousMoERunner(cfg, host_bank, decider, dev)
-
-    x = torch.randn(1, 4, 128)
-    logits = torch.randn(1, 4, 8)
-
-    out, stats = runner.route_and_execute(x, logits, layer_idx=0, top_k=2)
-    assert out.shape == (1, 4, 128)
-    assert stats["total_active_experts"] <= 8
-    assert "hybrid_ratio" in stats
 
 def test_safetensors_mmap_reader(tmp_path):
     # Construct a synthetic .safetensors binary file
@@ -225,4 +183,3 @@ def test_anthropic_messages_endpoint():
         assert "event: content_block_delta" in body_text
         assert "event: message_stop" in body_text
         stream_res.close()
-

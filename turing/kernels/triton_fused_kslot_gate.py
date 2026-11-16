@@ -1,7 +1,7 @@
 """
 Triton GPU Kernel: Fused k-Slot Attention Pooling & Gated Zero-Identity Head.
 Fuses multi-head query attention, softmax reduction, linear gating, sigmoid activation,
-and zero-residual addition into a single SRAM block pass (-85% global DRAM traffic).
+and zero-residual addition into a single SRAM block pass.
 """
 
 import math

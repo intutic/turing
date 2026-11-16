@@ -1,3 +1,9 @@
+"""
+Draft heads and token-tree builders for speculative decoding (library code). Every draft head here is randomly
+initialised and untrained, and serving does not use them: the engine speculates by prompt lookup (n-gram drafts from
+the request's own tokens). Acceptance rates of these heads are not measured.
+"""
+
 import math
 from typing import List, Dict, Tuple, Optional, Union
 import torch
@@ -49,11 +55,8 @@ def build_dag_tree_attention_mask(nodes: List[TreeNode], device: torch.device) -
 
 class MatryoshkaDraftHead(nn.Module):
     """
-    Nested Matryoshka Parameter-Sliced Speculative Draft Head (SIGIR 2026 / Turing Engine).
-    Stores a master projection tensor W in R^[VocabSize, HiddenDim] that can be sliced
-    into nested parameter widths W_k in {1024, 2048, 4096, 8192} (or custom slice dimensions).
-    Enables up to 4x-8x faster speculative candidate generation on bandwidth-constrained
-    edge devices while preserving >=98% of full-rank candidate acceptance fidelity.
+    Nested (Matryoshka) parameter-sliced draft head: one projection W [VocabSize, HiddenDim] whose leading
+    columns W[:, :k] give the logits at slice width k. Untrained (random init) and not used in serving.
     """
     def __init__(
         self,
@@ -283,7 +286,7 @@ class EnhancedQuadtreeDraftHead(nn.Module):
     1D Spatial Convolution-Enhanced Quadtree MRP Speculative Draft Head (ZAYA1 CCA + Turing Engine):
     Projects hidden state into 2D Cartesian coordinates (x, y), applies a 1D depthwise sequence
     convolution over recent coordinate trajectories to maintain momentum, and partitions candidates
-    into quadrants with >=93% speculative verification acceptance rate.
+    into quadrants. Untrained (random init) and not used in serving.
     """
     def __init__(self, hidden_dim: int, vocab_size: int, kernel_size: int = 3):
         super().__init__()
@@ -407,6 +410,7 @@ class SubspaceEAGLEDraftHead(nn.Module):
     2. Synthesizes K future candidate tokens in a single parallel step using 1D-Depthwise Dilated Conv (O(1) DFlash style).
     3. Employs Matryoshka parameter-sliced vocab projection (W in {1024, 2048, 4096, 8192}).
     4. Applies DSpark online Shannon entropy confidence gating to dynamically scale tree width (K in {1, 4, 8}).
+    Untrained (random init) and not used in serving.
     """
     def __init__(
         self,
@@ -507,9 +511,8 @@ class SubspaceEAGLEDraftHead(nn.Module):
 
 class RidgeAssistedTreeSpeculator:
     """
-    Cross-Model Closed-Form Ridge (W*) Speculative Tree Verifier:
-    Maps small draft model candidate KV representations into the target 70B space
-    in <=0.68ms without re-computing linear KV projections.
+    Speculative tree verifier: checks draft tokens against target-model logits and counts acceptances.
+    An optional ridge mapper can be attached; verification does not use it.
     """
     def __init__(self, ridge_mapper=None):
         self.ridge_mapper = ridge_mapper

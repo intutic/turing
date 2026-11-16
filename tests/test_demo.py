@@ -111,7 +111,6 @@ def test_multi_agent_coordinator_with_mock_engine():
     engine = TuringAcceleratedGenerator(
         model_id_or_instance=mock_model,
         tokenizer=mock_tokenizer,
-        sparsity_ratio=0.57,
         device="cpu"
     )
     wm = DynamicEnvironmentModel()

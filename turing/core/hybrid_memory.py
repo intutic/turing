@@ -1,7 +1,11 @@
 """
-Hybrid Recurrent Attention & Associative Recall Memory Systems for Turing Engine.
-Combines learned per-token decay linear recurrence for low perplexity / O(1) constant memory
-with dynamic gated Softmax anchoring for 100% exact fact retrieval on RAG & tool-use workloads.
+Hybrid recurrent attention (library code, not used in serving): a linear recurrence with learned per-token decay
+(S_t = b_t S_{t-1} + K_t^T V_t) plus softmax attention over a small pool of anchor tokens, and a synthetic
+associative-recall probe.
+
+The layer only works inside a model trained with hybrid layers: converting a pretrained softmax-attention model to
+it (LoLCATs-style linearization) needs training, and none of the models this engine loads were trained this way.
+No recall or quality numbers are claimed for it.
 """
 
 import math
@@ -37,9 +41,8 @@ class LearnedDecayRecurrenceState:
 
 class HybridRecurrentAttention(nn.Module):
     """
-    Gated Softmax Anchoring combining learned per-token decay recurrence with sparse anchor KV cache.
-    Eliminates the catastrophic 84% associative recall collapse of pure linear attention while
-    maintaining constant-memory O(1) execution speed on ambient text.
+    Learned per-token decay recurrence (constant-size state per head) plus a gated softmax over an anchor KV pool.
+    Its weights are randomly initialised; it needs training before its outputs mean anything.
     """
 
     def __init__(

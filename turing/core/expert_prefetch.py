@@ -1,7 +1,6 @@
 """
-One-Layer-Ahead Speculative Expert Prefetcher (PILOT / Turing Engine Integration).
-Overlaps compute on layer L with asynchronous host-to-device PCIe streaming of predicted
-routed experts for layer L+1 on dedicated CUDA streams, eliminating IO bubbles during decode.
+One-layer-ahead expert prefetcher: while layer L computes, copies the experts predicted for layer L+1 into the
+expert cache on a separate CUDA stream (synchronously elsewhere).
 """
 
 import time
@@ -69,6 +68,7 @@ class OneLayerAheadExpertPrefetcher:
             if len(unique_candidates) >= self.prefetch_k:
                 break
 
+        provider = weight_provider or (self.host_bank.slot_weights if self.host_bank is not None else None)
         scheduled = []
         for exp_id in unique_candidates:
             self._prefetches += 1
@@ -82,21 +82,14 @@ class OneLayerAheadExpertPrefetcher:
             if slot_idx is None:  # LFRU gate kept the resident expert: nothing to prefetch into
                 continue
             scheduled.append(exp_id)
-
-            # Perform asynchronous copy if host bank or weight provider available
+            if provider is None:  # bookkeeping only: the caller loads the slot
+                continue
             if self.is_cuda and self.prefetch_stream is not None:
                 with torch.cuda.stream(self.prefetch_stream):
-                    if weight_provider is not None:
-                        w_g, w_u, w_d = weight_provider(next_layer_idx, exp_id)
-                        self.expert_cache.load_expert_weights(slot_idx, w_g, w_u, w_d)
-                    elif self.host_bank is not None:
-                        # Real or dummy slice copy
-                        pass
+                    self.expert_cache.load_expert_weights(slot_idx, *provider(next_layer_idx, exp_id))
                     self.prefetch_event.record(self.prefetch_stream)
             else:
-                if weight_provider is not None:
-                    w_g, w_u, w_d = weight_provider(next_layer_idx, exp_id)
-                    self.expert_cache.load_expert_weights(slot_idx, w_g, w_u, w_d)
+                self.expert_cache.load_expert_weights(slot_idx, *provider(next_layer_idx, exp_id))
 
         return scheduled
 

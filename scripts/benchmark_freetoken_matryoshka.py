@@ -2,9 +2,8 @@
 Empirical Benchmark: Matryoshka Parameter Slicing & FreeToken Elastic Serving on Turing Engine.
 Measures:
 1. Matryoshka Sliced Draft Head Latency & Throughput across nested widths (1024, 2048, 4096, 8192).
-2. Semantic Anchor Agent Turnaround Latency (Zero-Prefill Reuse vs Full Prefill).
-3. Elastic Memory Dynamic Budget Rebalancing under context expansion.
-4. Bandwidth-Adaptive q* Bus Streaming Decisions.
+2. Elastic Memory Dynamic Budget Rebalancing under context expansion.
+3. Bandwidth-Adaptive q* Bus Streaming Decisions.
 """
 import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
@@ -21,7 +20,6 @@ import torch.nn.functional as F
 
 from turing.core.speculation import MatryoshkaDraftHead, QuadtreeMRPSpeculator
 
-from turing.core.radix_svd import SpectralRadixSVDForest
 from turing.core.expert_cache import GPULRUExpertCache
 from turing.core.paging import StaticPagedKVPool
 from turing.core.elastic_memory import ElasticMemoryBudgetManager
@@ -91,74 +89,6 @@ def benchmark_matryoshka_draft_head(device: torch.device, hidden_dim: int = 8192
         )
 
     return results
-
-
-def benchmark_semantic_anchors(device: torch.device):
-    print("\n" + "=" * 80)
-    print(f"⚓ 2. SEMANTIC ANCHOR CHECKPOINTING MULTI-TURN LATENCY ({device})")
-    print("=" * 80)
-
-    rank = 64
-    head_dim = 128
-    num_layers = 16
-    forest = SpectralRadixSVDForest(rank=rank)
-    u_proj = torch.randn(head_dim, rank, device=device)
-
-    # Simulate a multi-turn conversation with 2048 tokens of history across 16 layers
-    seq_len = 2048
-    token_ids = list(range(100, 100 + seq_len))
-    k_full = torch.randn(seq_len, 8, head_dim, device=device)
-    v_full = torch.randn(seq_len, 8, head_dim, device=device)
-
-    # 1. Full Multi-Layer Prompt Prefill (16 layers of self-attention + MLP projection)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    elif device.type == "mps":
-        torch.mps.synchronize()
-
-    t0 = time.perf_counter()
-    for _ in range(num_layers):
-        _ = torch.matmul(k_full, u_proj)
-        _ = torch.matmul(v_full, u_proj)
-        _ = torch.matmul(k_full, k_full.transpose(-1, -2).contiguous() if k_full.dim() > 2 else k_full.t())
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    elif device.type == "mps":
-        torch.mps.synchronize()
-    full_prefill_ms = (time.perf_counter() - t0) * 1000.0
-
-    # 2. Insert and Mark Semantic Anchor Checkpoint
-    forest.insert_prefix(token_ids, k_full, v_full, u_proj)
-    forest.mark_semantic_anchor(token_ids, tag="agent_turn_2_tool_output")
-
-    # 3. Anchor-Restored Turn Execution (Zero-Prefill SVD state retrieval)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    elif device.type == "mps":
-        torch.mps.synchronize()
-
-    t0 = time.perf_counter()
-    matched_count, k_recon, v_recon = forest.match_anchor_prefix("agent_turn_2_tool_output", u_proj)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    elif device.type == "mps":
-        torch.mps.synchronize()
-    anchor_restore_ms = (time.perf_counter() - t0) * 1000.0
-
-    latency_reduction = (
-        ((full_prefill_ms - anchor_restore_ms) / max(1e-6, full_prefill_ms)) * 100.0
-    )
-
-    print(f"  • Full Prompt Prefill (2048 tokens, 16 layers): {full_prefill_ms:.3f} ms")
-    print(f"  • Semantic Anchor Restoration (Zero-Prefill): {anchor_restore_ms:.3f} ms")
-    print(f"  • Turn-to-Turn Latency Reduction: {latency_reduction:.1f}%")
-
-    return {
-        "full_prefill_ms": round(full_prefill_ms, 3),
-        "anchor_restore_ms": round(anchor_restore_ms, 3),
-        "latency_reduction_pct": f"{latency_reduction:.1f}%",
-    }
-
 
 
 def benchmark_elastic_memory(device: torch.device):
@@ -246,7 +176,7 @@ def benchmark_bandwidth_adaptive_qstar(device: torch.device):
     # Decision sample for 35B MoE layer
     expert_bytes = 4 * 1024 * 1024  # 4MB packed INT4
     should_stream = decider.should_stream_to_gpu(
-        expert_bytes_int4=expert_bytes,
+        expert_bytes=expert_bytes,
         batch_tokens=8,
         hidden_dim=4096,
         moe_intermediate_dim=2048,
@@ -280,17 +210,14 @@ def main():
     # 1. Matryoshka Draft Head
     m_res = benchmark_matryoshka_draft_head(device)
 
-    # 2. Semantic Anchors
-    a_res = benchmark_semantic_anchors(device)
-
-    # 3. Elastic Memory
+    # 2. Elastic Memory
     e_res = benchmark_elastic_memory(device)
 
-    # 4. Closed-loop q*
+    # 3. Closed-loop q*
     q_res = benchmark_bandwidth_adaptive_qstar(device)
 
     print("\n" + "=" * 80)
-    print("✅ BENCHMARK COMPLETED SUCCESSFULLY WITH 0 REGRESSIONS")
+    print("✅ BENCHMARK COMPLETED")
     print("=" * 80)
 
 

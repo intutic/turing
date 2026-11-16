@@ -1,11 +1,8 @@
 """
-Comprehensive All-in-One Frontier Benchmarking Suite for Turing Engine.
-Executes:
-1. Multi-Model Architecture Profiler (8B to 1 Trillion Parameters)
-2. NIAH retrieval through the SVD INT8 evaluator (synthetic vectors)
-3. Pointers to the real-weight quality harness (scripts/eval_kv_quality.py)
-4. Pointers to the real-weight throughput benchmark (scripts/benchmark_kv_decode.py)
-5. HPC primitive micro-timings
+Benchmark index for Turing Engine: points to the real-weight measurements and times a few HPC primitives.
+1. Quality: scripts/eval_kv_quality.py; GSM8K and needle-in-a-haystack: `turing eval-accuracy`, `turing eval-niah`
+2. Throughput: scripts/benchmark_kv_decode.py
+3. HPC primitive micro-timings (run here)
 """
 import _bootstrap  # noqa: F401,E402  (this repo's root first on sys.path)
 
@@ -20,10 +17,6 @@ import torch
 # Ensure repo root is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from turing.config import ModelConfig, TuringConfig
-from turing.models.registry import get_model_config, MODEL_REGISTRY
-from turing.serving.comparative_bench import ComparativeBenchmarker
-from turing.serving.niah import LongContextNIAHEvaluator
 from turing.core.matrix_pow import LogarithmicRecurrenceEngine
 from turing.core.swarm_objectives import evaluate_objective
 from turing.core.router_annealer import compute_exponential_decay
@@ -41,86 +34,26 @@ def run_all_frontier_benchmarks():
     print("=" * 88)
     print(f"[*] Execution Platform  : {device} ({'NVIDIA GPU' if device.type == 'cuda' else 'Apple Silicon Metal' if device.type == 'mps' else 'CPU SIMD'})")
 
-    print(f"[*] Total Models Tested : 7 Frontier Architectures (8B to 1.05 Trillion)")
-    print(f"[*] Backends Compared   : Turing Engine 3.0, vLLM, TensorRT-LLM, SGLang, Ollama, PyTorch FP16")
-    print(f"[*] Context Lengths     : 8K, 32K, 64K, 128K, 1,000,000 Tokens")
     print("=" * 88)
-
-    # -------------------------------------------------------------------------
-    # 1. Multi-Model & Multi-Backend Profiling Matrix
-    # -------------------------------------------------------------------------
-    print("\n[📊 1/5] RUNNING MULTI-MODEL & MULTI-BACKEND COMPARATIVE PROFILING...")
-    models_to_test = [
-        "llama-3-8b",
-        "llama-3.1-70b",
-        "qwen-2.5-72b",
-        "mistral-large-123b",
-        "deepseek-v3-671b",
-        "glm-5.2-753b",
-        "turing-trillion-1t"
-    ]
-
-    benchmarker = ComparativeBenchmarker(device=device)
-    model_matrix = {}
-
-    for m_key in models_to_test:
-        if m_key in MODEL_REGISTRY:
-            res = benchmarker.compare_model(m_key)
-            model_matrix[m_key] = res
-            arch = res["architecture"]
-            vram = res["vram_model_footprint"]
-            kv = res["kv_cache_footprint_32k_context"]
-            tps = res["measured_layer_throughput"]
-            lat = res["layer_latency_ms"]
-
-
-            print(f"\n  ┌── [{res['model_name']}] ──────────────────────────────────────────")
-            print(f"  │ • Layers / Hidden Dim       : {arch['num_layers']} layers | {arch['hidden_dim']} dim")
-            print(f"  │ • Active Subspace Pruning   : {arch['channel_sparsity_pct']} pruned ({arch['turing_subspace_dim']} active / {arch['dense_ffn_dim']} dense)")
-            print(f"  │ • Model VRAM (PyTorch FP16) : {vram['1_native_pytorch_fp16']}")
-            print(f"  │ • Model VRAM (Standard INT4): {vram['2_standard_int4_awq']}")
-            print(f"  │ • Model VRAM (Turing Engine W4A16) : {vram['3_turing_subspace_w4a16']} ({vram['turing_vram_savings_vs_fp16']} reduction)")
-            print(f"  │ • 32K KV Cache (Paged FP16) : {kv['standard_paged_fp16']}")
-            print(f"  │ • 32K KV Cache (Turing SVD) : {kv['turing_svd_int8_hierarchical']}")
-            print(f"  │ • Dense Layer Latency       : {lat['dense_layer_ms']} ms ({tps['dense_layer_tok_per_sec']} tok/s)")
-            print(f"  │ • Turing Subspace Latency   : {lat['turing_subspace_layer_ms']} ms ({tps['turing_subspace_tok_per_sec']} tok/s, {tps['speedup_multiplier']} speedup)")
-            print(f"  └────────────────────────────────────────────────────────────────────")
-
-
-    # -------------------------------------------------------------------------
-    # 2. Long-Context Needle-In-A-Haystack (NIAH) Across Context Lengths
-    # -------------------------------------------------------------------------
-    print("\n[🎯 2/5] RUNNING LONG-CONTEXT NEEDLE-IN-A-HAYSTACK (NIAH) BENCHMARK...")
-    niah_lengths = [32768, 65536, 131072]
-    cfg_70b = get_model_config("llama-3.1-70b")
-    niah_evaluator = LongContextNIAHEvaluator(cfg_70b, rank=64, device=device)
-    niah_results = niah_evaluator.evaluate_retrieval(context_lengths=niah_lengths)
-
-    print("  • SVD INT8 Subspace Compression Retrieval Accuracy vs Context Length:")
-    for res_item in niah_results:
-        ctx = res_item["context_length"]
-        depth_str = res_item["depth_pct"]
-        status = res_item["retrieval_status"]
-        status_icon = "✅" if "SUCCESS" in status else "❌"
-        print(f"    - Context {ctx:>7,} tokens | Depth {depth_str:>4} : {status_icon} {status}")
 
     # -------------------------------------------------------------------------
     # 3. Downstream Quality & Accuracy Benchmark Evaluation
     # -------------------------------------------------------------------------
-    print("\n[🧠 3/5] QUALITY: not run here. Measure it on real weights with scripts/eval_kv_quality.py")
+    print("\n[🧠 1/3] QUALITY: not run here. Measure it on real weights with scripts/eval_kv_quality.py")
     print("  (paired NLL against the exact model; results in results_kv_quality_*.json).")
+    print("  GSM8K exact match: `turing eval-accuracy --model <id>`; pass-key retrieval: `turing eval-niah --model <id>`.")
 
     # -------------------------------------------------------------------------
     # 4. Serving throughput
     # -------------------------------------------------------------------------
-    print("\n[⚡ 4/5] THROUGHPUT: not run here. Measure it on real weights with scripts/benchmark_kv_decode.py")
+    print("\n[⚡ 2/3] THROUGHPUT: not run here. Measure it on real weights with scripts/benchmark_kv_decode.py")
     print("  (tokens/s by batch and context against HuggingFace transformers; results in results_kv_decode_*.json).")
     print("  No other engine is run by this repository, so no comparison with vLLM, TensorRT-LLM, SGLang or Ollama is claimed.")
 
     # -------------------------------------------------------------------------
     # 5. HPC Primitives Verification (High-Performance Systems & Math Integration Benchmarks)
     # -------------------------------------------------------------------------
-    print("\n[🔬 5/5] PROFILING High-Performance Systems & Math NATIVE HPC KERNELS...")
+    print("\n[🔬 3/3] PROFILING High-Performance Systems & Math NATIVE HPC KERNELS...")
     # 1. Logarithmic matrix power jump-ahead
     rec_engine = LogarithmicRecurrenceEngine(101, 202, 3, 7, 11, 1000000007)
     t0 = time.perf_counter()
@@ -141,7 +74,7 @@ def run_all_frontier_benchmarks():
     print(f"  • Exponential Router Annealing Temperature at 50% Step   : {temp_decay:.4f} (init=2.0, min=0.1)")
 
     print("\n" + "=" * 88)
-    print("   ✅ ALL BENCHMARKS COMPLETED SUCCESSFULLY WITH ZERO WARNINGS")
+    print("   ✅ DONE")
     print("=" * 88)
 
 if __name__ == "__main__":

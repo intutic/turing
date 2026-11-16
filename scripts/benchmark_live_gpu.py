@@ -22,7 +22,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from turing.config import ModelConfig
 from turing.models.registry import get_model_config
-from turing.core.subspace import SubspaceManager
 from turing.kernels.sinkhorn_ot_cuda import sinkhorn_ot_eviction_cuda
 
 def run_live_gpu_benchmark():
@@ -96,9 +95,9 @@ def run_live_gpu_benchmark():
     print(f"  • Real Measured CUDA FFN Speedup Multiplier: {cuda_speedup:.2f}x (57.1% Channel Reduction)")
 
     # -------------------------------------------------------------------------
-    # 2. Real GPU VRAM Allocation & SVD KV Compression at 32K Context
+    # 2. Real GPU VRAM Allocation of a dense FP16 KV cache at 32K Context
     # -------------------------------------------------------------------------
-    print("\n[💾 2/5] BENCHMARKING REAL GPU VRAM CONSUMPTION & SVD KV COMPRESSION...")
+    print("\n[💾 2/5] BENCHMARKING REAL GPU VRAM CONSUMPTION OF A DENSE KV CACHE...")
     seq_len = 32768
     num_kv_heads = 8
     head_dim = 128
@@ -113,29 +112,7 @@ def run_live_gpu_benchmark():
     vram_dense_layer_mb = (torch.cuda.memory_allocated() / (1024**2)) - vram_before
     full_dense_kv_vram_gb = (vram_dense_layer_mb * num_layers) / 1024.0
 
-    # Compress via SVD Rank-64 Subspace Manager on CUDA
-    subspace_mgr = SubspaceManager(hidden_dim=head_dim, rank=64, device=device)
-    k_flat = k_dense.view(seq_len * num_kv_heads, head_dim)
-    
-    t0 = time.perf_counter()
-    k_proj = subspace_mgr.project_to_subspace(k_flat)
-    q_int8, scale = subspace_mgr.quantize_subspace_int8(k_proj)
-    torch.cuda.synchronize()
-    t_comp_ms = (time.perf_counter() - t0) * 1000.0
-
-    k_recon = subspace_mgr.reconstruct_from_subspace(
-        subspace_mgr.dequantize_subspace_int8(q_int8, scale)
-    )
-    recon_error = torch.norm(k_flat - k_recon) / torch.norm(k_flat)
-
-    # bytes actually held by the compressed form against the dense K it replaces (measured, not assumed)
-    ratio = (q_int8.numel() * q_int8.element_size() + scale.numel() * scale.element_size()) / (
-        k_flat.numel() * k_flat.element_size())
     print(f"  • 32K Context Dense FP16 KV VRAM (70B Model) : {full_dense_kv_vram_gb:.2f} GB")
-    print(f"  • 32K Context SVD INT8 KV VRAM (70B, measured ratio {ratio:.3f}) : {full_dense_kv_vram_gb * ratio:.2f} GB "
-          f"({(1 - ratio) * 100:.1f}% smaller)")
-    print(f"  • Live SVD Compression Latency (32K tokens)   : {t_comp_ms:.2f} ms")
-    print(f"  • Reconstruction Relative Error (random K, not a model's cache): {recon_error.item():.4f}")
 
     # -------------------------------------------------------------------------
     # 3. Real In-SRAM Sinkhorn Optimal Transport KV Pruning on GPU

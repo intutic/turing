@@ -19,9 +19,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from turing.models.registry import get_model_config, MODEL_REGISTRY
-from turing.core.subspace import SubspaceManager
 from turing.kernels.sinkhorn_ot_cuda import sinkhorn_ot_eviction_cuda
-from turing.serving.niah import LongContextNIAHEvaluator
 
 def clean_gpu_memory():
     gc.collect()
@@ -69,7 +67,7 @@ def run_suite():
     # -------------------------------------------------------------------------
     # PART 1: Real Downloaded Model Weight Inference (SmolLM2-1.7B & GPT-2)
     # -------------------------------------------------------------------------
-    print("\n[🧠 PART 1/4] REAL END-TO-END HUGGINGFACE MODEL INFERENCE & KV PROFILING")
+    print("\n[🧠 PART 1/3] REAL END-TO-END HUGGINGFACE MODEL INFERENCE & KV PROFILING")
     downloaded_models = [
         ("gpt2", "gpt2"),
         ("HuggingFaceTB/SmolLM2-1.7B-Instruct", "SmolLM2-1.7B-Instruct")
@@ -118,18 +116,6 @@ def run_suite():
             print(f"  │ • HF transformers generate (batch 1): {tps_native:.1f} tok/s ({gen_tokens} tokens in {gen_time_s*1000:.1f}ms)")
             print(f"  │ • Generated Text Output           : \"{response_text[:80]}...\"")
 
-            # SVD INT8 Subspace KV Cache evaluation on actual model head dimensions
-            head_dim = getattr(model.config, "head_dim", model.config.hidden_size // model.config.num_attention_heads)
-            subspace_mgr = SubspaceManager(hidden_dim=head_dim, rank=min(64, head_dim), device=device)
-            dummy_kv = torch.randn(2048, head_dim, device=device, dtype=dtype_val)
-            q_kv, scale = subspace_mgr.quantize_subspace_int8(subspace_mgr.project_to_subspace(dummy_kv))
-            recon_kv = subspace_mgr.reconstruct_from_subspace(subspace_mgr.dequantize_subspace_int8(q_kv, scale))
-            fidelity = (1.0 - (torch.norm(dummy_kv - recon_kv) / torch.norm(dummy_kv)).item()) * 100.0
-            saved = 100.0 * (1.0 - (q_kv.numel() * q_kv.element_size() + scale.numel() * scale.element_size())
-                             / (dummy_kv.numel() * dummy_kv.element_size()))
-            print(f"  │ • SVD INT8 KV (rank {subspace_mgr.rank}, head_dim {head_dim}): {saved:.1f}% smaller | "
-                  f"{fidelity:.2f}% reconstruction on random K (not this model's cache)")
-
             # Cleanup model
             del model
             del tokenizer
@@ -144,7 +130,7 @@ def run_suite():
     # -------------------------------------------------------------------------
     # PART 2: Live Query Against Active vLLM Engine (Qwen2.5-7B-Instruct)
     # -------------------------------------------------------------------------
-    print("\n[⚡ PART 2/4] REAL LIVE COMPARISON WITH ACTIVE vLLM ENGINE (Qwen2.5-7B)")
+    print("\n[⚡ PART 2/3] REAL LIVE COMPARISON WITH ACTIVE vLLM ENGINE (Qwen2.5-7B)")
     vllm_prompts = [
         "What is the derivative of f(x) = 3x^2 + 5x - 7?",
         "Explain the Birkhoff-von Neumann theorem in 2 sentences.",
@@ -187,7 +173,7 @@ def run_suite():
     # -------------------------------------------------------------------------
     # PART 3: Unmocked Layer Benchmark Across All 7 Frontier Geometries
     # -------------------------------------------------------------------------
-    print("\n[📊 PART 3/4] ONE RANDOM-WEIGHT FFN LAYER (batch 1) SHAPED LIKE EACH ARCHITECTURE")
+    print("\n[📊 PART 3/3] ONE RANDOM-WEIGHT FFN LAYER (batch 1) SHAPED LIKE EACH ARCHITECTURE")
     frontier_configs = [
         "llama-3-8b",
         "llama-3.1-70b",
@@ -278,26 +264,10 @@ def run_suite():
             clean_gpu_memory()
             print(f"{cfg.name:<24} | {h:<6} | {ffn_d:<10} | [failed: {type(e).__name__}: {e}]")
 
-    # -------------------------------------------------------------------------
-    # PART 4: Real Long-Context Needle-In-A-Haystack (NIAH) on CUDA
-    # -------------------------------------------------------------------------
-    # Synthetic: one 512-row page of random keys per row; the context length only labels the row, no model runs.
-    print("\n[🎯 PART 4/4] SYNTHETIC SINGLE-PAGE NEEDLE TEST (random keys, no model; context length is a label)")
-    cfg_70b = get_model_config("llama-3.1-70b")
-    niah_eval = LongContextNIAHEvaluator(cfg_70b, rank=64, device=device)
-    niah_res = niah_eval.evaluate_retrieval(context_lengths=[32768, 65536, 131072])
-
-    print("  • Needle retrieval from one random page after SVD INT8 compression:")
-    for item in niah_res:
-        c = item["context_length"]
-        d = item["depth_pct"]
-        st = item["retrieval_status"]
-        icon = "✅" if "SUCCESS" in st else "❌"
-        print(f"    - Context {c:>7,} tokens | Depth {d:>4} : {icon} {st}")
-
+    # Needle-in-a-haystack through the engine on real weights: `turing eval-niah --model <id> --context-len ...`
     clean_gpu_memory()
     print("\n" + "=" * 90)
-    print(f"   Done on {device}. Part 1 uses real HF weights; parts 3-4 use random tensors.")
+    print(f"   Done on {device}. Part 1 uses real HF weights; part 3 uses random tensors.")
     print("=" * 90)
 
 if __name__ == "__main__":

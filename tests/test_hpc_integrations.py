@@ -6,7 +6,6 @@ from turing.models.mesh_2d import Mesh2DCoordinator, Mesh2DParallelLinear
 from turing.core.swarm_opt import AsynchronousSwarmOptimizer
 from turing.core.cca_fast import CooperativeSharedConv2D, FastCompressedConvolutionalAttention
 from turing.kernels.softened_attention import SoftenedAttentionEngine
-from turing.core.hex_quant import HexagonalSubspaceQuantizer
 
 def test_mesh_2d_coordinator_and_linear():
     coord = Mesh2DCoordinator(rows=2, cols=2, rank=3)
@@ -67,24 +66,6 @@ def test_softened_attention_engine():
     assert out.shape == (2, 2, 8, 32)
     assert not torch.isnan(out).any()
 
-def test_hexagonal_subspace_quantizer():
-    quant = HexagonalSubspaceQuantizer(
-        codebook_dim=32,
-        grid_width=4,
-        grid_height=4,
-        device=torch.device("cpu")
-    )
-
-    activations = torch.randn(8, 32)
-    quantized, bmu_indices = quant.quantize_subspace(activations)
-    assert quantized.shape == (8, 32)
-    assert len(bmu_indices) == 8
-    assert (bmu_indices >= 0).all() and (bmu_indices < 16).all()
-
-    # Test hexagonal metric distance
-    dist = quant.hex_neighborhood_distance(0, 1)
-    assert dist > 0.0
-
 def test_native_csrc_hpc_kernels():
     try:
         from turing import turing_csrc
@@ -104,17 +85,6 @@ def test_native_csrc_hpc_kernels():
     v = torch.randn(2, 2, 8, 16).numpy()
     attn_out = turing_csrc.softened_nbody_attention(q, k, v, 1e-4, 0.25)
     assert attn_out.shape == (2, 2, 8, 16)
-
-    # 3. Native C++ Hexagonal BMU Search
-    acts = torch.randn(4, 16).numpy()
-    cb = torch.randn(8, 16).numpy()
-    bmu_indices, bmu_dists = turing_csrc.hexagonal_bmu_search(acts, cb)
-    assert len(bmu_indices) == 4
-    assert len(bmu_dists) == 4
-
-    # 4. Native C++ Hexagonal Distance
-    hex_dist = turing_csrc.hexagonal_distance(0.0, 0.0, 1.0, 1.0)
-    assert hex_dist > 0.0
 
     # 5. Native C++ Fused Adam Step (Fused High-Performance Kernel)
     p = torch.ones(8).numpy()
@@ -148,31 +118,6 @@ def test_autonomic_threshold_tuner():
     assert tuner.timestep == 5
     assert 0.1 <= tuner.current_threshold <= 0.9
     assert 0.2 <= tuner.current_tau <= 2.0
-
-def test_heterogeneous_moe_cpu_fast_path():
-    from turing.config import ModelConfig
-    from turing.core.heterogeneous_moe import BandwidthAdaptiveDecider, HostExpertBank, HeterogeneousMoERunner
-
-    cfg = ModelConfig(
-        name="test-moe-cpu",
-        hidden_dim=32,
-        ffn_dim=64,
-        num_layers=2,
-        num_heads=4,
-        num_kv_heads=2,
-        head_dim=8,
-        vocab_size=100
-    )
-    bank = HostExpertBank(num_layers=2, num_experts=4, hidden_dim=32, ffn_dim=64, active_subspace_dim=16)
-    decider = BandwidthAdaptiveDecider(torch.device("cpu"), pcie_bandwidth_gb_s=0.1, cpu_throughput_gflops=1000.0, gpu_throughput_gflops=10.0)
-    runner = HeterogeneousMoERunner(cfg, bank, decider, torch.device("cpu"))
-
-    hidden = torch.randn(2, 4, 32)
-    logits = torch.randn(2, 4, 4)
-    out, stats = runner.route_and_execute(hidden, logits, layer_idx=0, top_k=2)
-
-    assert out.shape == (2, 4, 32)
-    assert stats["total_active_experts"] > 0
 
 def test_asynch_task_scheduler_csrc():
     from turing.core.asynch_scheduler import AsynchronousWorkerPool
@@ -235,22 +180,3 @@ def test_pso_optimize_hyperparams_csrc():
     # All dimensions should have converged close to 0 (sphere minimum)
     for p in opt_params:
         assert abs(p) < 1.0
-
-def test_hex_quantize_activations_csrc():
-    quant = HexagonalSubspaceQuantizer(
-        codebook_dim=16,
-        grid_width=4,
-        grid_height=4,
-        device=torch.device("cpu")
-    )
-    acts = torch.randn(8, 16)
-    quantized, bmu = quant.quantize_subspace(acts)
-    assert quantized.shape == (8, 16)
-    assert len(bmu) == 8
-    assert not torch.isnan(quantized).any()
-
-
-
-
-
-

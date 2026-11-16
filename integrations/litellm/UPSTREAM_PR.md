@@ -3,7 +3,7 @@
 **PR Title**: `feat(providers): Add native support for Turing Engine LLM serving runtime`
 
 ## Description
-This PR adds native provider support for **Turing Engine** (`turing/*` model prefix), a high-performance open-source LLM serving runtime that executes 70B–120B models on single 24GB GPUs via Subspace Pruning and SVD INT8 KV Cache Compression.
+This PR adds native provider support for **Turing Engine** (`turing/*` model prefix), an OpenAI-compatible LLM serving runtime.
 
 ## Changes
 - Added `TuringEngineConfig` in `litellm/llms/turing_engine.py`.

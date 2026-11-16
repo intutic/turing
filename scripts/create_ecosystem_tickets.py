@@ -47,7 +47,7 @@ Introduce `ChatTuringEngine` into `langchain-community` for agentic loops and La
 
 ### Key Deliverables
 - [ ] Submit PR to `langchain-ai/langchain` (`libs/community/langchain_community/chat_models/turing.py`).
-- [ ] Support custom parameters: `sparsity_ratio`, `use_svd_kv`, and `speculative_draft_tokens`.
+- [ ] Support custom parameters: `sparsity_ratio` and `speculative_draft_tokens`.
 - [ ] Add end-to-end multi-agent LangGraph test case.
 
 ### Upstream Reference

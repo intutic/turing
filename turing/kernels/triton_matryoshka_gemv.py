@@ -1,7 +1,7 @@
 """
 Fused In-SRAM Triton GPU kernel for Matryoshka Parameter-Sliced Vocab GEMV (Turing Engine v1.5.0).
-Directly computes logits = x[:, :K] @ W[:K, :]^T without non-contiguous tensor slicing,
-delivering 2.1x faster speculative candidate logit projection.
+Directly computes logits = x[:, :K] @ W[:K, :]^T without non-contiguous tensor slicing.
+Serves the untrained Matryoshka draft heads in turing/core/speculation.py, which serving does not use.
 """
 
 import math

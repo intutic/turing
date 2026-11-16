@@ -56,3 +56,25 @@ def test_lru_policy_keeps_evicting_once_full():
         assert evicted == (0, e - 2)  # plain LRU: the oldest key goes
         assert cache.contains(0, e)
     assert cache.used_slots == 2
+
+
+@pytest.mark.parametrize("policy", ["lru", "lfru"])
+def test_allocate_pin_allocate_keeps_distinct_slots_and_hits(policy):
+    cache = _cache(4, policy)
+    first = cache.allocate_or_evict_slot(0, 1)[0]
+    cache.pin_experts([(0, 1)])
+    second = cache.allocate_or_evict_slot(0, 2)[0]
+    assert first is not None and second is not None and first != second
+    assert cache.get_slot(0, 1) == first and cache.get_slot(0, 2) == second
+    assert cache.hits == 2 and cache.used_slots == 2
+    _assert_slots_consistent(cache)
+
+
+def test_pinned_experts_are_never_evicted():
+    cache = _cache(2, "lru")
+    cache.allocate_or_evict_slot(0, 1)
+    cache.allocate_or_evict_slot(0, 2)
+    cache.pin_experts([(0, 1), (0, 2)])
+    assert cache.allocate_or_evict_slot(0, 3) == (None, None)
+    assert cache.contains(0, 1) and cache.contains(0, 2) and not cache.contains(0, 3)
+    _assert_slots_consistent(cache)

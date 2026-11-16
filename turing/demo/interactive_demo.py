@@ -18,8 +18,10 @@ def run_demo(
     sparsity: float = 0.0,
     prompt: str = "Explain how high-performance subspace inference accelerates LLM token generation in 3 bullet points."
 ):
+    if sparsity:
+        raise ValueError("the demo runs the HuggingFace model through transformers; --sparsity is not applied there")
     print("=" * 80)
-    print("   ⚡ TURING ENGINE: INTERACTIVE SUBSPACE INFERENCE DEMO")
+    print("   ⚡ TURING ENGINE: INTERACTIVE DEMO")
     print("=" * 80 + "\n")
 
     # 1. Resolve Model Identifier
@@ -33,23 +35,19 @@ def run_demo(
 
     print(f"[*] Initializing Turing Engine:")
     print(f"    • Model Target            : {target_model_id}")
-    print(f"    • Active Subspace Pruning : {sparsity * 100:.1f}% FFN Channels Bypassed")
     print(f"    • Compute Device Request  : {device.upper()}")
 
     # 2. Initialize Engine
-    engine = TuringAcceleratedGenerator(
-        model_id_or_instance=target_model_id,
-        sparsity_ratio=sparsity,
-        device=device
-    )
+    engine = TuringAcceleratedGenerator(model_id_or_instance=target_model_id, device=device)
     print(f"    • Active Compute Device   : {str(engine.device).upper()}\n")
 
     # 3. Run Benchmark Prompt
     print(f"[*] Input Prompt:\n    \"{prompt}\"\n")
-    print("⚡ Generating response with Turing Engine Subspace Acceleration...\n")
+    print("⚡ Generating response...\n")
 
     system_prompt = "You are a helpful, expert AI systems engineer."
-    output_text, elapsed_ms = engine.fast_generate(system_prompt, prompt, max_new_tokens=100)
+    res = engine.fast_generate(system_prompt, prompt, max_new_tokens=100)
+    output_text, elapsed_ms = res["response_text"], res["latency_ms"]
 
     print("=" * 80)
     print("   GENERATED RESPONSE")
@@ -64,13 +62,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Turing Engine Interactive Demo Runner")
     parser.add_argument("--model", type=str, default="smollm2", help="Model target (e.g. smollm2, gpt2)")
     parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
-    parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace sparsity ratio")
     parser.add_argument("--prompt", type=str, default="Explain how high-performance subspace inference accelerates LLM token generation in 3 bullet points.", help="Prompt to evaluate")
     args = parser.parse_args()
 
     run_demo(
         model_name=args.model,
         device=args.device,
-        sparsity=args.sparsity,
         prompt=args.prompt
     )

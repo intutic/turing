@@ -1,7 +1,9 @@
 """
-Manifold-Constrained Hyper-Connections (mHC) for Subspace Recirculation (DeepSeek V4 & arXiv:2512.24880).
-Projects multi-stream residual mappings onto the Birkhoff Polytope of Doubly Stochastic Matrices
-using Sinkhorn-Knopp normalization for provably non-expansive, stable belief state recurrence.
+Manifold-Constrained Hyper-Connections (mHC, arXiv:2512.24880) as a library block: n residual streams mixed by a
+matrix projected towards the doubly stochastic matrices (Birkhoff polytope) with Sinkhorn-Knopp iterations. An exact
+doubly stochastic matrix has spectral norm 1, so the mixing does not amplify the streams; the projection is only
+approximate after a finite number of iterations (tests/test_mhc_doubly_stochastic.py). No model this engine loads was
+trained with these blocks, and no training-stability effect is claimed.
 """
 
 from typing import Optional, Tuple
@@ -138,30 +140,23 @@ class ManifoldHyperConnection(nn.Module):
         layer_out = layer_fn(x_in)
 
         if streams.is_cuda and self.num_streams == 4:
-            try:
-                from ..kernels.triton_mhc_fuse import mhc_stream_mix_cuda
-                h_res = self.get_doubly_stochastic_res_map()
-                new_streams = mhc_stream_mix_cuda(streams, layer_out, h_res, self.raw_post_weights)
-                return new_streams, layer_out
-            except Exception:
-                pass
+            from ..kernels.triton_mhc_fuse import mhc_stream_mix_cuda
+            h_res = self.get_doubly_stochastic_res_map()
+            new_streams = mhc_stream_mix_cuda(streams, layer_out, h_res, self.raw_post_weights)
+            return new_streams, layer_out
 
-        if not streams.is_cuda and self.num_streams == 4:
-            try:
-                import turing.turing_csrc as turing_csrc
-                batch, seq_len, _, hidden_dim = streams.shape
-                s_np = streams.view(-1, 4, hidden_dim).detach().to(torch.float32).cpu().contiguous().numpy()
-                lup_np = layer_out.view(-1, hidden_dim).detach().to(torch.float32).cpu().contiguous().numpy()
-                alpha_np = F.softmax(self.raw_pre_weights, dim=0).detach().to(torch.float32).cpu().contiguous().numpy()
-                h_res = self.get_doubly_stochastic_res_map()
-                h_np = h_res.detach().to(torch.float32).cpu().contiguous().numpy()
-                beta_np = torch.sigmoid(self.raw_post_weights).detach().to(torch.float32).cpu().contiguous().numpy()
+        if HAS_CSRC and not streams.is_cuda and self.num_streams == 4:
+            batch, seq_len, _, hidden_dim = streams.shape
+            s_np = streams.view(-1, 4, hidden_dim).detach().to(torch.float32).cpu().contiguous().numpy()
+            lup_np = layer_out.view(-1, hidden_dim).detach().to(torch.float32).cpu().contiguous().numpy()
+            alpha_np = F.softmax(self.raw_pre_weights, dim=0).detach().to(torch.float32).cpu().contiguous().numpy()
+            h_res = self.get_doubly_stochastic_res_map()
+            h_np = h_res.detach().to(torch.float32).cpu().contiguous().numpy()
+            beta_np = torch.sigmoid(self.raw_post_weights).detach().to(torch.float32).cpu().contiguous().numpy()
 
-                _, s_out_np = turing_csrc.mhc_4stream_simd_cpu(s_np, lup_np, alpha_np, h_np, beta_np)
-                new_streams = torch.from_numpy(s_out_np).to(device=streams.device, dtype=streams.dtype).view(batch, seq_len, 4, hidden_dim)
-                return new_streams, layer_out
-            except Exception:
-                pass
+            _, s_out_np = turing_csrc.mhc_4stream_simd_cpu(s_np, lup_np, alpha_np, h_np, beta_np)
+            new_streams = torch.from_numpy(s_out_np).to(device=streams.device, dtype=streams.dtype).view(batch, seq_len, 4, hidden_dim)
+            return new_streams, layer_out
 
         # Step 3: Doubly stochastic residual stream mixing
         streams_mixed = self.res_map(streams)

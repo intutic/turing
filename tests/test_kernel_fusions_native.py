@@ -51,33 +51,6 @@ def test_matryoshka_quadtree_native_parity():
 
 
 @pytest.mark.skipif(not HAS_CSRC, reason="Requires native C++ turing_csrc extension")
-def test_svd_int8_quant_native_parity():
-    seq_len = 16
-    head_dim = 128
-    rank = 64
-
-    torch.manual_seed(42)
-    k_tensor = torch.randn(seq_len, head_dim, dtype=torch.float32)
-    u_proj = torch.randn(head_dim, rank, dtype=torch.float32)
-
-    k_np = k_tensor.numpy()
-    u_np = u_proj.numpy()
-
-    q_np, s_np = turing_csrc.fused_svd_int8_quant(k_np, u_np)
-    recon_np = turing_csrc.fused_int8_dequant_svd_recon(q_np, s_np, u_np)
-
-    # Reference PyTorch calculation
-    k_sub_ref = torch.matmul(k_tensor, u_proj)
-    scale_ref = torch.amax(torch.abs(k_sub_ref), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
-    q_ref = torch.clamp(torch.round(k_sub_ref / scale_ref), -128, 127).to(torch.int8)
-    recon_ref = torch.matmul(q_ref.to(torch.float32) * scale_ref, u_proj.t())
-
-    np.testing.assert_array_equal(q_np, q_ref.numpy())
-    np.testing.assert_allclose(s_np, scale_ref.numpy(), rtol=1e-5, atol=1e-5)
-    np.testing.assert_allclose(recon_np, recon_ref.numpy(), rtol=1e-4, atol=1e-4)
-
-
-@pytest.mark.skipif(not HAS_CSRC, reason="Requires native C++ turing_csrc extension")
 def test_ridge_forward_native_parity():
     n_tokens = 8
     in_dim = 512
@@ -102,24 +75,6 @@ def test_triton_matryoshka_fallback():
     out = matryoshka_sliced_gemv_triton(x, w, slice_width=256)
     out_ref = torch.matmul(x[..., :256], w[:, :256].t())
     torch.testing.assert_close(out, out_ref, rtol=1e-4, atol=1e-4)
-
-
-def test_triton_svd_paged_fallback():
-    from turing.kernels.triton_svd_paged import fused_svd_int8_quant_cuda, fused_int8_dequant_svd_recon_cuda
-    k = torch.randn(8, 128, dtype=torch.float32)
-    u_proj = torch.randn(128, 64, dtype=torch.float32)
-
-    q_int8, scale = fused_svd_int8_quant_cuda(k, u_proj)
-    recon = fused_int8_dequant_svd_recon_cuda(q_int8, scale, u_proj)
-
-    k_sub = torch.matmul(k, u_proj)
-    scale_ref = torch.amax(torch.abs(k_sub), dim=-1, keepdim=True).clamp(min=1e-5) / 127.0
-    q_ref = torch.clamp(torch.round(k_sub / scale_ref), -128, 127).to(torch.int8)
-    recon_ref = torch.matmul(q_ref.to(torch.float32) * scale_ref, u_proj.t())
-
-    torch.testing.assert_close(q_int8, q_ref)
-    torch.testing.assert_close(scale, scale_ref)
-    torch.testing.assert_close(recon, recon_ref, rtol=1e-4, atol=1e-4)
 
 
 def test_triton_cross_kv_fallback():
