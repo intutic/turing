@@ -1,0 +1,56 @@
+{
+  "script": "scripts/benchmark_cpp_engine.py",
+  "model": {
+    "hidden_dim": 1024,
+    "ffn_dim": 2816,
+    "num_layers": 8,
+    "num_heads": 16,
+    "num_kv_heads": 16,
+    "vocab_size": 8192,
+    "max_position_embeddings": 2048,
+    "dtype": "F16 GGUF (synthetic, seed 0), fp32 weights in the engine"
+  },
+  "env": {
+    "machine": "arm64",
+    "platform": "macOS-27.3-arm64-arm-64bit",
+    "processor": "arm",
+    "cpu": "Apple M4 Pro",
+    "compiler_flags": "-std=c++20 -O3 -flto -fvisibility=hidden (+ -mavx2 -mfma -mf16c on x86_64)",
+    "threads": 1,
+    "load_average_start": 14.083984375,
+    "load_average_end": 10.68603515625
+  },
+  "rows": [
+    {
+      "binary": "c547190",
+      "kv_cache_dtype": "native",
+      "prompt_tokens": 17,
+      "new_tokens": 256,
+      "n": 5,
+      "tok_s_median": 16.919690951269967,
+      "tok_s_mean": 16.908481654770956,
+      "tok_s_se": 0.015272804600558246
+    },
+    {
+      "binary": "current",
+      "kv_cache_dtype": "native",
+      "prompt_tokens": 17,
+      "new_tokens": 256,
+      "n": 5,
+      "tok_s_median": 125.60471802722088,
+      "tok_s_mean": 124.55305235929345,
+      "tok_s_se": 1.5857333886936362
+    },
+    {
+      "binary": "current",
+      "kv_cache_dtype": "int8",
+      "prompt_tokens": 17,
+      "new_tokens": 256,
+      "n": 5,
+      "tok_s_median": 113.57133033729797,
+      "tok_s_mean": 117.17132528743781,
+      "tok_s_se": 3.513037397278797
+    }
+  ],
+  "note": "tok/s = new tokens / wall time of generate (prefill of 17 tokens included), greedy; se over n runs."
+}

@@ -50,7 +50,7 @@
 #include "turing_json_fast_scan.hpp"
 #include "turing_chunked_decay.hpp"
 #include "turing_gguf_simd.hpp"
-#include "turing_io_uring.hpp"
+#include "turing_parallel_reader.hpp"
 #include "turing_cufile.hpp"
 #include "turing_safetensors_fast_header.hpp"
 #include "turing_traffic_manager.hpp"
@@ -1531,15 +1531,15 @@ PYBIND11_MODULE(turing_csrc, m) {
         return result;
     }, py::arg("data_bytes"), py::arg("ggml_type"), py::arg("shape"), "Native AVX2 SIMD GGUF Block Dequantizer");
 
-    // Tier 2: Native Async Ring Reader (io_uring / pread parallel queue)
-    py::class_<turing::NativeAsyncRingReader>(m, "NativeAsyncRingReader")
+    // Tier 2: parallel positional reader (io_uring when built with liburing, else pread / ReadFile threads)
+    py::class_<turing::ParallelReader>(m, "ParallelReader")
         .def(py::init<int, size_t>(), py::arg("num_workers") = 8, py::arg("queue_depth") = 64)
-        .def("read_exact", [](turing::NativeAsyncRingReader& self, const std::string& filepath, uint64_t file_offset, uint64_t num_bytes) -> py::bytes {
+        .def("read_exact", [](turing::ParallelReader& self, const std::string& filepath, uint64_t file_offset, uint64_t num_bytes) -> py::bytes {
             std::vector<uint8_t> buffer(num_bytes);
             self.read_exact(filepath, file_offset, num_bytes, buffer.data());
             return py::bytes(reinterpret_cast<const char*>(buffer.data()), num_bytes);
         }, py::arg("filepath"), py::arg("file_offset"), py::arg("num_bytes"))
-        .def("read_segments_parallel", [](turing::NativeAsyncRingReader& self, const std::string& filepath, 
+        .def("read_segments_parallel", [](turing::ParallelReader& self, const std::string& filepath, 
                                           const std::vector<uint64_t>& file_offsets, 
                                           const std::vector<uint64_t>& byte_lengths) -> py::bytes {
             uint64_t total_bytes = 0;
@@ -1559,7 +1559,7 @@ PYBIND11_MODULE(turing_csrc, m) {
             }
             return result;
         }, py::arg("filepath"), py::arg("file_offsets"), py::arg("byte_lengths"))
-        .def("read_segments_into", [](turing::NativeAsyncRingReader& self, const std::string& filepath,
+        .def("read_segments_into", [](turing::ParallelReader& self, const std::string& filepath,
                                       const std::vector<uint64_t>& file_offsets,
                                       const std::vector<uint64_t>& byte_lengths, py::buffer out) {
             // Segments land back to back in `out` (any writable C-contiguous buffer), with no extra copy.
@@ -1581,13 +1581,26 @@ PYBIND11_MODULE(turing_csrc, m) {
             self.read_segments_parallel(filepath, file_offsets, byte_lengths, dest_offsets, static_cast<uint8_t*>(info.ptr));
             return total_bytes;
         }, py::arg("filepath"), py::arg("file_offsets"), py::arg("byte_lengths"), py::arg("out"))
-        .def_property_readonly("num_workers", &turing::NativeAsyncRingReader::get_num_workers)
-        .def_property_readonly("queue_depth", &turing::NativeAsyncRingReader::get_queue_depth);
+        .def_property_readonly("num_workers", &turing::ParallelReader::get_num_workers)
+        .def_property_readonly("queue_depth", &turing::ParallelReader::get_queue_depth)
+        .def_property_readonly("backend", [](const turing::ParallelReader& self) { return std::string(self.backend()); });
+    m.attr("NativeAsyncRingReader") = m.attr("ParallelReader");  // pre-1.8 name
 
     // Tier 4: Native GDS Loader (GPUDirect Storage cuFile dynamic driver)
     py::class_<turing::NativeGDSLoader>(m, "NativeGDSLoader")
         .def(py::init<>())
         .def("is_available", &turing::NativeGDSLoader::is_available)
+        .def("has_cuda", &turing::NativeGDSLoader::has_cuda)
+        .def("read_to_device", [](turing::NativeGDSLoader& self, const std::string& filepath, uint64_t file_offset,
+                                  uint64_t num_bytes, uintptr_t dev_ptr, bool allow_cufile) {
+            turing::NativeGDSLoader::ReadResult r;
+            {
+                py::gil_scoped_release release;
+                r = self.read_to_device(filepath, file_offset, num_bytes, reinterpret_cast<void*>(dev_ptr), allow_cufile);
+            }
+            return py::make_tuple(r.bytes, r.path);
+        }, py::arg("filepath"), py::arg("file_offset"), py::arg("num_bytes"), py::arg("dev_ptr"), py::arg("allow_cufile") = true,
+           "Read file bytes into device memory at dev_ptr; returns (bytes_read, path) with path cufile, pinned_host_copy or no_cuda")
         .def("get_status_info", &turing::NativeGDSLoader::get_status_info);
 
     // Fast Safetensors Header Parser
@@ -1831,6 +1844,66 @@ PYBIND11_MODULE(turing_csrc, m) {
 
         return py::make_tuple(out_k, out_v);
     }, py::arg("gate"), py::arg("raw_k"), py::arg("raw_v"), "Fast SIMD gated zero-identity head forward pass");
+
+    // Engine SIMD kernels (turing_simd.hpp), exposed for parity tests against NumPy.
+    using f32arr = py::array_t<float, py::array::c_style | py::array::forcecast>;
+    using u8arr = py::array_t<uint8_t, py::array::c_style | py::array::forcecast>;
+    m.def("simd_backend", []() { return std::string(turing::simd_backend()); },
+          "SIMD path the extension was built with: avx2, neon or scalar");
+    m.def("simd_dot_f32", [](f32arr a, f32arr b) {
+        if (a.size() != b.size()) throw std::invalid_argument("length mismatch");
+        return turing::dot_f32(a.data(), b.data(), static_cast<size_t>(a.size()));
+    });
+    m.def("simd_gemv_f32", [](f32arr w, f32arr x) {
+        if (w.ndim() != 2 || w.shape(1) != x.size()) throw std::invalid_argument("w must be [M, K] with K == len(x)");
+        f32arr y(w.shape(0));
+        turing::gemv_f32(w.data(), x.data(), y.mutable_data(), static_cast<size_t>(w.shape(0)), static_cast<size_t>(w.shape(1)));
+        return y;
+    });
+    m.def("simd_softmax_f32", [](f32arr x) {
+        f32arr y(x.size());
+        std::memcpy(y.mutable_data(), x.data(), x.size() * sizeof(float));
+        turing::softmax_f32(y.mutable_data(), static_cast<size_t>(y.size()));
+        return y;
+    });
+    m.def("simd_rmsnorm_f32", [](f32arr x, f32arr w, float eps) {
+        if (x.size() != w.size()) throw std::invalid_argument("length mismatch");
+        f32arr y(x.size());
+        turing::rmsnorm_f32(x.data(), w.data(), y.mutable_data(), static_cast<size_t>(x.size()), eps);
+        return y;
+    });
+    m.def("simd_silu_mul_f32", [](f32arr gate, f32arr up) {
+        if (gate.size() != up.size()) throw std::invalid_argument("length mismatch");
+        f32arr y(gate.size());
+        std::memcpy(y.mutable_data(), gate.data(), gate.size() * sizeof(float));
+        turing::silu_mul_f32(y.mutable_data(), up.data(), static_cast<size_t>(y.size()));
+        return y;
+    });
+    m.def("simd_dot_f32_u8", [](f32arr a, u8arr codes) {
+        if (a.size() != codes.size()) throw std::invalid_argument("length mismatch");
+        return turing::dot_f32_u8(a.data(), codes.data(), static_cast<size_t>(a.size()));
+    });
+    m.def("simd_axpby_u8_f32", [](float a, float b, u8arr codes, f32arr y) {
+        if (y.size() != codes.size()) throw std::invalid_argument("length mismatch");
+        f32arr out(y.size());
+        std::memcpy(out.mutable_data(), y.data(), y.size() * sizeof(float));
+        turing::axpby_u8_f32(a, b, codes.data(), out.mutable_data(), static_cast<size_t>(out.size()));
+        return out;
+    });
+    m.def("simd_gemv_fp32_tile", [](f32arr x, f32arr w) {
+        if (w.ndim() != 2 || w.shape(1) != x.size()) throw std::invalid_argument("w must be [M, K] with K == len(x)");
+        f32arr y(w.shape(0));
+        std::fill(y.mutable_data(), y.mutable_data() + y.size(), 0.0f);
+        turing::gemv_fp32_tile(x.data(), w.data(), y.mutable_data(), static_cast<int>(w.shape(0)), static_cast<int>(w.shape(1)));
+        return y;
+    });
+    m.def("simd_gemv_int8_tile", [](u8arr x, py::array_t<int8_t, py::array::c_style | py::array::forcecast> w) {
+        if (w.ndim() != 2 || w.shape(1) != x.size()) throw std::invalid_argument("w must be [M, K] with K == len(x)");
+        py::array_t<int32_t> y(w.shape(0));
+        std::fill(y.mutable_data(), y.mutable_data() + y.size(), 0);
+        turing::gemv_int8_tile(x.data(), w.data(), y.mutable_data(), static_cast<int>(w.shape(0)), static_cast<int>(w.shape(1)));
+        return y;
+    });
 }
 
 

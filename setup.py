@@ -1,5 +1,7 @@
 import os
 import sys
+import glob
+import platform
 import sysconfig
 import subprocess
 from setuptools import setup, Extension, find_packages
@@ -10,20 +12,24 @@ class get_pybind_include:
         import pybind11
         return pybind11.get_include()
 
+# Instruction set by target CPU, not OS: x86_64 (Linux, Intel macOS, Windows) gets AVX2 + FMA + F16C;
+# arm64 / aarch64 gets NEON, which every 64-bit ARM core has, so it needs no flag.
+IS_X86 = platform.machine().lower() in ("x86_64", "amd64", "i386", "i686")
+
 if sys.platform == "win32":
-    # Windows MSVC compiler flags
+    # Windows MSVC compiler flags (/GL + /LTCG: whole-program optimisation, MSVC's LTO)
     extra_compile_args = [
         "/std:c++20",
         "/O2",
-        "/arch:AVX2",
+        "/GL",
         "/EHsc",
         "/bigobj",
         "/utf-8",
         "/DNOMINMAX",
         "/D_USE_MATH_DEFINES",
         "/D__restrict__=__restrict",
-    ]
-    extra_link_args = []
+    ] + (["/arch:AVX2"] if IS_X86 else [])
+    extra_link_args = ["/LTCG"]
 elif sys.platform == "darwin":
     # macOS Apple Clang flags
     extra_compile_args = [
@@ -33,7 +39,7 @@ elif sys.platform == "darwin":
         "-fvisibility=hidden",
         "-stdlib=libc++",
         "-mmacosx-version-min=10.15",
-    ]
+    ] + (["-mavx2", "-mfma", "-mf16c"] if IS_X86 else [])
     extra_link_args = [
         "-flto",
     ]
@@ -44,13 +50,27 @@ else:
         "-O3",
         "-flto",
         "-fvisibility=hidden",
-        "-mavx2",
-        "-mfma",
-    ]
+    ] + (["-mavx2", "-mfma", "-mf16c"] if IS_X86 else [])
     extra_link_args = [
         "-flto",
         "-Wl,--strip-all",
     ]
+
+
+def has_liburing() -> bool:
+    """liburing's header and library are installed (Linux): build the io_uring reader backend."""
+    if not sys.platform.startswith("linux"):
+        return False
+    import ctypes.util
+    include_dirs = [sysconfig.get_config_var("INCLUDEDIR") or "", "/usr/include", "/usr/local/include"]
+    header = any(os.path.exists(os.path.join(d, "liburing.h")) for d in include_dirs if d)
+    return header and ctypes.util.find_library("uring") is not None
+
+
+define_macros, libraries = [], []
+if has_liburing():
+    define_macros.append(("TURING_HAVE_LIBURING", "1"))
+    libraries.append("uring")
 
 class StripBuildExt(build_ext):
     """
@@ -77,6 +97,9 @@ ext_modules = [
     Extension(
         "turing.turing_csrc",
         sources=["csrc/pybind_bindings.cpp"],
+        depends=sorted(glob.glob("csrc/*.hpp")),  # header edits rebuild the extension
+        define_macros=define_macros,
+        libraries=libraries,
         include_dirs=[
             get_pybind_include(),
             "csrc",

@@ -26,6 +26,9 @@ jobs:
         include:
           - os: ubuntu-24.04
             python-version: '3.9'
+          # NEON build and full suite on Linux arm64
+          - os: ubuntu-24.04-arm
+            python-version: '3.12'
 
     steps:
       - name: Check out repository
@@ -41,7 +44,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang cmake
+          sudo apt-get install -y build-essential clang cmake liburing-dev
 
       - name: Install dependencies
         run: |
@@ -53,6 +56,46 @@ jobs:
         run: |
           python setup.py build_ext --inplace
 
+      - name: Build standalone turing-cli (CMake)
+        if: runner.os != 'Windows'
+        run: |
+          cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-cmake
+          ./build-cmake/bin/turing-cli info
+
       - name: Run Test Suite (Strict Warning Escalation)
         run: |
           pytest -v
+
+  # AVX2 build on Intel macOS. Build-only: PyTorch publishes no macOS x86_64 wheels past 2.2, older than the
+  # suite needs. (macos-13, the previous Intel image, is retired; macos-15-intel is its replacement.)
+  native-build-intel-mac:
+    name: Native build (macos-15-intel, AVX2)
+    runs-on: macos-15-intel
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build extension and turing-cli
+        run: |
+          python -m pip install --upgrade pip setuptools wheel pybind11 numpy
+          python setup.py build_ext --inplace
+          cmake -S . -B build-cmake -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-cmake
+
+      - name: Check the AVX2 path was compiled in
+        run: |
+          ./build-cmake/bin/turing-cli info | grep "SIMD backend: avx2"
+          python - <<'PY'
+          import glob, importlib.util
+          spec = importlib.util.spec_from_file_location("turing_csrc", glob.glob("turing/turing_csrc*.so")[0])
+          m = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          assert m.simd_backend() == "avx2", m.simd_backend()
+          print("extension SIMD backend:", m.simd_backend())
+          PY

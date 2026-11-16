@@ -10,26 +10,9 @@ import pytest
 from turing.models.gguf_loader import create_test_gguf_file, GGMLType
 
 
-import shutil
-
 @pytest.fixture(scope="module")
-def standalone_cli_binary():
-    os.makedirs("build", exist_ok=True)
-    binary_path = os.path.abspath("build/turing-cli")
-    
-    # Auto-detect g++ or clang++
-    cxx = os.environ.get("CXX")
-    if not cxx:
-        cxx = "g++" if shutil.which("g++") else "clang++"
-        
-    if not shutil.which(cxx):
-        pytest.skip(f"No C++ compiler ({cxx}) found on system")
-
-    cmd = [cxx, "-std=c++20", "-O3", "-I", "csrc", "csrc/turing_main.cpp", "-o", binary_path]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    if res.returncode != 0:
-        pytest.skip(f"C++ compiler failed to build standalone binary: {res.stderr}")
-    return binary_path
+def standalone_cli_binary(turing_cli_binary):
+    return turing_cli_binary
 
 
 @pytest.fixture(scope="module")
@@ -75,7 +58,7 @@ def test_turing_cli_generate(standalone_cli_binary, test_gguf_path):
 
 def test_turing_cli_rejects_prompt_longer_than_context(standalone_cli_binary, test_gguf_path):
     """A prompt past the KV cache length is an error, not an out-of-bounds read."""
-    prompt = " ".join(["<tok_1>"] * 600)  # the engine's context is 512 positions
+    prompt = " ".join(["<tok_1>"] * 600)  # the GGUF's context_length is 256 positions
     res = subprocess.run([standalone_cli_binary, "generate", "--model", test_gguf_path, "--prompt", prompt,
                           "--max-tokens", "2", "--temp", "0.0"], capture_output=True, text=True)
     assert res.returncode != 0
