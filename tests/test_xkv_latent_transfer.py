@@ -153,4 +153,4 @@ def test_multi_agent_coordinator_latent_deliberation():
     assert result["total_latency_ms"] > 0
     assert "audit_report" in result
     assert result["audit_report"]["audit_status"] == "PASSED"
-    assert "measured_speedup" in result
+    assert "measured_speedup" not in result  # it was a fixed 7.2x multiplier, never measured

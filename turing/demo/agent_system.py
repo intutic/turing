@@ -141,7 +141,9 @@ class MultiAgentCoordinator:
     ) -> Dict[str, Any]:
         """
         Zero-Token Inter-Agent Latent Deliberation using XKV Bridge & Auditable Semantic Inspector.
-        Skips text serialization to achieve 6.8x-8.2x lower latency with 100% auditable semantic logging.
+        Demo only: the source KV is torch.randn, the bridge is untrained, and the transferred KV is not passed to the
+        final generation, so no agent reads another's KV here and no speedup over text exchange is measured
+        (scripts/eval_debate.py and docs/measured-differentiators.md).
         """
         import time
         import torch
@@ -205,17 +207,12 @@ class MultiAgentCoordinator:
 
         total_latent_latency_ms = (time.perf_counter() - start_time) * 1000.0
 
-        # Comparative speedup estimation vs conventional text-to-text multi-agent serialization (200 tokens)
-        baseline_text_latency_ms = total_latent_latency_ms * 7.2
-
         return {
             "mode": "XKV_ZERO_TOKEN_LATENT_DELIBERATION",
             "scenario": user_scenario,
             "transfer_latency_ms": round(transfer_latency_ms, 2),
             "audit_latency_ms": round(audit_latency_ms, 2),
             "total_latency_ms": round(total_latent_latency_ms, 2),
-            "baseline_text_latency_ms": round(baseline_text_latency_ms, 2),
-            "measured_speedup": "7.2x faster than natural language message passing",
             "audit_report": audit_report,
             "final_response": final_gen["response_text"]
         }

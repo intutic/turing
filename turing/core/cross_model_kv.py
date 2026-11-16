@@ -27,6 +27,20 @@ class RoPEContentDecoupler:
     Allows linear Ridge mapping weights to be position-free and reusable across arbitrary context lengths.
     """
     @staticmethod
+    def _native(turing_csrc, k: torch.Tensor, base: float, inverse: bool) -> torch.Tensor:
+        """The native op takes [SeqLen, HeadDim] or [SeqLen, NumHeads, HeadDim] (any other rank is a silent no-op
+        there), so a [Batch, SeqLen, NumHeads, HeadDim] tensor goes through it one batch row at a time."""
+        k_cpu = k.detach().to(torch.float32).cpu().contiguous().numpy()
+        if k.ndim == 4:
+            out_np = np.stack([turing_csrc.fused_rope_transform(np.ascontiguousarray(row), base, 0, inverse)
+                               for row in k_cpu])
+        elif k.ndim == 2:
+            out_np = turing_csrc.fused_rope_transform(k_cpu, base, 0, inverse)
+        else:
+            raise ValueError(f"Unsupported tensor shape {tuple(k.shape)}")
+        return torch.from_numpy(out_np).to(device=k.device, dtype=k.dtype)
+
+    @staticmethod
     def strip_rope(k_rope: torch.Tensor, base: float = 500000.0) -> torch.Tensor:
         """
         k_rope: [Batch, SeqLen, NumHeads, HeadDim] or [SeqLen, HeadDim]
@@ -50,9 +64,7 @@ class RoPEContentDecoupler:
                 pass
 
         if HAS_CSRC and not k_rope.is_cuda:
-            k_cpu = k_rope.detach().to(torch.float32).cpu().contiguous().numpy()
-            out_np = turing_csrc.fused_rope_transform(k_cpu, base, 0, True)
-            return torch.from_numpy(out_np).to(device=k_rope.device, dtype=k_rope.dtype)
+            return RoPEContentDecoupler._native(turing_csrc, k_rope, base, True)
 
 
         orig_shape = k_rope.shape
@@ -98,9 +110,7 @@ class RoPEContentDecoupler:
                 HAS_CSRC = False
 
         if HAS_CSRC and not k_content.is_cuda:
-            k_cpu = k_content.detach().to(torch.float32).cpu().contiguous().numpy()
-            out_np = turing_csrc.fused_rope_transform(k_cpu, base, 0, False)
-            return torch.from_numpy(out_np).to(device=k_content.device, dtype=k_content.dtype)
+            return RoPEContentDecoupler._native(turing_csrc, k_content, base, False)
 
         orig_shape = k_content.shape
         if k_content.ndim == 2:
@@ -141,7 +151,8 @@ class ClosedFormRidgeMapper(nn.Module):
         target_heads: int,
         head_dim: int,
         top_k_source_layers: int = 8,
-        ridge_lambda: float = 0.01
+        ridge_lambda: float = 0.01,
+        source_head_dim: Optional[int] = None
     ):
         super().__init__()
         self.source_heads = source_heads
@@ -150,8 +161,8 @@ class ClosedFormRidgeMapper(nn.Module):
         self.top_k = top_k_source_layers
         self.ridge_lambda = ridge_lambda
 
-        # In_dim = top_k * source_heads * head_dim
-        self.in_dim = self.top_k * self.source_heads * self.head_dim
+        # In_dim = top_k * source_heads * source_head_dim (the source's head size may differ from the target's)
+        self.in_dim = self.top_k * self.source_heads * (source_head_dim or head_dim)
         self.out_dim = self.head_dim
 
         # Per-head weights and biases for K and V
@@ -235,23 +246,8 @@ class ClosedFormRidgeMapper(nn.Module):
         w = (self.w_k if is_key else self.w_v).to(device=x.device, dtype=x.dtype)
         b = (self.b_k if is_key else self.b_v).to(device=x.device, dtype=x.dtype)
 
-        try:
-            import turing.turing_csrc as turing_csrc
-            HAS_CSRC = True
-        except ImportError:
-            HAS_CSRC = False
-
-        if HAS_CSRC and not x.is_cuda:
-            x_flat = x.reshape(-1, self.in_dim).detach().to(torch.float32).cpu().contiguous().numpy()
-            w_flat = w.permute(1, 0, 2).reshape(self.in_dim, self.target_heads * self.out_dim).detach().to(torch.float32).cpu().contiguous().numpy()
-            b_flat = b.reshape(self.target_heads * self.out_dim).detach().to(torch.float32).cpu().contiguous().numpy()
-            out_np = turing_csrc.fused_ridge_forward(x_flat, w_flat, b_flat)
-            out_flat = torch.from_numpy(out_np).to(device=x.device, dtype=x.dtype)
-            out = out_flat.view(batch_size, seq_len, self.target_heads, self.out_dim)
-            if orig_ndim == 2:
-                return out.squeeze(0)
-            return out
-
+        # torch's GEMM, not turing_csrc.fused_ridge_forward: that native loop took 7 s for a 512 x 2560 x 2048 map
+        # on an M4 Pro that torch does in 4 ms on the CPU, with identical output
         # Reshape to standard GEMM for hardware compatibility across CPU, MPS, and CUDA
         w_flat = w.permute(1, 0, 2).reshape(self.in_dim, self.target_heads * self.out_dim)
         out_flat = torch.matmul(x.reshape(-1, self.in_dim), w_flat)
@@ -321,14 +317,16 @@ class CrossModelKVPipeline:
                 target_heads=target_config.num_kv_heads,
                 head_dim=target_config.head_dim,
                 top_k_source_layers=self.top_k,
-                ridge_lambda=ridge_lambda
+                ridge_lambda=ridge_lambda,
+                source_head_dim=source_config.head_dim
             )
             self.layer_mappers_v[l_idx] = ClosedFormRidgeMapper(
                 source_heads=source_config.num_kv_heads,
                 target_heads=target_config.num_kv_heads,
                 head_dim=target_config.head_dim,
                 top_k_source_layers=self.top_k,
-                ridge_lambda=ridge_lambda
+                ridge_lambda=ridge_lambda,
+                source_head_dim=source_config.head_dim
             )
 
     def select_source_layer_indices(self, target_layer_idx: int) -> List[int]:
@@ -343,6 +341,35 @@ class CrossModelKVPipeline:
         half_k = self.top_k // 2
         start = max(0, min(src_layers - self.top_k, center_src - half_k))
         return list(range(start, min(src_layers, start + self.top_k)))
+
+    def _features(self, stripped_keys: List[torch.Tensor], values: List[torch.Tensor], target_layer_idx: int
+                  ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Mapper inputs for one target layer: the selected source layers' (RoPE-stripped) K and V, each
+        [Batch, SeqLen, SrcKVHeads, HeadDim], concatenated per token -> [Batch, SeqLen, top_k * SrcKVHeads * HeadDim]."""
+        idx = self.select_source_layer_indices(target_layer_idx)
+        b, n = values[0].shape[:2]
+        return (torch.cat([stripped_keys[i].reshape(b, n, -1) for i in idx], dim=-1),
+                torch.cat([values[i].reshape(b, n, -1) for i in idx], dim=-1))
+
+    def fit(
+        self,
+        source_keys_by_layer: List[torch.Tensor],
+        source_values_by_layer: List[torch.Tensor],
+        target_keys_by_layer: List[torch.Tensor],
+        target_values_by_layer: List[torch.Tensor],
+    ) -> None:
+        """Fits every target layer's K and V maps (closed-form ridge) on paired calibration caches of the same tokens:
+        lists over layers of [Batch, SeqLen, KVHeads, HeadDim], keys with RoPE applied at positions 0 .. SeqLen - 1
+        (as stored in a cache); RoPE is stripped from both sides, so the K maps act in content space."""
+        sk = [RoPEContentDecoupler.strip_rope(k.float(), base=self.source_config.rope_theta) for k in source_keys_by_layer]
+        sv = [v.float() for v in source_values_by_layer]
+        for t_idx in range(self.target_config.num_layers):  # one target layer in fp32 at a time (inputs may be fp16)
+            k_feats, v_feats = self._features(sk, sv, t_idx)
+            tk = RoPEContentDecoupler.strip_rope(target_keys_by_layer[t_idx].float(), base=self.target_config.rope_theta)
+            tv = target_values_by_layer[t_idx].float()
+            h, d = self.target_config.num_kv_heads, self.target_config.head_dim
+            self.layer_mappers_k[t_idx].fit(k_feats.reshape(-1, k_feats.shape[-1]), tk.reshape(-1, h, d), is_key=True)
+            self.layer_mappers_v[t_idx].fit(v_feats.reshape(-1, v_feats.shape[-1]), tv.reshape(-1, h, d), is_key=False)
 
     def transfer_cache(
         self,
@@ -407,18 +434,8 @@ class CrossModelKVPipeline:
 
         # Step 2: Map each target layer
         for t_idx in range(self.target_config.num_layers):
-            selected_src_indices = self.select_source_layer_indices(t_idx)
-
             # Concatenate selected source layer features: [Batch, SeqLen, top_k * SrcKVHeads * HeadDim]
-            k_feats = torch.cat([
-                stripped_source_keys[s_idx].reshape(batch, seq_len, -1)
-                for s_idx in selected_src_indices
-            ], dim=-1)
-
-            v_feats = torch.cat([
-                src_vals_formatted[s_idx].reshape(batch, seq_len, -1)
-                for s_idx in selected_src_indices
-            ], dim=-1)
+            k_feats, v_feats = self._features(stripped_source_keys, src_vals_formatted, t_idx)
 
             # Apply per-head linear ridge map
             k_mapper = self.layer_mappers_k[t_idx]
@@ -559,7 +576,7 @@ class XKVLatentAgentBridge(nn.Module):
     """
     XKV Cross-Model Latent Agent Bridge (arXiv:2608.20617).
     Enables zero-token, sub-symbolic KV cache transfer between heterogeneous agents.
-    Provides 6.8x-8.2x lower latency than natural language message passing.
+    (The paper reports 6.8x-8.2x lower latency than text message passing; not measured in this repository.)
     """
     def __init__(
         self,
