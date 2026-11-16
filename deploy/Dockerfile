@@ -13,7 +13,8 @@ FROM python:3.11-slim
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir torch --index-url ${TORCH_INDEX}
 COPY --from=build /wheels /wheels
-RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels \
+# the llmd extra (pyzmq, msgpack) is what `turing serve --enable-kv-events` publishes with
+RUN pip install --no-cache-dir "$(ls /wheels/*.whl)[llmd]" && rm -rf /wheels \
     && useradd --create-home turing
 USER turing
 WORKDIR /home/turing

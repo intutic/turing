@@ -76,6 +76,11 @@ def main():
     serve_parser.add_argument("--no-cuda-graphs", action="store_true", help="Run decode steps eagerly instead of replaying CUDA graphs")
     serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=0.6, help="Share of free GPU memory (after the weights) for the paged KV pool (default: 0.6)")
     serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
+    serve_parser.add_argument("--embedding-model", type=str, default=None, help="HF embedding model (e.g. BAAI/bge-small-en-v1.5) for /v1/embeddings; default: the served model's mean-pooled hidden states")
+    serve_parser.add_argument("--rerank-model", type=str, default=None, help="HF cross-encoder (e.g. cross-encoder/ms-marco-MiniLM-L-6-v2) for /v1/rerank; default: the served model's yes/no likelihood")
+    serve_parser.add_argument("--draft-tokens", type=int, default=4, help="Prompt-lookup speculative draft tokens per step while few requests decode (0 = off)")
+    serve_parser.add_argument("--no-prefix-caching", action="store_true", help="Disable automatic prefix caching")
+    serve_parser.add_argument("--lora", action="append", default=[], metavar="NAME=PATH", help="Load a PEFT LoRA adapter (repeatable); select it per request with model 'base:NAME' or X-Turing-Adapter")
     serve_parser.add_argument("--enable-kv-events", action="store_true", help="Enable ZeroMQ KV block event publisher for llm-d EPP prefix cache routing")
     serve_parser.add_argument("--kv-events-pub-port", type=int, default=5556, help="ZeroMQ PUB port for live KV cache block events (default: 5556)")
     serve_parser.add_argument("--kv-events-replay-port", type=int, default=5559, help="ZeroMQ ROUTER port for KV cache event replay (default: 5559)")
@@ -278,7 +283,15 @@ def main():
             dist_driver = DistributedInferenceDriver(model=model_inst, config=cfg, dist_config=dist_cfg)
             print(f"[+] Initialized DistributedInferenceDriver (TP: {tp_size}, PP: {pp_size})")
 
-        engine = ContinuousBatchEngine(cfg, jcfg, model=model_inst, tokenizer=tokenizer_inst, dist_driver=dist_driver)
+        for spec in args.lora:
+            from .models.adapters import load_lora_adapter
+            name, _, path = spec.partition("=")
+            if not path or model_inst is None:
+                raise SystemExit(f"[!] --lora takes NAME=PATH and real weights, got '{spec}'")
+            load_lora_adapter(model_inst, name, path)
+            print(f"[+] Loaded LoRA adapter '{name}' from {path}")
+        engine = ContinuousBatchEngine(cfg, jcfg, model=model_inst, tokenizer=tokenizer_inst, dist_driver=dist_driver,
+                                       prefix_caching=not args.no_prefix_caching, draft_tokens=args.draft_tokens)
 
         kv_pub = None
         if getattr(args, "enable_kv_events", False) or os.getenv("ENABLE_KV_EVENTS", "0").lower() in ("1", "true", "yes"):
@@ -297,7 +310,7 @@ def main():
             )
             print(f"[+] Initialized llm-d KVBlockEventPublisher on {kv_pub.pub_endpoint} (topic: {kv_pub.topic})")
 
-        app = create_app(engine, kv_publisher=kv_pub)
+        app = create_app(engine, kv_publisher=kv_pub, embedding_model=args.embedding_model, rerank_model=args.rerank_model)
         print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} (Model: {cfg.name}, Device: {dev})")
         uvicorn.run(app, host=args.host, port=args.port)
 

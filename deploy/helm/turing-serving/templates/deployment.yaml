@@ -16,6 +16,12 @@ spec:
       app: turing-serving
   template:
     metadata:
+      {{- if .Values.prometheus.enabled }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: {{ .Values.prometheus.path | quote }}
+        prometheus.io/port: {{ .Values.prometheus.port | quote }}
+      {{- end }}
       labels:
         app: turing-serving
         {{- if .Values.llmd.enabled }}
@@ -48,7 +54,14 @@ spec:
             - "--host"
             - "0.0.0.0"
             - "--port"
-            - "8000"
+            - "{{ .Values.service.port }}"
+            {{- if and .Values.llmd.enabled .Values.llmd.kvEvents.enabled }}
+            - "--enable-kv-events"
+            - "--kv-events-pub-port"
+            - "{{ .Values.llmd.kvEvents.pubPort }}"
+            - "--kv-events-replay-port"
+            - "{{ .Values.llmd.kvEvents.replayPort }}"
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

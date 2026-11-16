@@ -17,7 +17,6 @@ import numpy as np
 
 # Core Imports
 from turing.serving.traffic import AdaptiveComputeBatcher, KVMemoryEstimator, PrefixHashRouter, LanePolicy, Lane
-from turing.serving.multi_model import ElasticMultiModelManager, TaskType
 from turing.serving.spec_gate import SpeculationGatePolicy, SpecExactParityVerifier
 from turing.core.expert_cache import RoutingHistoryTracker, GPULRUExpertCache
 from turing.core.kslot_pooling import KSlotCachePooler, GatedZeroIdentityHead, GateSkipPolicy
@@ -280,56 +279,6 @@ def run_suite_2_hybrid_memory(device: str) -> Dict[str, Any]:
     return suite_res
 
 
-def run_suite_3_multi_model(device: str) -> Dict[str, Any]:
-    print("\n" + "=" * 90)
-    print(f" [SUITE 3] Single-GPU Elastic Multi-Model Pipeline Co-Residency ({device.upper()})")
-    print("=" * 90)
-    suite_res = {}
-
-    manager = ElasticMultiModelManager(vram_budget_bytes=24 * 1024**3, device=device)
-
-    # Register 5 models in co-residency
-    manager.register_model("bge-m3", TaskType.EMBEDDING, estimated_vram_bytes=int(1.1 * 1024**3))
-    manager.register_model("bge-reranker-large", TaskType.RERANK, estimated_vram_bytes=int(1.3 * 1024**3))
-    manager.register_model("gliner-base", TaskType.EXTRACT, estimated_vram_bytes=int(0.6 * 1024**3))
-    manager.register_model("docling-parse", TaskType.EXTRACT, estimated_vram_bytes=int(1.2 * 1024**3))
-    manager.register_model("qwen-7b-distill", TaskType.GENERATE, estimated_vram_bytes=int(3.2 * 1024**3))
-
-    stats = manager.stats
-    total_vram_gb = sum(meta.estimated_vram_bytes for meta in manager.registry.values()) / (1024**3)
-    print(f"  * Sum of declared VRAM estimates (not measured; models are placeholders) : {total_vram_gb:.2f} GB")
-
-    # End-to-End Pipeline Execution
-    sample_text = "Turing Engine delivers 4x lower TCO by serving embeddings, reranking, and generation on 1 GPU."
-    sample_docs = [
-        "Turing Engine is an open-source inference system.",
-        "vLLM requires one GPU per model architecture.",
-        "Elastic multi-model pipelines share weights and KV buffers."
-    ]
-    sample_labels = ["Turing Engine", "1 GPU", "TCO"]
-
-    sync_device(device)
-    t0 = time.perf_counter()
-    for _ in range(20):
-        emb = manager.encode("bge-m3", [sample_text])
-        ranked = manager.score("bge-reranker-large", sample_text, sample_docs)
-        extracted = manager.extract("gliner-base", sample_text, sample_labels)
-    sync_device(device)
-    t_pipe = (time.perf_counter() - t0) / 20.0 * 1000.0
-
-    embed_dim = len(emb[0]) if isinstance(emb, list) and emb else (emb.shape[-1] if hasattr(emb, "shape") else 1024)
-
-    suite_res["multi_model_pipeline"] = {
-        "total_vram_gb": round(total_vram_gb, 2),
-        "pipeline_latency_ms": round(t_pipe, 2),
-        "embed_dim": embed_dim,
-        "reranked_top1_score": round(ranked[0]["score"], 4) if ranked else 0.0,
-        "extracted_spans": len(extracted),
-    }
-    print(f"  * End-to-End 5-Stage Pipeline Latency : {t_pipe:.2f} ms")
-    return suite_res
-
-
 def run_suite_4_speculation_and_traffic(device: str) -> Dict[str, Any]:
     print("\n" + "=" * 90)
     print(f" [SUITE 4] Speculative Decoding & Traffic Gating Telemetry ({device.upper()})")
@@ -421,7 +370,6 @@ def main():
 
     master_results["suites"]["suite_1_kernel_fusions"] = run_suite_1_kernel_fusions(device)
     master_results["suites"]["suite_2_hybrid_memory"] = run_suite_2_hybrid_memory(device)
-    master_results["suites"]["suite_3_multi_model"] = run_suite_3_multi_model(device)
     master_results["suites"]["suite_4_speculation_and_traffic"] = run_suite_4_speculation_and_traffic(device)
     master_results["suites"]["suite_5_cross_kv_and_lineage"] = run_suite_5_cross_kv_and_lineage(device)
 

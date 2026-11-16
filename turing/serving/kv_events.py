@@ -5,7 +5,6 @@ enabling llm-d's EPP router to build a live prefix-cache affinity index for Turi
 """
 
 import struct
-import json
 import time
 import hashlib
 import threading
@@ -13,6 +12,7 @@ from collections import deque
 from typing import List, Optional, Dict, Any
 
 try:
+    import msgpack
     import zmq
     HAS_ZMQ = True
 except ImportError:
@@ -37,14 +37,21 @@ def deterministic_block_hash(token_ids: List[int], seed: int = 0) -> int:
 
 class KVBlockEventPublisher:
     """
-    Publishes KV cache block events over ZeroMQ matching the llm-d wire protocol.
+    Publishes KV cache block events over ZeroMQ in vLLM's wire format, which llm-d's KV-cache indexer reads
+    (vllm/distributed/kv_events.py, ZmqEventPublisher):
 
-    Transport topology:
-    - PUB socket (default tcp://*:5556): Live event stream
-    - ROUTER socket (default tcp://*:5559): Replay buffer for EPP recovery
+    - PUB socket (default tcp://*:5556): multipart (topic, sequence number as 8 big-endian bytes, payload), the
+      payload a msgpack array [timestamp, [event, ...]] with each event a tagged array:
+      ["BlockStored", block_hashes, parent_block_hash, token_ids, block_size, lora_id, medium, lora_name],
+      ["BlockRemoved", block_hashes, medium] or ["AllBlocksCleared"].
+    - ROUTER socket (default tcp://*:5559): a request (client id, b"", start sequence as 8 big-endian bytes) is
+      answered with every buffered message from that sequence on, (client id, b"", topic, seq, payload), then
+      (client id, b"", b"", -1 as 8 signed big-endian bytes, b"").
 
-    Topic format: kv@<POD_IP>:<POD_PORT>@<MODEL_NAME>
+    Topic: kv@<POD_IP>:<POD_PORT>@<MODEL_NAME> (llm-d reads the pod and the model from it).
     """
+
+    END_SEQ = (-1).to_bytes(8, "big", signed=True)
 
     def __init__(
         self,
@@ -55,16 +62,21 @@ class KVBlockEventPublisher:
         replay_endpoint: str = "tcp://*:5559",
         replay_buffer_size: int = 10000,
         block_size: int = 16,  # the KV pool's page size
+        medium: str = "GPU",
     ):
+        if not HAS_ZMQ:
+            raise RuntimeError("KV events need pyzmq and msgpack: pip install 'turing-engine[llmd]'")
         self.model_name = model_name
         self.pod_ip = pod_ip
         self.pod_port = pod_port
         self.pub_endpoint = pub_endpoint
         self.replay_endpoint = replay_endpoint
         self.block_size = block_size
+        self.medium = medium
         self.topic = f"kv@{pod_ip}:{pod_port}@{model_name}"
 
-        self._replay_buffer: deque = deque(maxlen=replay_buffer_size)
+        self._replay_buffer: deque = deque(maxlen=replay_buffer_size)  # (seq, payload)
+        self._seq = 0
         self._started = False
         self._lock = threading.Lock()
 
@@ -78,9 +90,6 @@ class KVBlockEventPublisher:
         if self._started:
             return
         self._started = True
-
-        if not HAS_ZMQ:
-            return
 
         self._ctx = zmq.Context()
 
@@ -100,6 +109,9 @@ class KVBlockEventPublisher:
     def stop(self):
         """Close ZMQ sockets and context."""
         self._started = False
+        if self._replay_thread is not None:
+            self._replay_thread.join(timeout=2)
+            self._replay_thread = None
         if self._pub_socket is not None:
             self._pub_socket.close(linger=100)
             self._pub_socket = None
@@ -113,87 +125,55 @@ class KVBlockEventPublisher:
     def on_block_stored(
         self,
         block_hashes: List[int],
-        parent_hash: int,
+        parent_hash: Optional[int],
         token_ids: List[int],
-        tier: str = "gpu",
         lora_name: Optional[str] = None,
     ):
-        """Publish a BlockStored event when new KV blocks are cached."""
-        event = {
-            "type": "BlockStored",
-            "block_hashes": block_hashes,
-            "parent_hash": parent_hash,
-            "token_ids": token_ids,
-            "tier": tier,
-            "timestamp": time.time(),
-        }
-        if lora_name:
-            event["lora_name"] = lora_name
-        self._publish(event)
+        """Publish a BlockStored event: full blocks of block_size tokens newly cached, token_ids their tokens in
+        order, parent_hash the block before the first (None at the start of a sequence)."""
+        self._publish(["BlockStored", list(block_hashes), parent_hash, list(token_ids), self.block_size, None,
+                       self.medium, lora_name])
 
-    def on_block_removed(
-        self,
-        block_hashes: List[int],
-        tier: str = "gpu",
-    ):
+    def on_block_removed(self, block_hashes: List[int]):
         """Publish a BlockRemoved event when KV blocks are evicted."""
-        event = {
-            "type": "BlockRemoved",
-            "block_hashes": block_hashes,
-            "tier": tier,
-            "timestamp": time.time(),
-        }
-        self._publish(event)
+        self._publish(["BlockRemoved", list(block_hashes), self.medium])
 
     def on_all_blocks_cleared(self):
         """Publish an AllBlocksCleared event (e.g., on model reload)."""
-        event = {
-            "type": "AllBlocksCleared",
-            "timestamp": time.time(),
-        }
-        self._publish(event)
+        self._publish(["AllBlocksCleared"])
 
-    def _publish(self, event: Dict[str, Any]):
-        """Serialize and publish event on PUB socket, buffer for replay."""
-        payload = json.dumps(event).encode("utf-8")
+    def _publish(self, event: list):
+        """Serialize one event as a batch, publish it on the PUB socket and buffer it for replay."""
+        payload = msgpack.packb([time.time(), [event]])
         with self._lock:
-            self._replay_buffer.append(payload)
+            seq = self._seq
+            self._seq += 1
+            self._replay_buffer.append((seq, payload))
 
-        if not self._started or self._pub_socket is None or not HAS_ZMQ:
+        if not self._started or self._pub_socket is None:
             return
-
-        topic_bytes = self.topic.encode("utf-8")
         try:
-            self._pub_socket.send_multipart([topic_bytes, payload], flags=zmq.NOBLOCK)
-        except Exception:
+            self._pub_socket.send_multipart([self.topic.encode(), seq.to_bytes(8, "big"), payload],
+                                            flags=zmq.NOBLOCK)
+        except zmq.ZMQError:
             pass  # Drop event if HWM exceeded rather than blocking
 
-
     def _replay_listener(self):
-        """Background thread serving replay requests from EPP on ROUTER socket."""
+        """Background thread serving replay requests on the ROUTER socket."""
         while self._started and self._replay_socket is not None:
             try:
-                if self._replay_socket.poll(timeout=500):
-                    frames = self._replay_socket.recv_multipart()
-                    if len(frames) >= 2:
-                        identity = frames[0]
-                        # Replay all buffered events
-                        with self._lock:
-                            events = list(self._replay_buffer)
-                        for payload in events:
-                            try:
-                                self._replay_socket.send_multipart(
-                                    [identity, b"", payload], flags=zmq.NOBLOCK
-                                )
-                            except zmq.ZMQError:
-                                break
-                        # Send end-of-replay marker
-                        try:
-                            self._replay_socket.send_multipart(
-                                [identity, b"", b"END_REPLAY"], flags=zmq.NOBLOCK
-                            )
-                        except zmq.ZMQError:
-                            pass
+                if not self._replay_socket.poll(timeout=100):
+                    continue
+                frames = self._replay_socket.recv_multipart()
+                if len(frames) != 3:
+                    continue
+                identity, start = frames[0], int.from_bytes(frames[2], "big")
+                with self._lock:
+                    events = [(s, p) for s, p in self._replay_buffer if s >= start]
+                for seq, payload in events:
+                    self._replay_socket.send_multipart(
+                        [identity, b"", self.topic.encode(), seq.to_bytes(8, "big"), payload])
+                self._replay_socket.send_multipart([identity, b"", b"", self.END_SEQ, b""])
             except zmq.ZMQError:
                 if not self._started:
                     break
@@ -201,6 +181,26 @@ class KVBlockEventPublisher:
     @property
     def is_active(self) -> bool:
         return self._started and HAS_ZMQ
+
+
+def attach_kv_events(engine, publisher: KVBlockEventPublisher) -> None:
+    """Publish the engine's prefix-cache changes: pages indexed (BlockStored, with their chained hashes, the hash of
+    the page before, their token ids), pages evicted (BlockRemoved) and the index cleared (AllBlocksCleared)."""
+    if engine.prefix_cache is None:
+        raise ValueError("KV events need the engine's prefix cache, which is off (distributed serving or "
+                         "prefix_caching=False)")
+    publisher.block_size = engine.kv_pool.page_size
+
+    def on_event(kind, hashes, parent, token_ids):
+        if kind == "stored":
+            # parent 0 is the root of a sequence; with a LoRA adapter the root is that adapter's hash
+            publisher.on_block_stored(hashes, parent or None, token_ids)
+        elif kind == "removed":
+            publisher.on_block_removed(hashes)
+        else:  # "cleared"
+            publisher.on_all_blocks_cleared()
+
+    engine.prefix_cache.on_event = on_event
 
 
 def tokenids_to_block_hashes(
