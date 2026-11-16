@@ -111,7 +111,7 @@ python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M --setti
   --contexts 1024,2048,4096,8192,16384,32768 --batches 1,8,64 --quest-min-tokens 0
 ```
 
-> **About the earlier NIAH section.** `scripts/stress_test_niah_breaking_point.py` quantizes one 512-token page of random vectors per row; the "context length" only labelled the row, and no model was involved. Its 1,000,000-token and rank-table claims were removed; the script now says what it tests.
+> **About the earlier NIAH section.** `scripts/stress_test_niah_breaking_point.py` quantized one 512-token page of random vectors per row; the "context length" only labelled the row, and no model was involved. Its 1,000,000-token and rank-table claims were removed, and the script was deleted in v2.0; `turing eval-niah` now runs pass-key retrieval through the engine on real weights.
 
 ---
 

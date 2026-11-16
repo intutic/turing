@@ -11,7 +11,8 @@ as a non-root user (`turing`); arguments after the image name are passed to `tur
 | `ghcr.io/intutic/turing:<version>-cuda` | linux/amd64 | PyTorch for CUDA 12.8 |
 
 `<version>` is the release tag, for example `v2.0.0`; `latest` and `latest-cuda` follow the newest release. The
-release workflow (`.github/workflows/release.yml`) publishes them when a version tag is pushed.
+release workflow (`.github/workflows/release.yml`) publishes them when a version tag is pushed. No release has been
+published with this workflow yet, so until one is, build the image locally (below).
 
 ## CPU
 

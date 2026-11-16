@@ -1,5 +1,5 @@
 site_name: Turing Engine
-site_description: High-Performance Frontier LLM Serving Runtime for Sub-24GB Hardware
+site_description: Inference server with HuggingFace-exact logits, a paged int8/int4 KV cache and OpenAI, Anthropic and Ollama APIs
 site_author: Ishan Gupta
 site_url: https://intutic.github.io/turing/
 repo_url: https://github.com/intutic/turing
@@ -55,7 +55,6 @@ markdown_extensions:
       permalink: true
 
 extra_javascript:
-  - https://polyfill.io/v3/polyfill.min.js?features=es6
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
 nav:

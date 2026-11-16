@@ -37,7 +37,7 @@ python setup.py build_ext --inplace
 ## 🧪 Testing & Verification
 
 We enforce strict test cleanliness. All pull requests must pass the full test suite with **zero warnings**
-(383 tests; 18 need CUDA and skip elsewhere):
+(667 tests; 49 need CUDA and skip elsewhere):
 
 ```bash
 # Run the complete test suite with strict warning escalation
@@ -70,7 +70,9 @@ on `sys.path`). New scripts must do the same.
 
 ### C++ (`csrc/`)
 - All C++ code must adhere to **C++20** standards.
-- Maintain **64-byte alignment** for all SIMD vector loads (`posix_memalign`, `_mm256_load_ps`, `_mm256_fmadd_ps`).
+- Allocate buffers you own with `make_aligned` / `aligned_alloc_64` (`csrc/turing_simd.hpp`, 64-byte aligned). SIMD
+  kernels use unaligned loads (`_mm256_loadu_ps`, `vld1q_f32`) and scalar tails, so they must stay correct on any
+  pointer and length passed from Python.
 - Native extensions must be built with `-fvisibility=hidden` and Link-Time Optimization (LTO).
 
 ### Triton GPU Kernels (`turing/kernels/`)
@@ -84,7 +86,7 @@ on `sys.path`). New scripts must do the same.
 1. **Fork the Repository**: Create a personal fork on GitHub.
 2. **Create a Feature Branch**: `git checkout -b feature/my-new-kernel`
 3. **Implement Your Changes**: Keep commits focused and provide clear, descriptive commit messages.
-4. **Verify Tests**: Run `python -W error -m pytest -v` and ensure all 383 tests pass cleanly (18 need CUDA).
+4. **Verify Tests**: Run `python -W error -m pytest -v` and ensure all 667 tests pass cleanly (49 need CUDA).
 5. **Submit PR**: Open a pull request against the `master` branch of `intutic/turing`. Include:
    - A clear summary of the motivation and changes.
    - Any benchmark results or hardware specifications (e.g. tested on NVIDIA L4 or Apple M3 Max).

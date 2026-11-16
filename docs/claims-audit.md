@@ -157,3 +157,53 @@ None of these was added to the benchmarks page, because none measures the engine
 * **Library bugs found in passing** (they affect what scripts measure, not what the docs now say): `turing/kernels/triton_vram_hash.py:33` converts floats to int instead of bitcasting. Fixed in v2.0 (W0): TTFT and inter-token times are now stamped after the forward pass and sample, percentiles are `null` until there are two samples (never the mean in their place), and the never-launched `triton_sparse_subspace_prefill.py` was deleted.
 * **Other pages that repeated removed numbers**: `docs/architecture.md`, `docs/serving.md` and the top-level `ARCHITECTURE.md` were cleaned in a follow-up commit (numbers removed or pointed at the measured sections, components marked experimental), except the ingest Tier 1–5 bullets in `docs/architecture.md` §19, which the offload-fixes branch rewrites with cold-measured numbers. Scripts not cited by these pages also print unverified claims, for example `benchmark_multi_gpu_mig.py` "partitions" an L4 into MIG slices (the L4 does not support MIG) and `benchmark_extended_matrix.py` computes VRAM as `fp16 × 0.166`.
 * **GPU re-measurement**: nothing here was re-run on an L4; GPU runs need the owner's approval.
+
+---
+
+## Re-audit for v2.0 (2026-11-16)
+
+The capability statements and placeholders the audit above found false at `f936008` were either implemented in v2.0
+or removed. Each row names the state at this commit and the test that checks it (`tests/…`). Numbers removed above
+stay removed; v2.0 adds no performance number without a committed result.
+
+| Previously false or placeholder | Now | Evidence |
+| :--- | :--- | :--- |
+| Exact parity for Llama-family only; "any open-weight model" | Implemented for 16 HF model types (25 configurations), everything else refused before download | `test_hf_parity.py` |
+| Qwen2/Qwen3/Llama-3 RoPE scaling not mapped; other RoPE types refused | default, linear, dynamic, YaRN, LongRoPE, Llama 3 and proportional implemented | `test_hf_parity.py`, `test_gguf_parity.py::test_gguf_llama3_rope_scaling_matches_hf` |
+| No MoE loader path | Mixtral, Qwen2-MoE, Qwen3-MoE and OLMoE load from HF and GGUF | `test_hf_parity.py`, `test_gguf_parity.py::test_gguf_matches_hf_logits` |
+| GGUF loader without a parity test (Q4_0 nibble order wrong) | Exact dequantization of 14 types in Python and C++, q/k un-permutation, strict loading; 13 real files against llama.cpp | `test_gguf_parity.py`, `results_gguf_parity_mps.json` |
+| `.tgate4` int4 weights "not wired"; `torch.randn` exporter and warm-up loader | `turing convert` (GPTQ/RTN, layer by layer), `.tgate4` v2, `QuantLinear` in serving | `test_w4a16.py`, `test_static_pool_and_streaming.py::test_streaming_conversion_matches_in_memory_quantization` |
+| 70B on one 24 GB GPU | Removed. fp16 70B weights are about 141 GB; 4-bit projections still do not fit 24 GB | — |
+| `/v1/embeddings` random vectors | Served LLM mean-pooled hidden states or `--embedding-model` | `test_side_endpoints.py::test_llm_embeddings_endpoint`, `::test_embedding_model_paraphrases_are_closer` |
+| `/v1/rerank` word overlap | Cross-encoder (`--rerank-model`) or the served LLM's P(yes) | `test_side_endpoints.py::test_rerank_with_cross_encoder`, `::test_rerank_with_served_llm` |
+| `/v1/extract` substring match with a fixed score | LLM JSON extraction, spans located in the text, 422 on non-JSON output | `test_side_endpoints.py::test_extract_with_instruct_model`, `::test_extract_refuses_non_json_output` |
+| Five-model pipeline (`ElasticMultiModelManager`, `--enable-multi-model`) | Removed (the flag never existed) | — |
+| Structured output by prompt injection and bracket repair | Token-level constrained decoding with llguidance; 400 when it cannot be enforced | `test_generation_api.py::test_json_schema_output_is_always_valid_on_random_weights`, `::test_structured_output_without_tokenizer_or_llguidance_is_a_400` |
+| Tool calls parsed from prompt-injected schemas | Chat-template tools; Hermes, Mistral and Llama 3 parsers; `tool_choice` enforced by grammar | `test_generation_api.py::test_tool_call_parsers`, `::test_tool_choice_required_and_named_are_enforced` |
+| `X-Turing-Sparsity`, `X-Turing-SVD-*`, `use_svd_kv`, `sparsity_ratio` echoed back with no effect | Rejected with 400; response headers report real values | `test_serving_headers.py::test_removed_per_request_knobs_are_rejected`, `test_generation_api.py::test_removed_knobs_are_400_and_headers_report_real_values` |
+| Multi-tenant LoRA (a random rank-8 adapter on the final hidden state) | PEFT adapters per layer, mixed per batch row | `test_lora_adapters.py` |
+| Prefix caching "not in the serving path" | Automatic prefix caching in the engine | `test_engine_generation.py::test_prefix_cache_reuses_pages_and_gives_identical_output` |
+| DSL branches re-prefill the prefix | `fork()` prefills once; branches continue the shared KV | `test_dsl_primitives.py::test_fork_prefills_the_prefix_once_and_branches_equal_sequential_greedy` |
+| Speculative parity verifier compared two literal lists; spec gate flipped a flag | Prompt-lookup speculation in the engine, exact for greedy and sampling (speed not measured) | `test_engine_generation.py::test_greedy_engine_output_equals_plain_decoding_with_and_without_speculation`, `::test_sampled_speculation_keeps_the_output_distribution` |
+| Every rejection reported as 429; admission and lanes off unless configured | 503 (pool full or shed) / 429 (queued) with `Retry-After`, 400 for requests that never fit; on by default | `test_serving_and_api.py::test_rejections_return_400_429_503_with_retry_after`, `test_generation_api.py::test_lanes_order_waiting_requests_and_show_in_metrics` |
+| TP/PP "building blocks; pipeline stages in one process; TP not applied to loaded models" | Real TP and PP over `torch.distributed` (CPU gloo tested; no NCCL run) | `test_distributed_inference.py::test_parallel_logits_match_single_process`, `::test_engine_on_rank0_drives_tp2_x_pp2_workers` |
+| P/D disaggregation with an SVD wire codec | KV pages in the pool's storage format over TCP | `test_kv_transfer.py` |
+| llm-d integration with SVD network transfer and "CNCF Sandbox" | KV events in vLLM's msgpack format from the prefix cache; no CNCF claim | `test_kv_events.py::test_engine_prefix_cache_events_reach_a_zmq_subscriber` |
+| Ollama tags/show/ps fixed "w4a16", "7B", 4 GiB | Real family, parameter count, quantization and memory | `test_ollama_api.py` |
+| `/api/pull` | Real download into the HF cache with progress lines | `test_side_endpoints.py::test_ollama_pull_downloads_into_the_hf_cache` |
+| NIAH "131K 100%" on random keys | `turing eval-niah`: pass-key retrieval through the engine on real weights | `test_niah.py::test_retrieval_runs_through_engine` |
+| `eval-accuracy` | GSM8K k-shot greedy exact match through the engine | `test_accuracy_eval.py::test_gsm8k_through_engine_on_gpt2` |
+| MoE expert cache on synthetic traces only | `HeterogeneousMoERunner` runs a model's own experts (library; not in serving; no MoE throughput claimed) | `test_moe_offload.py::test_runner_matches_sparse_moe` |
+| `io_uring` reader that used `pread` | io_uring when built with liburing, `pread` threads otherwise; `backend` reports which | `test_parallel_reader_and_gds.py` |
+| GPUDirect loader reporting success without data | cuFile, else pinned copy, else `no_cuda`, reported | `test_parallel_reader_and_gds.py` |
+| C++ server crashing on long prompts; `/v1/chat/completions` without a chat template | 400 past the context; GGUF chat templates; `/v1/completions` | `test_cpp_http_server.py` |
+| LangChain `ChatTuring` returning dicts; LlamaIndex package | `ChatTuring` is a `BaseChatModel`; LlamaIndex through `OpenAILike` | `test_langchain_integration.py`, `test_llamaindex_example.py` |
+| Licence-key gate (`TURING_LICENSE_KEY`) | Removed; commercial use is a signed agreement under `LICENSE` §2 | — |
+| SVD-KV family, `radix_svd`, semantic anchors, hex quantizer, latent SVD claims in the serving story | Deleted (`radix_svd`, `triton_svd_paged`, wire codec, hex quantizer); `triton_latent_decode.py` stays as a library kernel | — |
+| `--memory-mode hybrid` | Removed; `hybrid_memory.py` is library code that needs a model trained with hybrid layers | — |
+| Matryoshka draft heads in serving | Removed from serving; untrained library code | — |
+| `bench`, `compare`, `transfer-bench`, `moe-bench`, `hybrid-bench`, `spec-bench` commands; `run_all_documented_benchmarks_exhaustive.py`; `stress_test_niah_breaking_point.py` | Deleted | — |
+| Qwen 2.4T guide | Deleted (needs Blackwell FP4 and many GPUs; the guide also published a project ID and IP) | `test_no_private_identifiers.py` |
+| Sparse 2:4 prefill kernel; tiled fused RMSNorm-SwiGLU kernel | Deleted | — |
+| Comparison tables "not verified here" | Competitor cells now cite the competitor's documentation, or say "not checked" ([comparison](comparison.md)) | — |
+| Turing vs vLLM throughput | Still not measured; `scripts/benchmark_e2e_generation.py` exists, GPU run pending | — |

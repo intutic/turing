@@ -1,6 +1,6 @@
 # Security Policy & Vulnerability Disclosure
 
-Turing Engine and Intutic take the security and integrity of our codebase, native SIMD binaries, and cryptographic model containers seriously.
+This policy covers the Turing Engine Python package, its native C++ extension and `turing-cli`, and the HTTP servers they run.
 
 ---
 
@@ -17,9 +17,13 @@ We provide active security patches, bug fixes, and vulnerability remediation for
 
 ## 🔑 Deploying the Server
 
-Authentication is off by default: `turing serve` answers every request that reaches its port unless it is started
-with `--api-key`. Bind it to `127.0.0.1` (`--host 127.0.0.1`), or put it behind a gateway that authenticates
-callers, before exposing it to a network.
+Authentication is off by default, and `turing serve` binds `0.0.0.0` by default: it answers every request that
+reaches its port unless it is started with `--api-key` (or the `TURING_API_KEY` environment variable), which then
+requires `Authorization: Bearer <key>` or `x-api-key: <key>` on every endpoint except `/health`. Bind it to
+`127.0.0.1` (`--host 127.0.0.1`), or put it behind a gateway that authenticates callers, before exposing it to a
+network. `/api/pull` downloads any HuggingFace repository a caller names into the server's HuggingFace cache, and
+`--prefill-worker` accepts unauthenticated TCP connections on `--kv-port`; keep both off untrusted networks.
+`turing-cli serve` binds `127.0.0.1` by default and has no authentication.
 
 ---
 

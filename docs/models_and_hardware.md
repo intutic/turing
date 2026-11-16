@@ -1,128 +1,115 @@
-# 🌐 Supported Models & Hardware Setup
-
-Turing Engine resolves and loads HuggingFace and GGUF checkpoints on NVIDIA GPUs, Apple Silicon Macs and CPUs. This page separates what has been run from what is only named.
+# 🌐 Models & Hardware
 
 ---
 
-## 1. Models and Memory
+## 1. Supported model types
 
-> **What is measured today:** the HuggingFace loader reproduces HuggingFace's logits (prefill, chunked prefill and decode, `atol 1e-3`) for the **Llama**, **Llama-3.1 RoPE scaling** (`rope_type="llama3"`), **Qwen2/Qwen2.5** (q/k/v biases, also DeepSeek-R1-Distill-Qwen) and **Qwen3** (q/k norms) architectures, tested on small randomly initialised models of each (`tests/test_hf_parity.py`); quality on real weights is measured for SmolLM2 only. The loader refuses what it cannot reproduce (other RoPE scaling types, sliding-window attention, `o_proj` biases), and `serve`, `generate` and `chat` exit when weights fail to load instead of falling back to random weights (`--mock` runs synthetic weights on purpose). Other families (Gemma, Phi) and the GGUF loader have no parity test. Models run with real weights so far: SmolLM2 135M, 360M and 1.7B through the Turing engine, and GPT-2 and SmolLM2-1.7B-Instruct through HuggingFace `generate`. No MoE checkpoint and no model larger than 1.7B has been run end to end. The serving path keeps fp16 weights (int4 weight loading is not wired), so weight memory is about 2 bytes per parameter: a 70B model needs about 141 GB and does not fit on one 24 GB GPU.
+The HuggingFace loader accepts exactly the model types in `hf_loader.FAMILIES` and refuses every other one before
+downloading (`ArchitectureRegistry` raises for the same set). Each type has a parity test against HuggingFace in
+`tests/test_hf_parity.py` (prefill, chunked prefill, decode, stateless calls and batched decode across requests,
+atol 1e-3, on small randomly initialised models of each configuration):
 
-Turing Engine features a **Universal Dynamic Model Resolver** (`ModelResolver`) and **Architecture Registry** (`ArchitectureRegistry`). It resolves any Hugging Face Hub repository ID or local checkpoint and derives the architecture from its `config.json`; exact output parity is only implemented and tested for Llama-architecture models.
+| HF `model_type` | Examples | Configurations tested | GGUF |
+| :--- | :--- | :--- | :---: |
+| `llama` | Llama 2/3/3.1/3.2/3.3, SmolLM2, DeepSeek-R1-Distill-Llama | head_dim ≠ hidden/heads; RoPE default, linear, dynamic, YaRN, LongRoPE, Llama 3 | ✅ |
+| `mistral` | Mistral 7B | sliding window | ✅ (as `llama`) |
+| `qwen2` | Qwen2/2.5, DeepSeek-R1-Distill-Qwen | q/k/v biases | ✅ |
+| `qwen3` | Qwen3 | q/k norms | ✅ |
+| `gemma` | Gemma 1 | | ✅ |
+| `gemma2` | Gemma 2 | soft-capping, sliding window | ✅ |
+| `gemma3_text` | Gemma 3 (text) | local/global RoPE bases | ✅ |
+| `phi` | Phi-2 | with and without q/k LayerNorm | ✅ |
+| `phi3` | Phi-3, Phi-3.5 | sliding window; LongRoPE | ✅ |
+| `gpt2` | GPT-2 | | ✅ |
+| `opt` | OPT | pre-LN; post-LN with projected embeddings (OPT-350m) | ❌ |
+| `gpt_neox` | Pythia, GPT-NeoX | parallel and sequential residual | ✅ |
+| `mixtral` | Mixtral | top-2 MoE | ✅ (as `llama`) |
+| `qwen2_moe` | Qwen1.5-MoE, Qwen2-MoE | shared expert | ✅ |
+| `qwen3_moe` | Qwen3-MoE | | ✅ |
+| `olmoe` | OLMoE | `clip_qkv`, full-projection q/k norms | ✅ |
 
-### A. Model Geometries and fp16 Weight Memory
+RoPE scaling types: default, linear, dynamic NTK, YaRN, LongRoPE, Llama 3 and proportional (the last without a
+parity configuration of its own). Weights are written from the checkpoint into a model built on the meta device, and
+any parameter left unwritten is an error, so a model never runs with random weights; `--mock` runs synthetic weights
+on purpose.
 
-The rows below are names the resolver and `SIZING_PROFILES` know about; **none of them has been run**. The fp16 column is parameters × 2 bytes. An earlier "Turing Engine VRAM" column (for example 15.7 GB for Llama-3.3-70B, 3.5 GB VRAM + 42 GB RAM for a 320B MoE) was removed: it was not computed by any script, and it implies 0.7–1.8 bits per parameter, below what 4-bit weights with FFN pruning would give.
+### Real checkpoints
 
-| Model Family | Model Repository ID | Parameters | fp16 weights | Fits one 24 GB GPU in fp16? |
-| :--- | :--- | :---: | :---: | :---: |
-| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` | 1.5B | ~3 GB | Yes |
-| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` | 7B | ~14 GB | Yes |
-| **Meta AI** | `meta-llama/Llama-3.1-8B-Instruct` | 8B | ~16 GB | Yes |
-| **DeepSeek** | `deepseek-ai/DeepSeek-R1-Distill-Qwen-14B` | 14B | ~28 GB | No |
-| **Mistral AI** | `mistralai/Mistral-Small-24B-Instruct-2501` | 24B | ~48 GB | No |
-| **Google** | `google/gemma-2-27b-it` | 27B | ~54 GB | No |
-| **Alibaba** | `Qwen/Qwen2.5-Coder-32B-Instruct` | 32.5B | ~65 GB | No |
-| **Meta AI** | `meta-llama/Llama-3.3-70B-Instruct` | 70.6B | ~141 GB | No |
-| **Alibaba** | `Qwen/Qwen2.5-72B-Instruct` | 72.7B | ~145 GB | No |
-| **DeepSeek** | `deepseek-ai/DeepSeek-V3` | 671B MoE (37B active) | ~1,342 GB | No |
-| **Alibaba** | `Qwen/Qwen3.8-2.4T-A95B` | 2.4T MoE (95B active) | ~4,800 GB (~1.2 TB at NVFP4) | No: not supported. NVFP4 needs Blackwell FP4 tensor cores and the weights need many GPUs; see [vLLM's recipe](https://recipes.vllm.ai/Qwen/Qwen3.8-2.4T-A95B). |
+* **HuggingFace, real weights**: SmolLM2 135M, 360M and 1.7B match HuggingFace's mean NLL to five decimals
+  ([benchmarks §2](benchmarks.md#2-quality-on-real-weights)). `scripts/eval_parity.py` compares other real
+  checkpoints with HuggingFace (logit difference, top-1 agreement, NLL, and HF's own cached-vs-full gap as the noise
+  floor for bf16); its results are not committed yet.
+* **GGUF, real files against llama.cpp** (`scripts/eval_gguf_parity.py`, `results_gguf_parity_mps.json`): Apple
+  M4 Pro, Turing on MPS in fp32 and llama.cpp (llama-cpp-python 0.3.37) on Metal with all layers offloaded, the first
+  64 tokens of WikiText-2 test. NLL is per token; the HF column is the original HuggingFace checkpoint in fp32, not
+  the GGUF. "llama.cpp Metal vs CPU" is llama.cpp's own difference between its two backends, a scale for the first
+  column.
 
-Qwen2/Qwen2.5 and Qwen3 checkpoints reproduce HuggingFace's logits in the parity tests (small random models; no real Qwen checkpoint has been run). MoE checkpoints have no loader path.
+| Family | GGUF file | Quantized types | max \|Δlogit\| vs llama.cpp | top-1 agreement | llama.cpp Metal vs CPU max \|Δlogit\| | NLL Turing | NLL llama.cpp | NLL HF fp32 |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| llama | `Llama-3.2-1B-Instruct-Q8_0.gguf` | Q8_0 | 0.037 | 100.0% | 0.431 | 3.813 | 3.812 | 3.809 |
+| mixtral (`llama`) | `tiny-mixtral-30m-q8_0.gguf` | Q8_0 | 0.015 | 100.0% | 0.168 | 4.654 | 4.653 | 4.643 |
+| qwen2 | `qwen2.5-0.5b-instruct-q8_0.gguf` | Q8_0 | 0.074 | 100.0% | 1.321 | 3.353 | 3.353 | 3.373 |
+| qwen3 | `Qwen3-0.6B-Q8_0.gguf` | Q8_0 | 0.039 | 100.0% | 3.999 | 3.884 | 3.884 | 3.909 |
+| gemma | `gemma-1.1-2b-it.Q8_0.gguf` | Q8_0 | 0.080 | 100.0% | 1.461 | 5.937 | 5.937 | 5.913 |
+| gemma2 | `gemma-2-2b-it-Q8_0.gguf` | Q8_0 | 0.030 | 100.0% | 0.870 | 3.522 | 3.522 | 3.517 |
+| gemma3 | `gemma-3-270m-it-Q8_0.gguf` | Q8_0 | 0.200 | 100.0% | 5.516 | 5.172 | 5.173 | 5.153 |
+| phi2 | `phi-2.Q8_0.gguf` | Q8_0 | 0.691 | 98.4% | 2.649 | 3.377 | 3.370 | 3.383 |
+| phi3 | `Phi-3-mini-4k-instruct-q4.gguf` | Q4_K, Q5_K, Q6_K | 0.251 | 98.4% | 5.222 | 2.933 | 2.932 | 2.772 |
+| phi3 (LongRoPE) | `Phi-3.5-mini-instruct-Q8_0.gguf` | Q8_0 | 0.247 | 100.0% | 8.282 | 2.828 | 2.828 | 2.832 |
+| gpt2 | `gpt2.Q8_0.gguf` | Q8_0 | 0.164 | 100.0% | 2.770 | 4.427 | 4.427 | 4.412 |
+| gptneox | `pythia-160m.Q8_0.gguf` | Q8_0 | 1.469 | 96.9% | 5.433 | 4.133 | 4.126 | 4.167 |
+| olmoe | `olmoe-1b-7b-0924-q8_0.gguf` | Q8_0 | 0.961 | 100.0% | 0.973 | 3.195 | 3.198 | 3.200 |
 
-### B. Multi-Model Pipeline Endpoints
+Qwen2-MoE and Qwen3-MoE were not run: their smallest real checkpoints (14.3B and 30.5B parameters) do not fit this
+machine's memory in fp32.
 
-`/v1/embeddings`, `/v1/rerank` and `/v1/extract` are served by `ElasticMultiModelManager`, whose model entries are placeholders today: embeddings pool random hidden states, rerank scores word overlap, and extract is a substring match. No embedding, reranker, NER or OCR model is loaded. The per-model and "7.42 GB total" figures shown in earlier versions were the sum of estimates declared in the benchmark script, not memory read from a device.
+### Not run
 
-### C. Universal Model Identification & Tri-Part Namespaces
+No model larger than the 7B-total-parameter OLMoE file above has been run end to end, no MoE model on a GPU, and no
+real checkpoint through the tensor- or pipeline-parallel path.
 
-Turing Engine's `ModelResolver` seamlessly parses all industry-standard model naming patterns:
+---
+
+## 2. Memory
+
+Weights take 2 bytes per parameter in fp16/bf16 and 4 in fp32 (the default on CPU and MPS). With 4-bit weights
+(`turing convert` or `--quantization`), attention and dense-MLP projections take half a byte per weight plus an fp16
+scale and a uint8 zero per 64 weights; embeddings, the LM head, routers and MoE experts stay in the model dtype. The
+KV pool takes `--kv-cache-memory-fraction` (0.6) of the GPU memory left after the weights. A 7B model in fp16 (about
+15 GB of weights) leaves room for a KV pool on a 24 GB GPU; a 70B model needs about 141 GB in fp16 and does not fit
+on one 24 GB GPU even at 4 bits per projection weight.
+
+---
+
+## 3. Model names
 
 ```bash
-# 1. Canonical Hugging Face Hub Repository ID (Any open-weight model):
-turing serve --model meta-llama/Llama-3.3-70B-Instruct
-turing chat --model EleutherAI/pythia-70m
-
-# 2. Tri-Part Provider/Model/Reasoning Namespace:
-turing serve --model deepseek-ai/DeepSeek-R1/high
-
-# 3. Colon Reasoning Effort Suffix:
-turing chat --model meta-llama/Llama-3.3-70B-Instruct:low
-
-# 4. LiteLLM / Model Gateway Prefix:
-turing serve --model huggingface/meta-llama/Llama-3.1-8B-Instruct
-
-# 5. Local Checkpoint Directory:
-turing serve --model /path/to/custom/finetuned/weights/
-
-# 6. Local Quantized .gguf File (Zero-copy binary reader):
-turing chat --model ./models/llama-3.3-70b-q4_k_m.gguf
-turing serve --model ./models/qwen2.5-coder-32b-q8_0.gguf
-
-# 7. Ergonomic CLI Shortcuts:
-turing chat --model deepseek-r1-1.5b
+turing serve --model Qwen/Qwen2.5-7B-Instruct          # HuggingFace repo id
+turing serve --model /path/to/checkpoint/               # local HuggingFace directory
+turing serve --model ./models/gemma-2-2b-it-Q8_0.gguf   # llama.cpp GGUF file
+turing serve --model ./qwen7b-gptq                      # .tgate4 directory from turing convert
+turing chat --model deepseek-r1-1.5b                    # alias
 ```
 
-### C. ❓ Architecture Clarification: `CLI_ALIASES` vs. `SIZING_PROFILES`
-
-To ensure full transparency and avoid confusion regarding model loading:
-
-* **`CLI_ALIASES` (`turing/models/resolver.py`)**:
-  - **What it is**: Purely optional **typing shortcuts for interactive developers** (e.g. typing `turing chat --model smollm2` instead of typing `turing chat --model HuggingFaceTB/SmolLM2-135M`).
-  - **Dynamic Passthrough**: If you pass any full repo ID (e.g., `turing chat --model stabilityai/stablelm-base-alpha-3b` or `EleutherAI/pythia-70m`), `ModelResolver` skips aliases and loads directly from Hugging Face Hub.
-* **`SIZING_PROFILES` (`turing/models/sizing_profiles.py`)**:
-  - **What it is**: An offline catalog of theoretical parameter dimensions used **strictly by `turing bench`** for dry-run theoretical FLOP simulations, memory bandwidth calculations, and PCIe bottleneck modeling without needing to download 140GB weight checkpoints to disk.
-  - **Zero Impact on Live Inference**: Live serving and chat **never use static sizing profiles**; they dynamically introspect the model's remote `config.json` on the fly via `ModelConfig.from_pretrained()`.
-
-
-!!! info "MoE host paging: components only"
-    The repository has an on-GPU LFRU expert slot cache (`GPULRUExpertCache`), routing-history pinning (`RoutingHistoryTracker`) and a one-layer-ahead prefetcher (`OneLayerAheadExpertPrefetcher`), tested on synthetic routing traces. No MoE checkpoint has been decoded, so there is no measured MoE throughput; earlier "18–50 tok/s" figures had no producing script. Apple M-series memory bandwidth tops out around 800 GB/s (Ultra parts), not 1,600 GB/s.
+Aliases (`ModelResolver.CLI_ALIASES` in `turing/models/resolver.py`) are typing shortcuts for repo ids, for example
+`smollm2` → `HuggingFaceTB/SmolLM2-135M`. An alias does not mean the model was tested, and an alias resolving to a
+model type outside the table above is refused at load. `SIZING_PROFILES` (`turing/models/sizing_profiles.py`) holds
+layer geometries for `--mock` synthetic models only.
 
 ---
 
-## 2. Universal Hardware Setup
+## 4. Hardware
 
-Turing Engine auto-detects your silicon at startup. You can also explicitly verify or select your backend:
-
-=== "NVIDIA (CUDA + Triton 3.x)"
-    ```bash
-    # Install standard CUDA build:
-    pip install torch torchvision triton
-    turing serve --model deepseek-r1-7b --device cuda
-    ```
-
-=== "Apple Silicon (Mac M1/M2/M3/M4 Metal)"
-    ```bash
-    # Direct Metal acceleration on unified memory:
-    turing serve --model deepseek-r1-7b --device mps
-    ```
-
-=== "AMD GPUs (ROCm / HIP)"
-    ```bash
-    # Supports RX 7900 XTX / 8000 and MI300X with Wave32/Wave64 tuning:
-    pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
-    turing serve --model deepseek-r1-7b --device rocm
-    ```
-
-=== "Intel GPUs (Arc & Data Center Max)"
-    ```bash
-    # Intel OneAPI / SYCL acceleration:
-    pip install intel-extension-for-pytorch
-    turing serve --model deepseek-r1-7b --device xpu
-    ```
-
-=== "CPU (AVX2 / NEON SIMD)"
-    ```bash
-    # Pure bare-metal C++20 AVX2 SIMD fallback:
-    turing serve --model deepseek-r1-1.5b --device cpu
-    ```
-
----
-
-## 3. Hardware Diagnostics CLI
-
-Inspect your detected accelerator, compute backend, and available memory in one command:
+| Backend | Status |
+| :--- | :--- |
+| NVIDIA CUDA | Measured on an L4: Triton decode kernels, CUDA graphs, int4 GEMM and sparse GEMV kernels (the last two have CUDA parity tests; their speed is not yet measured) |
+| Apple Silicon (MPS) | Measured on an M4 Pro. Attention takes an explicit path, because PyTorch 2.9's MPS SDPA reuses one cached graph per shape with the first call's scale |
+| CPU | PyTorch on CPU; the C++ extension and `turing-cli` use AVX2/FMA (x86_64) or NEON (arm64) |
+| AMD ROCm | `--device rocm` uses PyTorch's HIP build (exposed as `cuda`); no recorded run |
+| Intel XPU, Vulkan | Picked by `--device auto` when PyTorch reports them; no recorded run |
 
 ```bash
-python scripts/test_universal_backends.py
+turing info                      # detected devices and runtime
+turing serve --model smollm2 --device mps
 ```
