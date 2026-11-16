@@ -7,58 +7,37 @@
       "8192": 1073741824,
       "32768": 4294967296
     },
-    "admission_overhead_us": 4.435504200228024,
-    "qos_overhead_us": 0.6990916008362547
+    "admission_overhead_us": 0.4876041901297867,
+    "qos_overhead_us": 0.0811167061328888
   },
   "part2": {
     "concurrencies": [
       {
         "c": 1,
-        "always_spec_tps": 91.0,
-        "always_plain_tps": 50.0,
-        "gated_tps": 91.0,
         "mode": "full_spec"
       },
       {
         "c": 2,
-        "always_spec_tps": 152.0,
-        "always_plain_tps": 100.0,
-        "gated_tps": 152.0,
         "mode": "full_spec"
       },
       {
         "c": 3,
-        "always_spec_tps": 183.00000000000003,
-        "always_plain_tps": 150.0,
-        "gated_tps": 183.00000000000003,
         "mode": "full_spec"
       },
       {
         "c": 4,
-        "always_spec_tps": 184.00000000000003,
-        "always_plain_tps": 200.0,
-        "gated_tps": 200.0,
         "mode": "plain"
       },
       {
         "c": 8,
-        "always_spec_tps": 200.0,
-        "always_plain_tps": 400.0,
-        "gated_tps": 400.0,
         "mode": "plain"
       },
       {
         "c": 12,
-        "always_spec_tps": 300.0,
-        "always_plain_tps": 600.0,
-        "gated_tps": 600.0,
         "mode": "plain"
       },
       {
         "c": 16,
-        "always_spec_tps": 400.0,
-        "always_plain_tps": 800.0,
-        "gated_tps": 800.0,
         "mode": "plain"
       }
     ]

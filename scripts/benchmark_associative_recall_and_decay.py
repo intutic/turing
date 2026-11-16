@@ -304,12 +304,12 @@ def main():
         r16 = recall_table[fam][16]
         print(f"  | {fam:<13} | {r4:>7.2f}% | {r8:>7.2f}% | {r12:>7.2f}% | {r16:>7.2f}% |")
     print("  +---------------+----------+----------+----------+----------+")
-    print("  (Chance Floor: 1.56% | Softmax & Turing Hybrid maintain exact recall)\n")
+    print(f"  (Chance floor: 1.56% | toy models trained from scratch, n=128 queries per cell; one query = 0.78 pp)\n")
 
     print("[2/2] Benchmarking Chunkwise In-SRAM Prefill & Step-Decode Latency...")
     kernel_res = benchmark_kernel_throughput(device=device, batch_size=4, num_heads=8, head_dim=64, seq_len=1024)
     print(f"  • Dense Pairwise Prefill (T=1024) : {kernel_res['dense_pairwise_prefill_ms']:.3f} ms")
-    print(f"  • Chunkwise In-SRAM Prefill       : {kernel_res['chunked_in_sram_prefill_ms']:.3f} ms ({kernel_res['prefill_speedup']:.2f}x Faster)")
+    print(f"  • Chunkwise In-SRAM Prefill       : {kernel_res['chunked_in_sram_prefill_ms']:.3f} ms ({kernel_res['prefill_speedup']:.2f}x vs dense pairwise)")
     print(f"  • Single-Step Decode Step Latency : {kernel_res['single_step_decode_us']:.2f} µs ({kernel_res['decode_throughput_tok_s']:,.0f} tok/s)")
 
     print("\n================================================================================")

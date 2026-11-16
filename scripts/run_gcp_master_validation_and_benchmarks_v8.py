@@ -296,7 +296,7 @@ def run_suite_3_multi_model(device: str) -> Dict[str, Any]:
 
     stats = manager.stats
     total_vram_gb = sum(meta.estimated_vram_bytes for meta in manager.registry.values()) / (1024**3)
-    print(f"  * Single-GPU Co-Residency Footprint : {total_vram_gb:.2f} GB / 24.0 GB VRAM")
+    print(f"  * Sum of declared VRAM estimates (not measured; models are placeholders) : {total_vram_gb:.2f} GB")
 
     # End-to-End Pipeline Execution
     sample_text = "Turing Engine delivers 4x lower TCO by serving embeddings, reranking, and generation on 1 GPU."
@@ -346,7 +346,7 @@ def run_suite_4_speculation_and_traffic(device: str) -> Dict[str, Any]:
         }
         print(f"  * Concurrency c={c:2d} -> Mode: {decision.value:10s} | Active Tree Width: {width}")
 
-    # Byte-exact parity test
+    # Verifier self-check on two fixed, identical lists (no spec or plain decode is run)
     spec_toks = [101, 2054, 2003, 1037, 7592, 102]
     plain_toks = [101, 2054, 2003, 1037, 7592, 102]
     report = SpecExactParityVerifier.verify_greedy_parity(spec_toks, plain_toks)
@@ -354,7 +354,7 @@ def run_suite_4_speculation_and_traffic(device: str) -> Dict[str, Any]:
         "passed": report.passed,
         "tokens_compared": report.num_tokens_compared,
     }
-    print(f"  * Byte-Exact Greedy Parity Check : {'PASSED (Exact Match)' if report.passed else 'FAILED'}")
+    print(f"  * Parity verifier self-check (fixed lists, no decoding) : {'passed' if report.passed else 'FAILED'}")
 
     suite_res["concurrency_gating"] = concurrency_decisions
     return suite_res
@@ -398,7 +398,8 @@ def run_suite_5_cross_kv_and_lineage(device: str) -> Dict[str, Any]:
         "ridge_forward_ms": round(t_ridge, 4),
         "lineage_turns_recorded": len(lineage),
     }
-    print(f"  * Multi-Turn Lineage Invariant : Enforced (CleanBase frozen across turns)")
+    clean_frozen = clean_strat.cache_for_turn(2, kv_orig, curr_clean)[0] is kv_orig[0]
+    print(f"  * CleanBase returns the original cache on a later turn : {clean_frozen}")
     return suite_res
 
 

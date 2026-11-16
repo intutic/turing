@@ -7,9 +7,9 @@ causing the residual norm to explode. The Clean Base strategy keeps the error
 bounded by re-projecting from a stable base, while the Append-only strategy 
 flatlines but consumes linearly increasing memory.
 
-k-slot pooling achieves 10x-50x transfer speedups by symmetrically pooling 
-tokens into k slots before cross-model projection, drastically reducing the 
-transfer latency while preserving semantic density.
+Part 2 times a full-length linear transfer against k-slot pooling followed by the
+same transfer, on randn K/V with a random-init pooler; it measures latency only,
+not what the pooled slots preserve.
 """
 
 import argparse
@@ -47,78 +47,56 @@ def sync_device(device):
     elif device.type == 'mps':
         torch.mps.synchronize()
 
-def get_peak_memory(device, default_bytes):
-    if device.type == 'cuda':
-        return torch.cuda.max_memory_allocated(device)
-    return default_bytes
-
 @torch.inference_mode()
 def benchmark_lineage_strategies(args, device):
-    print(f"\n--- Part 1: Multi-Turn Lineage Strategy Drift ({args.num_turns} turns, seq_len={args.seq_len}) ---")
-    strategies = ['clean_base', 'naive', 'append_only']
-    
+    """Drive the library's turn strategies with a synthetic translator.
+
+    Synthetic: the cache is torch.randn and the per-turn translation is a seeded random
+    linear map with spectral norm `--gain`, so the residual norms show how each strategy
+    compounds (or does not compound) a translation; they are not a model-quality measurement.
+    """
+    print(f"\n--- Part 1: Multi-Turn Lineage Strategies ({args.num_turns} turns, seq_len={args.seq_len}; "
+          f"synthetic cache and translator, gain={args.gain}) ---")
     hidden_size = 4096
+    gen = torch.Generator(device="cpu").manual_seed(0)
+    base = torch.randn(args.seq_len, hidden_size, generator=gen).to(device)
+    m = torch.randn(hidden_size, hidden_size, generator=gen)
+    m = (m * (args.gain / torch.linalg.matrix_norm(m, ord=2))).to(device)
+
+    def translate(cache):
+        # One deliberation turn: the receiver cache plus the translated residual.
+        return cache + cache @ m
+
     results = {}
-    
-    for strategy in strategies:
-        print(f"\nStrategy: {strategy.upper()}")
-        print(f"{'Turn':<6} | {'Residual Norm ||ΔC_R||_2':<25} | {'Latency (ms)':<15} | {'Peak Memory (MB)':<15}")
+    for strategy in (CleanBaseStrategy(), NaiveStrategy(), AppendOnlyStrategy()):
+        print(f"\nStrategy: {strategy.name.upper()}")
+        print(f"{'Turn':<6} | {'Residual Norm ||dC_R||_2':<25} | {'Latency (ms)':<15} | {'Cache bytes (MB)':<15}")
         print("-" * 65)
-        
-        if device.type == 'cuda':
-            torch.cuda.reset_peak_memory_stats(device)
-            
+        previous, live = None, []
         strategy_results = []
-        base_tensor = torch.randn(args.seq_len, hidden_size, device=device)
-        current_tensor = base_tensor.clone()
-        
-        for turn in range(1, args.num_turns + 1):
+        for turn in range(args.num_turns):
             sync_device(device)
             t0 = time.perf_counter()
-            
-            # Simulate projection and drift
-            noise = torch.randn_like(current_tensor) * 0.01
-            
-            if strategy == 'naive':
-                # Error compounds exponentially
-                current_tensor = current_tensor * 1.5 + noise
-            elif strategy == 'clean_base':
-                # Always project from base + bounded noise
-                current_tensor = base_tensor + noise * 1.5
-            elif strategy == 'append_only':
-                # Flatlines error but we simulate memory growth
-                current_tensor = torch.cat([current_tensor, base_tensor], dim=0)
-                
-            # Compute norm
-            delta = current_tensor[:args.seq_len] - base_tensor
-            residual_norm = torch.linalg.norm(delta).item()
-            
-            # Dummy matmul to simulate work
-            _ = current_tensor @ torch.randn(current_tensor.shape[-1], 256, device=device)
-            
+            src = strategy.cache_for_turn(turn, [base], previous)[0]
+            if strategy.translates_on_turn(turn):
+                out = translate(src)
+            else:
+                # Append-only keeps the cache it has and appends this turn's new tokens.
+                out = torch.cat([src, base], dim=0)
             sync_device(device)
             latency_ms = (time.perf_counter() - t0) * 1000
-            
-            # Simulated memory for non-CUDA platforms
-            simulated_mem = (args.seq_len * hidden_size * 2 * (turn if strategy == 'append_only' else 1))
-            peak_mem = get_peak_memory(device, simulated_mem) / (1024 * 1024)
-            
-            print(f"{turn:<6} | {residual_norm:<25.4f} | {latency_ms:<15.2f} | {peak_mem:<15.2f}")
-            
-            strategy_results.append({
-                'turn': turn,
-                'residual_norm': residual_norm,
-                'latency_ms': latency_ms,
-                'peak_memory_mb': peak_mem
-            })
-            
-        results[strategy] = strategy_results
-        
+            residual_norm = torch.linalg.norm(out[:args.seq_len] - base).item()
+            cache_mb = out.numel() * out.element_size() / (1024 * 1024)
+            previous = [out]
+            print(f"{turn + 1:<6} | {residual_norm:<25.4f} | {latency_ms:<15.2f} | {cache_mb:<15.2f}")
+            strategy_results.append({'turn': turn + 1, 'residual_norm': residual_norm,
+                                     'latency_ms': latency_ms, 'cache_mb': cache_mb})
+        results[strategy.name] = strategy_results
     return results
 
 @torch.inference_mode()
 def benchmark_kslot_pooling(device):
-    print("\n--- Part 2: k-Slot Symmetric Pooling Speedup (k=4) ---")
+    print("\n--- Part 2: k-Slot Pooling vs Full Transfer (k=4; random-init pooler, randn K/V; median of 20) ---")
     seq_lens = [512, 1024, 4096, 8192, 16384]
     k_slots = 4
     num_layers = 4
@@ -138,28 +116,27 @@ def benchmark_kslot_pooling(device):
     warm_k = torch.randn(1, num_layers, num_kv_heads, 512, head_dim, device=device)
     warm_v = torch.randn(1, num_layers, num_kv_heads, 512, head_dim, device=device)
     _ = pooler(warm_k, warm_v)
+    _ = linear_map(warm_k.view(num_layers, 512, hidden_dim))
     sync_device(device)
+
+    def median_ms(fn, reps=20):
+        times = []
+        for _ in range(reps):
+            sync_device(device)
+            t0 = time.perf_counter()
+            fn()
+            sync_device(device)
+            times.append((time.perf_counter() - t0) * 1000.0)
+        return sorted(times)[reps // 2]
 
     for n in seq_lens:
         k = torch.randn(1, num_layers, num_kv_heads, n, head_dim, device=device)
         v = torch.randn(1, num_layers, num_kv_heads, n, head_dim, device=device)
 
         # Standard transfer: map all N tokens across layers
-        sync_device(device)
-        t0 = time.perf_counter()
-        flat_kv = k.view(num_layers, n, hidden_dim)
-        _ = linear_map(flat_kv)
-        sync_device(device)
-        standard_ms = (time.perf_counter() - t0) * 1000.0
-
+        standard_ms = median_ms(lambda: linear_map(k.view(num_layers, n, hidden_dim)))
         # k-Slot pooled transfer: pool to k slots, then map only k slots
-        sync_device(device)
-        t0 = time.perf_counter()
-        pk, pv = pooler(k, v)
-        flat_pk = pk.view(num_layers, k_slots, hidden_dim)
-        _ = linear_map(flat_pk)
-        sync_device(device)
-        pooled_ms = (time.perf_counter() - t0) * 1000.0
+        pooled_ms = median_ms(lambda: linear_map(pooler(k, v)[0].view(num_layers, k_slots, hidden_dim)))
 
         speedup = standard_ms / max(pooled_ms, 1e-6)
         compression = float(n) / k_slots
@@ -181,6 +158,7 @@ def main():
     parser.add_argument('--device', type=str, default='auto', choices=['auto', 'cuda', 'mps', 'cpu'])
     parser.add_argument('--num_turns', type=int, default=6)
     parser.add_argument('--seq_len', type=int, default=1024)
+    parser.add_argument('--gain', type=float, default=0.5, help='Spectral norm of the synthetic per-turn translator')
     parser.add_argument('--json_out', type=str, default=None)
     args = parser.parse_args()
 

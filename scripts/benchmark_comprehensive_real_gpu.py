@@ -103,14 +103,18 @@ def run_suite():
 
             # Benchmark Native Generation
             t0 = time.perf_counter()
-            out = model.generate(**inputs, max_new_tokens=48, do_sample=False)
-            clean_gpu_memory()
+            out = model.generate(**inputs, max_new_tokens=48, min_new_tokens=48, do_sample=False)
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            elif device.type == "mps":
+                torch.mps.synchronize()
             gen_time_s = time.perf_counter() - t0
+            clean_gpu_memory()
             gen_tokens = out.shape[1] - prompt_len
             tps_native = gen_tokens / max(1e-5, gen_time_s)
 
             response_text = tokenizer.decode(out[0][prompt_len:], skip_special_tokens=True).strip()
-            print(f"  │ • Native Generation Speed         : {tps_native:.1f} tok/s ({gen_tokens} tokens in {gen_time_s*1000:.1f}ms)")
+            print(f"  │ • HF transformers generate (batch 1): {tps_native:.1f} tok/s ({gen_tokens} tokens in {gen_time_s*1000:.1f}ms)")
             print(f"  │ • Generated Text Output           : \"{response_text[:80]}...\"")
 
             # SVD INT8 Subspace KV Cache evaluation on actual model head dimensions
@@ -174,15 +178,15 @@ def run_suite():
             print(f"  │  -> Ans ({toks} toks, {elapsed_ms:.1f}ms): \"{ans[:65]}...\"")
 
         vllm_overall_tps = (sum(vllm_tok_counts) / sum(vllm_latencies)) * 1000.0
-        print(f"  │ • Measured vLLM Generation Speed  : {vllm_overall_tps:.2f} tok/s on NVIDIA L4")
+        print(f"  │ • Measured vLLM Generation Speed  : {vllm_overall_tps:.2f} tok/s (external server at 127.0.0.1:8000)")
     except Exception as e:
-        print(f"  │ • Standalone vLLM server offline ({e}). Using native GPU execution.")
+        print(f"  │ • vLLM server not reachable ({e}); vLLM comparison skipped.")
     print(f"  └────────────────────────────────────────────────────────────────────")
 
     # -------------------------------------------------------------------------
     # PART 3: Unmocked Layer Benchmark Across All 7 Frontier Geometries
     # -------------------------------------------------------------------------
-    print("\n[📊 PART 3/4] UNMOCKED FFN LAYER EXECUTION ACROSS ALL 7 ARCHITECTURES")
+    print("\n[📊 PART 3/4] ONE RANDOM-WEIGHT FFN LAYER (batch 1) SHAPED LIKE EACH ARCHITECTURE")
     frontier_configs = [
         "llama-3-8b",
         "llama-3.1-70b",
@@ -220,7 +224,7 @@ def run_suite():
                 g = F.silu(F.linear(x, w_gate))
                 u = F.linear(x, w_up)
                 _ = F.linear(g * u, w_down)
-            torch.cuda.synchronize()
+            clean_gpu_memory()  # device-aware sync (cuda or mps)
 
             # Measure Dense
             iters = 50
@@ -271,17 +275,18 @@ def run_suite():
 
         except Exception as e:
             clean_gpu_memory()
-            print(f"{cfg.name:<24} | {h:<6} | {ffn_d:<10} | [Out-of-Core Host Stream Required: {e}]")
+            print(f"{cfg.name:<24} | {h:<6} | {ffn_d:<10} | [failed: {type(e).__name__}: {e}]")
 
     # -------------------------------------------------------------------------
     # PART 4: Real Long-Context Needle-In-A-Haystack (NIAH) on CUDA
     # -------------------------------------------------------------------------
-    print("\n[🎯 PART 4/4] REAL LONG-CONTEXT NEEDLE-IN-A-HAYSTACK (NIAH) ON NVIDIA L4")
+    # Synthetic: one 512-row page of random keys per row; the context length only labels the row, no model runs.
+    print("\n[🎯 PART 4/4] SYNTHETIC SINGLE-PAGE NEEDLE TEST (random keys, no model; context length is a label)")
     cfg_70b = get_model_config("llama-3.1-70b")
     niah_eval = LongContextNIAHEvaluator(cfg_70b, rank=64, device=device)
     niah_res = niah_eval.evaluate_retrieval(context_lengths=[32768, 65536, 131072])
 
-    print("  • Needle Retrieval with SVD INT8 KV Compression on GPU:")
+    print("  • Needle retrieval from one random page after SVD INT8 compression:")
     for item in niah_res:
         c = item["context_length"]
         d = item["depth_pct"]
@@ -291,7 +296,7 @@ def run_suite():
 
     clean_gpu_memory()
     print("\n" + "=" * 90)
-    print("   ✅ ALL UNMOCKED GPU BENCHMARKS COMPLETED CLEANLY ON NVIDIA L4")
+    print(f"   Done on {device}. Part 1 uses real HF weights; parts 3-4 use random tensors.")
     print("=" * 90)
 
 if __name__ == "__main__":

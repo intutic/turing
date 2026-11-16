@@ -59,12 +59,16 @@ def benchmark_fused_ffn():
     tile_size = 64
     active_tiles = torch.arange(0, 112, dtype=torch.int32) # 50% channel pruning
 
-    x = torch.randn(B, K)
-    weight_norm = torch.randn(K)
-    w_gate = torch.randn(K, ffn_dim)
-    w_up = torch.randn(K, ffn_dim)
-    w_down = torch.randn(ffn_dim, K)
-    residual = torch.randn(B, K)
+    # The Triton kernel only runs on CUDA tensors; elsewhere both arms are PyTorch on the CPU.
+    dev = "cuda" if torch.cuda.is_available() else "cpu"
+    sync = torch.cuda.synchronize if dev == "cuda" else (lambda: None)
+    x = torch.randn(B, K, device=dev)
+    weight_norm = torch.randn(K, device=dev)
+    w_gate = torch.randn(K, ffn_dim, device=dev)
+    w_up = torch.randn(K, ffn_dim, device=dev)
+    w_down = torch.randn(ffn_dim, K, device=dev)
+    residual = torch.randn(B, K, device=dev)
+    active_tiles = active_tiles.to(dev)
 
     # Warmup
     for _ in range(5):
@@ -72,6 +76,7 @@ def benchmark_fused_ffn():
 
     # 1. Unfused Execution
     iters = 20
+    sync()
     t0 = time.perf_counter()
     for _ in range(iters):
         var = x.pow(2).mean(-1, keepdim=True)
@@ -79,25 +84,28 @@ def benchmark_fused_ffn():
         idx_list = []
         for t in active_tiles.tolist():
             idx_list.extend(range(t * tile_size, (t + 1) * tile_size))
-        idx_t = torch.tensor(idx_list, dtype=torch.long)
+        idx_t = torch.tensor(idx_list, dtype=torch.long, device=dev)
         gate = torch.matmul(x_norm, w_gate[:, idx_t])
         up = torch.matmul(x_norm, w_up[:, idx_t])
         out = torch.matmul(F.silu(gate) * up, w_down[idx_t, :]) + residual
+    sync()
     t_unfused = ((time.perf_counter() - t0) / iters) * 1000.0
 
     # 2. Fused Execution
+    sync()
     t0 = time.perf_counter()
     for _ in range(iters):
         out_fused = dispatch_fused_rmsnorm_swiglu(
             x, weight_norm, w_gate, w_up, w_down, residual, active_tiles, tile_size
         )
+    sync()
     t_fused = ((time.perf_counter() - t0) / iters) * 1000.0
 
     speedup = t_unfused / max(t_fused, 1e-6)
-    print(f"  • Hidden Dim: {K}, FFN Dim: {ffn_dim}, Batch: {B}")
-    print(f"  • Unfused Multi-Pass Baseline: {t_unfused:.2f} ms")
-    print(f"  • Fused SRAM Single-Pass:      {t_fused:.2f} ms")
-    print(f"  • Measured Speedup:            {speedup:.2f}x FASTER\n")
+    print(f"  • Hidden Dim: {K}, FFN Dim: {ffn_dim}, Batch: {B}, device: {dev} (random weights)")
+    print(f"  • Unfused baseline:            {t_unfused:.2f} ms")
+    print(f"  • Fused dispatch:              {t_fused:.2f} ms")
+    print(f"  • Baseline / fused:            {speedup:.2f}x\n")
 
 
 def benchmark_dsl_select():
@@ -132,8 +140,8 @@ def benchmark_dsl_select():
     speedup = t_seq / max(t_batched, 1e-6)
     print(f"  • Candidate Options: {num_options}, Vocab: {vocab_size}")
     print(f"  • Sequential Host Loop: {t_seq * 1e3:.2f} µs")
-    print(f"  • Batched GPU Gather:   {t_batched * 1e3:.2f} µs")
-    print(f"  • Measured Speedup:     {speedup:.2f}x FASTER\n")
+    print(f"  • Batched dispatcher:   {t_batched * 1e3:.2f} µs (CPU tensors)")
+    print(f"  • Loop / batched:       {speedup:.2f}x (below 1.0 the batched path is slower)\n")
     print("=" * 70 + "\n")
 
 

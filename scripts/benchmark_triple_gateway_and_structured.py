@@ -50,29 +50,33 @@ def run_triple_gateway_and_structured_benchmarks():
         # Benchmark /api/tags
         t0 = time.perf_counter()
         iters = 50
+        ok = 0
         for _ in range(iters):
-            resp = client.get("/api/tags")
+            ok += client.get("/api/tags").status_code == 200
         tags_lat_us = ((time.perf_counter() - t0) / iters) * 1_000_000
-        print(f"  • GET /api/tags Metadata Latency           : {tags_lat_us:.2f} µs (100% OK)")
+        print(f"  • GET /api/tags Metadata Latency           : {tags_lat_us:.2f} µs ({ok}/{iters} HTTP 200)")
 
         # Benchmark /api/show
         t0 = time.perf_counter()
+        ok = 0
         for _ in range(iters):
-            resp = client.post("/api/show", json={"model": "test-tiny"})
+            ok += client.post("/api/show", json={"model": "test-tiny"}).status_code == 200
         show_lat_us = ((time.perf_counter() - t0) / iters) * 1_000_000
-        print(f"  • POST /api/show Architecture Introspect   : {show_lat_us:.2f} µs (100% OK)")
+        print(f"  • POST /api/show Architecture Introspect   : {show_lat_us:.2f} µs ({ok}/{iters} HTTP 200)")
 
         # Benchmark /api/ps
         t0 = time.perf_counter()
+        ok = 0
         for _ in range(iters):
-            resp = client.get("/api/ps")
+            ok += client.get("/api/ps").status_code == 200
         ps_lat_us = ((time.perf_counter() - t0) / iters) * 1_000_000
-        print(f"  • GET /api/ps Active VRAM Monitoring       : {ps_lat_us:.2f} µs (100% OK)")
+        print(f"  • GET /api/ps Active VRAM Monitoring       : {ps_lat_us:.2f} µs ({ok}/{iters} HTTP 200)")
 
         # Benchmark /api/generate (Non-streaming)
         gen_tokens = 32
         t0 = time.perf_counter()
         gen_iters = 10
+        gen_tokens_total = 0
         for _ in range(gen_iters):
             resp = client.post("/api/generate", json={
                 "model": "test-tiny",
@@ -81,9 +85,10 @@ def run_triple_gateway_and_structured_benchmarks():
                 "options": {"num_predict": gen_tokens, "temperature": 0.0}
             })
             assert resp.status_code == 200
+            gen_tokens_total += resp.json().get("eval_count", 0)
         total_time = time.perf_counter() - t0
-        gen_tok_per_sec = (gen_tokens * gen_iters) / total_time
-        print(f"  • POST /api/generate Raw Completion Speed : {gen_tok_per_sec:.2f} tok/s (avg {(total_time/gen_iters)*1000:.2f} ms/req)")
+        gen_tok_per_sec = gen_tokens_total / total_time
+        print(f"  • POST /api/generate Raw Completion Speed : {gen_tok_per_sec:.2f} tok/s, random-init test-tiny model (avg {(total_time/gen_iters)*1000:.2f} ms/req)")
 
         # Benchmark /api/chat (Streaming NDJSON)
         t0 = time.perf_counter()
@@ -99,10 +104,10 @@ def run_triple_gateway_and_structured_benchmarks():
                     if line:
                         chunk = json.loads(line)
                         if chunk.get("done"):
-                            chat_tokens_total += chunk.get("eval_count", gen_tokens)
+                            chat_tokens_total += chunk.get("eval_count", 0)
         chat_time = time.perf_counter() - t0
         chat_tok_per_sec = chat_tokens_total / chat_time
-        print(f"  • POST /api/chat Streaming NDJSON Speed    : {chat_tok_per_sec:.2f} tok/s (avg {(chat_time/gen_iters)*1000:.2f} ms/req)")
+        print(f"  • POST /api/chat Streaming NDJSON Speed    : {chat_tok_per_sec:.2f} tok/s, random-init test-tiny model (avg {(chat_time/gen_iters)*1000:.2f} ms/req)")
 
         # ---------------------------------------------------------------------
         # 2. Structured Outputs & JSON Mode Benchmark
@@ -126,7 +131,7 @@ def run_triple_gateway_and_structured_benchmarks():
         for _ in range(1000):
             valid, obj, _ = StructuredOutputParser.extract_json(test_json_str)
         extract_us = ((time.perf_counter() - t0) / 1000) * 1_000_000
-        print(f"  • JSON Object Extraction & Parser Latency  : {extract_us:.2f} µs (100% Parse Success)")
+        print(f"  • JSON Object Extraction & Parser Latency  : {extract_us:.2f} µs (one fixed input; parsed: {valid})")
 
         # C. Truncated JSON Auto-Repair Latency & Recovery
         truncated_json = '{"name": "Turing Engine", "status": "active", "metrics": {"tps": 168.4, "vram_reduction": 0.75, "layers": [1, 2, 3'
@@ -140,6 +145,7 @@ def run_triple_gateway_and_structured_benchmarks():
         # D. End-to-End Chat Completion in JSON Mode
         t0 = time.perf_counter()
         json_req_iters = 10
+        json_tokens = 0
         for _ in range(json_req_iters):
             resp = client.post("/v1/chat/completions", json={
                 "model": "test-tiny",
@@ -148,8 +154,9 @@ def run_triple_gateway_and_structured_benchmarks():
                 "max_tokens": 32
             })
             assert resp.status_code == 200
+            json_tokens += resp.json()["usage"]["completion_tokens"]
         json_e2e_time = time.perf_counter() - t0
-        print(f"  • E2E JSON Mode /v1/chat/completions Speed : {(32 * json_req_iters) / json_e2e_time:.2f} tok/s")
+        print(f"  • E2E JSON Mode /v1/chat/completions Speed : {json_tokens / json_e2e_time:.2f} tok/s, random-init test-tiny model")
 
         # ---------------------------------------------------------------------
         # 3. Native Tool & Function Calling Benchmark
@@ -193,10 +200,11 @@ def run_triple_gateway_and_structured_benchmarks():
             clean_text, calls = ToolCallingHandler.extract_tool_calls(mock_tool_output)
         tool_extract_us = ((time.perf_counter() - t0) / 1000) * 1_000_000
         assert len(calls) == 1
-        print(f"  • Tool Call Regex/JSON Extraction Latency : {tool_extract_us:.2f} µs (100% Extraction Accuracy)")
+        print(f"  • Tool Call Regex/JSON Extraction Latency : {tool_extract_us:.2f} µs (one fixed input; calls found: {len(calls)})")
 
         # E2E Tool Call Chat Completion
         t0 = time.perf_counter()
+        tool_tokens = 0
         for _ in range(json_req_iters):
             resp = client.post("/v1/chat/completions", json={
                 "model": "test-tiny",
@@ -205,8 +213,9 @@ def run_triple_gateway_and_structured_benchmarks():
                 "max_tokens": 32
             })
             assert resp.status_code == 200
+            tool_tokens += resp.json()["usage"]["completion_tokens"]
         tool_e2e_time = time.perf_counter() - t0
-        print(f"  • E2E Tool Calling /v1/chat/completions    : {(32 * json_req_iters) / tool_e2e_time:.2f} tok/s")
+        print(f"  • E2E Tool Calling /v1/chat/completions    : {tool_tokens / tool_e2e_time:.2f} tok/s, random-init test-tiny model")
 
     print("\n" + "=" * 88)
     print("   🏆 ALL TRIPLE GATEWAY, STRUCTURED OUTPUT & TOOL CALLING BENCHMARKS PASSED")

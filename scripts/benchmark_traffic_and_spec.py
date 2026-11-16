@@ -4,9 +4,9 @@ Benchmark AI traffic management and concurrency-adaptive speculation gating.
 
 Features:
 1. Token-budget routing & VRAM admission control overhead measurement.
-2. Concurrency-adaptive spec gating (memra 1.82x spec at c=1, batching overtaking at c>=4).
+2. Speculation gate decisions per concurrency (policy only; no throughput is measured).
 3. 3-lane QoS scheduling verification.
-4. Byte-exact spec-plain parity verification.
+4. Self-check of the parity verifier on fixed token lists (no spec or plain decode is run).
 """
 
 import argparse
@@ -28,15 +28,13 @@ from turing.serving.traffic import (
 )
 from turing.serving.spec_gate import (
     SpeculationGatePolicy,
-    SpecGateDecision,
     SpecExactParityVerifier,
-    ParityReport,
 )
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Benchmark traffic management and spec gating.")
     parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto",
-                        help="Target device (simulated for these benchmarks).")
+                        help="Ignored: these benchmarks are pure Python and run on the host CPU.")
     parser.add_argument("--concurrency_max", type=int, default=16,
                         help="Maximum active concurrency for spec gating.")
     parser.add_argument("--json_out", type=str, default="results_traffic_spec.json",
@@ -87,62 +85,27 @@ def benchmark_part1_admission_overhead() -> Dict[str, Any]:
     end_time = time.perf_counter()
     qos_us = ((end_time - start_time) / iterations) * 1e6
     results["qos_overhead_us"] = qos_us
-    print(f"3-Lane QoS sort overhead: {qos_us:.3f} us")
+    print(f"Lane classification overhead: {qos_us:.3f} us")
     
     return results
 
-def simulate_throughput(c: int, mode: SpecGateDecision) -> float:
-    """Models tokens/s based on concurrency and speculation mode."""
-    # Base plain tokens/s roughly scales with concurrency
-    plain_tps = 50.0 * min(c, 16)
-    
-    if mode == SpecGateDecision.FULL_SPEC:
-        # 1.82x at c=1, degrading as c increases
-        multiplier = 1.82 - (0.3 * (c - 1))
-        spec_tps = 50.0 * max(0.5, multiplier) * c 
-        return spec_tps
-    elif mode == SpecGateDecision.PLAIN:
-        return plain_tps
-    else: # COLLAPSED
-        # Mid-way performance
-        multiplier = 1.4 - (0.15 * (c - 1))
-        return 50.0 * max(0.7, multiplier) * c
-
 def benchmark_part2_spec_gating_envelope(max_c: int) -> Dict[str, Any]:
-    print("\n--- Part 2: Concurrency-Adaptive Speculation Gating Envelope ---")
+    # Only the gate's decision is computed here; no model runs, so no throughput is reported.
+    print("\n--- Part 2: Speculation Gate Decisions by Concurrency (policy only, no decoding) ---")
     results = {"concurrencies": []}
-    
     policy = SpeculationGatePolicy(low_threshold=2, high_threshold=4)
-    
-    print(f"{'Concurrency':<12} | {'Always-Spec':<12} | {'Always-Plain':<12} | {'Gated-Adaptive (Mode)':<21}")
-    print("-" * 65)
-    
-    concurrencies = [1, 2, 3, 4, 8, 12, 16]
-    for c in concurrencies:
+    print(f"{'Concurrency':<12} | {'Gate decision':<14}")
+    print("-" * 30)
+    for c in [1, 2, 3, 4, 8, 12, 16]:
         if c > max_c:
             break
-            
-        always_spec_tps = simulate_throughput(c, SpecGateDecision.FULL_SPEC)
-        always_plain_tps = simulate_throughput(c, SpecGateDecision.PLAIN)
-        
-        # Adaptive mode
-        gated_mode = policy.gate_decision(c)
-        gated_tps = simulate_throughput(c, gated_mode)
-        
-        print(f"{c:<12} | {always_spec_tps:<12.1f} | {always_plain_tps:<12.1f} | {gated_tps:<5.1f} ({gated_mode.value})")
-        
-        results["concurrencies"].append({
-            "c": c,
-            "always_spec_tps": always_spec_tps,
-            "always_plain_tps": always_plain_tps,
-            "gated_tps": gated_tps,
-            "mode": gated_mode.value
-        })
-        
+        mode = policy.gate_decision(c)
+        print(f"{c:<12} | {mode.value:<14}")
+        results["concurrencies"].append({"c": c, "mode": mode.value})
     return results
 
 def benchmark_part3_parity_verifier() -> Dict[str, Any]:
-    print("\n--- Part 3: Byte-Exact Spec-Plain Parity Gate ---")
+    print("\n--- Part 3: Parity Verifier Self-Check (fixed token lists; no decoding is run) ---")
     
     # Exact Match
     spec_tokens = [1, 5, 23, 99, 102]
