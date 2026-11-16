@@ -71,3 +71,12 @@ def test_turing_cli_generate(standalone_cli_binary, test_gguf_path):
     res = subprocess.run(cmd, capture_output=True, text=True)
     assert res.returncode == 0
     assert "Generated" in res.stderr or len(res.stdout.strip()) > 0
+
+
+def test_turing_cli_rejects_prompt_longer_than_context(standalone_cli_binary, test_gguf_path):
+    """A prompt past the KV cache length is an error, not an out-of-bounds read."""
+    prompt = " ".join(["<tok_1>"] * 600)  # the engine's context is 512 positions
+    res = subprocess.run([standalone_cli_binary, "generate", "--model", test_gguf_path, "--prompt", prompt,
+                          "--max-tokens", "2", "--temp", "0.0"], capture_output=True, text=True)
+    assert res.returncode != 0
+    assert "exceeds the model's context" in res.stdout + res.stderr

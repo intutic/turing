@@ -54,7 +54,7 @@ class KVBlockEventPublisher:
         pub_endpoint: str = "tcp://*:5556",
         replay_endpoint: str = "tcp://*:5559",
         replay_buffer_size: int = 10000,
-        block_size: int = 64,
+        block_size: int = 16,  # the KV pool's page size
     ):
         self.model_name = model_name
         self.pod_ip = pod_ip
@@ -204,7 +204,7 @@ class KVBlockEventPublisher:
 
 
 def tokenids_to_block_hashes(
-    token_ids: List[int], block_size: int = 64
+    token_ids: List[int], block_size: int = 16
 ) -> List[Dict[str, Any]]:
     """
     Chunk a token ID sequence into block-sized segments and compute

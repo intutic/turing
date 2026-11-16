@@ -67,3 +67,44 @@ def test_fastapi_server_endpoints():
         data_m = res_metrics_json.json()
         assert "telemetry" in data_m
         assert data_m["telemetry"]["total_tokens_generated"] >= 4
+
+
+def _overloaded_app(**pool):
+    import dataclasses
+    cfg = dataclasses.replace(get_model_config("test-tiny"), **pool)  # the registry's object is shared
+    engine = ContinuousBatchEngine(cfg, TuringConfig(device="cpu", max_batch_size=4))
+    return engine
+
+
+def test_rejections_return_400_429_503_with_retry_after():
+    """Pool full -> 503, admission QUEUE -> 429, never-fits -> 400; streaming requests are rejected before any 200."""
+    from turing.serving.traffic import AdmissionController
+    engine = _overloaded_app(kv_pool_gib=0.002)
+    pool = engine.kv_pool
+    with TestClient(create_app(engine)) as client:
+        too_big = pool.page_limit * 16 + 1
+        r = client.post("/v1/completions", json={"model": "m", "prompt": "hi", "max_tokens": too_big, "stream": True})
+        assert r.status_code == 400 and r.json()["error"]["type"] == "invalid_request_error"
+
+        held = pool.alloc_pages(pool.page_limit)  # another tenant holds every page
+        try:
+            for body, path in [({"model": "m", "prompt": "hi", "max_tokens": 4}, "/v1/completions"),
+                               ({"model": "m", "prompt": "hi", "max_tokens": 4, "stream": True}, "/v1/completions"),
+                               ({"model": "m", "max_tokens": 4, "stream": True,
+                                 "messages": [{"role": "user", "content": "hi"}]}, "/v1/messages"),
+                               ({"model": "m", "prompt": "hi", "stream": True}, "/api/generate")]:
+                r = client.post(path, json=body)
+                assert r.status_code == 503, (path, r.status_code, r.text)
+                assert r.headers["retry-after"] == "1"
+            assert client.post("/v1/messages", json={"model": "m", "max_tokens": 4, "messages": [
+                {"role": "user", "content": "hi"}]}).json()["error"]["type"] == "overloaded_error"
+        finally:
+            pool.decref(held)
+        assert pool.used_pages == 0
+
+    engine = _overloaded_app()
+    app = create_app(engine, admission_controller=AdmissionController(1, high_watermark=0.0, shed_watermark=float("inf")))
+    with TestClient(app) as client:
+        r = client.post("/v1/completions", json={"model": "m", "prompt": "hi", "max_tokens": 4})
+        assert r.status_code == 429 and r.headers["retry-after"] == "2"
+        assert r.json()["error"]["type"] == "rate_limit_exceeded"

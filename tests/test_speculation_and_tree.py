@@ -92,3 +92,15 @@ def test_ridge_assisted_tree_speculator():
     assert accepted == [10, 20, 99]
     assert speculator.get_acceptance_rate() > 0.0
 
+
+
+def test_verify_counts_only_matching_drafts_as_accepted():
+    """The target's correction token is emitted but is not a draft acceptance."""
+    import torch
+    from turing.core.speculation import RidgeAssistedTreeSpeculator
+    logits = torch.full((3, 10), -10.0)
+    logits[0, 1] = logits[1, 5] = logits[2, 3] = 10.0  # target picks 1, 5, 3
+    spec = RidgeAssistedTreeSpeculator()
+    out, n = spec.verify_speculative_candidates([1, 2, 3], logits, temperature=0.0)
+    assert out == [1, 5] and n == 2
+    assert spec.total_drafted == 2 and spec.total_accepted == 1

@@ -5,6 +5,7 @@ Supports chunked prefill, speculative interleaving, and Prometheus telemetry.
 
 import asyncio
 import uuid
+import statistics
 import time
 from enum import Enum
 from typing import List, Dict, Tuple, Optional, AsyncGenerator, Deque, Any
@@ -14,13 +15,21 @@ import torch.nn.functional as F
 
 from ..config import ModelConfig, TuringConfig
 from ..models.causal_lm import SubspaceCausalLM
-from ..core.kv_cache import KVCache, KVPoolExhausted, kv_bytes_per_token
+from ..core.kv_cache import PAGE, KVCache, KVPoolExhausted, kv_bytes_per_token
 from .traffic import (
     AdmissionController, AdmissionDecision,
     AdmissionResult, Lane, LanePolicy
 )
 from .spec_gate import SpecGateDecision, SpeculationGatePolicy
 from ..kernels.triton_fused_sample import batched_sample_tokens
+
+class RequestRejected(RuntimeError):
+    """The engine cannot take this request now. The HTTP layer returns status_code (429 or 503) with Retry-After."""
+
+    def __init__(self, message: str, status_code: int = 503, retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.status_code, self.retry_after = status_code, retry_after
+
 
 class RequestState(Enum):
     WAITING = 0
@@ -176,10 +185,24 @@ class ContinuousBatchEngine:
             est_bytes = (len(prompt_tokens) + max_new_tokens) * kv_bytes_per_token(
                 cfg.num_layers, cfg.num_kv_heads, cfg.head_dim, cfg.kv_cache_dtype, native_bytes)
             adm_res = self.admission.admit(req.request_id, est_bytes)
-            if adm_res.decision == AdmissionDecision.SHED:
+            if adm_res.decision in (AdmissionDecision.SHED, AdmissionDecision.QUEUE):
                 req.state = RequestState.FINISHED
                 req.output_queue.put_nowait(None)
-                raise RuntimeError(f"Request {req.request_id} rejected by admission controller: {adm_res.reason or 'VRAM limit exceeded'}")
+                shed = adm_res.decision == AdmissionDecision.SHED
+                raise RequestRejected(
+                    f"Request {req.request_id} rejected by admission controller: {adm_res.reason or 'VRAM limit exceeded'}",
+                    status_code=503 if shed else 429, retry_after=adm_res.retry_after_seconds)
+
+        # A request larger than the pool (or the page table) can never run: that is the client's error, not overload
+        prefix_len = prefix_kv.length if isinstance(prefix_kv, KVCache) else 0
+        need, cap = prefix_len + len(prompt_tokens) + max_new_tokens, min(self.kv_pool.table_width, self.kv_pool.page_limit) * PAGE
+        if need > cap:
+            req.state = RequestState.FINISHED
+            req.output_queue.put_nowait(None)
+            if self.admission is not None:
+                self.admission.release(req.request_id)
+            raise RequestRejected(f"Request {req.request_id} rejected: prompt plus max_tokens is {need} tokens, "
+                                  f"but this server holds at most {cap} per request", status_code=400)
 
         # Reserve every page the request can need, so it can never run out of pages mid-decode
         try:
@@ -191,7 +214,7 @@ class ContinuousBatchEngine:
             req.output_queue.put_nowait(None)
             if self.admission is not None:
                 self.admission.release(req.request_id)
-            raise RuntimeError(f"Request {req.request_id} rejected: {e}") from e
+            raise RequestRejected(f"Request {req.request_id} rejected: {e}", status_code=503, retry_after=1.0) from e
 
         self.waiting_queue.append(req)
         return req
@@ -245,6 +268,11 @@ class ContinuousBatchEngine:
             draft_tokens=draft_tokens,
             lane=lane
         )
+        async for token in self.stream_request(req):
+            yield token
+
+    async def stream_request(self, req: AsyncSequenceRequest) -> AsyncGenerator[int, None]:
+        """Tokens of a request already admitted by add_request (admit first so a rejection precedes any response)."""
         while True:
             token = await req.output_queue.get()
             if token is None:
@@ -281,7 +309,6 @@ class ContinuousBatchEngine:
             return
 
         finished_indices = []
-        now = time.time()
 
         # Partition running batch into prefill and decode requests
         prefill_reqs = [req for req in self.running_batch if req.state == RequestState.PREFILLING]
@@ -310,6 +337,7 @@ class ContinuousBatchEngine:
                 if req.prefill_offset >= len(req.prompt_tokens):
                     req.state = RequestState.DECODING
                     next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)
+                    now = time.time()  # after the forward and the sample (which syncs), so TTFT includes the prefill
                     req.first_token_at = now
                     req.last_token_at = now
                     self.recent_ttft.append(now - req.created_at)
@@ -341,10 +369,11 @@ class ContinuousBatchEngine:
                         collected_logits.append(logits[:, -1, :])
                     batched_logits = torch.cat(collected_logits, dim=0)
                 batched_temps = torch.tensor([r.temperature for r in active_decode], dtype=torch.float32, device=self.device)
-                sampled_tokens = batched_sample_tokens(batched_logits, batched_temps, top_k=50)
+                sampled_tokens = batched_sample_tokens(batched_logits, batched_temps, top_k=50).tolist()  # one sync
+                now = time.time()
 
                 for i, req in enumerate(active_decode):
-                    next_token = int(sampled_tokens[i].item())
+                    next_token = int(sampled_tokens[i])
                     if req.last_token_at is not None:
                         self.recent_itl.append(now - req.last_token_at)
                     req.last_token_at = now
@@ -365,6 +394,7 @@ class ContinuousBatchEngine:
                     req.past_kv = new_kv
 
                     next_token = self._sample_token(logits[:, -1, :], req.temperature, req.top_k)
+                    now = time.time()
                     if req.last_token_at is not None:
                         self.recent_itl.append(now - req.last_token_at)
                     req.last_token_at = now
@@ -401,16 +431,13 @@ class ContinuousBatchEngine:
     def get_telemetry(self) -> Dict[str, Any]:
         uptime = max(0.001, time.time() - self.start_time)
         throughput = self.total_tokens_generated / uptime
-        avg_ttft_ms = (sum(self.recent_ttft) / len(self.recent_ttft) * 1000.0) if self.recent_ttft else 0.0
-        avg_itl_ms = (sum(self.recent_itl) / len(self.recent_itl) * 1000.0) if self.recent_itl else 0.0
 
-        p50_ttft_ms = float(torch.tensor(list(self.recent_ttft)).quantile(0.50).item() * 1000.0) if len(self.recent_ttft) >= 2 else avg_ttft_ms
-        p95_ttft_ms = float(torch.tensor(list(self.recent_ttft)).quantile(0.95).item() * 1000.0) if len(self.recent_ttft) >= 5 else avg_ttft_ms
-        p99_ttft_ms = float(torch.tensor(list(self.recent_ttft)).quantile(0.99).item() * 1000.0) if len(self.recent_ttft) >= 10 else avg_ttft_ms
-
-        p50_itl_ms = float(torch.tensor(list(self.recent_itl)).quantile(0.50).item() * 1000.0) if len(self.recent_itl) >= 2 else avg_itl_ms
-        p95_itl_ms = float(torch.tensor(list(self.recent_itl)).quantile(0.95).item() * 1000.0) if len(self.recent_itl) >= 5 else avg_itl_ms
-        p99_itl_ms = float(torch.tensor(list(self.recent_itl)).quantile(0.99).item() * 1000.0) if len(self.recent_itl) >= 10 else avg_itl_ms
+        def ms(vals, q=None):
+            """Mean (q=None) or q-quantile in ms; None when there are too few samples to say (never another statistic)."""
+            if len(vals) < (1 if q is None else 2):
+                return None
+            v = sum(vals) / len(vals) if q is None else statistics.quantiles(vals, n=100, method="inclusive")[q - 1]
+            return round(v * 1000.0, 2)
 
         telemetry: Dict[str, Any] = {
             "uptime_seconds": round(uptime, 2),
@@ -421,14 +448,14 @@ class ContinuousBatchEngine:
             "waiting_queue_depth": len(self.waiting_queue),
             "kv_memory_pool": self.kv_pool.get_stats(),
             "latency": {
-                "avg_ttft_ms": round(avg_ttft_ms, 2),
-                "p50_ttft_ms": round(p50_ttft_ms, 2),
-                "p95_ttft_ms": round(p95_ttft_ms, 2),
-                "p99_ttft_ms": round(p99_ttft_ms, 2),
-                "avg_itl_ms": round(avg_itl_ms, 2),
-                "p50_itl_ms": round(p50_itl_ms, 2),
-                "p95_itl_ms": round(p95_itl_ms, 2),
-                "p99_itl_ms": round(p99_itl_ms, 2)
+                "avg_ttft_ms": ms(self.recent_ttft),
+                "p50_ttft_ms": ms(self.recent_ttft, 50),
+                "p95_ttft_ms": ms(self.recent_ttft, 95),
+                "p99_ttft_ms": ms(self.recent_ttft, 99),
+                "avg_itl_ms": ms(self.recent_itl),
+                "p50_itl_ms": ms(self.recent_itl, 50),
+                "p95_itl_ms": ms(self.recent_itl, 95),
+                "p99_itl_ms": ms(self.recent_itl, 99),
             }
         }
         if self.admission is not None:

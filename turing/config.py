@@ -202,6 +202,11 @@ class TuringConfig:
             # 5. CPU Fallback (AVX2 SIMD)
             else:
                 return torch.device("cpu")
+        if self.device == "rocm":  # PyTorch exposes AMD GPUs through its HIP build as "cuda"
+            if getattr(torch.version, "hip", None) is None or not torch.cuda.is_available():
+                raise RuntimeError("--device rocm needs a ROCm build of PyTorch and a visible AMD GPU "
+                                   "(pip install torch --index-url https://download.pytorch.org/whl/rocm6.2)")
+            return torch.device("cuda")
         return torch.device(self.device)
 
     @property

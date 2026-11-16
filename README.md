@@ -12,7 +12,7 @@
 
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 377/377 Passing](https://img.shields.io/badge/Tests-377%2F377%20Passing-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 383 (18 need CUDA)](https://img.shields.io/badge/Tests-383%20%2818%20need%20CUDA%29-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -283,5 +283,5 @@ pip install https://github.com/intutic/turing/releases/download/v1.5.0/turing_en
 ## 📄 License
 
 Turing Engine is licensed under the **Business Source License 1.1 (BSL 1.1)**. 
-* **Free & Open for Community Use**: Completely free for single-node development, testing, research, and non-commercial deployments.
-* Converts automatically to **Apache 2.0** on **March 1, 2030**.
+* **Free for non-production use**: development, local testing, academic research, personal single-GPU workstations and benchmarking ([`LICENSE`](LICENSE), Additional Use Grant). Production use (multi-GPU clusters, commercial hosting, revenue-generating API traffic) needs a separate commercial license.
+* Converts automatically to **Apache 2.0** on **August 24, 2030** or the fourth anniversary of the first public release (as [`LICENSE`](LICENSE) §3 states).

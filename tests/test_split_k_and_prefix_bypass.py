@@ -11,9 +11,6 @@ from turing.kernels.triton_linear_recurrence_step import (
     fused_linear_recurrence_step_cuda,
     fused_kda_conv_recurrence_step_cuda
 )
-from turing.kernels.triton_sparse_subspace_prefill import (
-    sparse_subspace_prefill_cuda
-)
 from turing.core.paging import (
     GroupedMicroScalePagedKVPool,
     StaticPagedKVPool
@@ -172,19 +169,3 @@ def test_kda_step_simd_cpp_binding():
         assert out_cpp.shape == (B, H, D)
     except ImportError:
         pytest.skip("turing_csrc not loaded")
-
-
-def test_sparse_subspace_prefill_parity():
-    """Validates 2:4 sparse subspace prompt prefill kernel."""
-    torch.manual_seed(42)
-    M, K, N = 8, 32, 64
-    x = torch.randn(M, K, dtype=torch.float32)
-    gate = torch.randn(K, N, dtype=torch.float32)
-    up = torch.randn(K, N, dtype=torch.float32)
-    down = torch.randn(N, K, dtype=torch.float32)
-
-    active_indices = torch.tensor([0, 2, 5, 8, 12, 18, 24, 30], dtype=torch.int64)
-
-    out = sparse_subspace_prefill_cuda(x, gate, up, down, active_indices)
-    assert out.shape == (M, K)
-    assert not torch.isnan(out).any()

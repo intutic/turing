@@ -115,7 +115,7 @@ turing_kv_cache_usage_perc 0.125
 
 # HELP turing_cache_config_info KV cache configuration info (llm-d BlockSize and NumGPUBlocks)
 # TYPE turing_cache_config_info gauge
-turing_cache_config_info{block_size="64",num_gpu_blocks="1024"} 1.0
+turing_cache_config_info{block_size="16",num_gpu_blocks="1024"} 1.0
 ```
 
 ---

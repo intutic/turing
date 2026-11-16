@@ -227,8 +227,11 @@ class QuadtreeMRPSpeculator(nn.Module):
         top_k_candidates = torch.topk(logits, k=min(64, self.vocab_size), dim=-1).indices
 
 
+        # The tree is host-side, so the candidates cross to the host once per draft, not once per node.
+        cands: List[int] = top_k_candidates.tolist()
+
         nodes: List[TreeNode] = []
-        root_token = top_k_candidates[0].item()
+        root_token = cands[0]
         nodes.append(TreeNode(node_id=0, token_id=root_token, parent_id=-1, depth=0))
 
 
@@ -238,11 +241,10 @@ class QuadtreeMRPSpeculator(nn.Module):
         depth_1_nodes: List[int] = []
 
         quadrant_cands: Dict[int, List[int]] = {0: [], 1: [], 2: [], 3: []}
-        for cand_idx in top_k_candidates[1:]:
-            c_tok = cand_idx.item()
+        for c_tok in cands[1:]:
             # Spatial projection approximation
-            dx = (cand_idx % 7) - 3.0
-            dy = ((cand_idx // 7) % 7) - 3.0
+            dx = (c_tok % 7) - 3.0
+            dy = ((c_tok // 7) % 7) - 3.0
 
             if dx >= 0 and dy >= 0:
                 quad = 0
@@ -255,7 +257,7 @@ class QuadtreeMRPSpeculator(nn.Module):
             quadrant_cands[quad].append(c_tok)
 
         for q in range(4):
-            tok = quadrant_cands[q][0] if quadrant_cands[q] else top_k_candidates[node_counter].item()
+            tok = quadrant_cands[q][0] if quadrant_cands[q] else cands[node_counter]
             nodes.append(TreeNode(node_id=node_counter, token_id=tok, parent_id=0, depth=1))
             nodes[0].children_ids.append(node_counter)
             depth_1_nodes.append(node_counter)
@@ -265,7 +267,7 @@ class QuadtreeMRPSpeculator(nn.Module):
         if self.max_depth >= 3:
             for p_id in depth_1_nodes:
                 for _ in range(4):
-                    tok = top_k_candidates[node_counter % len(top_k_candidates)].item()
+                    tok = cands[node_counter % len(cands)]
                     nodes.append(TreeNode(node_id=node_counter, token_id=tok, parent_id=p_id, depth=2))
                     nodes[p_id].children_ids.append(node_counter)
                     node_counter += 1
@@ -342,23 +344,20 @@ class EntropyConfidenceTreePruner:
         self.low_thresh = low_entropy_thresh
         self.high_thresh = high_entropy_thresh
 
-    def compute_entropy(self, logits: torch.Tensor) -> float:
-        """
-        Computes Shannon entropy H(P_t) in nats.
-        logits: [VocabSize]
-        """
+    def entropy_tensor(self, logits: torch.Tensor) -> torch.Tensor:
+        """Shannon entropy H(P_t) in nats as a 0-d tensor on the logits' device (no host sync). logits: [VocabSize]"""
         if logits.is_cuda:
             try:
                 from ..kernels.triton_spec_entropy import fused_entropy_argmax_gate_cuda
-                entropy, _, _ = fused_entropy_argmax_gate_cuda(logits, self.low_thresh, self.high_thresh)
-                return float(entropy.item() if hasattr(entropy, "item") else entropy)
+                return fused_entropy_argmax_gate_cuda(logits, self.low_thresh, self.high_thresh)[0].float().reshape(())
             except Exception:
                 pass
-
-        probs = F.softmax(logits.float(), dim=-1)
         log_probs = F.log_softmax(logits.float(), dim=-1)
-        entropy = -(probs * log_probs).sum().item()
-        return float(entropy)
+        return -(log_probs.exp() * log_probs).sum()
+
+    def compute_entropy(self, logits: torch.Tensor) -> float:
+        """Entropy as a Python float, for host-side callers; syncs once."""
+        return float(self.entropy_tensor(logits))
 
     def prune_and_build_tree(
         self,
@@ -369,8 +368,11 @@ class EntropyConfidenceTreePruner:
         candidate_logits: [K_candidates, VocabSize]
         Returns: (nodes, dag_mask, token_ids, entropy, active_width)
         """
-        root_logits = candidate_logits[0]
-        entropy = self.compute_entropy(root_logits)
+        # One host transfer per draft: entropy and the argmax of the (at most 8) candidates that can be used.
+        # float32 holds token ids exactly up to 2**24, far above any vocabulary size.
+        ids = candidate_logits[:8].argmax(dim=-1)
+        stats = torch.cat([self.entropy_tensor(candidate_logits[0]).reshape(1), ids.float()]).tolist()
+        entropy, argmax_ids = stats[0], [int(t) for t in stats[1:]]
 
         if entropy < self.low_thresh:
             active_width = min(8, candidate_logits.shape[0])
@@ -383,14 +385,13 @@ class EntropyConfidenceTreePruner:
         token_ids: List[int] = []
 
         # Root node
-        root_token = int(torch.argmax(root_logits).item())
+        root_token = argmax_ids[0]
         nodes.append(TreeNode(node_id=0, token_id=root_token, parent_id=-1, depth=0))
         token_ids.append(root_token)
 
         # Dynamic child branches
         for i in range(1, active_width):
-            c_logits = candidate_logits[i]
-            c_token = torch.argmax(c_logits).item()
+            c_token = argmax_ids[i]
             nodes.append(TreeNode(node_id=i, token_id=c_token, parent_id=0, depth=1))
             nodes[0].children_ids.append(i)
             token_ids.append(c_token)
@@ -533,27 +534,29 @@ class RidgeAssistedTreeSpeculator:
         try:
             from ..kernels.triton_spec_verify import fused_speculative_verify_cuda
             accepted_t, num_accepted = fused_speculative_verify_cuda(draft_token_ids, target_logits, temperature)
-            self.total_drafted += len(draft_token_ids)
-            self.total_accepted += num_accepted
-            return accepted_t.tolist() if isinstance(accepted_t, torch.Tensor) else accepted_t, num_accepted
+            accepted = accepted_t.tolist() if isinstance(accepted_t, torch.Tensor) else list(accepted_t)
+            self.total_drafted += len(accepted)  # drafts checked; a trailing correction token is not an acceptance
+            self.total_accepted += sum(d == a for d, a in zip(draft_token_ids, accepted))
+            return accepted, num_accepted
         except Exception:
             pass
 
-        accepted = []
-        for i, draft_tok in enumerate(draft_token_ids):
-            if i >= target_logits.shape[0]:
-                break
-            t_logit = target_logits[i]
-            target_best_tok = torch.argmax(t_logit).item() if temperature == 0.0 else torch.multinomial(F.softmax(t_logit / max(temperature, 1e-4), dim=-1), 1).item()
+        n = min(len(draft_token_ids), target_logits.shape[0])
+        if temperature == 0.0:
+            target_t = target_logits[:n].argmax(dim=-1)
+        else:
+            target_t = torch.multinomial(F.softmax(target_logits[:n].float() / max(temperature, 1e-4), dim=-1), 1).squeeze(-1)
+        target_toks = target_t.tolist()  # one host transfer for all positions
 
+        accepted = []
+        for draft_tok, target_best_tok in zip(draft_token_ids, target_toks):
             self.total_drafted += 1
             if draft_tok == target_best_tok:
                 accepted.append(draft_tok)
                 self.total_accepted += 1
             else:
-                # Append correct target token on first divergence and stop
+                # Emit the target's token on the first divergence and stop; it was not a draft acceptance
                 accepted.append(target_best_tok)
-                self.total_accepted += 1
                 break
 
         return accepted, len(accepted)

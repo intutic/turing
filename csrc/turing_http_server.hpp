@@ -89,6 +89,7 @@ public:
             if (bytes_read > 0) {
                 std::string req(buffer);
                 std::string response_body;
+                std::string status = "200 OK";
 
                 if (req.find("GET /health") != std::string::npos) {
                     response_body = "{\"status\": \"healthy\", \"runtime\": \"turing-cpp-standalone\"}";
@@ -108,12 +109,17 @@ public:
                         }
                     }
 
-                    std::string gen_text = generate_handler ? generate_handler(prompt, 32) : "OK";
-                    response_body = "{\"choices\": [{\"text\": \"" + gen_text + "\"}]}";
+                    try {
+                        std::string gen_text = generate_handler ? generate_handler(prompt, 32) : "OK";
+                        response_body = "{\"choices\": [{\"text\": \"" + gen_text + "\"}]}";
+                    } catch (const std::exception& e) {
+                        status = "400 Bad Request";
+                        response_body = std::string("{\"error\": \"") + e.what() + "\"}";
+                    }
                 }
 
                 std::ostringstream oss;
-                oss << "HTTP/1.1 200 OK\r\n"
+                oss << "HTTP/1.1 " << status << "\r\n"
                     << "Content-Type: application/json\r\n"
                     << "Content-Length: " << response_body.size() << "\r\n"
                     << "Connection: close\r\n\r\n"

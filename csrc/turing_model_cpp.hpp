@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <memory>
 #include <iostream>
+#include <stdexcept>
 #include "turing_simd.hpp"
 #include "turing_rope.hpp"
 #include "turing_sampler.hpp"
@@ -198,6 +199,11 @@ public:
 
     // Evaluates 1 token forward step at pos, updates KV caches, and produces logits [vocab_size]
     void forward_token(int32_t token_id, size_t pos, float* logits_out) {
+        // Attention reads cache rows 0..pos; past max_pos those rows do not exist.
+        if (pos >= config.max_pos) {
+            throw std::out_of_range("position " + std::to_string(pos) + " exceeds the model's context of " +
+                                    std::to_string(config.max_pos) + " tokens");
+        }
         size_t H = config.hidden_dim;
         size_t V = config.vocab_size;
         size_t n_heads = config.num_heads;

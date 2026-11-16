@@ -48,3 +48,25 @@ def test_cli_exits_instead_of_falling_back_to_random_weights(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert "--mock" in str(exc.value.code)
+
+
+def test_cli_generate_from_gguf_file(monkeypatch, tmp_path, capsys):
+    """A local .gguf path loads through the GGUF loader (this crashed with UnboundLocalError on `os`)."""
+    import sys
+    from turing import cli
+    from turing.models.gguf_loader import create_test_gguf_file
+    path = create_test_gguf_file(str(tmp_path / "tiny.gguf"))
+    monkeypatch.setattr(sys, "argv", ["turing", "generate", "--model", path, "--device", "cpu",
+                                      "--prompt", "<tok_5>", "--max-tokens", "3", "--temperature", "0"])
+    cli.main()
+    assert "Generated Output" in capsys.readouterr().out
+
+
+def test_rocm_device_maps_to_hip_or_explains():
+    import torch
+    from turing.config import TuringConfig
+    if getattr(torch.version, "hip", None) and torch.cuda.is_available():
+        assert TuringConfig(device="rocm").resolve_device() == torch.device("cuda")
+    else:
+        with pytest.raises(RuntimeError, match="ROCm build"):
+            TuringConfig(device="rocm").resolve_device()

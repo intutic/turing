@@ -26,6 +26,7 @@ The rows below are names the resolver and `SIZING_PROFILES` know about; **none o
 | **Meta AI** | `meta-llama/Llama-3.3-70B-Instruct` | 70.6B | ~141 GB | No |
 | **Alibaba** | `Qwen/Qwen2.5-72B-Instruct` | 72.7B | ~145 GB | No |
 | **DeepSeek** | `deepseek-ai/DeepSeek-V3` | 671B MoE (37B active) | ~1,342 GB | No |
+| **Alibaba** | `Qwen/Qwen3.8-2.4T-A95B` | 2.4T MoE (95B active) | ~4,800 GB (~1.2 TB at NVFP4) | No: not supported. NVFP4 needs Blackwell FP4 tensor cores and the weights need many GPUs; see [vLLM's recipe](https://recipes.vllm.ai/Qwen/Qwen3.8-2.4T-A95B). |
 
 Qwen2/Qwen2.5 and Qwen3 checkpoints reproduce HuggingFace's logits in the parity tests (small random models; no real Qwen checkpoint has been run). MoE checkpoints have no loader path.
 

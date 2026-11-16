@@ -3,6 +3,7 @@ Turing Engine Master Command-Line Interface (CLI).
 """
 
 import argparse
+import os
 import sys
 import json
 import time
@@ -29,6 +30,21 @@ def _load_hf_or_exit(args, dev):
     except Exception as e:
         raise SystemExit(f"[!] Could not load weights for '{args.model}': {e}\n    Pass --mock to run on synthetic weights.")
 
+def _load_weights(args, dev):
+    """Real weights from a local .gguf file or HuggingFace, with the KV cache flags applied when the command has them."""
+    if args.model.endswith(".gguf") and os.path.isfile(args.model):
+        from .models.gguf_loader import GGUFModelLoader
+        print(f"[*] Loading native GGUF weights from '{args.model}'...")
+        model, tokenizer = GGUFModelLoader(args.model).load(sparsity_ratio=args.sparsity, device=str(dev))
+    else:
+        model, tokenizer = _load_hf_or_exit(args, dev)
+    cfg = model.config
+    if hasattr(args, "kv_cache_dtype"):
+        cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
+    if hasattr(args, "no_cuda_graphs"):
+        cfg.cuda_graphs, cfg.kv_pool_fraction = not args.no_cuda_graphs, args.kv_cache_memory_fraction
+    return model, tokenizer
+
 def main():
     parser = argparse.ArgumentParser(prog="turing", description="Turing Engine: Subspace-Compressed LLM Serving Runtime")
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
@@ -45,7 +61,6 @@ def main():
     serve_parser.add_argument("--no-cuda-graphs", action="store_true", help="Run decode steps eagerly instead of replaying CUDA graphs")
     serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=0.6, help="Share of free GPU memory (after the weights) for the paged KV pool (default: 0.6)")
     serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
-    serve_parser.add_argument("--block-size", type=int, default=64, help="KV cache block size tokens (default: 64)")
     serve_parser.add_argument("--enable-kv-events", action="store_true", help="Enable ZeroMQ KV block event publisher for llm-d EPP prefix cache routing")
     serve_parser.add_argument("--kv-events-pub-port", type=int, default=5556, help="ZeroMQ PUB port for live KV cache block events (default: 5556)")
     serve_parser.add_argument("--kv-events-replay-port", type=int, default=5559, help="ZeroMQ ROUTER port for KV cache event replay (default: 5559)")
@@ -65,7 +80,7 @@ def main():
     gen_parser = subparsers.add_parser("generate", help="Run single-prompt autoregressive text generation")
     gen_parser.add_argument("--model", type=str, default="smollm2", help="Model identifier (e.g. gpt2, smollm2, or HF repo ID)")
     gen_parser.add_argument("--prompt", type=str, default="Artificial intelligence is", help="Input prompt")
-    gen_parser.add_argument("--max-new-tokens", type=int, default=32, help="Tokens to generate")
+    gen_parser.add_argument("--max-new-tokens", "--max-tokens", type=int, default=32, help="Tokens to generate")
     gen_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     gen_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     gen_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
@@ -137,7 +152,7 @@ def main():
     chat_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
     chat_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     chat_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
-    chat_parser.add_argument("--max-new-tokens", type=int, default=128, help="Maximum new tokens per response")
+    chat_parser.add_argument("--max-new-tokens", "--max-tokens", type=int, default=128, help="Maximum new tokens per response")
     chat_parser.add_argument("--mock", action="store_true", help="Run with mock synthetic weights without downloading")
     chat_parser.add_argument("--reasoning-effort", type=str, default=None, choices=["low", "medium", "high"], help="Constrain reasoning effort level (low, medium, high)")
 
@@ -173,15 +188,9 @@ def main():
             model = SubspaceCausalLM(cfg).to(dev).eval()
             tokenizer = None
             print(f"[*] Loaded mock architecture: {cfg.name}")
-        elif args.model.endswith(".gguf") and os.path.isfile(args.model):
-            from .models.gguf_loader import GGUFModelLoader
-            print(f"[*] Loading native GGUF weights from '{args.model}'...")
-            loader = GGUFModelLoader(args.model)
-            model, tokenizer = loader.load(sparsity_ratio=args.sparsity, device=str(dev))
-            print(f"[+] Loaded GGUF model: {model.config.name} (layers: {model.config.num_layers}, hidden: {model.config.hidden_dim})")
         else:
-            model, tokenizer = _load_hf_or_exit(args, dev)
-            print(f"[+] Loaded real pretrained weights from '{args.model}'")
+            model, tokenizer = _load_weights(args, dev)
+            print(f"[+] Loaded {model.config.name} (layers: {model.config.num_layers}, hidden: {model.config.hidden_dim})")
 
         print("\nType your message and press Enter. Type 'exit' or 'quit' to end.\n")
         while True:
@@ -228,17 +237,9 @@ def main():
 
         if getattr(args, "mock", False) or args.model in ["test-tiny", "mock"]:
             cfg = get_model_config(args.model)
-        elif args.model.endswith(".gguf") and os.path.isfile(args.model):
-            from .models.gguf_loader import GGUFModelLoader
-            print(f"[*] Loading native GGUF weights for server from '{args.model}'...")
-            loader = GGUFModelLoader(args.model)
-            model_inst, tokenizer_inst = loader.load(sparsity_ratio=args.sparsity, device=str(dev))
-            cfg = model_inst.config
         else:
-            model_inst, tokenizer_inst = _load_hf_or_exit(args, dev)
+            model_inst, tokenizer_inst = _load_weights(args, dev)
             cfg = model_inst.config
-            cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
-            cfg.cuda_graphs, cfg.kv_pool_fraction = not args.no_cuda_graphs, args.kv_cache_memory_fraction
 
         # Multi-GPU / Multi-Node Distributed Driver setup
         tp_size = getattr(args, "tensor_parallel", 1)
@@ -255,7 +256,6 @@ def main():
         engine = ContinuousBatchEngine(cfg, jcfg, model=model_inst, tokenizer=tokenizer_inst, dist_driver=dist_driver)
 
         kv_pub = None
-        import os
         if getattr(args, "enable_kv_events", False) or os.getenv("ENABLE_KV_EVENTS", "0").lower() in ("1", "true", "yes"):
             from .serving.kv_events import KVBlockEventPublisher
             pod_ip = os.getenv("POD_IP", args.host if args.host != "0.0.0.0" else "127.0.0.1")
@@ -268,7 +268,7 @@ def main():
                 pod_port=pod_port,
                 pub_endpoint=f"tcp://*:{pub_port}",
                 replay_endpoint=f"tcp://*:{replay_port}",
-                block_size=getattr(args, "block_size", 64),
+                block_size=engine.kv_pool.page_size,  # events describe the pool's real 16-token pages
             )
             print(f"[+] Initialized llm-d KVBlockEventPublisher on {kv_pub.pub_endpoint} (topic: {kv_pub.topic})")
 
@@ -298,9 +298,8 @@ def main():
             output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)
             out_text = "".join([chr(t % 128) if (32 <= (t % 128) <= 126) else f"<{t}>" for t in output_tokens])
         else:
-            model, tokenizer = _load_hf_or_exit(args, dev)
+            model, tokenizer = _load_weights(args, dev)
             cfg = model.config
-            cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
             prompt_tokens = tokenizer.encode(args.prompt)
             print(f"[*] Generating from prompt: '{args.prompt}' on {cfg.name} ({len(prompt_tokens)} input tokens)...")
             output_tokens = model.generate(prompt_tokens, max_new_tokens=args.max_new_tokens, temperature=args.temperature)

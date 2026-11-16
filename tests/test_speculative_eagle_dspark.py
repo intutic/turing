@@ -72,4 +72,4 @@ def test_ridge_assisted_tree_speculator_verification():
 
     assert num_acc == 4 # 3 accepted draft + 1 corrected target token
     assert accepted == [10, 20, 30, 99]
-    assert speculator.get_acceptance_rate() == 1.0
+    assert speculator.get_acceptance_rate() == 0.75  # 3 of 4 drafts matched; the correction is not an acceptance

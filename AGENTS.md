@@ -26,7 +26,7 @@ python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
 # Run quick quiet validation
 python -W error -m pytest -q
 ```
-> **Invariant**: All 377 automated tests MUST pass with 0 warnings on CUDA (18 need CUDA and skip on Mac/CPU). Any newly introduced warning or test regression must be resolved immediately.
+> **Invariant**: All 383 automated tests MUST pass with 0 warnings on CUDA (18 need CUDA and skip on Mac/CPU). Any newly introduced warning or test regression must be resolved immediately.
 
 
 

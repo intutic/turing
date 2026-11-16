@@ -201,9 +201,10 @@ def benchmark_interleaved_prefill_decode_jitter(device: str = "cpu") -> dict:
             await engine.stop()
 
     lat_metrics = asyncio.run(_run_test())
+    _fmt = lambda v: 'n/a' if v is None else f'{v:.2f} ms'  # n/a: too few samples
 
-    print(f"  • TTFT P50: {lat_metrics.get('p50_ttft_ms', 0):.2f} ms | TTFT P95: {lat_metrics.get('p95_ttft_ms', 0):.2f} ms | TTFT P99: {lat_metrics.get('p99_ttft_ms', 0):.2f} ms")
-    print(f"  • ITL  P50: {lat_metrics.get('p50_itl_ms', 0):.2f} ms | ITL  P95: {lat_metrics.get('p95_itl_ms', 0):.2f} ms | ITL  P99: {lat_metrics.get('p99_itl_ms', 0):.2f} ms")
+    print(f"  • TTFT P50: {_fmt(lat_metrics.get('p50_ttft_ms'))} | TTFT P95: {_fmt(lat_metrics.get('p95_ttft_ms'))} | TTFT P99: {_fmt(lat_metrics.get('p99_ttft_ms'))}")
+    print(f"  • ITL  P50: {_fmt(lat_metrics.get('p50_itl_ms'))} | ITL  P95: {_fmt(lat_metrics.get('p95_itl_ms'))} | ITL  P99: {_fmt(lat_metrics.get('p99_itl_ms'))}")
 
     return lat_metrics
 

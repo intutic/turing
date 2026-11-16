@@ -24,9 +24,6 @@ from turing.kernels.triton_linear_recurrence_step import (
     fused_linear_recurrence_step_cuda,
     fused_kda_conv_recurrence_step_cuda
 )
-from turing.kernels.triton_sparse_subspace_prefill import (
-    sparse_subspace_prefill_cuda
-)
 from turing.core.paging import GroupedMicroScalePagedKVPool
 from turing.core.lineage import CleanBaseLineageBuffer
 
@@ -60,7 +57,7 @@ def get_target_device(device_str: str) -> torch.device:
 
 def benchmark_split_k_paged_decode(device: torch.device) -> dict:
     print("\n" + "=" * 80)
-    print(" [1/5] Benchmarking Split-K Paged Flash-Decode Attention GEMV")
+    print(" [1/4] Benchmarking Split-K Paged Flash-Decode Attention GEMV")
     print("=" * 80)
 
     results = []
@@ -125,7 +122,7 @@ def benchmark_split_k_paged_decode(device: torch.device) -> dict:
 
 def benchmark_kda_recurrence(device: torch.device) -> dict:
     print("\n" + "=" * 80)
-    print(" [2/5] Benchmarking Fused Short-Causal Conv + Delta State Recurrence (KDA)")
+    print(" [2/4] Benchmarking Fused Short-Causal Conv + Delta State Recurrence (KDA)")
     print("=" * 80)
 
     B, H, D = 2, 8, 64
@@ -155,7 +152,7 @@ def benchmark_kda_recurrence(device: torch.device) -> dict:
 
 def benchmark_prefix_cache_bypass() -> dict:
     print("\n" + "=" * 80)
-    print(" [3/5] Benchmarking Exact Fed-Token Prefix Cache Bypass on Multi-Turn Dialogue")
+    print(" [3/4] Benchmarking Exact Fed-Token Prefix Cache Bypass on Multi-Turn Dialogue")
     print("=" * 80)
 
     # 2048 token conversation history + 128 new tokens
@@ -199,7 +196,7 @@ def benchmark_prefix_cache_bypass() -> dict:
 
 def benchmark_grouped_micro_scaling() -> dict:
     print("\n" + "=" * 80)
-    print(" [4/5] Benchmarking Two-Level Grouped Micro-Scaling (gs=32 / NVFP4 pattern)")
+    print(" [4/4] Benchmarking Two-Level Grouped Micro-Scaling (gs=32 / NVFP4 pattern)")
     print("=" * 80)
 
     num_layers = 4
@@ -238,53 +235,6 @@ def benchmark_grouped_micro_scaling() -> dict:
     }
 
 
-def benchmark_sparse_subspace_prefill(device: torch.device) -> dict:
-    print("\n" + "=" * 80)
-    print(" [5/5] Benchmarking 2:4 Structured Sparse Subspace Prompt Prefill")
-    print("=" * 80)
-
-    M = 512    # Prompt tokens
-    K = 4096   # Hidden dimension
-    N = 14336  # FFN dimension
-    active_channels = 6144  # 57% active subspace channels
-
-    x = torch.randn(M, K, device=device, dtype=torch.float32)
-    gate = torch.randn(K, N, device=device, dtype=torch.float32)
-    up = torch.randn(K, N, device=device, dtype=torch.float32)
-    down = torch.randn(N, K, device=device, dtype=torch.float32)
-    active_indices = torch.randperm(N, device=device)[:active_channels]
-
-    # Dense Baseline
-    iters = 10
-    t0 = time.perf_counter()
-    for _ in range(iters):
-        act_g = F.silu(torch.matmul(x, gate))
-        act_u = torch.matmul(x, up)
-        _ = torch.matmul(act_g * act_u, down)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    dense_ms = ((time.perf_counter() - t0) / iters) * 1000.0
-
-    # Sparse Subspace Prefill
-    t0 = time.perf_counter()
-    for _ in range(iters):
-        _ = sparse_subspace_prefill_cuda(x, gate, up, down, active_indices)
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-    sparse_ms = ((time.perf_counter() - t0) / iters) * 1000.0
-
-    speedup = dense_ms / max(sparse_ms, 1e-6)
-    print(f"  • Tokens={M}, Hidden={K}, FFN={N} | Dense: {dense_ms:6.2f} ms | Sparse Subspace: {sparse_ms:6.2f} ms | Speedup: {speedup:5.2f}x")
-
-    return {
-        "suite": "sparse_subspace_prefill",
-        "tokens": M,
-        "dense_ms": round(dense_ms, 3),
-        "sparse_ms": round(sparse_ms, 3),
-        "speedup": round(speedup, 2)
-    }
-
-
 def main():
     args = parse_args()
     device = get_target_device(args.device)
@@ -303,7 +253,6 @@ def main():
     r2 = benchmark_kda_recurrence(device)
     r3 = benchmark_prefix_cache_bypass()
     r4 = benchmark_grouped_micro_scaling()
-    r5 = benchmark_sparse_subspace_prefill(device)
 
     total_time = time.perf_counter() - t_start
 
@@ -312,14 +261,14 @@ def main():
         "device": device.type,
         "device_name": device_name,
         "total_duration_seconds": round(total_time, 2),
-        "results": [r1, r2, r3, r4, r5]
+        "results": [r1, r2, r3, r4]
     }
 
     with open(args.output, "w") as f:
         json.dump(summary, f, indent=2)
 
     print("\n" + "=" * 80)
-    print(f"   [+] All 5 benchmark suites passed in {total_time:.2f}s! Telemetry saved to {args.output}")
+    print(f"   [+] All 4 benchmark suites passed in {total_time:.2f}s! Telemetry saved to {args.output}")
     print("=" * 80)
 
 

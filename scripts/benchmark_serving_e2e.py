@@ -80,13 +80,13 @@ async def run_workload(
         "total_tokens": telemetry.get("total_tokens_generated", 0),
         "duration_s": round(duration, 2),
         "ttft_ms": {
-            "avg": round(telemetry.get("latency", {}).get("avg_ttft_ms", 0.0), 2),
+            "avg": telemetry["latency"]["avg_ttft_ms"],
             "p50": round(calculate_percentile(ttfts, 0.50), 2),
-            "p95": round(telemetry.get("latency", {}).get("p95_ttft_ms", 0.0), 2),
-            "p99": round(telemetry.get("latency", {}).get("p99_ttft_ms", 0.0), 2),
+            "p95": telemetry["latency"]["p95_ttft_ms"],
+            "p99": telemetry["latency"]["p99_ttft_ms"],
         },
         "itl_ms": {
-            "avg": round(telemetry.get("latency", {}).get("avg_itl_ms", 0.0), 2),
+            "avg": telemetry["latency"]["avg_itl_ms"],
             "p50": round(calculate_percentile(itls, 0.50), 2),
             "p95": round(calculate_percentile(itls, 0.95), 2),
         },

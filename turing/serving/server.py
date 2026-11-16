@@ -3,6 +3,7 @@ OpenAI-Compatible FastAPI Asynchronous LLM Serving Server.
 """
 
 import json
+import math
 import time
 from typing import List, Optional, Dict, Any, Union
 from contextlib import asynccontextmanager
@@ -11,7 +12,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from ..config import ModelConfig, TuringConfig
-from .engine import ContinuousBatchEngine
+from .engine import ContinuousBatchEngine, RequestRejected
 from .anthropic_api import AnthropicMessageRequest, AnthropicAPIHandler
 from .ollama_api import (
     OllamaGenerateRequest,
@@ -102,6 +103,20 @@ def create_app(
             await engine.stop()
 
     app = FastAPI(title="Turing Engine High-Performance Inference Server", version=__version__, lifespan=lifespan)
+
+    @app.exception_handler(RequestRejected)
+    async def request_rejected(request: Request, exc: RequestRejected):
+        headers = {"Retry-After": str(max(1, math.ceil(exc.retry_after)))} if exc.retry_after else None
+        path = request.url.path
+        if path.startswith("/v1/messages"):  # Anthropic error shape
+            kind = {400: "invalid_request_error", 429: "rate_limit_error"}.get(exc.status_code, "overloaded_error")
+            body = {"type": "error", "error": {"type": kind, "message": str(exc)}}
+        elif path.startswith("/api/"):  # Ollama error shape
+            body = {"error": str(exc)}
+        else:  # OpenAI error shape
+            kind = {400: "invalid_request_error", 429: "rate_limit_exceeded"}.get(exc.status_code, "server_overloaded")
+            body = {"error": {"message": str(exc), "type": kind, "code": exc.status_code}}
+        return JSONResponse(status_code=exc.status_code, content=body, headers=headers)
     multi_model_mgr = ElasticMultiModelManager(device=engine.device)
 
     def _extract_turing_controls(req_obj: Any, raw_req: Request) -> Dict[str, Any]:
@@ -173,6 +188,9 @@ def create_app(
             "kv_cache_utilization": f"{engine.get_kv_cache_utilization() * 100:.2f}%",
         }
 
+    def _prom(v):
+        return "NaN" if v is None else v  # Prometheus' value for "no samples yet"
+
     @app.get("/metrics")
     async def metrics(request: Request):
         telem = engine.get_telemetry()
@@ -195,13 +213,13 @@ def create_app(
                 f"turing_waiting_queue_depth {telem['waiting_queue_depth']}",
                 f"# HELP turing_ttft_avg_ms Average Time-To-First-Token in milliseconds",
                 f"# TYPE turing_ttft_avg_ms gauge",
-                f"turing_ttft_avg_ms {telem['latency']['avg_ttft_ms']}",
+                f"turing_ttft_avg_ms {_prom(telem['latency']['avg_ttft_ms'])}",
                 f"# HELP turing_ttft_p99_ms 99th percentile Time-To-First-Token in milliseconds",
                 f"# TYPE turing_ttft_p99_ms gauge",
-                f"turing_ttft_p99_ms {telem['latency']['p99_ttft_ms']}",
+                f"turing_ttft_p99_ms {_prom(telem['latency']['p99_ttft_ms'])}",
                 f"# HELP turing_itl_avg_ms Average Inter-Token Latency in milliseconds",
                 f"# TYPE turing_itl_avg_ms gauge",
-                f"turing_itl_avg_ms {telem['latency']['avg_itl_ms']}",
+                f"turing_itl_avg_ms {_prom(telem['latency']['avg_itl_ms'])}",
                 f"# HELP turing_num_requests_waiting Number of requests queued in waiting backlog (llm-d TotalQueuedRequests)",
                 f"# TYPE turing_num_requests_waiting gauge",
                 f"turing_num_requests_waiting {llmd['num_requests_waiting']}",
@@ -375,16 +393,19 @@ def create_app(
         req_id = f"cmpl-{int(time.time()*1000)}"
 
         if req.stream:
+            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
+            admitted = await engine.add_request(
+                prompt_tokens=prompt_tokens,
+                max_new_tokens=max_new_tokens,
+                temperature=temp,
+                top_k=top_k,
+                sparsity_ratio=controls["sparsity_ratio"],
+                use_svd_kv=controls["use_svd_kv"],
+                draft_tokens=controls["draft_tokens"],
+            )
+
             async def event_generator():
-                token_stream = engine.stream_generate(
-                    prompt_tokens=prompt_tokens,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temp,
-                    top_k=top_k,
-                    sparsity_ratio=controls["sparsity_ratio"],
-                    use_svd_kv=controls["use_svd_kv"],
-                    draft_tokens=controls["draft_tokens"],
-                )
+                token_stream = engine.stream_request(admitted)
                 async for token_id in token_stream:
                     char_repr = engine.decode_tokens([token_id])
                     chunk_data = {
@@ -507,16 +528,19 @@ def create_app(
         req_id = f"chatcmpl-{int(time.time()*1000)}"
 
         if req.stream:
+            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
+            admitted = await engine.add_request(
+                prompt_tokens=prompt_tokens,
+                max_new_tokens=max_new_tokens,
+                temperature=temp,
+                top_k=top_k,
+                sparsity_ratio=controls["sparsity_ratio"],
+                use_svd_kv=controls["use_svd_kv"],
+                draft_tokens=controls["draft_tokens"]
+            )
+
             async def event_generator():
-                token_stream = engine.stream_generate(
-                    prompt_tokens=prompt_tokens,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temp,
-                    top_k=top_k,
-                    sparsity_ratio=controls["sparsity_ratio"],
-                    use_svd_kv=controls["use_svd_kv"],
-                    draft_tokens=controls["draft_tokens"]
-                )
+                token_stream = engine.stream_request(admitted)
                 async for token_id in token_stream:
                     char_repr = engine.decode_tokens([token_id])
                     chunk_data = {
@@ -630,16 +654,19 @@ def create_app(
         top_k = req.top_k or 50
 
         if req.stream:
+            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
+            admitted = await engine.add_request(
+                prompt_tokens=prompt_tokens,
+                max_new_tokens=max_new_tokens,
+                temperature=temp,
+                top_k=top_k,
+                sparsity_ratio=controls["sparsity_ratio"],
+                use_svd_kv=controls["use_svd_kv"],
+                draft_tokens=controls["draft_tokens"]
+            )
+
             async def anthropic_token_stream():
-                token_stream = engine.stream_generate(
-                    prompt_tokens=prompt_tokens,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temp,
-                    top_k=top_k,
-                    sparsity_ratio=controls["sparsity_ratio"],
-                    use_svd_kv=controls["use_svd_kv"],
-                    draft_tokens=controls["draft_tokens"]
-                )
+                token_stream = engine.stream_request(admitted)
                 async for tok_id in token_stream:
                     tok_str = engine.decode_tokens([tok_id])
                     yield tok_id, tok_str
@@ -754,17 +781,20 @@ def create_app(
         t0 = time.time_ns()
 
         if req.stream:
+            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
+            admitted = await engine.add_request(
+                prompt_tokens=prompt_tokens,
+                max_new_tokens=max_new_tokens,
+                temperature=temp,
+                top_k=top_k,
+                sparsity_ratio=controls["sparsity_ratio"],
+                use_svd_kv=controls["use_svd_kv"],
+                draft_tokens=controls["draft_tokens"]
+            )
+
             async def ollama_generate_stream():
                 accumulated_tokens = []
-                token_stream = engine.stream_generate(
-                    prompt_tokens=prompt_tokens,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temp,
-                    top_k=top_k,
-                    sparsity_ratio=controls["sparsity_ratio"],
-                    use_svd_kv=controls["use_svd_kv"],
-                    draft_tokens=controls["draft_tokens"]
-                )
+                token_stream = engine.stream_request(admitted)
                 async for tok_id in token_stream:
                     accumulated_tokens.append(tok_id)
                     tok_str = engine.decode_tokens([tok_id])
@@ -848,17 +878,20 @@ def create_app(
         t0 = time.time_ns()
 
         if req.stream:
+            # Admit before the response starts, so a rejection is a 429/503 rather than a broken 200 stream
+            admitted = await engine.add_request(
+                prompt_tokens=prompt_tokens,
+                max_new_tokens=max_new_tokens,
+                temperature=temp,
+                top_k=top_k,
+                sparsity_ratio=controls["sparsity_ratio"],
+                use_svd_kv=controls["use_svd_kv"],
+                draft_tokens=controls["draft_tokens"]
+            )
+
             async def ollama_chat_stream():
                 accumulated_tokens = []
-                token_stream = engine.stream_generate(
-                    prompt_tokens=prompt_tokens,
-                    max_new_tokens=max_new_tokens,
-                    temperature=temp,
-                    top_k=top_k,
-                    sparsity_ratio=controls["sparsity_ratio"],
-                    use_svd_kv=controls["use_svd_kv"],
-                    draft_tokens=controls["draft_tokens"]
-                )
+                token_stream = engine.stream_request(admitted)
                 async for tok_id in token_stream:
                     accumulated_tokens.append(tok_id)
                     tok_str = engine.decode_tokens([tok_id])

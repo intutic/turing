@@ -310,7 +310,6 @@ For multi-model prefill acceleration, Turing Engine also includes closed-form li
   - **Two-Level Grouped Micro-Scaling (`GroupedMicroScalePagedKVPool` in `turing/core/paging.py`)**: Implements sub-block micro-scales ($gs=32/64$) inspired by NVFP4 and Colibrì GS; not used by the serving path.
   - **Fused Short-Causal Conv + KDA Recurrence (`turing/kernels/triton_linear_recurrence_step.py` & `csrc/turing_kda_simd.hpp`)**: Fuses 1D depthwise short convolution ($k=4$), SiLU activation, L2 normalization, and delta state recurrence ($S_t = \text{Diag}(\alpha)S_{t-1} + K_t \delta^T$) directly in register scratchpad.
   - **Exact Fed-Token Prefix Cache Bypass (`CleanBaseLineageBuffer` & `csrc/turing_prefix_match.hpp`)**: Keeps the exact token IDs already fed and finds the longest common prefix with the next turn (a linear scan), so prefill can skip the shared prefix. How much it skips depends on the conversation.
-  - **2:4 Structured Sparse Subspace Prefill (`turing/kernels/triton_sparse_subspace_prefill.py`)**: Intended to combine channel pruning with 2:4 structured weight sparsity. The current code selects the kept channels with `index_select` and never launches its Triton kernel, so no 2:4 sparsity is applied.
 * **Status**: experimental; random-tensor micro-benchmarks only (split-K measured 0.36× at N=1,024). The earlier figures were removed ([claims audit](claims-audit.md)).
 
 ---

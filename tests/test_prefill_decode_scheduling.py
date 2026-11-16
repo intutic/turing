@@ -8,6 +8,7 @@ import time
 import torch
 
 from turing.config import ModelConfig, TuringConfig
+from turing.models.registry import get_model_config
 from turing.serving.engine import ContinuousBatchEngine, RequestState, AsyncSequenceRequest
 from turing.serving.traffic import LanePolicy, Lane, AdmissionController
 
@@ -151,3 +152,19 @@ def test_lane_budget_prefill_differentiation():
             await engine.stop()
 
     asyncio.run(_run())
+
+
+def test_latency_percentiles_are_null_until_there_are_samples():
+    """One request gives one TTFT: its mean is known, its percentiles are not (no average stands in for a P99)."""
+    async def _run():
+        engine = ContinuousBatchEngine(get_model_config("test-tiny"), TuringConfig(device="cpu", max_batch_size=4))
+        await engine.start()
+        try:
+            async for _ in engine.stream_generate(prompt_tokens=[1, 2, 3], max_new_tokens=1, temperature=0.0):
+                pass
+            return engine.get_telemetry()["latency"]
+        finally:
+            await engine.stop()
+    lat = asyncio.run(_run())
+    assert lat["avg_ttft_ms"] > 0.0
+    assert lat["p50_ttft_ms"] is None and lat["p99_ttft_ms"] is None and lat["avg_itl_ms"] is None

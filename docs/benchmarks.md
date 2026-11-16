@@ -2,7 +2,7 @@
 
 Sections 2 and 3 are measured on real pretrained weights (SmolLM2 135M–1.7B) on an NVIDIA L4 and an Apple M4 Pro, by scripts in this repository whose raw results are committed (`results_*.json`). Section 1 is a single-layer timing on random weights. Nothing else is claimed here.
 
-Earlier versions of this page carried about 25 further sections (latent decode, hybrid prefill, LoRA hot-swap, gateway latency, prefill/decode duality, MoE pinning, ingest tiers, multi-model pipeline, kernel fusions and more). An audit traced every number to the code that was supposed to produce it and found that none had been measured on a real model, many had no committed result, and several were constants or formulas printed as results. Those sections were removed; [§4](#4-removed-results) summarises why, and the [claims audit](claims-audit.md) lists every number with its producing script and line.
+Earlier versions of this page carried about 25 further sections (latent decode, hybrid prefill, LoRA hot-swap, gateway latency, prefill/decode duality, MoE pinning, ingest tiers, multi-model pipeline, kernel fusions and more). An audit traced every number to the code that was supposed to produce it and found that none had been measured on a real model, many had no committed result, and several were constants or formulas printed as results. Those sections were removed; [§5](#5-removed-results) summarises why, and the [claims audit](claims-audit.md) lists every number with its producing script and line.
 
 ---
 
