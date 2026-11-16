@@ -53,8 +53,8 @@ def test_architecture_registry_dispatch():
     assert cls_llama is not None
     cls_qwen = ArchitectureRegistry.get_model_class("qwen2")
     assert cls_qwen is not None
-    cls_deepseek = ArchitectureRegistry.get_model_class("deepseek_v3")
-    assert cls_deepseek is not None
+    with pytest.raises(ValueError, match="not supported"):  # MLA + shared experts: no loader mapping
+        ArchitectureRegistry.get_model_class("deepseek_v3")
 
 def test_get_model_config_offline_sizing():
     cfg = get_model_config("llama-3.1-70b")

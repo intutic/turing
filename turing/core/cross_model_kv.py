@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..config import ModelConfig
-from ..core.rope import NTKDynamicRoPEScaling
+from ..core.rope import RotaryEmbedding
 from .lineage import (
     CleanBaseLineageBuffer, CacheLineage, CacheLineageEntry,
     CleanBaseStrategy, AppendOnlyStrategy, NaiveStrategy, TurnStrategy

@@ -1,7 +1,11 @@
 """
-Full Subspace Causal Language Model (SubspaceCausalLM) Architecture with GQA, RoPE & Subspace SwiGLU.
+Decoder-only causal LM (SubspaceCausalLM) covering the HuggingFace families the loader converts: Llama, Mistral, Qwen2/3,
+Gemma 1/2/3, Phi-2/3, GPT-2, OPT, GPT-NeoX and the MoE families Mixtral, Qwen2/3-MoE and OLMoE. Each family's features
+(norm type, MLP shape, biases, positions, partial rotary, sliding windows, soft-capping, MoE routing) come from
+ModelConfig, and tests/test_hf_parity.py checks every family against HuggingFace's own logits.
 """
 
+import math
 from typing import List, Optional, Tuple, Union, Any
 import gc
 import torch
@@ -9,63 +13,133 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..config import ModelConfig
-from ..core.subspace import SubspaceRecirculation
-from ..core.router import SubspaceStructuredRouter
-from ..core.rope import NTKDynamicRoPEScaling, apply_rotary_pos_emb
-from ..core.hybrid_attention import ChunkContextScorer
+from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
 from ..core.kv_cache import KVCache, KVPool
 from ..kernels.triton_kv_decode import pool_decode_supported, triton_pool_decode
-from ..kernels.dispatch import dispatch_swiglu
-from ..kernels.triton_fused_rmsnorm_swiglu import dispatch_fused_rmsnorm_swiglu
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, dim: int, eps: float = 1e-6):
+    """RMSNorm in fp32. offset 0 is Llama's (normalise, cast, scale by weight); offset 1 is Gemma's (scale by
+    1 + weight in fp32, then cast)."""
+
+    def __init__(self, dim: int, eps: float = 1e-6, offset: float = 0.0):
         super().__init__()
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(dim))
+        self.eps, self.offset = eps, offset
+        self.weight = nn.Parameter(torch.zeros(dim) if offset else torch.ones(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        xf = x.float()  # in fp32, as HF Llama does: fp16 squares overflow for large activations
-        return (xf * torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + self.eps)).to(x.dtype) * self.weight
+        xf = x.float()  # fp16 squares overflow for large activations
+        normed = xf * torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + self.eps)
+        if self.offset:
+            return (normed * (self.offset + self.weight.float())).to(x.dtype)
+        return normed.to(x.dtype) * self.weight
+
+
+def make_norm(config: ModelConfig, dim: int) -> nn.Module:
+    if config.norm_type == "layer":
+        return nn.LayerNorm(dim, eps=config.rms_norm_eps)
+    return RMSNorm(dim, config.rms_norm_eps, config.norm_offset)
+
+
+def activation(name: str):
+    """HuggingFace's ACT2FN for the activations the supported families use."""
+    if name in ("silu", "swish"):
+        return F.silu
+    if name == "relu":
+        return F.relu
+    if name == "gelu":
+        return F.gelu
+    if name in ("gelu_new", "gelu_fast", "gelu_pytorch_tanh"):
+        return lambda x: F.gelu(x, approximate="tanh")
+    if name == "quick_gelu":
+        return lambda x: x * torch.sigmoid(1.702 * x)
+    raise ValueError(f"activation '{name}' is not supported")
+
 
 class SubspaceMLP(nn.Module):
-    """
-    Subspace SwiGLU Feed-Forward Network executing over pruned active channel tiles.
-    """
-    def __init__(self, config: ModelConfig):
+    """Feed-forward block: gated (down(act(gate(x)) * up(x)), Llama/Gemma/Phi-3) or plain (down(act(up(x))), GPT-2/OPT/
+    NeoX/Phi-2). FFN channel pruning (sparsity_ratio > 0) keeps a subset of intermediate channels as smaller contiguous
+    weights (set_active_tiles), so the pruned forward is three plain matmuls on every device."""
+
+    def __init__(self, config: ModelConfig, ffn_dim: Optional[int] = None):
         super().__init__()
         self.hidden_dim = config.hidden_dim
-        self.ffn_dim = config.ffn_dim
+        self.ffn_dim = ffn_dim or config.ffn_dim
         self.tile_size = config.tile_size
-        self.active_tiles_count = config.active_tiles
-
-        # Full weight representations (can be sliced / quantized)
-        self.gate_proj = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
-        self.up_proj = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
-        self.down_proj = nn.Linear(self.ffn_dim, self.hidden_dim, bias=False)
-
-        # Default contiguous active tile indices [0 .. active_tiles - 1]
-        default_tiles = torch.arange(self.active_tiles_count, dtype=torch.int32)
-        self.register_buffer("active_tiles", default_tiles)
+        self.act = activation(config.hidden_act)
+        bias = config.mlp_bias
+        self.gate_proj = nn.Linear(self.hidden_dim, self.ffn_dim, bias=bias) if config.mlp_gated else None
+        self.up_proj = nn.Linear(self.hidden_dim, self.ffn_dim, bias=bias)
+        self.down_proj = nn.Linear(self.ffn_dim, self.hidden_dim, bias=bias)
 
     def set_active_tiles(self, active_tile_indices: torch.Tensor):
-        self.active_tiles = active_tile_indices.to(dtype=torch.int32)
+        """Keep only these tiles (of tile_size intermediate channels): the weights become contiguous slices."""
+        t = active_tile_indices.to(device=self.up_proj.weight.device, dtype=torch.long)
+        ch = (t[:, None] * self.tile_size + torch.arange(self.tile_size, device=t.device)).flatten()
+        ch = ch[ch < self.ffn_dim]
+
+        def rows(lin):
+            new = nn.Linear(lin.in_features, len(ch), bias=lin.bias is not None).to(lin.weight)
+            new.weight.data.copy_(lin.weight.data[ch])
+            if lin.bias is not None:
+                new.bias.data.copy_(lin.bias.data[ch])
+            return new
+        if self.gate_proj is not None:
+            self.gate_proj = rows(self.gate_proj)
+        self.up_proj = rows(self.up_proj)
+        down = nn.Linear(len(ch), self.hidden_dim, bias=self.down_proj.bias is not None).to(self.down_proj.weight)
+        down.weight.data.copy_(self.down_proj.weight.data[:, ch])
+        if self.down_proj.bias is not None:
+            down.bias.data.copy_(self.down_proj.bias.data)
+        self.down_proj = down
+        self.ffn_dim = len(ch)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        orig_shape = x.shape
-        x_2d = x.view(-1, self.hidden_dim)
+        if self.gate_proj is not None:
+            return self.down_proj(self.act(self.gate_proj(x)) * self.up_proj(x))
+        return self.down_proj(self.act(self.up_proj(x)))
 
-        out = dispatch_swiglu(
-            x=x_2d,
-            w_gate=self.gate_proj.weight.t(),
-            w_up=self.up_proj.weight.t(),
-            w_down=self.down_proj.weight.t(),
-            active_tiles=self.active_tiles,
-            tile_size=self.tile_size
-        )
 
-        return out.view(orig_shape)
+class SparseMoE(nn.Module):
+    """Top-k routed experts as in HuggingFace's Mixtral / Qwen2-MoE / Qwen3-MoE / OLMoE blocks: softmax over every
+    expert in fp32, top-k, optional renormalisation, each chosen expert's gated MLP weighted by its probability, plus
+    Qwen2-MoE's sigmoid-gated shared expert. Expert weights are stacked: gate_up [E, 2F, H], down [E, H, F]."""
+
+    def __init__(self, config: ModelConfig):
+        super().__init__()
+        E, H, Fd = config.num_experts, config.hidden_dim, config.moe_ffn_dim or config.ffn_dim
+        self.num_experts, self.top_k, self.norm_topk_prob = E, config.num_experts_per_tok, config.norm_topk_prob
+        self.router = nn.Linear(H, E, bias=False)
+        self.gate_up = nn.Parameter(torch.empty(E, 2 * Fd, H))
+        self.down = nn.Parameter(torch.empty(E, H, Fd))
+        nn.init.normal_(self.gate_up, std=0.02)
+        nn.init.normal_(self.down, std=0.02)
+        self.act = activation(config.hidden_act)
+        self.shared_expert = None
+        if config.shared_expert_ffn_dim:
+            self.shared_expert = SubspaceMLP(config, config.shared_expert_ffn_dim)
+            self.shared_expert_gate = nn.Linear(H, 1, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        shape = x.shape
+        x = x.reshape(-1, shape[-1])
+        probs = F.softmax(self.router(x).float(), dim=-1)
+        weights, experts = torch.topk(probs, self.top_k, dim=-1)
+        if self.norm_topk_prob:
+            weights = weights / weights.sum(dim=-1, keepdim=True)
+        out = torch.zeros_like(x)
+        # shortcut: one host sync per layer for the experts hit (fine for prefill and eager decode); MoE models
+        # therefore skip CUDA graphs. A grouped-GEMM kernel over all experts would remove it.
+        hit = torch.unique(experts).tolist()
+        for e in hit:
+            token, slot = torch.where(experts == e)
+            gate, up = F.linear(x[token], self.gate_up[e]).chunk(2, dim=-1)
+            y = F.linear(self.act(gate) * up, self.down[e])
+            out.index_add_(0, token, (y * weights[token, slot, None]).to(out.dtype))
+        if self.shared_expert is not None:
+            out = out + torch.sigmoid(self.shared_expert_gate(x)) * self.shared_expert(x)
+        return out.view(shape)
+
 
 class DecodeStep:
     """One batched decode step: the pool, each row's page-table slot and length before the step (device int32
@@ -75,7 +149,7 @@ class DecodeStep:
     def __init__(self, pool: KVPool, slots: torch.Tensor, starts_t: torch.Tensor,
                  caches: Optional[List[KVCache]] = None, starts: Optional[List[int]] = None):
         self.pool, self.slots, self.starts_t, self.caches, self.starts = pool, slots, starts_t, caches, starts
-        self._freqs = None
+        self._freqs = {}  # per RoPE configuration (Gemma 3's local and global layers differ)
         self.quest_plan = None
 
     @classmethod
@@ -85,14 +159,18 @@ class DecodeStep:
         return cls(caches[0].pool, rows[0], rows[1], caches, starts)
 
     def freqs(self, rope) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self._freqs is None:
-            self._freqs = rope.compute_freqs_device(self.starts_t)
-        return self._freqs
+        key = (rope.dim, rope.base_theta, rope.params)
+        if key not in self._freqs:
+            self._freqs[key] = rope.compute_freqs_device(self.starts_t)
+        return self._freqs[key]
+
+
 
 
 class SubspaceAttention(nn.Module):
     """
-    Multi-Head & Grouped-Query Attention with Rotary Position Embeddings and Stateful KV Cache.
+    Multi-head / grouped-query attention with RoPE (full or partial) or none, optional q/k norms, sliding window,
+    score soft-capping and a custom scale, over the paged KV cache.
     """
     def __init__(self, config: ModelConfig, layer_idx: int = 0):
         super().__init__()
@@ -103,22 +181,28 @@ class SubspaceAttention(nn.Module):
         self.num_kv_heads = config.num_kv_heads
         self.head_dim = config.head_dim
         self.num_kv_groups = self.num_heads // self.num_kv_heads
+        self.window = config.layer_window(layer_idx)
+        self.scale = config.attn_scale if config.attn_scale is not None else self.head_dim ** -0.5
+        self.softcap = config.attn_softcap
 
         self.q_proj = nn.Linear(self.hidden_dim, self.num_heads * self.head_dim, bias=config.attention_bias)
         self.k_proj = nn.Linear(self.hidden_dim, self.num_kv_heads * self.head_dim, bias=config.attention_bias)
         self.v_proj = nn.Linear(self.hidden_dim, self.num_kv_heads * self.head_dim, bias=config.attention_bias)
-        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_dim, bias=False)
-        if config.qk_norm:
-            self.q_norm = RMSNorm(self.head_dim, config.rms_norm_eps)
-            self.k_norm = RMSNorm(self.head_dim, config.rms_norm_eps)
+        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_dim, bias=config.o_proj_bias)
+        if config.qk_norm or config.qk_norm_full:
+            q_dim, k_dim = (self.num_heads * self.head_dim, self.num_kv_heads * self.head_dim) if config.qk_norm_full \
+                else (self.head_dim, self.head_dim)
+            self.q_norm, self.k_norm = make_norm(config, q_dim), make_norm(config, k_dim)
 
-        self.rope = NTKDynamicRoPEScaling(
-            dim=self.head_dim,
-            max_position_embeddings=config.max_position_embeddings,
-            base_theta=config.rope_theta,
-            llama3_scaling=config.rope_scaling
-        )
-        self.chunk_scorer = ChunkContextScorer(hidden_dim=self.num_kv_heads * self.head_dim, budget_tokens=2048)
+        self.rope = None
+        if not config.learned_positions and config.rotary_dim != 0:
+            local = self.window is not None and config.rope_local_theta is not None
+            self.rope = RotaryEmbedding(
+                dim=config.rotary_dim or self.head_dim,
+                max_position_embeddings=config.max_position_embeddings,
+                base_theta=config.rope_local_theta if local else config.rope_theta,
+                params=config.rope_local_scaling if local else config.rope_scaling,
+            )
 
     def forward(
         self,
@@ -130,27 +214,61 @@ class SubspaceAttention(nn.Module):
         """Attention for new tokens at start_pos: through a KVCache (one request), a DecodeStep (one token per
         request), or with neither, causal attention over these tokens alone, returning their k and v."""
         batch, seq_len, _ = hidden_states.shape
+        cfg = self.config
 
-        q = self.q_proj(hidden_states).view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        k = self.k_proj(hidden_states).view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
-        v = self.v_proj(hidden_states).view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
-        if self.config.qk_norm:
+        q, k, v = self.q_proj(hidden_states), self.k_proj(hidden_states), self.v_proj(hidden_states)
+        if cfg.qk_norm_full:
+            q, k = self.q_norm(q), self.k_norm(k)
+        if cfg.clip_qkv is not None:  # OLMoE clamps after its norms
+            q, k, v = (t.clamp(-cfg.clip_qkv, cfg.clip_qkv) for t in (q, k, v))
+        q = q.view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        v = v.view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        if cfg.qk_norm and not cfg.qk_norm_full:
             q, k = self.q_norm(q), self.k_norm(k)
 
-        if step is not None:  # one position per row, on the device
-            cos, sin = step.freqs(self.rope)
-            cos, sin = cos.view(batch, 1, 1, self.head_dim), sin.view(batch, 1, 1, self.head_dim)
-        else:
-            cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos)
-        q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
+        if self.rope is not None:
+            if step is not None:  # one position per row, on the device
+                cos, sin = step.freqs(self.rope)
+                r = cos.shape[-1]
+                cos, sin = cos.view(batch, 1, 1, r), sin.view(batch, 1, 1, r)
+            else:
+                cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos)
+            q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
 
         if step is not None:  # one decode token for each request of the step
             return self.o_proj(self._decode_step(q, k, v, step)), None, None
         if cache is not None:
             return self.o_proj(self._attend_one(q, k, v, cache)), None, None
 
-        out = F.scaled_dot_product_attention(q, k, v, is_causal=seq_len > 1, enable_gqa=self.num_kv_groups > 1)
+        mask = self._mask(0, seq_len, seq_len, q.device) if (self.window or self.softcap) else None
+        out = self._attend(q, k, v, mask, causal=mask is None and seq_len > 1)
         return self.o_proj(out.transpose(1, 2).reshape(batch, seq_len, self.num_heads * self.head_dim)), k, v
+
+    def _mask(self, start: int, seq_len: int, total: int, device) -> torch.Tensor:
+        """[seq_len, total] bool: query start + i sees key j when j <= start + i (and j > start + i - window)."""
+        qpos = start + torch.arange(seq_len, device=device)[:, None]
+        kpos = torch.arange(total, device=device)
+        mask = kpos <= qpos
+        if self.window:
+            mask &= kpos > qpos - self.window
+        return mask
+
+    def _attend(self, q, k, v, mask, causal: bool) -> torch.Tensor:
+        """softmax(q k^T * scale) v with an optional bool mask; soft-capped scores take the explicit path."""
+        if self.softcap is None:
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=causal, scale=self.scale,
+                                                  enable_gqa=self.num_kv_groups > 1)
+        if self.num_kv_groups > 1:
+            k, v = k.repeat_interleave(self.num_kv_groups, dim=1), v.repeat_interleave(self.num_kv_groups, dim=1)
+        s = torch.matmul(q, k.transpose(2, 3)) * self.scale
+        s = torch.tanh(s / self.softcap) * self.softcap
+        if causal:
+            mask = self._mask(0, q.shape[2], k.shape[2], q.device)
+        if mask is not None:
+            s = s.masked_fill(~mask, float("-inf"))
+        p = F.softmax(s, dim=-1, dtype=torch.float32).to(q.dtype)
+        return torch.matmul(p, v)
 
     def _attend_one(self, q, k, v, cache: KVCache) -> torch.Tensor:
         """One request: append k, v at cache.length, then attend q over its cache: [1, H, L, D] -> [1, L, H * D]."""
@@ -158,17 +276,18 @@ class SubspaceAttention(nn.Module):
         pool, layer, cfg = cache.pool, self.layer_idx, self.config
         start, total = cache.length, cache.length + seq_len
         pool.append(layer, cache, k, v)
-        gqa, mask, causal = self.num_kv_groups > 1, None, False
-        if seq_len == 1 and cfg.kv_page_budget < 1.0 and pool.track_pages and total >= cfg.kv_select_min_tokens:
+        mask, causal = None, False
+        if (seq_len == 1 and self.window is None and cfg.kv_page_budget < 1.0 and pool.track_pages
+                and total >= cfg.kv_select_min_tokens):
             sel = pool.select_pages(layer, [cache], [total], q, cfg.kv_page_budget, cfg.kv_select_min_tokens)[0]
             k_all, v_all, valid = pool.read_selected(layer, cache, sel, total)
             mask = valid.repeat_interleave(self.num_kv_groups, dim=1)
         else:
             k_all, v_all = pool.read(layer, cache, total)
-            if seq_len > 1 and start > 0:  # chunked prefill: query i sees keys 0 .. start + i
-                mask = torch.arange(total, device=q.device) <= (start + torch.arange(seq_len, device=q.device))[:, None]
-            causal = seq_len > 1 and start == 0
-        out = F.scaled_dot_product_attention(q, k_all, v_all, attn_mask=mask, is_causal=causal, enable_gqa=gqa)
+            if self.window is not None or (seq_len > 1 and start > 0):  # chunked prefill or a window
+                mask = self._mask(start, seq_len, total, q.device)
+            causal = mask is None and seq_len > 1  # start == 0
+        out = self._attend(q, k_all, v_all, mask, causal)
         return out.transpose(1, 2).reshape(batch, seq_len, self.num_heads * self.head_dim)
 
     def _decode_step(self, q, k, v, step: "DecodeStep") -> torch.Tensor:
@@ -179,26 +298,34 @@ class SubspaceAttention(nn.Module):
         if not pool_decode_supported(pool, q):
             return torch.cat([self._attend_one(q[b:b + 1], k[b:b + 1], v[b:b + 1], c) for b, c in enumerate(step.caches)])
         sel = None
-        if cfg.kv_page_budget < 1.0 and pool.track_pages and max(step.starts) + 1 >= cfg.kv_select_min_tokens:
+        if (self.window is None and cfg.kv_page_budget < 1.0 and pool.track_pages
+                and max(step.starts) + 1 >= cfg.kv_select_min_tokens):
             if step.quest_plan is None:  # once per step: every layer shares the rows' page counts and pages
                 step.quest_plan = pool.selection_plan(step.caches, [n + 1 for n in step.starts],
                                                       cfg.kv_page_budget, cfg.kv_select_min_tokens)
             sel = pool.select_pages_planned(layer, q, step.quest_plan)
-        out = triton_pool_decode(pool, layer, q, k, v, step.slots, step.starts_t, sel)
+        out = triton_pool_decode(pool, layer, q, k, v, step.slots, step.starts_t, sel, scale=self.scale,
+                                 window=self.window or 0, softcap=self.softcap or 0.0)
         return out.transpose(1, 2).reshape(batch, 1, self.num_heads * self.head_dim)
 
 
 class SubspaceDecoderLayer(nn.Module):
     """
-    Transformer Decoder block with Subspace Attention and Subspace SwiGLU MLP.
+    Transformer decoder block: pre-norm (or post-norm) attention and MLP/MoE, sequential or parallel residual, with
+    Gemma's extra output norms when sandwich_norm is set.
     """
     def __init__(self, config: ModelConfig, layer_idx: int):
         super().__init__()
         self.layer_idx = layer_idx
-        self.input_layernorm = RMSNorm(config.hidden_dim, config.rms_norm_eps)
+        self.config = config
+        self.input_layernorm = make_norm(config, config.hidden_dim)
         self.self_attn = SubspaceAttention(config, layer_idx)
-        self.post_attention_layernorm = RMSNorm(config.hidden_dim, config.rms_norm_eps)
-        self.mlp = SubspaceMLP(config)
+        if not config.shared_layer_norm:
+            self.post_attention_layernorm = make_norm(config, config.hidden_dim)  # the norm before the MLP
+        if config.sandwich_norm:
+            self.attn_out_norm = make_norm(config, config.hidden_dim)
+            self.mlp_out_norm = make_norm(config, config.hidden_dim)
+        self.mlp = SparseMoE(config) if config.layer_is_moe(layer_idx) else SubspaceMLP(config)
 
     def forward(
         self,
@@ -207,30 +334,26 @@ class SubspaceDecoderLayer(nn.Module):
         cache: Optional[KVCache] = None,
         step: Optional["DecodeStep"] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
-        residual = hidden_states
-        hidden_states = self.input_layernorm(hidden_states)
-        attn_out, k_out, v_out = self.self_attn(hidden_states, start_pos=start_pos, cache=cache, step=step)
-        hidden_states = residual + attn_out
-
-        # Fused RMSNorm + Subspace SwiGLU + Residual
-        orig_shape = hidden_states.shape
-        x_2d = hidden_states.view(-1, self.mlp.hidden_dim)
-        res_2d = hidden_states.view(-1, self.mlp.hidden_dim)
-
-        fused_out = dispatch_fused_rmsnorm_swiglu(
-            x=x_2d,
-            weight_norm=self.post_attention_layernorm.weight,
-            w_gate=self.mlp.gate_proj.weight.t(),
-            w_up=self.mlp.up_proj.weight.t(),
-            w_down=self.mlp.down_proj.weight.t(),
-            residual=res_2d,
-            active_tiles=self.mlp.active_tiles,
-            tile_size=self.mlp.tile_size,
-            eps=self.post_attention_layernorm.eps
-        )
-        hidden_states = fused_out.view(orig_shape)
-
-        return hidden_states, k_out, v_out
+        cfg = self.config
+        x = hidden_states
+        h = self.input_layernorm(x) if cfg.pre_norm else x
+        attn_out, k_out, v_out = self.self_attn(h, start_pos=start_pos, cache=cache, step=step)
+        if cfg.parallel_residual:
+            mlp_in = h if cfg.shared_layer_norm else self.post_attention_layernorm(x)
+            return x + attn_out + self.mlp(mlp_in), k_out, v_out
+        if cfg.sandwich_norm:
+            attn_out = self.attn_out_norm(attn_out)
+        x = x + attn_out
+        if not cfg.pre_norm:
+            x = self.input_layernorm(x)
+        h = self.post_attention_layernorm(x) if cfg.pre_norm else x
+        m = self.mlp(h)
+        if cfg.sandwich_norm:
+            m = self.mlp_out_norm(m)
+        x = x + m
+        if not cfg.pre_norm:
+            x = self.post_attention_layernorm(x)
+        return x, k_out, v_out
 
 class DecodeGraphs:
     """CUDA graphs of one decode step through SubspaceCausalLM._body, one per batch bucket. A step is copied into the
@@ -249,6 +372,7 @@ class DecodeGraphs:
         cfg, pool = model.config, caches[0].pool
         return (cfg.cuda_graphs and pool.device.type == "cuda" and len(caches) <= self.BUCKETS[-1]
                 and tenant_id is None and not pool.track_pages and not torch.is_grad_enabled()
+                and cfg.num_experts == 0  # MoE routing picks experts on the host
                 and pool_decode_supported(pool, model.embed_tokens.weight))
 
     def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, caches: List[KVCache]) -> torch.Tensor:
@@ -278,11 +402,11 @@ class DecodeGraphs:
         side.wait_stream(torch.cuda.current_stream(device))
         with torch.cuda.stream(side):  # warm-up (Triton compilation, allocator) writes only the scratch page
             for _ in range(2):
-                step._freqs = None
+                step._freqs = {}
                 model._body(ids, rows[1], None, step)
         torch.cuda.current_stream(device).wait_stream(side)
         graph = torch.cuda.CUDAGraph()
-        step._freqs = None
+        step._freqs = {}
         with torch.cuda.graph(graph):
             logits = model._body(ids, rows[1], None, step)
         self.graphs[bucket] = (key, graph, ids, rows, logits)
@@ -300,21 +424,25 @@ class SubspaceCausalLM(nn.Module):
         self.hidden_dim = config.hidden_dim
         self.adapter_manager = adapter_manager
 
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_dim)
+        emb_dim = config.embed_proj_dim or config.hidden_dim
+        self.embed_tokens = nn.Embedding(config.vocab_size, emb_dim)
+        if config.learned_positions:
+            self.embed_positions = nn.Embedding(config.max_position_embeddings + config.position_offset,
+                                                config.hidden_dim)
+        if config.embed_proj_dim:  # OPT-350m: narrower embeddings projected to the hidden size and back
+            self.project_in = nn.Linear(emb_dim, config.hidden_dim, bias=False)
+            self.project_out = nn.Linear(config.hidden_dim, emb_dim, bias=False)
         self.layers = nn.ModuleList([SubspaceDecoderLayer(config, i) for i in range(config.num_layers)])
-        self.norm = RMSNorm(config.hidden_dim, config.rms_norm_eps)
-        self.lm_head = nn.Linear(config.hidden_dim, config.vocab_size, bias=False)
+        self.norm = make_norm(config, config.hidden_dim) if config.final_norm else None
+        self.lm_head = nn.Linear(emb_dim, config.vocab_size, bias=config.lm_head_bias)
         self._graphs = DecodeGraphs()
 
-        # Recirculation layer at layer L/3
+        # Optional deep-to-shallow recirculation (off by default: it changes the model's output). Its SVD basis is
+        # only built when enabled.
         self.router_layer_idx = config.router_layer_idx
-        self.recirculation = SubspaceRecirculation(hidden_dim=config.hidden_dim, rank=config.rank_sub)
-        self.router = SubspaceStructuredRouter(
-            hidden_dim=config.hidden_dim,
-            total_tiles=config.total_tiles,
-            min_tiles=max(1, config.active_tiles // 2),
-            max_tiles=config.active_tiles
-        )
+        if config.enable_recirculation:
+            from ..core.subspace import SubspaceRecirculation
+            self.recirculation = SubspaceRecirculation(hidden_dim=config.hidden_dim, rank=config.rank_sub)
 
     def forward(
         self,
@@ -369,7 +497,18 @@ class SubspaceCausalLM(nn.Module):
 
     def _body(self, input_ids, start_pos, cache, step, tenant_id=None, logits_to_keep: int = 0) -> torch.Tensor:
         """Embedding, layers, norm and head for one forward (what a CUDA graph captures for a decode step)."""
+        cfg = self.config
         hidden_states = self.embed_tokens(input_ids)
+        if cfg.embed_proj_dim:
+            hidden_states = self.project_in(hidden_states)
+        if cfg.embed_scale is not None:  # Gemma: in the activations' dtype, as HF rounds it
+            hidden_states = hidden_states * torch.tensor(cfg.embed_scale, dtype=hidden_states.dtype)
+        if cfg.learned_positions:
+            if step is not None:  # [B] lengths before this token, on the device
+                pos = step.starts_t.long()[:, None]
+            else:
+                pos = torch.arange(start_pos, start_pos + input_ids.shape[1], device=input_ids.device)[None]
+            hidden_states = hidden_states + self.embed_positions(pos + cfg.position_offset)
 
         shallow_state = None
 
@@ -393,8 +532,14 @@ class SubspaceCausalLM(nn.Module):
 
         if logits_to_keep:
             hidden_states = hidden_states[:, -logits_to_keep:]
-        hidden_states = self.norm(hidden_states)
-        return self.lm_head(hidden_states)
+        if self.norm is not None:
+            hidden_states = self.norm(hidden_states)
+        if cfg.embed_proj_dim:
+            hidden_states = self.project_out(hidden_states)
+        logits = self.lm_head(hidden_states)
+        if cfg.final_softcap is not None:
+            logits = torch.tanh(logits / cfg.final_softcap) * cfg.final_softcap
+        return logits
 
     def kv_pool(self) -> KVPool:
         """This model's paged KV pool, created on first use (and again if the device, dtype or cache settings

@@ -11,7 +11,6 @@ import torch.nn.functional as F
 
 import turing.turing_csrc as turing_csrc
 from turing.models.gguf_loader import GGMLType, GGUFDequantizer
-from turing.kernels.triton_fused_rmsnorm_swiglu import dispatch_fused_rmsnorm_swiglu
 from turing.kernels.triton_select_gather import dispatch_batched_option_select
 
 
@@ -48,64 +47,6 @@ def benchmark_gguf_simd():
     print(f"  • Python NumPy Baseline: {t_numpy:.2f} ms ({num_blocks * 32 / (t_numpy * 1e3):.2f} M elem/s)")
     print(f"  • C++20 SIMD Kernel:     {t_simd:.2f} ms ({num_blocks * 32 / (t_simd * 1e3):.2f} M elem/s)")
     print(f"  • Measured Speedup:      {speedup:.2f}x FASTER\n")
-
-
-def benchmark_fused_ffn():
-    print("=" * 70)
-    print(" 🚀 BENCHMARK: Fused RMSNorm + Subspace SwiGLU + In-Place Residual")
-    print("=" * 70)
-
-    B, K, ffn_dim = 16, 4096, 14336
-    tile_size = 64
-    active_tiles = torch.arange(0, 112, dtype=torch.int32) # 50% channel pruning
-
-    # The Triton kernel only runs on CUDA tensors; elsewhere both arms are PyTorch on the CPU.
-    dev = "cuda" if torch.cuda.is_available() else "cpu"
-    sync = torch.cuda.synchronize if dev == "cuda" else (lambda: None)
-    x = torch.randn(B, K, device=dev)
-    weight_norm = torch.randn(K, device=dev)
-    w_gate = torch.randn(K, ffn_dim, device=dev)
-    w_up = torch.randn(K, ffn_dim, device=dev)
-    w_down = torch.randn(ffn_dim, K, device=dev)
-    residual = torch.randn(B, K, device=dev)
-    active_tiles = active_tiles.to(dev)
-
-    # Warmup
-    for _ in range(5):
-        dispatch_fused_rmsnorm_swiglu(x, weight_norm, w_gate, w_up, w_down, residual, active_tiles, tile_size)
-
-    # 1. Unfused Execution
-    iters = 20
-    sync()
-    t0 = time.perf_counter()
-    for _ in range(iters):
-        var = x.pow(2).mean(-1, keepdim=True)
-        x_norm = x * torch.rsqrt(var + 1e-6) * weight_norm
-        idx_list = []
-        for t in active_tiles.tolist():
-            idx_list.extend(range(t * tile_size, (t + 1) * tile_size))
-        idx_t = torch.tensor(idx_list, dtype=torch.long, device=dev)
-        gate = torch.matmul(x_norm, w_gate[:, idx_t])
-        up = torch.matmul(x_norm, w_up[:, idx_t])
-        out = torch.matmul(F.silu(gate) * up, w_down[idx_t, :]) + residual
-    sync()
-    t_unfused = ((time.perf_counter() - t0) / iters) * 1000.0
-
-    # 2. Fused Execution
-    sync()
-    t0 = time.perf_counter()
-    for _ in range(iters):
-        out_fused = dispatch_fused_rmsnorm_swiglu(
-            x, weight_norm, w_gate, w_up, w_down, residual, active_tiles, tile_size
-        )
-    sync()
-    t_fused = ((time.perf_counter() - t0) / iters) * 1000.0
-
-    speedup = t_unfused / max(t_fused, 1e-6)
-    print(f"  • Hidden Dim: {K}, FFN Dim: {ffn_dim}, Batch: {B}, device: {dev} (random weights)")
-    print(f"  • Unfused baseline:            {t_unfused:.2f} ms")
-    print(f"  • Fused dispatch:              {t_fused:.2f} ms")
-    print(f"  • Baseline / fused:            {speedup:.2f}x\n")
 
 
 def benchmark_dsl_select():
@@ -147,5 +88,4 @@ def benchmark_dsl_select():
 
 if __name__ == "__main__":
     benchmark_gguf_simd()
-    benchmark_fused_ffn()
     benchmark_dsl_select()

@@ -82,57 +82,6 @@ try:
 except ImportError:
     HAS_TRITON = False
 
-def dispatch_swiglu(
-    x: torch.Tensor,
-    w_gate: torch.Tensor,
-    w_up: torch.Tensor,
-    w_down: torch.Tensor,
-    active_tiles: torch.Tensor,
-    tile_size: int = 256
-) -> torch.Tensor:
-    """
-    Dispatches SwiGLU computation with active channel pruning.
-    Uses Triton on CUDA if available, otherwise vectorized PyTorch.
-    """
-    if HAS_CUDA and HAS_TRITON and x.is_cuda and x.dtype == torch.float16:
-        try:
-            return launch_triton_swiglu(x, w_gate, w_up, w_down, active_tiles, tile_size)
-        except Exception:
-            pass # Fall back to PyTorch
-
-    # Vectorized PyTorch Fallback
-    active_count = len(active_tiles)
-    if active_count == 0:
-        return torch.zeros_like(x)
-
-    active_idx_list = active_tiles.tolist()
-    # Fast path: Contiguous active tiles (0 .. active_count - 1)
-    if active_idx_list == list(range(active_count)):
-        active_dim = active_count * tile_size
-        w_g_act = w_gate[:, :active_dim]
-        w_u_act = w_up[:, :active_dim]
-        w_d_act = w_down[:active_dim, :]
-    else:
-        gate_slices = []
-        up_slices = []
-        down_slices = []
-        for t in active_idx_list:
-            c_start = t * tile_size
-            c_end = c_start + tile_size
-            gate_slices.append(w_gate[:, c_start:c_end])
-            up_slices.append(w_up[:, c_start:c_end])
-            down_slices.append(w_down[c_start:c_end, :])
-
-        w_g_act = torch.cat(gate_slices, dim=-1)
-        w_u_act = torch.cat(up_slices, dim=-1)
-        w_d_act = torch.cat(down_slices, dim=0)
-
-    gate = F.silu(torch.matmul(x, w_g_act))
-    up = torch.matmul(x, w_u_act)
-    h = gate * up
-    out = torch.matmul(h, w_d_act)
-    return out
-
 def dispatch_flash_tree_attention(
     q: torch.Tensor,
     k_prefix: torch.Tensor,

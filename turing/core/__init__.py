@@ -8,7 +8,7 @@ from .paging import HierarchicalVirtualPageManager, PageTier
 from .optimal_transport import OptimalTransportEviction, sinkhorn_knopp_eviction
 from .speculation import QuadtreeMRPSpeculator, build_dag_tree_attention_mask, EnhancedQuadtreeDraftHead, MatryoshkaDraftHead
 from .attention_cache import AttentionPatternCache, ChunkedLongPrefillEngine
-from .rope import NTKDynamicRoPEScaling
+from .rope import RotaryEmbedding
 from .radix_svd import SpectralRadixSVDForest
 from .pcie_swapper import DoubleBufferedAsyncRingSwapper
 from .cross_model_kv import RoPEContentDecoupler, ClosedFormRidgeMapper, SVDNullSpaceProjector, CrossModelKVPipeline
@@ -47,7 +47,7 @@ __all__ = [
     "MatryoshkaDraftHead",
     "AttentionPatternCache",
     "ChunkedLongPrefillEngine",
-    "NTKDynamicRoPEScaling",
+    "RotaryEmbedding",
     "SpectralRadixSVDForest",
     "DoubleBufferedAsyncRingSwapper",
     "RoPEContentDecoupler",

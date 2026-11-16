@@ -9,7 +9,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 
 from turing.config import TuringConfig
-from turing.kernels.dispatch import get_hardware_backend_info, dispatch_swiglu
+from turing.kernels.dispatch import get_hardware_backend_info
+from turing.models.causal_lm import SubspaceMLP
+from turing.config import ModelConfig
 from turing.kernels.rocm_heuristics import get_rocm_arch_info
 from turing.kernels.vulkan_runtime import get_vulkan_runtime
 
@@ -42,12 +44,10 @@ def main():
 
     batch, seq_len, hidden_dim, ffn_dim = 1, 4, 256, 1024
     x = torch.randn((batch, seq_len, hidden_dim), device=device, dtype=dtype)
-    w_gate = torch.randn((hidden_dim, ffn_dim), device=device, dtype=dtype)
-    w_up = torch.randn((hidden_dim, ffn_dim), device=device, dtype=dtype)
-    w_down = torch.randn((ffn_dim, hidden_dim), device=device, dtype=dtype)
-    active_tiles = torch.tensor([0, 1], device=device, dtype=torch.long)
-
-    out = dispatch_swiglu(x, w_gate, w_up, w_down, active_tiles, tile_size=256)
+    mlp = SubspaceMLP(ModelConfig(name="probe", hidden_dim=hidden_dim, ffn_dim=ffn_dim, num_heads=4, num_kv_heads=4,
+                                  head_dim=64, num_layers=1, tile_size=256)).to(device=device, dtype=dtype)
+    mlp.set_active_tiles(torch.tensor([0, 1]))
+    out = mlp(x)
     print(f"[+] Output Tensor Shape      : {out.shape} (Expected: ({batch}, {seq_len}, {hidden_dim}))")
     print(f"[+] Execution Status         : ✅ PASSED on {str(device).upper()} with 0 errors!\n")
 

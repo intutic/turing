@@ -104,18 +104,22 @@ if HAS_TRITON:
 
     @triton.jit
     def _pool_decode_kernel(Q, PT, SLOTS, STARTS, SEL, K, V, KS, KZ, VS, VZ, ACC, M, L,
-                            s_qb, s_qh, pt_stride, s_sel_b, s_sel_h, n_sel, sm_scale,
+                            s_qb, s_qh, pt_stride, s_sel_b, s_sel_h, n_sel, sm_scale, softcap, window,
                             G: tl.constexpr, BLOCK_G: tl.constexpr, D: tl.constexpr, BLOCK_N: tl.constexpr,
                             MODE: tl.constexpr, GROUP: tl.constexpr, HAS_SEL: tl.constexpr,
-                            N_SPLITS: tl.constexpr, HKV: tl.constexpr):
+                            N_SPLITS: tl.constexpr, HKV: tl.constexpr, WINDOW: tl.constexpr,
+                            SOFTCAP: tl.constexpr):
         b = tl.program_id(0)
         h = tl.program_id(1)
         split = tl.program_id(2)
         length = tl.load(STARTS + b) + 1  # STARTS holds the length before this step's append
         pt_row = PT + tl.load(SLOTS + b).to(tl.int64) * pt_stride
         n_tok = n_sel * 16 if HAS_SEL else length
-        per_split = tl.cdiv(tl.cdiv(n_tok, N_SPLITS), BLOCK_N) * BLOCK_N
-        start = split * per_split
+        first = 0  # a sliding window sees keys j > (length - 1) - window only
+        if WINDOW:
+            first = tl.maximum(length - window, 0)
+        per_split = tl.cdiv(tl.cdiv(n_tok - first, N_SPLITS), BLOCK_N) * BLOCK_N
+        start = first + split * per_split
         end = tl.minimum(start + per_split, n_tok)
         offs_g = tl.arange(0, BLOCK_G)
         offs_d = tl.arange(0, D)
@@ -138,6 +142,8 @@ if HAS_TRITON:
             row = (page * HKV + h) * 16 + i % 16
             k = _load_rows(K, KS, KZ, row, valid, offs_d, D, MODE, GROUP)
             s = tl.dot(q, tl.trans(k), input_precision="ieee") * sm_scale
+            if SOFTCAP:  # Gemma 2: cap * tanh(s / cap)
+                s = softcap * libdevice.tanh(s / softcap)
             s = tl.where(valid[None, :], s, float("-inf"))
             m_new = tl.maximum(m_i, tl.max(s, 1))
             p = tl.exp(s - m_new[:, None])
@@ -181,10 +187,12 @@ def pool_decode_supported(pool: KVPool, q: torch.Tensor) -> bool:
 
 
 def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
-                       slots: torch.Tensor, starts: torch.Tensor, sel: Optional[torch.Tensor] = None) -> torch.Tensor:
+                       slots: torch.Tensor, starts: torch.Tensor, sel: Optional[torch.Tensor] = None,
+                       scale: Optional[float] = None, window: int = 0, softcap: float = 0.0) -> torch.Tensor:
     """One decode step of B requests in one layer: q [B, H, 1, D], k, v [B, Hkv, 1, D] (K after RoPE), slots and
     starts [B] int32 on the device (page-table rows, lengths before this step), sel [B, Hkv, K] logical pages or
-    None. Appends k, v to each row's pages (already reserved) and returns attention [B, H, 1, D]."""
+    None. Appends k, v to each row's pages (already reserved) and returns attention [B, H, 1, D]. scale defaults to
+    1 / sqrt(D); window > 0 attends to the last `window` keys only; softcap > 0 caps scores as cap * tanh(s / cap)."""
     B, H, _, D = q.shape
     Hkv = pool.num_kv_heads
     G = H // Hkv
@@ -209,9 +217,10 @@ def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tenso
         qc, pt, slots, starts, sel_t, *fields, *scales, acc, m, l,
         qc.stride(0), qc.stride(1), pt.stride(0),
         sel.stride(0) if sel is not None else 0, sel.stride(1) if sel is not None else 0,
-        sel.shape[-1] if sel is not None else 0, 1.0 / math.sqrt(D),
+        sel.shape[-1] if sel is not None else 0, scale if scale is not None else 1.0 / math.sqrt(D),
+        float(softcap), int(window),
         G=G, BLOCK_G=BLOCK_G, D=D, BLOCK_N=BLOCK_N, MODE=mode, GROUP=INT4_GROUP, HAS_SEL=sel is not None,
-        N_SPLITS=n_splits, HKV=Hkv, num_stages=2,
+        N_SPLITS=n_splits, HKV=Hkv, WINDOW=window > 0, SOFTCAP=softcap > 0, num_stages=2,
     )
     out = torch.empty(B, H, D, device=q.device, dtype=q.dtype)
     _kv_reduce_kernel[(B * Hkv,)](acc, m, l, out, G=G, BLOCK_G=BLOCK_G, D=D, N_SPLITS=n_splits)

@@ -26,7 +26,7 @@ def _load_hf_or_exit(args, dev):
     from .models.hf_loader import RealHuggingFaceLoader
     try:
         return RealHuggingFaceLoader.load_hf_model_into_turing(hf_model_id=args.model, sparsity_ratio=args.sparsity,
-                                                              device=str(dev))
+                                                              device=str(dev), dtype=getattr(args, "dtype", None))
     except Exception as e:
         raise SystemExit(f"[!] Could not load weights for '{args.model}': {e}\n    Pass --mock to run on synthetic weights.")
 
@@ -55,6 +55,7 @@ def main():
     serve_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, cpu, mps)")
+    serve_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     serve_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     serve_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
     serve_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
@@ -82,6 +83,7 @@ def main():
     gen_parser.add_argument("--prompt", type=str, default="Artificial intelligence is", help="Input prompt")
     gen_parser.add_argument("--max-new-tokens", "--max-tokens", type=int, default=32, help="Tokens to generate")
     gen_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
+    gen_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     gen_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     gen_parser.add_argument("--kv-cache-dtype", type=str, default="auto", choices=["auto", "native", "int8", "int4"], help="KV cache storage: native, int8 (per token), int4 (per 32 values); auto = int8 on CUDA, native elsewhere (default: auto)")
     gen_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
@@ -150,6 +152,7 @@ def main():
     chat_parser = subparsers.add_parser("chat", help="Start an instant interactive terminal chat session with real weights")
     chat_parser.add_argument("--model", type=str, default="smollm2", help="Model to chat with (e.g. smollm2, gpt2, qwen-2.5-7b, llama-3.1-8b)")
     chat_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
+    chat_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     chat_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
     chat_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     chat_parser.add_argument("--max-new-tokens", "--max-tokens", type=int, default=128, help="Maximum new tokens per response")

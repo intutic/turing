@@ -63,18 +63,24 @@ def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget):
             torch.testing.assert_close(pool.kmin[0, c.pages[-1]], pool.kmin[0, r.pages[-1]], rtol=0, atol=0)
 
 
+# Families whose decode differs from Llama's in the kernel or the graph: sliding windows, soft-capping with a custom
+# scale (Gemma 2), two RoPE bases (Gemma 3), learned positions (GPT-2), partial rotary (Phi-2), MoE (OLMoE, no graphs).
+ARCH_CASES = [("llama", "native"), ("llama", "int8"), ("mistral_sliding", "native"), ("gemma2", "native"),
+              ("gemma3", "int8"), ("gpt2", "native"), ("phi2", "native"), ("olmoe", "native")]
+
+
 @torch.no_grad()
-@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8"])
-def test_model_batched_decode_on_cuda_matches_cpu(kv_cache_dtype):
+@pytest.mark.parametrize("arch,kv_cache_dtype", ARCH_CASES)
+def test_model_batched_decode_on_cuda_matches_cpu(arch, kv_cache_dtype):
     import copy
-    from tests.test_hf_parity import _tiny_llama
+    from tests.test_hf_parity import _tiny
     from turing.models.hf_loader import RealHuggingFaceLoader
-    cpu = RealHuggingFaceLoader.convert_hf_model(_tiny_llama(), sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
+    cpu = RealHuggingFaceLoader.convert_hf_model(_tiny(arch), sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
     cpu.config.kv_cache_dtype, cpu.config.kv_pool_gib = kv_cache_dtype, 0.05
     gpu = copy.deepcopy(cpu).cuda()  # fp32 on CUDA: the fused kernels against the reference path on CPU
     g = torch.Generator().manual_seed(5)
     prompts = [torch.randint(0, 128, (1, n), generator=g) for n in (3, 20, 41)]
-    nxt = torch.randint(0, 128, (3, 4), generator=g)
+    nxt = torch.randint(0, 128, (3, 4), generator=g)  # prompts and steps cross the 6-token windows
     outs = []
     for model, dev in ((cpu, "cpu"), (gpu, "cuda")):
         caches = [model(p.to(dev))[1] for p in prompts]
@@ -83,12 +89,12 @@ def test_model_batched_decode_on_cuda_matches_cpu(kv_cache_dtype):
 
 
 @torch.no_grad()
-@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8"])
-def test_cuda_graph_decode_matches_eager(kv_cache_dtype):
+@pytest.mark.parametrize("arch,kv_cache_dtype", [c for c in ARCH_CASES if c[0] != "olmoe"])
+def test_cuda_graph_decode_matches_eager(arch, kv_cache_dtype):
     import copy
-    from tests.test_hf_parity import _tiny_llama
+    from tests.test_hf_parity import _tiny
     from turing.models.hf_loader import RealHuggingFaceLoader
-    base = RealHuggingFaceLoader.convert_hf_model(_tiny_llama(), sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
+    base = RealHuggingFaceLoader.convert_hf_model(_tiny(arch), sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
     base.config.kv_cache_dtype, base.config.kv_pool_gib = kv_cache_dtype, 0.05
     g = torch.Generator().manual_seed(6)
     prompts = [torch.randint(0, 128, (1, n), generator=g).cuda() for n in (3, 14, 31)]  # steps cross page boundaries
@@ -105,3 +111,31 @@ def test_cuda_graph_decode_matches_eager(kv_cache_dtype):
     for eager, graphed in zip(outs[0][0], outs[1][0]):
         torch.testing.assert_close(graphed, eager, atol=1e-4, rtol=0)
     assert outs[0][1] == outs[1][1] == [9, 18, 35]
+
+
+@pytest.mark.parametrize("window,softcap,scale", [(6, 0.0, None), (0, 5.0, 24 ** -0.5), (40, 5.0, 0.1)])
+def test_fused_decode_window_softcap_and_scale_match_reference(window, softcap, scale):
+    from turing.kernels.triton_kv_decode import triton_pool_decode
+    g = torch.Generator(device="cuda").manual_seed(3)
+    H, Hkv, D = 8, 2, 64
+    pool = KVPool(1, Hkv, D, 256, torch.float16, "cuda", "native")
+    lengths = (5, 100, 300)
+    caches = [_filled(pool, T, g) for T in lengths]
+    q = torch.randn(3, H, 1, D, device="cuda", generator=g)
+    k = torch.randn(3, Hkv, 1, D, device="cuda", generator=g).half()
+    v = torch.randn(3, Hkv, 1, D, device="cuda", generator=g).half()
+    for c in caches:
+        c.reserve(c.length + 1)
+    rows = torch.tensor([[c.slot for c in caches], list(lengths)], dtype=torch.int32, device="cuda")
+    out = triton_pool_decode(pool, 0, q, k, v, rows[0], rows[1], None, scale=scale, window=window, softcap=softcap)
+    for b, (c, T) in enumerate(zip(caches, lengths)):
+        kr, vr = pool.read(0, c, T + 1)  # the kernel appended this step's key
+        kr = kr.float().repeat_interleave(H // Hkv, dim=1)
+        vr = vr.float().repeat_interleave(H // Hkv, dim=1)
+        s = q[b:b + 1] @ kr.transpose(2, 3) * (scale if scale is not None else D ** -0.5)
+        if softcap:
+            s = softcap * torch.tanh(s / softcap)
+        if window:
+            s[..., : max(0, T + 1 - window)] = float("-inf")
+        ref = torch.softmax(s, -1) @ vr
+        torch.testing.assert_close(out[b:b + 1], ref, atol=1e-3, rtol=0)

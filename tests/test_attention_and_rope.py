@@ -1,7 +1,7 @@
 import pytest
 import torch
 from turing.core.attention_cache import AttentionPatternCache, ChunkedLongPrefillEngine
-from turing.core.rope import NTKDynamicRoPEScaling
+from turing.core.rope import RotaryEmbedding
 from turing.core.optimal_transport import sinkhorn_knopp_eviction, OptimalTransportEviction
 
 def test_attention_pattern_cache():
@@ -16,15 +16,18 @@ def test_attention_pattern_cache():
     assert bool(row[0]) is True # Root anchor
     assert bool(row[40]) is True # Self token
 
-def test_ntk_rope_scaling():
-    rope = NTKDynamicRoPEScaling(dim=64, max_position_embeddings=512)
-    # Within window
-    cos_short, sin_short = rope.compute_freqs(256, device=torch.device("cpu"))
-    assert cos_short.shape == (256, 64)
-
-    # Beyond window (triggers dynamic NTK alpha scaling)
-    cos_long, sin_long = rope.compute_freqs(1024, device=torch.device("cpu"))
+def test_dynamic_ntk_rope_scaling_only_beyond_the_trained_context():
+    rope = RotaryEmbedding(dim=64, max_position_embeddings=512, params={"rope_type": "dynamic", "factor": 2.0})
+    plain = RotaryEmbedding(dim=64, max_position_embeddings=512)
+    cos_short, _ = rope.compute_freqs(256, device=torch.device("cpu"))
+    assert torch.equal(cos_short, plain.compute_freqs(256, device=torch.device("cpu"))[0])
+    cos_long, _ = rope.compute_freqs(1024, device=torch.device("cpu"))  # the base grows past 512 tokens
     assert cos_long.shape == (1024, 64)
+    assert not torch.allclose(cos_long, plain.compute_freqs(1024, device=torch.device("cpu"))[0])
+    # the device path (one position per row, as decode uses) gives the same rows
+    cos_dev, _ = rope.compute_freqs_device(torch.tensor([10, 900]))
+    torch.testing.assert_close(cos_dev[0], rope.compute_freqs(11, torch.device("cpu"), start=10)[0][0])
+    torch.testing.assert_close(cos_dev[1], rope.compute_freqs(901, torch.device("cpu"), start=900)[0][0])
 
 def test_sinkhorn_knopp_ot_eviction():
     q = torch.randn(8, 64)
