@@ -46,8 +46,23 @@ def main():
         logits = model(w[None])[0].float()
         return F.cross_entropy(logits[0, :-1], w[1:]).item()
 
+    keep0 = {"on": False}
+    for m in mods.values():  # keep0 arms: the first position stays dense (a prefill's attention-sink token)
+        orig = m.forward
+
+        def fwd(x, _m=m, _orig=orig):
+            if keep0["on"] and x.dim() == 3 and x.shape[1] > 1:
+                t, _m.threshold = _m.threshold, 0.0
+                first = _orig(x[:, :1])
+                _m.threshold = t
+                return torch.cat([first, _orig(x[:, 1:])], 1)
+            return _orig(x)
+        m.forward = fwd
     res = dict(model=a.model, sparsity=a.sparsity, dtype=a.dtype, thresholds=thresholds, arms={})
-    for arm, keep in [("dense", lambda n: False)] + list(GROUPS.items()):
+    arms = [("dense", lambda n: False)] + list(GROUPS.items())
+    arms += [("all_keep0", GROUPS["all"]), ("mlp_in_keep0", GROUPS["mlp_in"])]
+    for arm, keep in arms:
+        keep0["on"] = arm.endswith("keep0")
         for n, m in mods.items():
             m.threshold = thresholds[n] if keep(n) else 0.0
         res["arms"][arm] = [nll(w) for w in wins]
