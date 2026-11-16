@@ -247,7 +247,10 @@ def quantize_model(model: nn.Module, method: str = "rtn", calib: Optional[torch.
 
 def calibration_windows(tokenizer, n: int = 128, T: int = 2048, seed: int = 0) -> torch.Tensor:
     """n random windows of T tokens from WikiText-2 train (GPTQ's usual calibration set)."""
-    from datasets import load_dataset
+    try:
+        from datasets import load_dataset
+    except ImportError as e:
+        raise ImportError("GPTQ and activation-sparsity calibration read WikiText-2: pip install datasets") from e
     text = "\n\n".join(load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="train")["text"])
     ids = tokenizer(text, return_tensors="pt").input_ids[0]
     g = torch.Generator().manual_seed(seed)
