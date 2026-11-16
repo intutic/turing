@@ -1,0 +1,786 @@
+{
+  "env": {
+    "device": "mps",
+    "chip": "Apple M4 Pro",
+    "platform": "macOS-27.3-arm64-arm-64bit",
+    "python": "3.11.9",
+    "torch": "2.9.1",
+    "transformers": "5.17.0",
+    "llama_cpp_python": "0.3.37",
+    "gguf": "0.19+",
+    "turing_commit": "b1ce57e",
+    "llamacpp_backend": "Metal, all layers offloaded",
+    "text": "WikiText-2 raw test split, first 400 lines joined, first 64 tokens (HF tokenizer, its special tokens)",
+    "date": "2026-11-16"
+  },
+  "rows": [
+    {
+      "name": "qwen2moe",
+      "arch": "qwen2moe",
+      "status": "not run",
+      "reason": "smallest real model is Qwen1.5-MoE-A2.7B (14.3B parameters: 57 GB in fp32, more than this machine's RAM)"
+    },
+    {
+      "name": "qwen3moe",
+      "arch": "qwen3moe",
+      "status": "not run",
+      "reason": "smallest real model is Qwen3-30B-A3B (30.5B parameters: 122 GB in fp32)"
+    },
+    {
+      "name": "llama",
+      "gguf": "unsloth/Llama-3.2-1B-Instruct-GGUF/Llama-3.2-1B-Instruct-Q8_0.gguf",
+      "hf": "unsloth/Llama-3.2-1B-Instruct",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "llama",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        128000,
+        271,
+        284,
+        8563
+      ],
+      "nll_hf": 3.8093085289001465,
+      "nll_llamacpp": 3.8121440410614014,
+      "nll_llamacpp_cpu": 3.81341552734375,
+      "turing_config": {
+        "arch": "llama",
+        "rope_type": "llama3",
+        "rope_factor": 32.0,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 0
+      },
+      "nll_turing": 3.812636613845825,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.03679800033569336,
+        "mean_abs_dlogit": 0.0017985992599278688,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 0.4893283247947693,
+        "mean_abs_dlogit": 0.03505870699882507,
+        "top1_agreement": 0.96875
+      },
+      "nll_diff_turing_minus_hf": 0.003328084945678711,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 0.43122005462646484,
+        "mean_abs_dlogit": 0.03354492038488388,
+        "top1_agreement": 0.984375
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 0.4253964424133301,
+        "mean_abs_dlogit": 0.03330925479531288,
+        "top1_agreement": 0.984375
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 0.4843251705169678,
+        "mean_abs_dlogit": 0.03507692366838455,
+        "top1_agreement": 0.96875
+      },
+      "status": "ok",
+      "seconds": 128.6
+    },
+    {
+      "name": "llama-mixtral",
+      "gguf": "DroidEverything/tiny-mixtral-30m-Q8_0-GGUF/tiny-mixtral-30m-q8_0.gguf",
+      "hf": "axolotl-ai-co/tiny-mixtral-30m",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "llama",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        1,
+        28705,
+        13,
+        13
+      ],
+      "nll_hf": 4.642664909362793,
+      "nll_llamacpp": 4.65325403213501,
+      "nll_llamacpp_cpu": 4.65104866027832,
+      "turing_config": {
+        "arch": "mixtral",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 8
+      },
+      "nll_turing": 4.653593063354492,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.014727592468261719,
+        "mean_abs_dlogit": 0.0008973703370429575,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 0.11938825994729996,
+        "mean_abs_dlogit": 0.013384672813117504,
+        "top1_agreement": 0.984375
+      },
+      "nll_diff_turing_minus_hf": 0.010928153991699219,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 0.16846680641174316,
+        "mean_abs_dlogit": 0.01794091798365116,
+        "top1_agreement": 1.0
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 0.16663789749145508,
+        "mean_abs_dlogit": 0.017955033108592033,
+        "top1_agreement": 1.0
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 0.1204533576965332,
+        "mean_abs_dlogit": 0.013446584343910217,
+        "top1_agreement": 0.984375
+      },
+      "status": "ok",
+      "seconds": 12.8
+    },
+    {
+      "name": "qwen2",
+      "gguf": "Qwen/Qwen2.5-0.5B-Instruct-GGUF/qwen2.5-0.5b-instruct-q8_0.gguf",
+      "hf": "Qwen/Qwen2.5-0.5B-Instruct",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "qwen2",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        271,
+        284,
+        8397,
+        425
+      ],
+      "nll_hf": 3.3728697299957275,
+      "nll_llamacpp": 3.352983236312866,
+      "nll_llamacpp_cpu": 3.350146532058716,
+      "turing_config": {
+        "arch": "qwen2",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 0
+      },
+      "nll_turing": 3.353029727935791,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.07425838708877563,
+        "mean_abs_dlogit": 0.005169369745999575,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 3.6345157623291016,
+        "mean_abs_dlogit": 0.27525269985198975,
+        "top1_agreement": 0.921875
+      },
+      "nll_diff_turing_minus_hf": -0.019840002059936523,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 1.3212559223175049,
+        "mean_abs_dlogit": 0.0741739571094513,
+        "top1_agreement": 0.984375
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 1.296869158744812,
+        "mean_abs_dlogit": 0.07419014722108841,
+        "top1_agreement": 0.984375
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 3.63858699798584,
+        "mean_abs_dlogit": 0.2757933437824249,
+        "top1_agreement": 0.921875
+      },
+      "status": "ok",
+      "seconds": 48.8
+    },
+    {
+      "name": "qwen3",
+      "gguf": "Qwen/Qwen3-0.6B-GGUF/Qwen3-0.6B-Q8_0.gguf",
+      "hf": "Qwen/Qwen3-0.6B",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "qwen3",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        271,
+        284,
+        8397,
+        425
+      ],
+      "nll_hf": 3.909067392349243,
+      "nll_llamacpp": 3.8842051029205322,
+      "nll_llamacpp_cpu": 3.9079556465148926,
+      "turing_config": {
+        "arch": "qwen3",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 0
+      },
+      "nll_turing": 3.8842475414276123,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.039073944091796875,
+        "mean_abs_dlogit": 0.0030444739386439323,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 4.3625359535217285,
+        "mean_abs_dlogit": 0.10235288739204407,
+        "top1_agreement": 0.96875
+      },
+      "nll_diff_turing_minus_hf": -0.02481985092163086,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 3.9985923767089844,
+        "mean_abs_dlogit": 0.07053373754024506,
+        "top1_agreement": 0.96875
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 4.002374649047852,
+        "mean_abs_dlogit": 0.07031916826963425,
+        "top1_agreement": 0.96875
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 4.362283706665039,
+        "mean_abs_dlogit": 0.10213588923215866,
+        "top1_agreement": 0.96875
+      },
+      "status": "ok",
+      "seconds": 32.4
+    },
+    {
+      "name": "gemma",
+      "gguf": "ggml-org/gemma-1.1-2b-it-Q8_0-GGUF/gemma-1.1-2b-it.Q8_0.gguf",
+      "hf": "unsloth/gemma-1.1-2b-it",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "gemma",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        2,
+        109,
+        589,
+        7866
+      ],
+      "nll_hf": 5.912991046905518,
+      "nll_llamacpp": 5.936880588531494,
+      "nll_llamacpp_cpu": 5.924724102020264,
+      "turing_config": {
+        "arch": "gemma",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 0
+      },
+      "nll_turing": 5.937078952789307,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.08019828796386719,
+        "mean_abs_dlogit": 0.005445273593068123,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 2.7171096801757812,
+        "mean_abs_dlogit": 0.11548066884279251,
+        "top1_agreement": 0.984375
+      },
+      "nll_diff_turing_minus_hf": 0.024087905883789062,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 1.4610424041748047,
+        "mean_abs_dlogit": 0.1337079107761383,
+        "top1_agreement": 0.984375
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 1.4554862976074219,
+        "mean_abs_dlogit": 0.13336169719696045,
+        "top1_agreement": 0.984375
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 2.70703125,
+        "mean_abs_dlogit": 0.11502431333065033,
+        "top1_agreement": 0.984375
+      },
+      "status": "ok",
+      "seconds": 884.7
+    },
+    {
+      "name": "gemma2",
+      "gguf": "bartowski/gemma-2-2b-it-GGUF/gemma-2-2b-it-Q8_0.gguf",
+      "hf": "unsloth/gemma-2-2b-it",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "gemma2",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        2,
+        109,
+        589,
+        7866
+      ],
+      "nll_hf": 3.5174896717071533,
+      "nll_llamacpp": 3.521787643432617,
+      "nll_llamacpp_cpu": 3.52182674407959,
+      "turing_config": {
+        "arch": "gemma2",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": 4096,
+        "attn_scale": 0.0625,
+        "num_experts": 0
+      },
+      "nll_turing": 3.5216798782348633,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.03036785125732422,
+        "mean_abs_dlogit": 0.0019408749649301171,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 0.5347752571105957,
+        "mean_abs_dlogit": 0.036570366472005844,
+        "top1_agreement": 1.0
+      },
+      "nll_diff_turing_minus_hf": 0.004190206527709961,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 0.8703460693359375,
+        "mean_abs_dlogit": 0.059725482016801834,
+        "top1_agreement": 1.0
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 0.8749294281005859,
+        "mean_abs_dlogit": 0.05979273095726967,
+        "top1_agreement": 1.0
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 0.5287203788757324,
+        "mean_abs_dlogit": 0.036594390869140625,
+        "top1_agreement": 1.0
+      },
+      "status": "ok",
+      "seconds": 841.3
+    },
+    {
+      "name": "gemma3",
+      "gguf": "unsloth/gemma-3-270m-it-GGUF/gemma-3-270m-it-Q8_0.gguf",
+      "hf": "unsloth/gemma-3-270m-it",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "gemma3",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        2,
+        108,
+        578,
+        9877
+      ],
+      "nll_hf": 5.153238773345947,
+      "nll_llamacpp": 5.173119068145752,
+      "nll_llamacpp_cpu": 5.193357944488525,
+      "turing_config": {
+        "arch": "gemma3_text",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": 512,
+        "attn_scale": 0.0625,
+        "num_experts": 0
+      },
+      "nll_turing": 5.1719889640808105,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.19974231719970703,
+        "mean_abs_dlogit": 0.007399551570415497,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 3.386380672454834,
+        "mean_abs_dlogit": 0.22386571764945984,
+        "top1_agreement": 0.984375
+      },
+      "nll_diff_turing_minus_hf": 0.01875019073486328,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 5.516304016113281,
+        "mean_abs_dlogit": 0.17375174164772034,
+        "top1_agreement": 0.953125
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 5.394125938415527,
+        "mean_abs_dlogit": 0.17345157265663147,
+        "top1_agreement": 0.953125
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 3.490227699279785,
+        "mean_abs_dlogit": 0.2282634675502777,
+        "top1_agreement": 0.984375
+      },
+      "status": "ok",
+      "seconds": 42.0
+    },
+    {
+      "name": "phi2",
+      "gguf": "TheBloke/phi-2-GGUF/phi-2.Q8_0.gguf",
+      "hf": "microsoft/phi-2",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "phi2",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        628,
+        796,
+        5199,
+        347
+      ],
+      "nll_hf": 3.3832614421844482,
+      "nll_llamacpp": 3.3703765869140625,
+      "nll_llamacpp_cpu": 3.382018804550171,
+      "turing_config": {
+        "arch": "phi",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 0
+      },
+      "nll_turing": 3.377310276031494,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.6910581588745117,
+        "mean_abs_dlogit": 0.044181182980537415,
+        "top1_agreement": 0.984375
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 0.41712474822998047,
+        "mean_abs_dlogit": 0.026543406769633293,
+        "top1_agreement": 0.984375
+      },
+      "nll_diff_turing_minus_hf": -0.0059511661529541016,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 2.6488590240478516,
+        "mean_abs_dlogit": 0.16973258554935455,
+        "top1_agreement": 0.96875
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 2.6179163455963135,
+        "mean_abs_dlogit": 0.1674290895462036,
+        "top1_agreement": 0.984375
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 0.6626672744750977,
+        "mean_abs_dlogit": 0.050810471177101135,
+        "top1_agreement": 0.96875
+      },
+      "status": "ok",
+      "seconds": 520.1
+    },
+    {
+      "name": "phi3",
+      "gguf": "microsoft/Phi-3-mini-4k-instruct-gguf/Phi-3-mini-4k-instruct-q4.gguf",
+      "hf": "microsoft/Phi-3-mini-4k-instruct",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "phi3",
+      "tensor_types": [
+        "F32",
+        "Q4_K",
+        "Q5_K",
+        "Q6_K"
+      ],
+      "first_ids": [
+        29871,
+        13,
+        13,
+        353
+      ],
+      "nll_hf": 2.7717032432556152,
+      "nll_llamacpp": 2.9321882724761963,
+      "nll_llamacpp_cpu": 2.9325754642486572,
+      "turing_config": {
+        "arch": "phi3",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 0
+      },
+      "nll_turing": 2.933490037918091,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.2510696351528168,
+        "mean_abs_dlogit": 0.010561035014688969,
+        "top1_agreement": 0.984375
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 33.895957946777344,
+        "mean_abs_dlogit": 21.260486602783203,
+        "top1_agreement": 0.796875
+      },
+      "nll_diff_turing_minus_hf": 0.16178679466247559,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 5.221848487854004,
+        "mean_abs_dlogit": 0.1613326221704483,
+        "top1_agreement": 0.921875
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 5.2103190422058105,
+        "mean_abs_dlogit": 0.15983355045318604,
+        "top1_agreement": 0.9375
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 33.896854400634766,
+        "mean_abs_dlogit": 21.26205825805664,
+        "top1_agreement": 0.796875
+      },
+      "status": "ok",
+      "seconds": 100.2
+    },
+    {
+      "name": "phi3-longrope",
+      "gguf": "bartowski/Phi-3.5-mini-instruct-GGUF/Phi-3.5-mini-instruct-Q8_0.gguf",
+      "hf": "microsoft/Phi-3.5-mini-instruct",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "phi3",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        29871,
+        13,
+        13,
+        353
+      ],
+      "nll_hf": 2.8318228721618652,
+      "nll_llamacpp": 2.827996253967285,
+      "nll_llamacpp_cpu": 2.8724567890167236,
+      "turing_config": {
+        "arch": "phi3",
+        "rope_type": "longrope",
+        "rope_factor": null,
+        "sliding_window": 262144,
+        "attn_scale": null,
+        "num_experts": 0
+      },
+      "nll_turing": 2.827625274658203,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.2467813491821289,
+        "mean_abs_dlogit": 0.006095041986554861,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 3.8559818267822266,
+        "mean_abs_dlogit": 0.07331319898366928,
+        "top1_agreement": 0.984375
+      },
+      "nll_diff_turing_minus_hf": -0.004197597503662109,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 8.28182315826416,
+        "mean_abs_dlogit": 0.1477625072002411,
+        "top1_agreement": 1.0
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 8.46090030670166,
+        "mean_abs_dlogit": 0.1498613953590393,
+        "top1_agreement": 1.0
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 3.7399840354919434,
+        "mean_abs_dlogit": 0.07141661643981934,
+        "top1_agreement": 0.984375
+      },
+      "status": "ok",
+      "seconds": 164.7
+    },
+    {
+      "name": "gpt2",
+      "gguf": "QuantFactory/gpt2-GGUF/gpt2.Q8_0.gguf",
+      "hf": "gpt2",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "gpt2",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        628,
+        796,
+        5199,
+        347
+      ],
+      "nll_hf": 4.411693096160889,
+      "nll_llamacpp": 4.4269490242004395,
+      "nll_llamacpp_cpu": 4.420834541320801,
+      "turing_config": {
+        "arch": "gpt2",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 0
+      },
+      "nll_turing": 4.426684856414795,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.16440200805664062,
+        "mean_abs_dlogit": 0.023991070687770844,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 2.87890625,
+        "mean_abs_dlogit": 0.26194894313812256,
+        "top1_agreement": 0.9375
+      },
+      "nll_diff_turing_minus_hf": 0.01499176025390625,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 2.769622802734375,
+        "mean_abs_dlogit": 0.40555405616760254,
+        "top1_agreement": 0.96875
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 2.63604736328125,
+        "mean_abs_dlogit": 0.4081023633480072,
+        "top1_agreement": 0.96875
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 2.9234619140625,
+        "mean_abs_dlogit": 0.26709315180778503,
+        "top1_agreement": 0.9375
+      },
+      "status": "ok",
+      "seconds": 14.0
+    },
+    {
+      "name": "gptneox",
+      "gguf": "mradermacher/pythia-160m-GGUF/pythia-160m.Q8_0.gguf",
+      "hf": "EleutherAI/pythia-160m",
+      "turing_device": "mps",
+      "tokens": 64,
+      "arch": "gptneox",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        535,
+        426,
+        6911,
+        378
+      ],
+      "nll_hf": 4.167388916015625,
+      "nll_llamacpp": 4.126008987426758,
+      "nll_llamacpp_cpu": 4.133489608764648,
+      "turing_config": {
+        "arch": "gpt_neox",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 0
+      },
+      "nll_turing": 4.1325883865356445,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 1.4688720703125,
+        "mean_abs_dlogit": 0.08501360565423965,
+        "top1_agreement": 0.96875
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 1.233673095703125,
+        "mean_abs_dlogit": 0.13470113277435303,
+        "top1_agreement": 0.921875
+      },
+      "nll_diff_turing_minus_hf": -0.03480052947998047,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 5.433441162109375,
+        "mean_abs_dlogit": 0.2817632853984833,
+        "top1_agreement": 0.921875
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 5.292022705078125,
+        "mean_abs_dlogit": 0.2615068256855011,
+        "top1_agreement": 0.921875
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 1.471099853515625,
+        "mean_abs_dlogit": 0.162042498588562,
+        "top1_agreement": 0.890625
+      },
+      "status": "ok",
+      "seconds": 12.5
+    },
+    {
+      "name": "olmoe",
+      "gguf": "allenai/OLMoE-1B-7B-0924-GGUF/olmoe-1b-7b-0924-q8_0.gguf",
+      "hf": "allenai/OLMoE-1B-7B-0924",
+      "turing_device": "cpu",
+      "tokens": 64,
+      "arch": "olmoe",
+      "tensor_types": [
+        "F32",
+        "Q8_0"
+      ],
+      "first_ids": [
+        535,
+        426,
+        6911,
+        378
+      ],
+      "nll_hf": 3.2001607418060303,
+      "nll_llamacpp": 3.1982169151306152,
+      "nll_llamacpp_cpu": 3.189652442932129,
+      "turing_config": {
+        "arch": "olmoe",
+        "rope_type": null,
+        "rope_factor": null,
+        "sliding_window": null,
+        "attn_scale": null,
+        "num_experts": 64
+      },
+      "nll_turing": 3.1950442790985107,
+      "vs_llamacpp": {
+        "max_abs_dlogit": 0.9605538845062256,
+        "mean_abs_dlogit": 0.019481778144836426,
+        "top1_agreement": 1.0
+      },
+      "vs_hf": {
+        "max_abs_dlogit": 1.131525993347168,
+        "mean_abs_dlogit": 0.05230372026562691,
+        "top1_agreement": 1.0
+      },
+      "nll_diff_turing_minus_hf": -0.005116462707519531,
+      "llamacpp_metal_vs_cpu": {
+        "max_abs_dlogit": 0.9731866121292114,
+        "mean_abs_dlogit": 0.05651436746120453,
+        "top1_agreement": 1.0
+      },
+      "vs_llamacpp_cpu": {
+        "max_abs_dlogit": 0.9350017309188843,
+        "mean_abs_dlogit": 0.05388756841421127,
+        "top1_agreement": 1.0
+      },
+      "llamacpp_vs_hf": {
+        "max_abs_dlogit": 1.1250827312469482,
+        "mean_abs_dlogit": 0.052836716175079346,
+        "top1_agreement": 1.0
+      },
+      "status": "ok",
+      "seconds": 973.1
+    }
+  ]
+}
