@@ -2,7 +2,8 @@
 """
 Batch-1 decode speed and weight memory of each weight format on real weights: fp16, 4-bit RTN/GPTQ (QuantLinear and
 its fused int4 kernel), and TEAL-style activation sparsity on fp16 and on 4-bit weights. One WikiText-2 prompt of
---context tokens is prefilled, then --steps greedy decode steps are timed (device synchronized). Writes
+--context tokens is prefilled, then --steps greedy decode steps are timed (device synchronized), on CUDA both with
+CUDA graphs (tokens_per_second, the serving path) and with eager launches (eager_tokens_per_second). Writes
 results_weight_formats_<device>.json.
 
 python scripts/benchmark_weight_formats.py --model HuggingFaceTB/SmolLM2-1.7B --settings fp16,rtn4,teal40,rtn4_teal40
@@ -30,8 +31,10 @@ def sync(dev):
 
 
 @torch.inference_mode()
-def decode_rate(model, ids, steps, dev):
-    model.config.cuda_graphs = False  # same path for every format (QuantLinear and sparse kernels take eager decode)
+def decode_rate(model, ids, steps, dev, graphs):
+    """Greedy decode tokens/s; graphs=True is the serving path on CUDA (every format's kernels are captured), False
+    launches each kernel from Python."""
+    model.config.cuda_graphs = graphs
     for _ in range(2):  # warm-up: kernel compilation and autotuning
         _, past = model(ids, logits_to_keep=1)
         tok = torch.tensor([[1]], device=dev)
@@ -72,8 +75,10 @@ def main():
             quantize_model(model, quant, calibration_windows(tok, 32, 2048) if quant == "gptq" else None)
         if "teal" in name:
             calibrate_and_apply(model, calibration_windows(tok, 16, 512), int(name.split("teal")[1]) / 100)
-        rate = decode_rate(model, ids, a.steps, dev)
-        row = dict(model=a.model, setting=name, tokens_per_second=round(rate, 2), weight_bytes=weight_bytes(model),
+        rate = decode_rate(model, ids, a.steps, dev, graphs=dev.type == "cuda")
+        eager = decode_rate(model, ids, a.steps, dev, graphs=False) if dev.type == "cuda" else rate
+        row = dict(model=a.model, setting=name, tokens_per_second=round(rate, 2),
+                   eager_tokens_per_second=round(eager, 2), weight_bytes=weight_bytes(model),
                    context=a.context, steps=a.steps)
         print(json.dumps(row), flush=True)
         rows.append(row)

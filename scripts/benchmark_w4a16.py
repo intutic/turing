@@ -2,7 +2,8 @@
 """
 Where the fused int4 GEMM beats dequantize + cuBLAS fp16, by row count M (decode is M = batch, prefill M = tokens).
 For each layer shape of the model and each M: the Triton W4A16 kernel, cuBLAS on fp16 weights, and QuantLinear's
-large-M path (dequantize into scratch + cuBLAS). Median of --iters CUDA-event timings. The crossover sets
+large-M path (dequantize into scratch + cuBLAS), and the int4 kernel without its K split. GPU time per call
+from CUDA-graph replays (median of --iters). The crossover sets
 turing.models.quant.INT4_MAX_ROWS. Writes results_w4a16_crossover_cuda.json.
 
 python scripts/benchmark_w4a16.py --shapes 2048x2048,2048x8192,8192x2048
@@ -20,18 +21,39 @@ from turing.kernels.triton_w4a16 import dequantize_cuda, w4a16_gemm
 from turing.models.quant import dequantize, pack, rtn_quantize
 
 
-def timed(fn, iters):
-    for _ in range(5):
+def timed(fn, iters, reps=20):
+    """GPU microseconds per call, from CUDA-graph replays of `reps` back-to-back calls (serving decode replays graphs;
+    timing each launch from Python would measure the launcher once the kernel is faster than it)."""
+    for _ in range(3):  # compilation and autotuning, outside the capture
         fn()
+    torch.cuda.synchronize()
+    g = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(g):
+        for _ in range(reps):
+            fn()
+    g.replay()
     ts = []
     for _ in range(iters):
         a, b = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
         a.record()
-        fn()
+        g.replay()
         b.record()
         torch.cuda.synchronize()
-        ts.append(a.elapsed_time(b) * 1000)
+        ts.append(a.elapsed_time(b) * 1000 / reps)
     return statistics.median(ts)
+
+
+def no_split(fn):
+    """fn with the int4 kernel's K split forced to 1 (one program per output tile walks all of K)."""
+    import turing.kernels.triton_sparse_gemv as sg
+
+    def run():
+        saved, sg._splits = sg._splits, (lambda *a: 1)
+        try:
+            return fn()
+        finally:
+            sg._splits = saved
+    return run
 
 
 def main():
@@ -53,6 +75,7 @@ def main():
             x = torch.randn(M, K, device="cuda", dtype=torch.float16)
             r = dict(K=K, N=N, M=M,
                      int4_kernel_us=timed(lambda: w4a16_gemm(x, q, s, z), a.iters),
+                     int4_kernel_no_split_us=timed(no_split(lambda: w4a16_gemm(x, q, s, z)), a.iters),
                      fp16_cublas_us=timed(lambda: F.linear(x, w16), a.iters),
                      dequant_cublas_us=timed(lambda: F.linear(x, dequantize_cuda(q, s, z, scratch)), a.iters))
             print(json.dumps(r), flush=True)

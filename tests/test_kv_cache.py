@@ -281,6 +281,14 @@ def test_key_smoothing_is_exact_and_tames_outlier_channels_in_a_4bit_cache():
     exact = copy.deepcopy(base)
     exact.calibrate_kv_smoothing()
     torch.testing.assert_close(exact(ids)[0], ref, atol=1e-4, rtol=0)
+    # power-of-two scales: q * s and k / s are exact, so in bf16 the smoothed logits are bit-identical (rounding them
+    # cost int8 KV 17 GSM8K points on Qwen2.5-1.5B-Instruct)
+    b16 = RealHuggingFaceLoader.convert_hf_model(hf, dtype=torch.bfloat16)
+    ref16 = b16._body(ids, 0, None, None)
+    b16.calibrate_kv_smoothing()
+    scales = torch.cat([layer.self_attn.k_smooth.float().flatten() for layer in b16.layers])
+    assert scales.max() > 1 and torch.equal(torch.exp2(torch.log2(scales).round()), scales)
+    assert torch.equal(b16._body(ids, 0, None, None), ref16)
 
 
 @pytest.mark.parametrize("dtype", ["int8", "int4"])
