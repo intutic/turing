@@ -25,8 +25,9 @@ import torch.nn.functional as F
 
 BITS, GROUP = 4, 64
 QMAX = 2 ** BITS - 1
-# Rows at or below which the fused int4 kernel beats dequant + cuBLAS on CUDA. shortcut: an estimate from cift F5 (int4
-# 3x faster at M=1, 3x slower at M=128); scripts/benchmark_w4a16.py measures the crossover on the L4.
+# Rows at or below which the fused int4 kernel beats dequant + cuBLAS on CUDA. Measured on an L4
+# (results_w4a16_crossover_cuda.json): it wins up to M=16 on 2048x2048 and 2048x8192 layers and up to M=128 on
+# 4096x14336, loses at every M on 8192x2048. shortcut: one threshold for all shapes, per-shape if int4 prefill matters.
 INT4_MAX_ROWS = 16
 
 

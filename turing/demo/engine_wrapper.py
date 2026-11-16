@@ -21,13 +21,11 @@ import huggingface_hub
 huggingface_hub.logging.set_verbosity_error()
 
 from .epistemic_gate import EpistemicUncertaintyGate
-from ..core.cross_model_kv import RoPEContentDecoupler
 
 
 class TuringAcceleratedGenerator:
     """
     Runs a transformers causal LM (by id or instance) with its own generate(); the Turing engine is not involved.
-    Semantic anchor tags only record a prompt's token ids under a name; nothing is reused from them.
     """
     def __init__(
         self,
@@ -72,9 +70,6 @@ class TuringAcceleratedGenerator:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        self.kv_decoupler = RoPEContentDecoupler()
-        self.cached_turn_kv = None
-        self.anchors: Dict[str, List[int]] = {}  # semantic anchor tag -> prompt token ids
 
     def sync_device(self):
         """Synchronizes device compute queue for microsecond-precise latency metrics."""
@@ -91,9 +86,6 @@ class TuringAcceleratedGenerator:
         max_new_tokens: int = 100,
         temperature: float = 0.7,
         top_p: float = 0.9,
-        reuse_previous_kv: bool = False,
-        semantic_anchor_tag: Optional[str] = None,
-        restore_anchor_tag: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generates a reply with chat formatting, timing and an uncertainty reading of the prompt logits.
@@ -109,14 +101,6 @@ class TuringAcceleratedGenerator:
             formatted_prompt = f"System: {system_prompt}\nUser: {user_prompt}\nAssistant:"
 
         inputs = self.tokenizer(formatted_prompt, return_tensors="pt", truncation=True, max_length=512).to(self.device)
-
-        # Handle Semantic Anchor Checkpoint Registration / Restoration
-        anchor_reused = False
-        if restore_anchor_tag and restore_anchor_tag in self.anchors:
-            anchor_reused = True
-
-        if semantic_anchor_tag:
-            self.anchors[semantic_anchor_tag] = inputs["input_ids"][0].tolist()
 
         # Evaluate Epistemic Uncertainty on prompt prefix
         with torch.no_grad():
@@ -152,8 +136,6 @@ class TuringAcceleratedGenerator:
             "tokens_generated": new_tokens_count,
             "throughput_tok_s": round(throughput, 1),
             "epistemic_diagnostics": epistemic_diagnostics,
-            "semantic_anchor_reused": anchor_reused,
-            "semantic_anchor_tag": semantic_anchor_tag or restore_anchor_tag,
             "device": str(self.device)
         }
 

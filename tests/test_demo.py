@@ -88,6 +88,7 @@ class MockTokenizer:
         self.pad_token = "<pad>"
         self.eos_token = "<eos>"
         self.eos_token_id = 0
+        self.replies = list(self.REPLIES)
 
     def apply_chat_template(self, messages, **kwargs):
         return "\n".join(m["content"] for m in messages)
@@ -101,8 +102,12 @@ class MockTokenizer:
                 return self
         return BatchEncoding()
 
+    REPLIES = ["Three regions.\nNODES=2,000; ZONES=AWS_US_EAST_1, AWS_EU_WEST_NODE_4, AWS_AP_SOUTHEAST_1",
+               "Configured 3,000 multi-region nodes bypassing failed cluster.\n"
+               "NODES=3,000; ZONES=AWS_US_EAST_1, AWS_EU_CENTRAL_1, AWS_AP_SOUTHEAST_1"]
+
     def decode(self, token_ids, **kwargs):
-        return "Configured 3,000 multi-region nodes bypassing failed cluster."
+        return self.replies.pop(0) if self.replies else "no plan line"
 
 
 def test_multi_agent_coordinator_with_mock_engine():
@@ -119,6 +124,15 @@ def test_multi_agent_coordinator_with_mock_engine():
     results = agent_sys.run_multi_agent_workflow(force_outage=True, max_tokens_per_agent=10)
 
     assert results["revision_successful"] is True
-    assert "3,000" in results["sol_proposal"]["response_text"]
     assert results["initial_world_feedback"]["constraint_penalty"] == 1300
     assert results["final_world_feedback"]["constraint_penalty"] == 0
+
+
+def test_multi_agent_unparsed_answer_is_not_scored():
+    tok = MockTokenizer()
+    tok.replies = []  # every reply lacks the NODES/ZONES line
+    engine = TuringAcceleratedGenerator(model_id_or_instance=MockModel(), tokenizer=tok, device="cpu")
+    results = MultiAgentCoordinator(engine=engine, world_model=DynamicEnvironmentModel()).run_multi_agent_workflow(
+        force_outage=True, max_tokens_per_agent=10)
+    assert results["initial_world_feedback"]["parsed"] is False
+    assert results["revision_successful"] is None

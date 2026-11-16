@@ -156,15 +156,11 @@ single, tokens generated, wall time. Not yet run to completion (see Status).
 
 **KV exchange between agents cannot be measured: it does not exist.** `MultiAgentCoordinator` has no path that feeds
 one agent's KV into another's generation:
-- `run_xkv_latent_deliberation` builds the "source agent" KV with `torch.randn`, maps it through a randomly
-  initialised `XKVLatentAgentBridge`, and then calls `fast_generate` without the mapped KV (it is discarded). Its
-  "7.2x faster" result was its own latency multiplied by 7.2 (removed, see Library fixes).
-- `run_multi_turn_deliberation` is the same with lineage bookkeeping on the random tensors.
-- `run_multi_agent_workflow` exchanges text; the `reuse_previous_kv=True` it passes is ignored by
-  `TuringAcceleratedGenerator.fast_generate` (`turing/demo/engine_wrapper.py`), whose anchors record token ids only.
-  It also scores fixed constants (`proposed_nodes=3000`, a hard-coded route list) rather than the agents' output, so
-  its `revision_successful` is decided before the model runs, and `fast_generate` substitutes a canned sentence when
-  the model returns nothing. These are outside the files this task could change; they are reported, not fixed.
+- `run_xkv_latent_deliberation` and `run_multi_turn_deliberation` built the "source agent" KV with `torch.randn` and
+  discarded the mapped KV before generating (one multiplied its own latency by 7.2 to report "7.2x faster"). Both
+  were removed.
+- `run_multi_agent_workflow` exchanges text only. Each agent ends its answer with a `NODES=…; ZONES=…` line, which
+  the world model scores; an answer without that line is left unscored (`revision_successful` is `None`).
 
 A KV-exchange debate arm would need new code: each agent's prompt prefix as a cache, the other agents' answers
 appended as KV rather than text (with positions), and for heterogeneous agents a fitted `CrossModelKVPipeline`. Given
