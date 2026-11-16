@@ -76,7 +76,10 @@ def _engine_generate(model, dist_driver=None):
         await engine.start()
         try:
             reqs = [await engine.add_request(p, max_new_tokens=10, temperature=0.0) for p in prompts]
-            return [[t async for t in engine.stream_request(r)] for r in reqs]
+            outs = []
+            for r in reqs:  # Python 3.10 rejects an async comprehension nested in a sync one
+                outs.append([t async for t in engine.stream_request(r)])
+            return outs
         finally:
             await engine.stop()
     return asyncio.run(go())
