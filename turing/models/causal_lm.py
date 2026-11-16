@@ -195,6 +195,13 @@ class SubspaceAttention(nn.Module):
                 else (self.head_dim, self.head_dim)
             self.q_norm, self.k_norm = make_norm(config, q_dim), make_norm(config, k_dim)
 
+        # Per-channel key smoothing for quantized KV caches (set by SubspaceCausalLM.calibrate_kv_smoothing): keys are
+        # stored as k / s and queries scaled by s, so q.k is unchanged while outlier channels (Qwen2's key biases reach
+        # 20x the median) no longer swamp the 4/8-bit grid of every other channel.
+        self.register_buffer("k_smooth", None, persistent=False)   # [1, Hkv, 1, D]
+        self.register_buffer("q_smooth", None, persistent=False)   # [1, H, 1, D]
+        self._k_absmax = None  # running max |k| per (KV head, channel) during calibration
+
         self.rope = None
         if not config.learned_positions and config.rotary_dim != 0:
             local = self.window is not None and config.rope_local_theta is not None
@@ -236,6 +243,11 @@ class SubspaceAttention(nn.Module):
             else:
                 cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos)
             q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
+        if self._k_absmax is not None:
+            m = k.detach().abs().float().amax(dim=(0, 2))
+            self._k_absmax = torch.maximum(self._k_absmax, m)
+        if self.k_smooth is not None:
+            k, q = k / self.k_smooth.to(k.dtype), q * self.q_smooth.to(q.dtype)
 
         if step is not None:  # one decode token for each request of the step
             return self.o_proj(self._decode_step(q, k, v, step)), None, None
@@ -596,6 +608,30 @@ class SubspaceCausalLM(nn.Module):
             logits = torch.tanh(logits / cfg.final_softcap) * cfg.final_softcap
         return logits
 
+    @torch.no_grad()
+    def calibrate_kv_smoothing(self, n: int = 4, tokens: int = 256, seed: int = 0) -> None:
+        """Measure each layer's per-channel max |k| (after RoPE) on n random token sequences and set the key smoothing
+        scale s = max(1, channel max / that head's median channel max): only outlier channels are scaled. Exact
+        algebraically (q.k unchanged); it changes what a quantized KV cache can represent. Random tokens suffice:
+        the outliers come from the projection biases and weights, not from the text."""
+        dev = self.embed_tokens.weight.device
+        attns = [layer.self_attn for layer in self.layers]
+        for a in attns:
+            a.k_smooth = a.q_smooth = None
+            a._k_absmax = torch.zeros(a.num_kv_heads, a.head_dim, device=dev)
+        ids = torch.randint(0, self.config.vocab_size, (n, tokens), generator=torch.Generator().manual_seed(seed))
+        try:
+            with torch.inference_mode(False):
+                self._body(ids.to(dev), 0, None, None)  # stateless batched forward: no KV pool involved
+        finally:
+            for a in attns:
+                m, a._k_absmax = a._k_absmax, None
+                ref = m.median(dim=-1, keepdim=True).values.clamp_min(1e-6)
+                scale = (m / ref).clamp_min(1.0)  # shrink outliers only (equalising all channels measured worse)
+                a.k_smooth = scale[None, :, None, :].to(self.embed_tokens.weight.dtype)
+                a.q_smooth = scale.repeat_interleave(a.num_kv_groups, dim=0)[None, :, None, :].to(a.k_smooth.dtype)
+        self._kv_smoothed = True
+
     def kv_pool(self) -> KVPool:
         """This model's paged KV pool, created on first use (and again if the device, dtype or cache settings
         changed; caches of an older pool keep it alive)."""
@@ -608,6 +644,8 @@ class SubspaceCausalLM(nn.Module):
             gc.collect()
             if w.device.type == "cuda":
                 torch.cuda.empty_cache()
+            if cfg.kv_cache_dtype != "native" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False):
+                self.calibrate_kv_smoothing()
             pool = KVPool.for_model(cfg, w.dtype, w.device)
             self._kv_pool = pool
         return pool

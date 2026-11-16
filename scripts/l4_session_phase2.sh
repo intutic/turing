@@ -29,4 +29,7 @@ step e2e_turing_1p7b2 python scripts/benchmark_e2e_generation.py --engine turing
 step vllm_venv2 bash -c "python3 -m venv ~/vllm-venv && ~/vllm-venv/bin/pip install -q vllm datasets"
 step e2e_vllm2 ~/vllm-venv/bin/python scripts/benchmark_e2e_generation.py --engine vllm --model HuggingFaceTB/SmolLM2-360M
 step e2e_vllm_1p7b2 ~/vllm-venv/bin/python scripts/benchmark_e2e_generation.py --engine vllm --model HuggingFaceTB/SmolLM2-1.7B
+NIAH="--model Qwen/Qwen2.5-1.5B-Instruct --context-len 2048 8192 16384 32768 --depths 0 0.25 0.5 0.75 1 --device cuda --dtype bf16 --out results_niah_smoothed_cuda.json"
+step niah_int4_smoothed turing eval-niah $NIAH --kv-cache-dtype int4
+step niah_int8_smoothed turing eval-niah $NIAH --kv-cache-dtype int8
 echo "PHASE2 DONE $(date -u +%H:%M:%S)" >> ~/l4_status.txt

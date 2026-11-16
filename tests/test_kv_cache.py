@@ -253,3 +253,31 @@ def test_pool_created_in_inference_mode_is_writable_outside_it():
     c.reserve(40)  # admission runs outside inference mode
     for _ in range(9):  # grows the page table
         KVCache(pool)
+
+
+@torch.no_grad()
+def test_key_smoothing_is_exact_and_tames_outlier_channels_in_a_4bit_cache():
+    """Qwen2-style key-bias outliers: smoothing leaves full-precision logits unchanged and makes the int4 cache's
+    logits much closer to them."""
+    import copy
+    import transformers as tf
+    from tests.test_hf_parity import _COMMON
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    torch.manual_seed(0)
+    hf = tf.Qwen2ForCausalLM(tf.Qwen2Config(**{**_COMMON, "num_attention_heads": 2, "num_key_value_heads": 1})).eval()
+    for layer in hf.model.layers:
+        layer.self_attn.k_proj.bias[::7] = 40.0  # a few channels 40x the rest
+    ids = torch.randint(0, 128, (1, 48), generator=torch.Generator().manual_seed(0))
+    base = RealHuggingFaceLoader.convert_hf_model(hf)
+    ref = base(ids)[0]
+    errs = {}
+    for smooth in (False, True):
+        m = copy.deepcopy(base)
+        m.config.kv_cache_dtype, m.config.kv_smoothing, m.config.kv_pool_gib = "int4", smooth, 0.01
+        logits, cache = m(ids[:, :40])
+        outs = [logits] + [m(ids[:, t:t + 1], past_key_values=cache)[0] for t in range(40, 48)]
+        errs[smooth] = (torch.cat(outs, 1) - ref).abs().max().item()
+    assert errs[True] < 0.7 * errs[False]  # Qwen2.5-0.5B real weights: int4 +0.74 -> +0.08 nats
+    exact = copy.deepcopy(base)
+    exact.calibrate_kv_smoothing()
+    torch.testing.assert_close(exact(ids)[0], ref, atol=1e-4, rtol=0)
