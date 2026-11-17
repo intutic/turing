@@ -136,3 +136,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+    sys.stdout.flush()
+    os._exit(0)  # results are written; vLLM 0.31's helper processes kept the interpreter alive for hours at exit
