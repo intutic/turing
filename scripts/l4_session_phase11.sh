@@ -3,7 +3,7 @@
 # 16x+ outlier channels (quality table, GSM8K, pass-key).
 cd ~/jflux; export PATH="$HOME/.local/bin:$PATH"
 python() { python3 "$@"; }
-until grep -q "PHASE10 DONE" ~/l4_status.txt; do sleep 60; done
+until grep -q "PHASE10B DONE" ~/l4_status.txt; do sleep 60; done
 echo "--- phase11" >> ~/l4_status.txt
 step() { n=$1; shift; grep -q "end $n exit=0" ~/l4_status.txt && return 0; echo "start $n $(date +%T)" >> ~/l4_status.txt; "$@" > ~/l4_logs/$n.log 2>&1; echo "end $n exit=$? $(date +%T)" >> ~/l4_status.txt; nvidia-smi --query-compute-apps=pid --format=csv,noheader | xargs -r kill -9 2>/dev/null; }
 step p11_full_cuda_suite python -W error -m pytest -q
