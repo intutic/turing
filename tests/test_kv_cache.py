@@ -288,6 +288,11 @@ def test_key_smoothing_is_exact_and_tames_outlier_channels_in_a_4bit_cache():
     b16.calibrate_kv_smoothing()
     scales = torch.cat([layer.self_attn.k_smooth.float().flatten() for layer in b16.layers])
     assert scales.max() > 1 and torch.equal(torch.exp2(torch.log2(scales).round()), scales)
+    assert ((scales == 1) | (scales >= 16)).all()  # only real outliers are scaled
+    i8 = copy.deepcopy(base)
+    i8.config.kv_cache_dtype, i8.config.kv_pool_gib = "int8", 0.01
+    i8.kv_pool()
+    assert not getattr(i8, "_kv_smoothed", False)  # int8 is stored without smoothing
     assert torch.equal(b16._body(ids, 0, None, None), ref16)
 
 

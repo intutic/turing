@@ -615,8 +615,9 @@ class SubspaceCausalLM(nn.Module):
     @torch.no_grad()
     def calibrate_kv_smoothing(self, n: int = 4, tokens: int = 256, seed: int = 0) -> None:
         """Measure each layer's per-channel max |k| (after RoPE) on n random token sequences and set the key smoothing
-        scale s = max(1, channel max / that head's median channel max), rounded to a power of two: only outlier
-        channels are scaled, and q.k is unchanged bit for bit; it changes what a quantized KV cache can represent. Random tokens suffice:
+        scale s = channel max / that head's median channel max, rounded to a power of two, where it is at least 16
+        (1 elsewhere): only outlier channels are scaled, and q.k is unchanged bit for bit; it changes what a 4-bit
+        KV cache can represent. Random tokens suffice:
         the outliers come from the projection biases and weights, not from the text."""
         dev = self.embed_tokens.weight.device
         attns = [layer.self_attn for layer in self.layers]
@@ -635,6 +636,9 @@ class SubspaceCausalLM(nn.Module):
                 # then exact in any float format, so q.k is bit-identical (in bf16, rounding q * s and k / s on the
                 # outlier channels added logit noise: int8 KV fell from 57% to 40% on GSM8K, Qwen2.5-1.5B-Instruct)
                 scale = torch.exp2(torch.round(torch.log2((m / ref).clamp_min(1.0))))
+                # only real outliers (Qwen2's bias channels reach 64x; SmolLM2's largest is 8x): smoothing milder
+                # channels raised SmolLM2's int4 cost from +0.025 to +0.05 nats
+                scale = torch.where(scale >= 16, scale, torch.ones_like(scale))
                 a.k_smooth = scale[None, :, None, :].to(self.embed_tokens.weight.dtype)
                 a.q_smooth = scale.repeat_interleave(a.num_kv_groups, dim=0)[None, :, None, :].to(a.k_smooth.dtype)
         self._kv_smoothed = True
@@ -686,7 +690,9 @@ class SubspaceCausalLM(nn.Module):
             gc.collect()
             if w.device.type == "cuda":
                 torch.cuda.empty_cache()
-            if cfg.kv_cache_dtype != "native" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False):
+            # int4 only: int8 needs no smoothing (+0.003 nats without it on Qwen2.5-1.5B-Instruct in bf16, +0.017 and
+            # 15 GSM8K points lost with it)
+            if cfg.kv_cache_dtype == "int4" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False):
                 self.calibrate_kv_smoothing()
             if cfg.kv_cache_dtype != "native" and cfg.kv_native_layers is None:
                 self.select_kv_native_layers()

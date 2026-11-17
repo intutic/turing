@@ -25,10 +25,10 @@ import torch.nn.functional as F
 
 BITS, GROUP = 4, 64
 QMAX = 2 ** BITS - 1
-# Rows at or below which the fused int4 kernel beats dequant + cuBLAS on CUDA. Measured on an L4
-# (results_w4a16_crossover_cuda.json): it wins up to M=16 on 2048x2048 and 2048x8192 layers and up to M=128 on
-# 4096x14336, loses at every M on 8192x2048. shortcut: one threshold for all shapes, per-shape if int4 prefill matters.
-INT4_MAX_ROWS = 16
+# Rows at or below which the fused int4 kernel beats dequantize + cuBLAS on CUDA. Measured on an L4 with CUDA-graph
+# replays (results_w4a16_crossover_cuda.json, summed over six layer shapes from 2048x2048 to 14336x4096): 1847 against
+# 3000 us at 64 rows, about equal at 128, 6330 against 3812 at 256.
+INT4_MAX_ROWS = 64
 
 
 def _grid(w: torch.Tensor, qmax: int = QMAX) -> Tuple[torch.Tensor, torch.Tensor]:

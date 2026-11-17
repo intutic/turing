@@ -207,6 +207,43 @@ def smooth_kl(name, T, device):
     return dict(model=name, kl=out)
 
 
+@torch.no_grad()
+def smooth_rule(name, T, device, dtype, kv):
+    """The rule calibration would apply, in the model's dtype on its device: for smoothing off and on, choose the
+    full-precision layers (select_kv_native_layers), then KL(exact || every other layer round-tripped) on the random
+    calibration tokens and on real text. Smoothing should win where it measured better (int4 Qwen) and lose where it
+    measured worse (int8 in bf16, int4 SmolLM2)."""
+    from datasets import load_dataset
+    import torch.nn.functional as F
+    model, tok = RealHuggingFaceLoader.load_hf_model_into_turing(name, device=device, dtype=dtype)
+    model.config.kv_cache_dtype = kv
+    text = "\n\n".join(load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1", split="test")["text"])
+    real = tok(text, return_tensors="pt").input_ids[:, :T].to(device)
+    rand = torch.randint(0, model.config.vocab_size, (4, 256), generator=torch.Generator().manual_seed(0)).to(device)
+    attns = [layer.self_attn for layer in model.layers]
+    model.calibrate_kv_smoothing()
+    smooth = [(a.k_smooth, a.q_smooth) for a in attns]
+    bits = 8 if kv == "int8" else 4
+    out = {}
+    for smoothed in (False, True):
+        for a, (ks, qs) in zip(attns, smooth):
+            a.k_smooth, a.q_smooth = (ks, qs) if smoothed else (None, None)
+        native = model.select_kv_native_layers()
+        for src, ids in (("random", rand), ("real", real)):
+            ref = [F.log_softmax(model._body(ids[i:i + 1], 0, None, None).float(), -1) for i in range(len(ids))]
+            for i, a in enumerate(attns):
+                a._kv_roundtrip = None if i in native else (bits, INT4_GROUP if bits == 4 else a.head_dim)
+            lp = [F.log_softmax(model._body(ids[i:i + 1], 0, None, None).float(), -1) for i in range(len(ids))]
+            for a in attns:
+                a._kv_roundtrip = None
+            out[f"{src}_{'smooth' if smoothed else 'raw'}"] = sum(
+                (r.exp() * (r - x)).sum(-1).mean().item() for r, x in zip(ref, lp)) / len(ids)
+        out[f"native_{'smooth' if smoothed else 'raw'}"] = list(native)
+    print(name, dtype, kv, json.dumps({k: (round(v, 5) if isinstance(v, float) else v) for k, v in out.items()}),
+          flush=True)
+    return dict(model=name, dtype=dtype, kv=kv, **out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models", default="Qwen/Qwen2.5-0.5B,Qwen/Qwen2.5-1.5B")
@@ -218,7 +255,13 @@ def main():
     ap.add_argument("--sensitivity", action="store_true", help="per-layer attention-output error, random vs real text")
     ap.add_argument("--kl", action="store_true", help="per-layer KL of the next-token distribution, random vs real")
     ap.add_argument("--smooth-kl", action="store_true", help="all-layer KL with and without smoothing")
+    ap.add_argument("--smooth-rule", default=None, help="dtype:kv,... e.g. bf16:int8,fp16:int4 (GPU, model dtype)")
     a = ap.parse_args()
+    if a.smooth_rule:
+        res = [smooth_rule(m, a.tokens, a.device, *c.split(":")) for c in a.smooth_rule.split(",")
+               for m in a.models.split(",")]
+        json.dump(res, open(a.out, "w"), indent=1)
+        return
     if a.smooth_kl:
         json.dump([smooth_kl(m, a.tokens, a.device) for m in a.models.split(",")], open(a.out, "w"), indent=1)
         return
