@@ -96,6 +96,20 @@ def run_turing(a, batches):
     return rows, torch.__version__
 
 
+def vllm_ttft(out):
+    """Seconds from a request's arrival to its first token, from vLLM's per-request stats (recorded only with
+    disable_log_stats=False): RequestStateStats.first_token_latency in the v1 engine, first_token_time - arrival_time
+    in older versions. None when the stats are missing."""
+    m = getattr(out, "metrics", None)
+    if m is None:
+        return None
+    if getattr(m, "first_token_latency", 0):
+        return m.first_token_latency
+    if getattr(m, "first_token_time", None) and getattr(m, "arrival_time", None):
+        return m.first_token_time - m.arrival_time
+    return None
+
+
 def run_vllm(a, batches):
     from vllm import LLM, SamplingParams
     from transformers import AutoTokenizer
@@ -126,8 +140,8 @@ def run_vllm(a, batches):
         outs = llm.generate([{"prompt_token_ids": p} for p in ps], sp, use_tqdm=False)
         secs = time.perf_counter() - t0
         n = sum(len(o.outputs[0].token_ids) for o in outs)
-        ttft = [o.metrics.first_token_time - o.metrics.arrival_time for o in outs
-                if getattr(o, "metrics", None) and getattr(o.metrics, "first_token_time", None)]
+        ttft = [vllm_ttft(o) for o in outs]
+        ttft = [t for t in ttft if t is not None]
         rows.append(dict(engine="vllm", model=a.model, batch=B, context=a.context, new_tokens=a.new_tokens,
                          seconds=round(secs, 3), output_tok_per_s=round(n / secs, 1),
                          mean_ttft_s=round(sum(ttft) / len(ttft), 4) if ttft else None, kv_cache_dtype=kv,
