@@ -1,0 +1,73 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "rows": [
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "setting": "fp16",
+      "tokens_per_second": 61.41,
+      "eager_tokens_per_second": 32.92,
+      "weight_bytes": 3624079360,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "setting": "rtn4",
+      "tokens_per_second": 96.47,
+      "eager_tokens_per_second": 17.36,
+      "weight_bytes": 1283657728,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "setting": "gptq4",
+      "tokens_per_second": 97.06,
+      "eager_tokens_per_second": 17.51,
+      "weight_bytes": 1283657728,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "setting": "teal25",
+      "tokens_per_second": 68.74,
+      "eager_tokens_per_second": 16.15,
+      "weight_bytes": 3624079360,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "setting": "teal40",
+      "tokens_per_second": 76.7,
+      "eager_tokens_per_second": 16.28,
+      "weight_bytes": 3624079360,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "setting": "teal50",
+      "tokens_per_second": 82.68,
+      "eager_tokens_per_second": 16.17,
+      "weight_bytes": 3624079360,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "setting": "rtn4_teal40",
+      "tokens_per_second": 123.44,
+      "eager_tokens_per_second": 15.66,
+      "weight_bytes": 1283657728,
+      "context": 512,
+      "steps": 128
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "env": {
+    "device": "cpu",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "x86_64"
+  },
+  "text": "WikiText-2 raw test, first window",
+  "rows": [
+    {
+      "model": "allenai/OLMoE-1B-7B-0924",
+      "arch": "olmoe",
+      "params": 6919161856,
+      "dtype": "bfloat16",
+      "tokens": 64,
+      "max_abs_diff_full": 1.59375,
+      "max_abs_diff_incremental": 1.71875,
+      "max_rel_diff": 0.0838414654135704,
+      "top1_agreement": 1.0,
+      "hf_self_max_abs_diff": 0.9375,
+      "hf_self_top1_agreement": 1.0,
+      "nll_hf": 3.2017009258270264,
+      "nll_turing": 3.2116034030914307,
+      "seconds": 17.0
+    },
+    {
+      "model": "Qwen/Qwen1.5-MoE-A2.7B",
+      "arch": "qwen2_moe",
+      "params": 14315784192,
+      "dtype": "bfloat16",
+      "tokens": 64,
+      "max_abs_diff_full": 0.994140625,
+      "max_abs_diff_incremental": 0.890625,
+      "max_rel_diff": 0.035272277891635895,
+      "top1_agreement": 0.96875,
+      "hf_self_max_abs_diff": 0.625,
+      "hf_self_top1_agreement": 1.0,
+      "nll_hf": 2.67396879196167,
+      "nll_turing": 2.6772587299346924,
+      "seconds": 333.6
+    }
+  ]
+}

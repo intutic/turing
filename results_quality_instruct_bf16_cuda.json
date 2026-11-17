@@ -1,0 +1,92 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "args": {
+    "models": "Qwen/Qwen2.5-1.5B-Instruct",
+    "arms": "exact_forward,int8,int4,int4_nosmooth",
+    "context": 2048,
+    "decode": 256,
+    "windows": 8,
+    "device": "cuda",
+    "dtype": "bf16",
+    "out": "results_quality_instruct_bf16_cuda.json"
+  },
+  "text": "WikiText-2 raw test, consecutive windows",
+  "rows": [
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.0897842794656754,
+      "se": 0.2115454790961856,
+      "n": 8,
+      "seconds": 1.8744613059989206,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.0929152220487595,
+      "se": 0.21061061933344558,
+      "n": 8,
+      "seconds": 6.74876504599888,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int4",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.110278680920601,
+      "se": 0.2096780083371438,
+      "n": 8,
+      "seconds": 6.947297565000554,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int4_nosmooth",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.128552183508873,
+      "se": 0.20820410277929657,
+      "n": 8,
+      "seconds": 6.654849586999262,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.0031309425830841064,
+      "se": 0.001610471116867279,
+      "n": 8,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.020494401454925537,
+      "se": 0.005343790290546668,
+      "n": 8,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int4_nosmooth",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.03876790404319763,
+      "se": 0.009452179944187785,
+      "n": 8,
+      "dtype": "bfloat16"
+    }
+  ]
+}

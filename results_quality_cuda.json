@@ -1,0 +1,654 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "args": {
+    "models": "HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B,Qwen/Qwen2.5-1.5B",
+    "arms": "exact_forward,exact_decode,int8,int4,int4_nosmooth,quest25,rtn4,gptq4,teal25,teal40,teal50",
+    "context": 2048,
+    "decode": 256,
+    "windows": 16,
+    "device": "cuda",
+    "dtype": null,
+    "out": "results_quality_cuda.json"
+  },
+  "text": "WikiText-2 raw test, consecutive windows",
+  "rows": [
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.4325223565101624,
+      "se": 0.10882472945395866,
+      "n": 16,
+      "seconds": 1.5206343720001314,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "exact_decode",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.4323948994278908,
+      "se": 0.10883583052446691,
+      "n": 16,
+      "seconds": 27.486149813999873,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.4324624314904213,
+      "se": 0.10879471848426937,
+      "n": 16,
+      "seconds": 7.879786144000718,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int4",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.457013748586178,
+      "se": 0.10884572717099111,
+      "n": 16,
+      "seconds": 8.387203996999233,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int4_nosmooth",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.457013748586178,
+      "se": 0.10884572717099111,
+      "n": 16,
+      "seconds": 7.998358171999826,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "quest25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.4323948994278908,
+      "se": 0.10883583052446691,
+      "n": 16,
+      "seconds": 26.38921291600036,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "rtn4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.5668013393878937,
+      "se": 0.10866097031810462,
+      "n": 16,
+      "seconds": 1.3882883550004408,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "gptq4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.500149793922901,
+      "se": 0.11050108316990091,
+      "n": 16,
+      "seconds": 1.3952828129995396,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "teal25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.45192751288414,
+      "se": 0.10963871267928835,
+      "n": 16,
+      "seconds": 34.27491974199984,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "teal40",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.526548109948635,
+      "se": 0.11215745933113203,
+      "n": 16,
+      "seconds": 30.26982870000029,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "teal50",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.674146555364132,
+      "se": 0.11963952822961295,
+      "n": 16,
+      "seconds": 29.7467714659997,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "exact_decode",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -0.00012745708227157593,
+      "se": 8.803226364586237e-05,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -5.992501974105835e-05,
+      "se": 0.0004104101432756347,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.024491392076015472,
+      "se": 0.004331798469355296,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "int4_nosmooth",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.024491392076015472,
+      "se": 0.004331798469355296,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "quest25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.0,
+      "se": 0.0,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "rtn4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.13427898287773132,
+      "se": 0.010970236422339609,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "gptq4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.0676274374127388,
+      "se": 0.006912197011051944,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "teal25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.019532613456249237,
+      "se": 0.003549394228481804,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "teal40",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.09415321052074432,
+      "se": 0.009106100284486052,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "teal50",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.24175165593624115,
+      "se": 0.017245846660100365,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.058294214308262,
+      "se": 0.10103447186018087,
+      "n": 16,
+      "seconds": 3.1571455640005297,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "exact_decode",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.05827084928751,
+      "se": 0.10108738652978476,
+      "n": 16,
+      "seconds": 76.70002712200039,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.0581864714622498,
+      "se": 0.1010606456863105,
+      "n": 16,
+      "seconds": 7.339819463999447,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int4",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.0771977081894875,
+      "se": 0.10108407485812612,
+      "n": 16,
+      "seconds": 7.65516798399949,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int4_nosmooth",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.081321641802788,
+      "se": 0.10110646356730546,
+      "n": 16,
+      "seconds": 7.474851397000748,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "quest25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.05827084928751,
+      "se": 0.10108738652978476,
+      "n": 16,
+      "seconds": 76.97731426599967,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "rtn4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.1862114667892456,
+      "se": 0.09843091735566194,
+      "n": 16,
+      "seconds": 3.669533426000271,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "gptq4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.1056791469454765,
+      "se": 0.10381538315113838,
+      "n": 16,
+      "seconds": 4.189543041000434,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "teal25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.085269622504711,
+      "se": 0.10403724939639378,
+      "n": 16,
+      "seconds": 72.71472139899925,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "teal40",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.156560979783535,
+      "se": 0.10577879848933898,
+      "n": 16,
+      "seconds": 63.05312666300051,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "teal50",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.290565975010395,
+      "se": 0.10880985021772613,
+      "n": 16,
+      "seconds": 58.51532278999912,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "exact_decode",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -2.3365020751953125e-05,
+      "se": 7.772470513939916e-05,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -0.00010774284601211548,
+      "se": 0.00034752459354011386,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.018903493881225586,
+      "se": 0.002863921629543973,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "int4_nosmooth",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.02302742749452591,
+      "se": 0.0020198998090362563,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "quest25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.0,
+      "se": 0.0,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "rtn4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.12791725248098373,
+      "se": 0.011762880271654012,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "gptq4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.04738493263721466,
+      "se": 0.007376831617548996,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "teal25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.026998773217201233,
+      "se": 0.005723969250081514,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "teal40",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.09829013049602509,
+      "se": 0.00867318147952719,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "teal50",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.23229512572288513,
+      "se": 0.013927789277799224,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.1351229399442673,
+      "se": 0.10516987749612308,
+      "n": 16,
+      "seconds": 2.9629605110003467,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "exact_decode",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.1351926624774933,
+      "se": 0.10518542011567292,
+      "n": 16,
+      "seconds": 66.40612573700128,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "int8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.135384351015091,
+      "se": 0.10505749090750563,
+      "n": 16,
+      "seconds": 8.317535578000388,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "int4",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.147750936448574,
+      "se": 0.10483459502683132,
+      "n": 16,
+      "seconds": 8.586945207000099,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "int4_nosmooth",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.1753350272774696,
+      "se": 0.10176436450979891,
+      "n": 16,
+      "seconds": 8.43415720899975,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "quest25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.1351926624774933,
+      "se": 0.10518542011567292,
+      "n": 16,
+      "seconds": 66.58261151000079,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "rtn4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.228800594806671,
+      "se": 0.1050461367820201,
+      "n": 16,
+      "seconds": 3.213296479001656,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "gptq4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.1695569157600403,
+      "se": 0.10537697026089216,
+      "n": 16,
+      "seconds": 3.591915386999972,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "teal25",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.1499124318361282,
+      "se": 0.10481604864331996,
+      "n": 16,
+      "seconds": 66.78174948800006,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "teal40",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.2156504541635513,
+      "se": 0.10617699743338783,
+      "n": 16,
+      "seconds": 57.46356725999976,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "teal50",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.3203175216913223,
+      "se": 0.108663079982598,
+      "n": 16,
+      "seconds": 53.56328071000098,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "exact_decode",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 6.972253322601318e-05,
+      "se": 0.00010247497293097244,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "int8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.00026141107082366943,
+      "se": 0.0005012650646710428,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "int4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.012627996504306793,
+      "se": 0.004153839569713436,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "int4_nosmooth",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.04021208733320236,
+      "se": 0.008075563394044949,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "quest25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.0,
+      "se": 0.0,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "rtn4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.09367765486240387,
+      "se": 0.007174203331840572,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "gptq4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.03443397581577301,
+      "se": 0.0054034472808375915,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "teal25",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.014719769358634949,
+      "se": 0.0031096093637286194,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "teal40",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.08045779168605804,
+      "se": 0.009168251900463449,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "teal50",
+      "metric": "delta_nll_vs_exact_decode",
+      "value": 0.18512485921382904,
+      "se": 0.011349634936655433,
+      "n": 16,
+      "dtype": "float16"
+    }
+  ]
+}

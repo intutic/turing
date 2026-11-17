@@ -1,0 +1,569 @@
+{
+  "script": "scripts/benchmark_moe_offload_olmoe.py",
+  "args": {
+    "model": "allenai/OLMoE-1B-7B-0924",
+    "slots": "64,128,256,512",
+    "policies": "lru,lfru",
+    "modes": "decider,device",
+    "prompt_tokens": 256,
+    "decode_tokens": 32,
+    "windows": 4,
+    "device": "cuda",
+    "no_gpu_baseline": false,
+    "out": "results_moe_offload_cuda.json"
+  },
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "python": "3.10.12",
+    "torch": "2.9.1+cu129",
+    "cuda": "12.9",
+    "cpus": 16,
+    "gpu": "NVIDIA L4"
+  },
+  "model": {
+    "moe_layers": 16,
+    "experts": 64,
+    "top_k": 8,
+    "bytes_per_expert": 12582912,
+    "load_s": 74.589117108
+  },
+  "decider": {
+    "device": "cuda",
+    "pcie_bandwidth_gb_s": 11.41,
+    "cpu_throughput_gflops": 743.7,
+    "gpu_throughput_gflops": 9522.2
+  },
+  "windows": 4,
+  "rows": [
+    {
+      "name": "offload slots=64 lru decider",
+      "slots": 64,
+      "policy": "lru",
+      "mode": "decider",
+      "slot_bytes": 805306368,
+      "decode_tok_s": 4.897369069174665,
+      "decode_tok_s_se": 0.2990975819655961,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        4.015798582821186,
+        5.223094295127461,
+        5.041562606680978,
+        5.309020792069036
+      ],
+      "hit_rate_prefill": 0.0002542588354945334,
+      "hit_rate_decode": 0.1781005859375,
+      "prefill_counts": {
+        "experts": 3933,
+        "cache_hits": 1,
+        "loaded_to_device": 445,
+        "host_executed": 3487
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 2918,
+        "loaded_to_device": 0,
+        "host_executed": 13466
+      },
+      "peak_gpu_bytes": 2850123776,
+      "argmax_agrees_with_gpu": 0.984375
+    },
+    {
+      "name": "offload slots=64 lru device",
+      "slots": 64,
+      "policy": "lru",
+      "mode": "device",
+      "slot_bytes": 805306368,
+      "decode_tok_s": 0.5623730958272917,
+      "decode_tok_s_se": 0.003740542931673592,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        0.5593581444232161,
+        0.556127185239868,
+        0.5732050114693374,
+        0.5608020421767452
+      ],
+      "hit_rate_prefill": 0.0,
+      "hit_rate_decode": 0.0,
+      "prefill_counts": {
+        "experts": 3935,
+        "cache_hits": 0,
+        "loaded_to_device": 3935,
+        "host_executed": 0
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 0,
+        "loaded_to_device": 16384,
+        "host_executed": 0
+      },
+      "peak_gpu_bytes": 2850123776,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=64 lfru decider",
+      "slots": 64,
+      "policy": "lfru",
+      "mode": "decider",
+      "slot_bytes": 805306368,
+      "decode_tok_s": 5.10654661023937,
+      "decode_tok_s_se": 0.037634808978513554,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        5.210691888052404,
+        5.066483833731169,
+        5.039206650523105,
+        5.109804068650801
+      ],
+      "hit_rate_prefill": 0.04805491990846682,
+      "hit_rate_decode": 0.17657470703125,
+      "prefill_counts": {
+        "experts": 3933,
+        "cache_hits": 189,
+        "loaded_to_device": 148,
+        "host_executed": 3596
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 2893,
+        "loaded_to_device": 0,
+        "host_executed": 13491
+      },
+      "peak_gpu_bytes": 2850123776,
+      "argmax_agrees_with_gpu": 0.984375
+    },
+    {
+      "name": "offload slots=64 lfru device",
+      "slots": 64,
+      "policy": "lfru",
+      "mode": "device",
+      "slot_bytes": 805306368,
+      "decode_tok_s": 4.7054360338698675,
+      "decode_tok_s_se": 0.17108000178039634,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        4.248209412324441,
+        4.890747386888864,
+        4.653171769203004,
+        5.029615567063161
+      ],
+      "hit_rate_prefill": 0.0465412004069176,
+      "hit_rate_decode": 0.19512939453125,
+      "prefill_counts": {
+        "experts": 3932,
+        "cache_hits": 183,
+        "loaded_to_device": 1045,
+        "host_executed": 2704
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 3197,
+        "loaded_to_device": 88,
+        "host_executed": 13099
+      },
+      "peak_gpu_bytes": 2850123776,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=128 lru decider",
+      "slots": 128,
+      "policy": "lru",
+      "mode": "decider",
+      "slot_bytes": 1610612736,
+      "decode_tok_s": 5.795511636320157,
+      "decode_tok_s_se": 0.0914114053596211,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        6.040197776687388,
+        5.7384951680544605,
+        5.602832471895939,
+        5.800521128642839
+      ],
+      "hit_rate_prefill": 0.07780320366132723,
+      "hit_rate_decode": 0.3402099609375,
+      "prefill_counts": {
+        "experts": 3933,
+        "cache_hits": 306,
+        "loaded_to_device": 207,
+        "host_executed": 3420
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 5574,
+        "loaded_to_device": 0,
+        "host_executed": 10810
+      },
+      "peak_gpu_bytes": 3655430144,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=128 lru device",
+      "slots": 128,
+      "policy": "lru",
+      "mode": "device",
+      "slot_bytes": 1610612736,
+      "decode_tok_s": 0.7370981834877576,
+      "decode_tok_s_se": 0.018150848304016465,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        0.6902849783415396,
+        0.7266659876798074,
+        0.7630176748325352,
+        0.768424093097148
+      ],
+      "hit_rate_prefill": 0.0,
+      "hit_rate_decode": 0.25164794921875,
+      "prefill_counts": {
+        "experts": 3935,
+        "cache_hits": 0,
+        "loaded_to_device": 3935,
+        "host_executed": 0
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 4123,
+        "loaded_to_device": 12261,
+        "host_executed": 0
+      },
+      "peak_gpu_bytes": 3655430144,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=128 lfru decider",
+      "slots": 128,
+      "policy": "lfru",
+      "mode": "decider",
+      "slot_bytes": 1610612736,
+      "decode_tok_s": 5.872308211862996,
+      "decode_tok_s_se": 0.06220533810244275,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        5.996444534513328,
+        5.7884524547725045,
+        5.744508344089464,
+        5.959827514076688
+      ],
+      "hit_rate_prefill": 0.0943780208598321,
+      "hit_rate_decode": 0.34307861328125,
+      "prefill_counts": {
+        "experts": 3931,
+        "cache_hits": 371,
+        "loaded_to_device": 148,
+        "host_executed": 3412
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 5621,
+        "loaded_to_device": 0,
+        "host_executed": 10763
+      },
+      "peak_gpu_bytes": 3655430144,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=128 lfru device",
+      "slots": 128,
+      "policy": "lfru",
+      "mode": "device",
+      "slot_bytes": 1610612736,
+      "decode_tok_s": 5.072325090433754,
+      "decode_tok_s_se": 0.2490830084394351,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        4.3849984474440635,
+        5.204526351911793,
+        5.1256881393301565,
+        5.574087423049002
+      ],
+      "hit_rate_prefill": 0.09333672431332656,
+      "hit_rate_decode": 0.30438232421875,
+      "prefill_counts": {
+        "experts": 3932,
+        "cache_hits": 367,
+        "loaded_to_device": 1041,
+        "host_executed": 2524
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 4987,
+        "loaded_to_device": 130,
+        "host_executed": 11267
+      },
+      "peak_gpu_bytes": 3655430144,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=256 lru decider",
+      "slots": 256,
+      "policy": "lru",
+      "mode": "decider",
+      "slot_bytes": 3221225472,
+      "decode_tok_s": 6.097817787706663,
+      "decode_tok_s_se": 0.09925067694100331,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        6.167285266193411,
+        5.99065405100524,
+        5.891734747890975,
+        6.341597085737025
+      ],
+      "hit_rate_prefill": 0.10022894937674892,
+      "hit_rate_decode": 0.36224365234375,
+      "prefill_counts": {
+        "experts": 3931,
+        "cache_hits": 394,
+        "loaded_to_device": 148,
+        "host_executed": 3389
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 5935,
+        "loaded_to_device": 0,
+        "host_executed": 10449
+      },
+      "peak_gpu_bytes": 5266042880,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=256 lru device",
+      "slots": 256,
+      "policy": "lru",
+      "mode": "device",
+      "slot_bytes": 3221225472,
+      "decode_tok_s": 0.9875454891547588,
+      "decode_tok_s_se": 0.009480096078152605,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        0.9619362930112465,
+        1.007743940191208,
+        0.9903514278967579,
+        0.9901502955198228
+      ],
+      "hit_rate_prefill": 0.017026683608640406,
+      "hit_rate_decode": 0.44757080078125,
+      "prefill_counts": {
+        "experts": 3935,
+        "cache_hits": 67,
+        "loaded_to_device": 3868,
+        "host_executed": 0
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 7333,
+        "loaded_to_device": 9051,
+        "host_executed": 0
+      },
+      "peak_gpu_bytes": 5266042880,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=256 lfru decider",
+      "slots": 256,
+      "policy": "lfru",
+      "mode": "decider",
+      "slot_bytes": 3221225472,
+      "decode_tok_s": 5.936252009363838,
+      "decode_tok_s_se": 0.09574446584793143,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        5.9597082862324875,
+        5.811563368901656,
+        5.776175781257144,
+        6.197560601064065
+      ],
+      "hit_rate_prefill": 0.10022894937674892,
+      "hit_rate_decode": 0.36224365234375,
+      "prefill_counts": {
+        "experts": 3931,
+        "cache_hits": 394,
+        "loaded_to_device": 148,
+        "host_executed": 3389
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 5935,
+        "loaded_to_device": 0,
+        "host_executed": 10449
+      },
+      "peak_gpu_bytes": 5266042880,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=256 lfru device",
+      "slots": 256,
+      "policy": "lfru",
+      "mode": "device",
+      "slot_bytes": 3221225472,
+      "decode_tok_s": 5.450249352142103,
+      "decode_tok_s_se": 0.44805908955900836,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        4.27547269245298,
+        5.500819673271798,
+        5.568220857678238,
+        6.456484185165396
+      ],
+      "hit_rate_prefill": 0.1866734486266531,
+      "hit_rate_decode": 0.4720458984375,
+      "prefill_counts": {
+        "experts": 3932,
+        "cache_hits": 734,
+        "loaded_to_device": 1047,
+        "host_executed": 2151
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 7734,
+        "loaded_to_device": 179,
+        "host_executed": 8471
+      },
+      "peak_gpu_bytes": 5266042880,
+      "argmax_agrees_with_gpu": 0.984375
+    },
+    {
+      "name": "offload slots=512 lru decider",
+      "slots": 512,
+      "policy": "lru",
+      "mode": "decider",
+      "slot_bytes": 6442450944,
+      "decode_tok_s": 6.000821662690353,
+      "decode_tok_s_se": 0.09941098834105394,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        5.977636034316072,
+        5.851868173931381,
+        5.885583146114607,
+        6.288199296399353
+      ],
+      "hit_rate_prefill": 0.10022894937674892,
+      "hit_rate_decode": 0.36224365234375,
+      "prefill_counts": {
+        "experts": 3931,
+        "cache_hits": 394,
+        "loaded_to_device": 148,
+        "host_executed": 3389
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 5935,
+        "loaded_to_device": 0,
+        "host_executed": 10449
+      },
+      "peak_gpu_bytes": 8487268352,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=512 lru device",
+      "slots": 512,
+      "policy": "lru",
+      "mode": "device",
+      "slot_bytes": 6442450944,
+      "decode_tok_s": 1.8317951451523515,
+      "decode_tok_s_se": 0.06633849477253596,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        1.8563184711069838,
+        1.79017545349286,
+        1.6817088179598925,
+        1.9989778380496703
+      ],
+      "hit_rate_prefill": 0.11512071156289708,
+      "hit_rate_decode": 0.71685791015625,
+      "prefill_counts": {
+        "experts": 3935,
+        "cache_hits": 453,
+        "loaded_to_device": 3482,
+        "host_executed": 0
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 11745,
+        "loaded_to_device": 4639,
+        "host_executed": 0
+      },
+      "peak_gpu_bytes": 8487268352,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=512 lfru decider",
+      "slots": 512,
+      "policy": "lfru",
+      "mode": "decider",
+      "slot_bytes": 6442450944,
+      "decode_tok_s": 5.962777664647351,
+      "decode_tok_s_se": 0.10031213718823563,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        5.9694373983214435,
+        5.790077754547032,
+        5.849461284887546,
+        6.2421342208333845
+      ],
+      "hit_rate_prefill": 0.10022894937674892,
+      "hit_rate_decode": 0.36224365234375,
+      "prefill_counts": {
+        "experts": 3931,
+        "cache_hits": 394,
+        "loaded_to_device": 148,
+        "host_executed": 3389
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 5935,
+        "loaded_to_device": 0,
+        "host_executed": 10449
+      },
+      "peak_gpu_bytes": 8487268352,
+      "argmax_agrees_with_gpu": 0.9921875
+    },
+    {
+      "name": "offload slots=512 lfru device",
+      "slots": 512,
+      "policy": "lfru",
+      "mode": "device",
+      "slot_bytes": 6442450944,
+      "decode_tok_s": 7.027952293944854,
+      "decode_tok_s_se": 0.8016702590603596,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        5.25351889811457,
+        6.55231763951969,
+        7.20276078399558,
+        9.103211854149576
+      ],
+      "hit_rate_prefill": 0.3824052885837783,
+      "hit_rate_decode": 0.72418212890625,
+      "prefill_counts": {
+        "experts": 3933,
+        "cache_hits": 1504,
+        "loaded_to_device": 1035,
+        "host_executed": 1394
+      },
+      "decode_counts": {
+        "experts": 16384,
+        "cache_hits": 11865,
+        "loaded_to_device": 216,
+        "host_executed": 4303
+      },
+      "peak_gpu_bytes": 8487268352,
+      "argmax_agrees_with_gpu": 0.984375
+    },
+    {
+      "name": "all experts on the GPU",
+      "decode_tok_s": 15.923031252171263,
+      "decode_tok_s_se": 0.08845471575422122,
+      "n_windows": 4,
+      "decode_tok_s_per_window": [
+        15.75988412332479,
+        15.82870614250517,
+        15.939449402911334,
+        16.164085339943757
+      ],
+      "hit_rate_prefill": null,
+      "hit_rate_decode": null,
+      "prefill_counts": {},
+      "decode_counts": {},
+      "peak_gpu_bytes": 14933913600
+    }
+  ],
+  "host_max_rss_kib": 28548676
+}

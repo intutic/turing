@@ -1,0 +1,305 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "processor": "NVIDIA L4",
+    "note": "shared, loaded machine: wall times are context only"
+  },
+  "args": {
+    "models": "HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B",
+    "context": 512,
+    "cont": 64,
+    "windows": 64,
+    "budgets": "64,4",
+    "seed": 0,
+    "device": "cuda",
+    "out": "results_kslot_cuda.json"
+  },
+  "dtype": "float32",
+  "text": "WikiText-2 raw test, consecutive windows",
+  "models": [
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "matched_budgets": {
+        "int8": 272,
+        "int4": 160
+      },
+      "rows": [
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "exact",
+          "nll": 2.4409387493506074,
+          "nll_se": 0.06683501550579835,
+          "delta_vs_exact": 0.0,
+          "delta_se": 0.0,
+          "n": 64,
+          "context_bytes": 20971520,
+          "bytes_vs_fp16": 1.0
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "none",
+          "nll": 3.76741336658597,
+          "nll_se": 0.057747823732558046,
+          "delta_vs_exact": 1.3264746172353625,
+          "delta_se": 0.04678138469312599,
+          "n": 64,
+          "context_bytes": 0,
+          "bytes_vs_fp16": 0.0
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "int8",
+          "nll": 2.440636263228953,
+          "nll_se": 0.06678407324881323,
+          "delta_vs_exact": -0.0003024861216545105,
+          "delta_se": 0.0004354097664362941,
+          "n": 64,
+          "context_bytes": 11141120,
+          "bytes_vs_fp16": 0.53125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "int4",
+          "nll": 2.4725773641839623,
+          "nll_se": 0.06640910946914055,
+          "delta_vs_exact": 0.03163861483335495,
+          "delta_se": 0.003992300624217146,
+          "n": 64,
+          "context_bytes": 6553600,
+          "bytes_vs_fp16": 0.3125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "kslot_272",
+          "nll": 5.478267647325993,
+          "nll_se": 0.3256082873811381,
+          "delta_vs_exact": 3.037328897975385,
+          "delta_se": 0.3157315745387756,
+          "n": 64,
+          "context_bytes": 11141120,
+          "bytes_vs_fp16": 0.53125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "last_272",
+          "nll": 2.54994965903461,
+          "nll_se": 0.06650041537161903,
+          "delta_vs_exact": 0.1090109096840024,
+          "delta_se": 0.018471022659143257,
+          "n": 64,
+          "context_bytes": 11141120,
+          "bytes_vs_fp16": 0.53125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "kslot_160",
+          "nll": 5.7443495988845825,
+          "nll_se": 0.36470941931869283,
+          "delta_vs_exact": 3.303410849533975,
+          "delta_se": 0.3546847767888618,
+          "n": 64,
+          "context_bytes": 6553600,
+          "bytes_vs_fp16": 0.3125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "last_160",
+          "nll": 2.6878255363553762,
+          "nll_se": 0.06580267315355925,
+          "delta_vs_exact": 0.24688678700476885,
+          "delta_se": 0.02815708405993466,
+          "n": 64,
+          "context_bytes": 6553600,
+          "bytes_vs_fp16": 0.3125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "kslot_64",
+          "nll": 5.7869810201227665,
+          "nll_se": 0.3392986314864445,
+          "delta_vs_exact": 3.346042270772159,
+          "delta_se": 0.3256562977316956,
+          "n": 64,
+          "context_bytes": 2621440,
+          "bytes_vs_fp16": 0.125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "last_64",
+          "nll": 2.8815613742917776,
+          "nll_se": 0.06277036984091015,
+          "delta_vs_exact": 0.4406226249411702,
+          "delta_se": 0.0351773515880732,
+          "n": 64,
+          "context_bytes": 2621440,
+          "bytes_vs_fp16": 0.125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "kslot_4",
+          "nll": 9.103921175003052,
+          "nll_se": 0.2710752784980039,
+          "delta_vs_exact": 6.662982425652444,
+          "delta_se": 0.26198941812054627,
+          "n": 64,
+          "context_bytes": 163840,
+          "bytes_vs_fp16": 0.0078125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-360M",
+          "arm": "last_4",
+          "nll": 3.582449708133936,
+          "nll_se": 0.059008172011382885,
+          "delta_vs_exact": 1.1415109587833285,
+          "delta_se": 0.04641928170654382,
+          "n": 64,
+          "context_bytes": 163840,
+          "bytes_vs_fp16": 0.0078125
+        }
+      ]
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "matched_budgets": {
+        "int8": 272,
+        "int4": 160
+      },
+      "rows": [
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "exact",
+          "nll": 2.1064816871657968,
+          "nll_se": 0.06450840133664361,
+          "delta_vs_exact": 0.0,
+          "delta_se": 0.0,
+          "n": 64,
+          "context_bytes": 100663296,
+          "bytes_vs_fp16": 1.0
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "none",
+          "nll": 3.4394058249890804,
+          "nll_se": 0.055727671649116566,
+          "delta_vs_exact": 1.3329241378232837,
+          "delta_se": 0.043903708539486185,
+          "n": 64,
+          "context_bytes": 0,
+          "bytes_vs_fp16": 0.0
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "int8",
+          "nll": 2.1064749928191304,
+          "nll_se": 0.06448497948713072,
+          "delta_vs_exact": -6.6943466663360596e-06,
+          "delta_se": 0.00038756566562748627,
+          "n": 64,
+          "context_bytes": 53477376,
+          "bytes_vs_fp16": 0.53125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "int4",
+          "nll": 2.130752948112786,
+          "nll_se": 0.06442704384301344,
+          "delta_vs_exact": 0.02427126094698906,
+          "delta_se": 0.003801015676584753,
+          "n": 64,
+          "context_bytes": 31457280,
+          "bytes_vs_fp16": 0.3125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "kslot_272",
+          "nll": 6.118418071419001,
+          "nll_se": 0.2074932739851263,
+          "delta_vs_exact": 4.011936384253204,
+          "delta_se": 0.18202227139415836,
+          "n": 64,
+          "context_bytes": 53477376,
+          "bytes_vs_fp16": 0.53125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "last_272",
+          "nll": 2.204971820116043,
+          "nll_se": 0.06418545193845115,
+          "delta_vs_exact": 0.09849013295024633,
+          "delta_se": 0.017270461004704186,
+          "n": 64,
+          "context_bytes": 53477376,
+          "bytes_vs_fp16": 0.53125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "kslot_160",
+          "nll": 6.129031091928482,
+          "nll_se": 0.17070868677687082,
+          "delta_vs_exact": 4.022549404762685,
+          "delta_se": 0.1483296833537033,
+          "n": 64,
+          "context_bytes": 31457280,
+          "bytes_vs_fp16": 0.3125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "last_160",
+          "nll": 2.3241730257868767,
+          "nll_se": 0.0637945998316666,
+          "delta_vs_exact": 0.21769133862107992,
+          "delta_se": 0.02529792154935449,
+          "n": 64,
+          "context_bytes": 31457280,
+          "bytes_vs_fp16": 0.3125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "kslot_64",
+          "nll": 6.706157620996237,
+          "nll_se": 0.20091898319194995,
+          "delta_vs_exact": 4.59967593383044,
+          "delta_se": 0.18617577055406664,
+          "n": 64,
+          "context_bytes": 12582912,
+          "bytes_vs_fp16": 0.125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "last_64",
+          "nll": 2.5207500271499157,
+          "nll_se": 0.06048688795873448,
+          "delta_vs_exact": 0.41426833998411894,
+          "delta_se": 0.03126265536211138,
+          "n": 64,
+          "context_bytes": 12582912,
+          "bytes_vs_fp16": 0.125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "kslot_4",
+          "nll": 7.553201444447041,
+          "nll_se": 0.2525392927941556,
+          "delta_vs_exact": 5.446719757281244,
+          "delta_se": 0.24446232927934516,
+          "n": 64,
+          "context_bytes": 786432,
+          "bytes_vs_fp16": 0.0078125
+        },
+        {
+          "model": "HuggingFaceTB/SmolLM2-1.7B",
+          "arm": "last_4",
+          "nll": 3.250158205628395,
+          "nll_se": 0.057960023354172406,
+          "delta_vs_exact": 1.1436765184625983,
+          "delta_se": 0.04348164629470887,
+          "n": 64,
+          "context_bytes": 786432,
+          "bytes_vs_fp16": 0.0078125
+        }
+      ]
+    }
+  ]
+}

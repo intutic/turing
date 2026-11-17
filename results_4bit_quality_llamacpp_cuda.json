@@ -1,0 +1,18 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35"
+  },
+  "rows": [
+    {
+      "engine": "llama.cpp",
+      "model": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+      "tokenizer": "Qwen/Qwen2.5-1.5B-Instruct",
+      "gsm8k": {
+        "n": 500,
+        "shots": 8,
+        "exact_match": 0.524,
+        "stderr": 0.02235727388101648
+      }
+    }
+  ]
+}

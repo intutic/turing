@@ -1,0 +1,182 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "processor": "NVIDIA L4",
+    "note": "shared, loaded machine: wall times are context only"
+  },
+  "args": {
+    "pairs": "HuggingFaceTB/SmolLM2-360M:HuggingFaceTB/SmolLM2-1.7B,Qwen/Qwen2.5-0.5B:Qwen/Qwen2.5-1.5B",
+    "context": 512,
+    "cont": 64,
+    "calib_windows": 64,
+    "eval_windows": 64,
+    "top_k": 8,
+    "ridge_lambda": 100.0,
+    "device": "cuda",
+    "out": "results_xkv_transfer_lambda100_cuda.json"
+  },
+  "dtype": "float32",
+  "text": "WikiText-2 raw: calibration on train, evaluation on test",
+  "pairs": [
+    {
+      "sender": "HuggingFaceTB/SmolLM2-360M",
+      "receiver": "HuggingFaceTB/SmolLM2-1.7B",
+      "fit": {
+        "calib_windows": 64,
+        "calib_tokens": 32768,
+        "fit_seconds": 125.47846673200002
+      },
+      "rows": [
+        {
+          "arm": "exact",
+          "metric": "nll",
+          "value": 2.1064816871657968,
+          "se": 0.06450840133664361,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "nll",
+          "value": 3.6119285579770803,
+          "se": 0.15798036152959333,
+          "n": 64
+        },
+        {
+          "arm": "none",
+          "metric": "nll",
+          "value": 3.4394058249890804,
+          "se": 0.055727671649116566,
+          "n": 64
+        },
+        {
+          "arm": "sender",
+          "metric": "nll",
+          "value": 2.4409387493506074,
+          "se": 0.06683501550579835,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "delta_nll_vs_exact",
+          "value": 1.5054468708112836,
+          "se": 0.13619439416858717,
+          "n": 64
+        },
+        {
+          "arm": "none",
+          "metric": "delta_nll_vs_exact",
+          "value": 1.3329241378232837,
+          "se": 0.043903708539486185,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "context_benefit_retained",
+          "value": -0.12943177191594427,
+          "se": 0.11060768587098732,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "rel_err_K",
+          "value": 0.24036086730900943,
+          "se": 0.0007605720191253573,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "rel_err_V",
+          "value": 0.6596325781905069,
+          "se": 0.0024255871246580537,
+          "n": 64
+        }
+      ],
+      "wall_times": {
+        "receiver_prefill_s": 0.33168707548466614,
+        "sender_prefill_s": 0.11162971121873966,
+        "transfer_and_inject_s": 0.07364729564051231
+      }
+    },
+    {
+      "sender": "Qwen/Qwen2.5-0.5B",
+      "receiver": "Qwen/Qwen2.5-1.5B",
+      "fit": {
+        "calib_windows": 64,
+        "calib_tokens": 32768,
+        "fit_seconds": 12.761160070000187
+      },
+      "rows": [
+        {
+          "arm": "exact",
+          "metric": "nll",
+          "value": 2.2018918888643384,
+          "se": 0.07336690985271908,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "nll",
+          "value": 2.595871986821294,
+          "se": 0.07314444602518859,
+          "n": 64
+        },
+        {
+          "arm": "none",
+          "metric": "nll",
+          "value": 3.3937809132039547,
+          "se": 0.06624622167810425,
+          "n": 64
+        },
+        {
+          "arm": "sender",
+          "metric": "nll",
+          "value": 2.5468887398019433,
+          "se": 0.0751821688710558,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "delta_nll_vs_exact",
+          "value": 0.39398009795695543,
+          "se": 0.029660772040473193,
+          "n": 64
+        },
+        {
+          "arm": "none",
+          "metric": "delta_nll_vs_exact",
+          "value": 1.1918890243396163,
+          "se": 0.050436066017682066,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "context_benefit_retained",
+          "value": 0.6694490091682437,
+          "se": 0.0190895015380779,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "rel_err_K",
+          "value": 0.040547124491034967,
+          "se": 0.00011353759658652756,
+          "n": 64
+        },
+        {
+          "arm": "transfer",
+          "metric": "rel_err_V",
+          "value": 0.6910288323693553,
+          "se": 0.0019817061187570443,
+          "n": 64
+        }
+      ],
+      "wall_times": {
+        "receiver_prefill_s": 0.31051090028120143,
+        "sender_prefill_s": 0.10953994523433153,
+        "transfer_and_inject_s": 0.033261262374850276
+      }
+    }
+  ]
+}

@@ -1,0 +1,73 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "rows": [
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "setting": "fp16",
+      "tokens_per_second": 68.67,
+      "eager_tokens_per_second": 27.39,
+      "weight_bytes": 3554176000,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "setting": "rtn4",
+      "tokens_per_second": 101.95,
+      "eager_tokens_per_second": 14.56,
+      "weight_bytes": 1650297856,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "setting": "gptq4",
+      "tokens_per_second": 100.86,
+      "eager_tokens_per_second": 14.37,
+      "weight_bytes": 1650297856,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "setting": "teal25",
+      "tokens_per_second": 73.07,
+      "eager_tokens_per_second": 13.63,
+      "weight_bytes": 3554176000,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "setting": "teal40",
+      "tokens_per_second": 82.07,
+      "eager_tokens_per_second": 13.49,
+      "weight_bytes": 3554176000,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "setting": "teal50",
+      "tokens_per_second": 88.68,
+      "eager_tokens_per_second": 13.45,
+      "weight_bytes": 3554176000,
+      "context": 512,
+      "steps": 128
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "setting": "rtn4_teal40",
+      "tokens_per_second": 114.89,
+      "eager_tokens_per_second": 13.06,
+      "weight_bytes": 1650297856,
+      "context": 512,
+      "steps": 128
+    }
+  ]
+}
