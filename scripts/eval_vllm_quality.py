@@ -61,7 +61,8 @@ class Engine:
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct")
-    ap.add_argument("--kv-cache-dtype", default="auto", choices=["auto", "fp8"])
+    ap.add_argument("--kv-cache-dtype", default="auto", help="any vLLM kv_cache_dtype (auto, fp8, int8_per_token_head, ...)")
+    ap.add_argument("--kv-skip-layers", default="", help="layers vLLM keeps out of the quantized cache, e.g. 0")
     ap.add_argument("--dtype", default="bfloat16")
     ap.add_argument("--samples", type=int, default=500)
     ap.add_argument("--shots", type=int, default=8)
@@ -80,7 +81,9 @@ def main():
     import vllm
     acc_eval, niah = turing_evals()
     tok = AutoTokenizer.from_pretrained(a.model)
+    skip = [x for x in a.kv_skip_layers.split(",") if x]
     llm = LLM(a.model, dtype=a.dtype, kv_cache_dtype=a.kv_cache_dtype, enable_prefix_caching=False,
+              **({"kv_cache_dtype_skip_layers": skip} if skip else {}),
               max_model_len=(max(a.context_len) if "niah" in a.checks else 4096) + 32,
               gpu_memory_utilization=0.85)
 
@@ -91,7 +94,7 @@ def main():
     acc_eval.engine_generate = niah.engine_generate = vllm_generate  # the evaluators' only engine call
     engine = Engine(tok)
     row = dict(engine="vllm", runtime=f"vllm {vllm.__version__}", model=a.model, dtype=a.dtype,
-               kv_cache_dtype=a.kv_cache_dtype)
+               kv_cache_dtype=a.kv_cache_dtype, kv_skip_layers=skip)
 
     checks = set(a.checks.split(","))
     t0 = time.perf_counter()
@@ -118,15 +121,19 @@ def main():
     print(json.dumps({k: v for k, v in row.items() if k != "wikitext_nll"}), flush=True)
 
     old = json.load(open(a.out))["rows"] if os.path.exists(a.out) else []
-    rows = [r for r in old if not (r["model"] == a.model and r["kv_cache_dtype"] == a.kv_cache_dtype
-                                   and r["dtype"] == a.dtype)] + [row]
-    # paired fp8-vs-fp16 NLL delta per window, once both runs exist
-    by = {r["kv_cache_dtype"]: r for r in rows if r["model"] == a.model and r["dtype"] == a.dtype}
-    if "auto" in by and "fp8" in by and "wikitext_nll" in by["auto"] and "wikitext_nll" in by["fp8"]:
-        d = [x - y for x, y in zip(by["fp8"]["wikitext_nll"]["per_window"], by["auto"]["wikitext_nll"]["per_window"])]
-        dm, dse = mean_se(d)
-        by["fp8"]["wikitext_nll"]["delta_vs_auto"] = {"mean": dm, "se": dse, "n": len(d)}
-        print(f"fp8 - fp16 nll {dm:+.4f} ± {dse:.4f}", flush=True)
+    same = lambda r: (r["model"] == a.model and r["dtype"] == a.dtype and r["kv_cache_dtype"] == a.kv_cache_dtype
+                      and r.get("kv_skip_layers", []) == skip)
+    rows = [r for r in old if not same(r)] + [row]
+    # paired NLL change against the fp16 (auto) run, per window, for every quantized cache of this model and dtype
+    base = next((r for r in rows if r["model"] == a.model and r["dtype"] == a.dtype and r["kv_cache_dtype"] == "auto"
+                 and "wikitext_nll" in r), None)
+    for r in rows:
+        if base and r is not base and r["model"] == a.model and r["dtype"] == a.dtype and "wikitext_nll" in r:
+            d = [x - y for x, y in zip(r["wikitext_nll"]["per_window"], base["wikitext_nll"]["per_window"])]
+            dm, dse = mean_se(d)
+            r["wikitext_nll"]["delta_vs_auto"] = {"mean": dm, "se": dse, "n": len(d)}
+            print(f"{r['kv_cache_dtype']} skip={r.get('kv_skip_layers', [])} - fp16 nll {dm:+.4f} ± {dse:.4f}",
+                  flush=True)
     env = dict(platform=platform.platform(), python=platform.python_version())
     with open(a.out, "w") as f:
         json.dump(dict(env=env, text="GSM8K and pass-key prompts and scoring from turing/serving; WikiText-2 windows "

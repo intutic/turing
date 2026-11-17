@@ -114,9 +114,11 @@ def run_vllm(a, batches):
     from vllm import LLM, SamplingParams
     from transformers import AutoTokenizer
     tok = AutoTokenizer.from_pretrained(a.model)
-    kv = {"native": "auto", "int8": "fp8", "fp8": "fp8"}[a.kv_cache_dtype]  # vLLM's 8-bit KV is fp8
+    kv = a.vllm_kv_cache_dtype or {"native": "auto", "int8": "fp8", "fp8": "fp8"}[a.kv_cache_dtype]
+    skip = [x for x in a.kv_skip_layers.split(",") if x]
     llm = LLM(a.model, dtype=a.dtype or "float16", kv_cache_dtype=kv, enable_prefix_caching=False,
               disable_log_stats=False,  # request metrics (first-token time) are recorded only with stats on
+              **({"kv_cache_dtype_skip_layers": skip} if skip else {}),
               max_model_len=a.context + a.new_tokens + 16, gpu_memory_utilization=a.gpu_memory_utilization)
     capacity, kv_gib = None, None
     try:  # KV capacity vLLM allocated: blocks x block size, and its bytes from the model shape
@@ -125,8 +127,9 @@ def run_vllm(a, batches):
         capacity = cc.num_gpu_blocks * cc.block_size
         hc = AutoConfig.from_pretrained(a.model)
         D = getattr(hc, "head_dim", None) or hc.hidden_size // hc.num_attention_heads
-        per_token = 2 * hc.num_hidden_layers * hc.num_key_value_heads * D * (1 if kv == "fp8" else 2)
-        kv_gib = round(capacity * per_token / 2 ** 30, 3)
+        if kv in ("auto", "fp8") and not skip:  # bytes known exactly only for these layouts
+            per_token = 2 * hc.num_hidden_layers * hc.num_key_value_heads * D * (1 if kv == "fp8" else 2)
+            kv_gib = round(capacity * per_token / 2 ** 30, 3)
     except Exception as e:  # recorded, not hidden
         print(f"[!] could not read vLLM's KV capacity: {e}", flush=True)
     sp = SamplingParams(temperature=0.0, max_tokens=a.new_tokens, ignore_eos=True)
@@ -145,7 +148,7 @@ def run_vllm(a, batches):
         rows.append(dict(engine="vllm", model=a.model, batch=B, context=a.context, new_tokens=a.new_tokens,
                          seconds=round(secs, 3), output_tok_per_s=round(n / secs, 1),
                          mean_ttft_s=round(sum(ttft) / len(ttft), 4) if ttft else None, kv_cache_dtype=kv,
-                         kv_capacity_tokens=capacity, kv_pool_gib=kv_gib,
+                         kv_capacity_tokens=capacity, kv_pool_gib=kv_gib, kv_skip_layers=skip,
                          gpu_memory_utilization=a.gpu_memory_utilization))
         print(json.dumps(rows[-1]), flush=True)
     import vllm
@@ -167,6 +170,8 @@ def main():
     ap.add_argument("--kv-pool-gib-from", default=None,
                     help="turing: take the KV budget vLLM recorded in this results file (same model and context)")
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.85, help="vllm")
+    ap.add_argument("--vllm-kv-cache-dtype", default=None, help="vllm: any kv_cache_dtype (int8_per_token_head, ...)")
+    ap.add_argument("--kv-skip-layers", default="", help="vllm: layers kept out of the quantized cache, e.g. 0")
     ap.add_argument("--warmup-context", type=int, default=None, help="prompt length of the warm-up batches")
     ap.add_argument("--quantization", default="none", choices=["none", "w4a16-gptq", "w4a16-rtn"], help="turing")
     ap.add_argument("--calib-windows", type=int, default=32, help="turing GPTQ calibration windows (speed only)")
@@ -186,10 +191,11 @@ def main():
         a.kv_pool_gib = max(got)  # the budget vLLM gave its KV cache (fp16 and fp8 runs take the same bytes)
     rows, version = (run_vllm if a.engine == "vllm" else run_turing)(a, batches)
     old = json.load(open(a.out))["rows"] if os.path.exists(a.out) else []
-    kvname = {"native": "auto", "int8": "fp8"}.get(a.kv_cache_dtype, a.kv_cache_dtype) if a.engine == "vllm" \
-        else a.kv_cache_dtype
+    kvname = (a.vllm_kv_cache_dtype or {"native": "auto", "int8": "fp8"}.get(a.kv_cache_dtype, a.kv_cache_dtype)) \
+        if a.engine == "vllm" else a.kv_cache_dtype
+    skipped = [x for x in a.kv_skip_layers.split(",") if x] if a.engine == "vllm" else []
     keep = [r for r in old if not (r["engine"] == a.engine and r["model"] == a.model and r["context"] == a.context
-                                   and r.get("kv_cache_dtype") == kvname
+                                   and r.get("kv_cache_dtype") == kvname and r.get("kv_skip_layers", []) == skipped
                                    and r.get("kv_page_budget", 1.0) == (a.kv_page_budget if a.engine == "turing" else 1.0)
                                    and r.get("quantization", "none") == (a.quantization if a.engine == "turing" else "none")
                                    and r.get("activation_sparsity", 0.0) == (a.activation_sparsity
