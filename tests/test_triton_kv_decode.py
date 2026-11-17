@@ -52,8 +52,10 @@ def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, 
         if budget is None:
             pool.append(0, r, k[b:b + 1], v[b:b + 1])
         page_f, page_r, slot = c.pages[(T - 1) // PAGE], r.pages[(T - 1) // PAGE], (T - 1) % PAGE
-        for t in pool.fields():  # the fused append stores exactly what the reference append stores
-            torch.testing.assert_close(t[0, page_f, :, slot], t[0, page_r, :, slot], rtol=0, atol=0)
+        # the fused append stores exactly what the reference append stores, in the fields layer 0 uses (a layer the
+        # pool keeps in the model dtype never writes its low-bit slots)
+        for t in (x for w in ("k", "v") for x in pool.layer_fields(0, w)[:3] if x is not None):
+            torch.testing.assert_close(t[page_f, :, slot], t[page_r, :, slot], rtol=0, atol=0)
         if budget is None:
             kr, vr = pool.read(0, r, T)
             ref_out = F.scaled_dot_product_attention(q[b:b + 1].float(), kr.float(), vr.float(), enable_gqa=True)
