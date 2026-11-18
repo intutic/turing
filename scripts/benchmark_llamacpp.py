@@ -113,9 +113,47 @@ def gsm8k(a):
     save(a.out, [row], lambda r: r["engine"] == "llama.cpp" and r["model"] == row["model"])
 
 
+def coldstart(a):
+    """Process start -> first generated token through llama-server, with the GGUF dropped from the page cache (cold)
+    or cached (warm), a.runs times each; the same quantity scripts/benchmark_cold_start.py measures for Turing."""
+    import requests
+    from benchmark_cold_start import evict, stats
+    url, rows = f"http://127.0.0.1:{a.port}", []
+    for cache in ("cold", "warm"):
+        runs = []
+        for _ in range(a.runs):
+            if cache == "cold":
+                evict([a.gguf])
+            t0 = time.time()
+            srv = subprocess.Popen([os.path.join(a.bin, "llama-server"), "-m", a.gguf, "-ngl", "99", "--port",
+                                    str(a.port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                for _ in range(600):
+                    try:
+                        if requests.get(url + "/health", timeout=1).status_code == 200:
+                            break
+                    except requests.RequestException:
+                        pass
+                    time.sleep(0.05)
+                t_ready = time.time()
+                requests.post(url + "/completion", json={"prompt": "Artificial intelligence is", "n_predict": 1,
+                                                         "temperature": 0.0}, timeout=120).raise_for_status()
+                runs.append(dict(ttft_s=time.time() - t0, load_s=t_ready - t0))
+            finally:
+                srv.terminate()
+                srv.wait(30)
+        rows.append(dict(engine="llama.cpp", model=os.path.basename(a.gguf), format="gguf", cache=cache, n=len(runs),
+                         bytes=os.path.getsize(a.gguf), ttft_s=stats([r["ttft_s"] for r in runs]),
+                         load_s=stats([r["load_s"] for r in runs]), runs=runs))
+        print(json.dumps({k: v for k, v in rows[-1].items() if k != "runs"}), flush=True)
+    name = os.path.basename(a.gguf)
+    save(a.out, rows, lambda r: r["engine"] == "llama.cpp" and r["model"] == name)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["bench", "gsm8k"])
+    ap.add_argument("mode", choices=["bench", "gsm8k", "coldstart"])
+    ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--gguf", required=True)
     ap.add_argument("--bin", default=os.path.expanduser("~/llama.cpp/build/bin"))
     ap.add_argument("--context", type=int, default=512)
@@ -129,8 +167,9 @@ def main():
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     a.batches = [int(b) for b in a.batches.split(",")]
-    a.out = a.out or ("results_4bit_speed_cuda.json" if a.mode == "bench" else "results_4bit_quality_llamacpp_cuda.json")
-    (bench if a.mode == "bench" else gsm8k)(a)
+    a.out = a.out or {"bench": "results_4bit_speed_cuda.json", "gsm8k": "results_4bit_quality_llamacpp_cuda.json",
+                      "coldstart": "results_cold_start_llamacpp_cuda.json"}[a.mode]
+    {"bench": bench, "gsm8k": gsm8k, "coldstart": coldstart}[a.mode](a)
 
 
 if __name__ == "__main__":

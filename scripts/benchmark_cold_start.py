@@ -53,6 +53,23 @@ print("COLDSTART " + json.dumps(dict(t_start=t_start, t_imported=t_imported, t_l
 """
 
 
+# vLLM, for the same measurement (run with --engine vllm --python ~/vllm-venv/bin/python --formats safetensors): its
+# engine start includes torch.compile and CUDA-graph capture; the compile cache on disk is left as vLLM leaves it.
+CHILD_VLLM = r"""
+import time; t_start = time.time()
+import json, os, sys
+from vllm import LLM, SamplingParams
+t_imported = time.time()
+llm = LLM(sys.argv[1], dtype="float16", gpu_memory_utilization=0.85)
+t_loaded = time.time()
+out = llm.generate(["Artificial intelligence is"], SamplingParams(temperature=0.0, max_tokens=1), use_tqdm=False)
+t_first = time.time()
+print("COLDSTART " + json.dumps(dict(t_start=t_start, t_imported=t_imported, t_loaded=t_loaded, t_first=t_first,
+      token=out[0].outputs[0].token_ids[0], dtype="float16", device="cuda", peak_device_bytes=None)), flush=True)
+os._exit(0)  # vLLM's helper processes keep the interpreter alive at exit
+"""
+
+
 def model_files(folder):
     """Every regular file under folder, symlinks (the HF cache's blobs) resolved, each once."""
     out = set()
@@ -80,11 +97,12 @@ def resident(paths):
     return sum(resident_fraction(p) * s for p, s in zip(paths, sizes) if s) / max(1, sum(sizes))
 
 
-def run_once(target, device, dtype):
+def run_once(target, device, dtype, engine="turing", python=sys.executable):
     env = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+    env["PATH"] = os.path.dirname(python) + os.pathsep + env["PATH"]  # a venv's own tools (vLLM's ninja)
     t0 = time.time()
-    p = subprocess.run([sys.executable, "-c", CHILD, target, device, dtype or ""], cwd=ROOT, env=env,
-                       capture_output=True, text=True)
+    p = subprocess.run([python, "-c", CHILD_VLLM if engine == "vllm" else CHILD, target, device, dtype or ""],
+                       cwd=ROOT, env=env, capture_output=True, text=True)
     line = next((ln for ln in p.stdout.splitlines() if ln.startswith("COLDSTART ")), None)
     if p.returncode or line is None:
         return dict(error=f"exit {p.returncode}: {(p.stderr or p.stdout)[-2000:]}")
@@ -135,6 +153,8 @@ def main(argv=None):
     ap.add_argument("--method", default="gptq", choices=["gptq", "rtn"], help="for missing .tgate4 directories")
     ap.add_argument("--calib-windows", type=int, default=128)
     ap.add_argument("--calib-tokens", type=int, default=2048)
+    ap.add_argument("--engine", default="turing", choices=["turing", "vllm"])
+    ap.add_argument("--python", default=sys.executable, help="interpreter of the child process (vLLM's virtualenv)")
     ap.add_argument("--out", default="results_cold_start_cuda.json")
     a = ap.parse_args(argv)
     caches = a.caches.split(",")
@@ -169,12 +189,12 @@ def main(argv=None):
                     if cache == "cold":
                         evict(files)
                     before = resident(files)
-                    res = run_once(target, a.device, a.dtype)
+                    res = run_once(target, a.device, a.dtype, a.engine, os.path.expanduser(a.python))
                     res.update(resident_before=before)
                     runs.append(res)
                     print(model, fmt, cache, r, json.dumps(res)[:300], flush=True)
                 ok = [x for x in runs if "error" not in x]
-                row = dict(model=model, format=fmt, cache=cache, n=len(ok), errors=len(runs) - len(ok),
+                row = dict(engine=a.engine, model=model, format=fmt, cache=cache, n=len(ok), errors=len(runs) - len(ok),
                            files=len(files), bytes=sum(os.path.getsize(p) for p in files), runs=runs)
                 if ok:
                     row.update({k: stats([x[k] for x in ok]) for k in
