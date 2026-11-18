@@ -129,9 +129,10 @@ the time above 4K: a LongRoPE bug in chunked prefill (each chunk picked its own 
 - **Limit:** Phi-3.5-mini loses 5.2 GSM8K points under fp8 (71.8% to 66.6%; each figure has a standard error of
   about 2 points) and the guard does not flag it: its largest per-layer KL is 0.006, under the 0.02 threshold. A loss
   spread thinly over many layers is not what a per-layer check catches.
-- Phi-3.5 scores higher in Turing (79.8% with int8 KV) than in vLLM bf16 (71.8%). Both runs use the same evaluator
-  and prompts; vLLM was started with a 16K maximum length, which may make it use LongRoPE's long frequencies for every
-  request. A vLLM run capped at 4K is queued to test that; until then the gap is unexplained.
+- Phi-3.5's vLLM column is from a run started with a 16K maximum length. vLLM then uses LongRoPE's long frequencies
+  for every request, short ones included: the same evaluation with the maximum length at 4,096 scores 78.8% (n=500,
+  `results_quality_vllm_phi35_4k_cuda.json`), against 71.8% at 16K and Turing's 79.8% (int8 KV), which picks the
+  frequencies per sequence as transformers does. The fp8 comparison above is unaffected: both of its runs used 16K.
 
 ### Reproduce
 ```bash

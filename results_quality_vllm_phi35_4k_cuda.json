@@ -1,0 +1,25 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "python": "3.10.12"
+  },
+  "text": "GSM8K and pass-key prompts and scoring from turing/serving; WikiText-2 windows as scripts/eval_kv_quality.py",
+  "rows": [
+    {
+      "engine": "vllm",
+      "runtime": "vllm 0.31.0",
+      "model": "microsoft/Phi-3.5-mini-instruct",
+      "dtype": "bfloat16",
+      "kv_cache_dtype": "auto",
+      "kv_skip_layers": [],
+      "max_model_len": 4096,
+      "gsm8k": {
+        "n": 500,
+        "shots": 8,
+        "exact_match": 0.788,
+        "stderr": 0.01829703700401386
+      },
+      "seconds": 758.7
+    }
+  ]
+}
