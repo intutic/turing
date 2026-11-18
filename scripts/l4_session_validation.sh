@@ -30,7 +30,9 @@ run_model() {  # tag, HF id, pass-key context lengths
 run_model qwen15 Qwen/Qwen2.5-1.5B-Instruct "2048 8192 16384 32768"
 run_model llama3b unsloth/Llama-3.2-3B-Instruct "2048 8192 16384 32768"
 run_model gemma2 unsloth/gemma-2-2b-it "2048 4096 8192"
-run_model phi35 microsoft/Phi-3.5-mini-instruct "2048 8192 16384 32768"
-run_model mistral7b unsloth/mistral-7b-instruct-v0.3 "2048 8192 16384 32768"
+# no GQA: 393 KB of KV per token, so one 32K request (12 GiB in bf16) exceeds vLLM's KV budget on an L4
+run_model phi35_16k microsoft/Phi-3.5-mini-instruct "2048 8192 16384"
+# 14.5 GB of weights leave about 4 GiB for KV; a 32K request needs 4.3 GiB in bf16
+run_model mistral7b_16k unsloth/mistral-7b-instruct-v0.3 "2048 8192 16384"
 run_model qwen7b Qwen/Qwen2.5-7B-Instruct "2048 8192 16384 32768"
 echo "VALIDATION DONE $(date +%T)" >> ~/l4_status.txt
