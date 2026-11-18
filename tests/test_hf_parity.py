@@ -241,8 +241,11 @@ def test_engine_prefills_a_long_longrope_prompt_as_hf_does_and_keeps_its_prefix_
         engine = ContinuousBatchEngine(model.config, TuringConfig(device="cpu"), prefill_chunk_size=8, model=model)
         await engine.start()
         try:
-            return [[t async for t in engine.stream_generate(prompt_tokens=p, max_new_tokens=8, temperature=0.0)]
-                    for p in prompts]
+            out = []  # a plain loop: Python 3.10 rejects an async comprehension nested in a list comprehension
+            for p in prompts:
+                out.append([t async for t in engine.stream_generate(prompt_tokens=p, max_new_tokens=8,
+                                                                    temperature=0.0)])
+            return out
         finally:
             await engine.stop()
 
