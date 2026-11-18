@@ -15,15 +15,15 @@ step v_setup_guard pip install -q --user -e packages/kv-layer-guard --no-deps
 step v_setup_venvpkg sudo apt-get install -y -q python3.10-venv  # the image lacks it; vLLM gets its own venv
 step v_setup_vllm bash -c "python3 -m venv ~/vllm-venv && ~/vllm-venv/bin/pip install -q vllm datasets && ~/vllm-venv/bin/pip install -q -e packages/kv-layer-guard --no-deps"
 VQ="env PATH=$HOME/vllm-venv/bin:$PATH $HOME/vllm-venv/bin/python scripts/eval_vllm_quality.py --out results_quality_vllm_validation_cuda.json"
-run_model() {  # tag, HF id, pass-key context lengths
-  local tag=$1 m=$2 ctx=$3
+run_model() {  # tag, HF id, pass-key context lengths, [Turing KV formats], [GSM8K problems for Turing]
+  local tag=$1 m=$2 ctx=$3 kvs=${4:-"int8 int4"} samples=${5:-500}
   step v_${tag}_guard bash -c "python3 -m kv_layer_guard $m --kv-cache-dtype fp8 > results_guard_${tag}_cuda.json"
   local skip; skip=$(python3 -c "import json; print(','.join(json.load(open('results_guard_${tag}_cuda.json'))['kv_cache_dtype_skip_layers']))" 2>/dev/null)
   step v_${tag}_vllm_bf16 $VQ --model $m --context-len $ctx --kv-cache-dtype auto
   step v_${tag}_vllm_fp8 $VQ --model $m --context-len $ctx --kv-cache-dtype fp8
   if [ -n "$skip" ]; then step v_${tag}_vllm_fp8_guard $VQ --model $m --context-len $ctx --kv-cache-dtype fp8 --kv-skip-layers "$skip"; fi
-  for kv in int8 int4; do
-    step v_${tag}_turing_gsm_$kv turing eval-accuracy --model $m --samples 500 --batch-size 32 --device cuda --dtype bf16 --kv-cache-dtype $kv --out results_gsm8k_validation_cuda.json
+  for kv in $kvs; do
+    step v_${tag}_turing_gsm_$kv turing eval-accuracy --model $m --samples $samples --batch-size 32 --device cuda --dtype bf16 --kv-cache-dtype $kv --out results_gsm8k_validation_cuda.json
     step v_${tag}_turing_niah_$kv turing eval-niah --model $m --context-len $ctx --depths 0 0.25 0.5 0.75 1 --device cuda --dtype bf16 --kv-cache-dtype $kv --out results_niah_validation_cuda.json
   done
 }
@@ -33,6 +33,7 @@ run_model gemma2 unsloth/gemma-2-2b-it "2048 4096 8192"
 # no GQA: 393 KB of KV per token, so one 32K request (12 GiB in bf16) exceeds vLLM's KV budget on an L4
 run_model phi35_16k microsoft/Phi-3.5-mini-instruct "2048 8192 16384"
 # 14.5 GB of weights leave about 4 GiB for KV; a 32K request needs 4.3 GiB in bf16
-run_model mistral7b_16k unsloth/mistral-7b-instruct-v0.3 "2048 8192 16384"
-run_model qwen7b Qwen/Qwen2.5-7B-Instruct "2048 8192 16384 32768"
+# 7B models: Turing int4 only, on 200 problems (int8 matched bf16 on every model before; Turing's batched decode is slow)
+run_model mistral7b_16k unsloth/mistral-7b-instruct-v0.3 "2048 8192 16384" int4 200
+run_model qwen7b Qwen/Qwen2.5-7B-Instruct "2048 8192 16384 32768" int4 200
 echo "VALIDATION DONE $(date +%T)" >> ~/l4_status.txt
