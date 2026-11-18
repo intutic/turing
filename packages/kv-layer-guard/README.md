@@ -46,10 +46,27 @@ Formats: `fp8` (e4m3, scale 1.0, saturating, as vLLM's default fp8 cache), `int8
 
 ## Scope
 
-The same calibration runs inside [Turing Engine](https://github.com/intutic/turing)'s int8/int4 KV pools, where it was
-measured on Qwen2.5 (0.5B, 1.5B, 1.5B-Instruct) and SmolLM2 (360M, 1.7B): it keeps layer 0 for the Qwen models and no
-layer for SmolLM2. The vLLM rows above skip layer 0 by hand; this package's own selections for vLLM's formats, and
-other model families, are being validated.
+Validated on six instruct models on an NVIDIA L4 (vLLM 0.31, fp8 KV cache, bf16 weights; GSM8K 8-shot on 500
+problems unless noted; pass-key retrieval at 5 depths per length). The Turing columns are the same calibration inside
+[Turing Engine](https://github.com/intutic/turing)'s int8/int4 KV pools, where it was first measured on Qwen2.5 and
+SmolLM2.
+
+<!-- table:validation -->
+| Model | vLLM bf16 | vLLM fp8 (default) | Guard keeps in bf16 | vLLM fp8 + guard | Turing int8 KV | Turing int4 KV | Pass-key: fp8 / fp8 + guard / Turing int4 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Qwen2.5-1.5B-Instruct | 57.4% | 2.2% | 0 | 56.8% | 58.2% | 52.8% | 5.0% / 100.0% / 100.0% |
+| Llama-3.2-3B-Instruct | 67.2% | 65.8% | none | = fp8 | 67.0% | 64.4% | 100.0% / 100.0% / 100.0% |
+| gemma-2-2b-it | 40.8% | 40.4% | none | = fp8 | 40.2% | 38.0% | 100.0% / 100.0% / 100.0% |
+| Phi-3.5-mini-instruct | 71.8% | 66.6% | none | = fp8 | 79.8% | 77.8% | 100.0% / 100.0% / 100.0% |
+| mistral-7b-instruct-v0.3 | 47.8% | 47.0% | none | = fp8 | — | 46.0% (n=200) | 100.0% / 100.0% / 100.0% |
+| Qwen2.5-7B-Instruct | 74.6% | 2.4% | 0, 1, 27 | 70.2% | — | 71.5% (n=200) | 0.0% / 100.0% / 100.0% |
+<!-- /table -->
+
+- It keeps layers only where vLLM's default fp8 cache breaks the model: layer 0 of Qwen2.5-1.5B and layers 0, 1 and
+  27 of Qwen2.5-7B. On Llama 3.2, Gemma 2, Phi-3.5 and Mistral it keeps none, and their fp8 runs need none.
+- **Limit:** Phi-3.5-mini loses 5.2 GSM8K points under fp8 (71.8% to 66.6%; standard errors about 2 points each) and
+  the guard does not flag it: its largest per-layer KL is 0.006, under the 0.02 threshold. A loss spread thinly over
+  many layers is not what a per-layer check catches.
 
 ## License
 

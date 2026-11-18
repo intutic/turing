@@ -103,6 +103,36 @@ Scope: measured on Qwen2.5 (0.5B, 1.5B, 1.5B-Instruct) and SmolLM2 (360M, 1.7B).
 | int4 KV | 5/5 | 5/5 | 5/5 | 5/5 | 100.0% |
 <!-- /table -->
 
+**Six instruct models** (NVIDIA L4, vLLM 0.31, 2026-11-18). The calibration, run as
+[`kv-layer-guard`](../packages/kv-layer-guard) for vLLM's fp8 cache and inside Turing's own int8/int4 pools. GSM8K
+is 8-shot exact match on 500 problems unless noted, bf16 weights; pass-key is 5 depths per length, up to 32K for the
+Qwen and Llama models and up to 16K (8K for Gemma 2) for the others. Results files: `results_quality_vllm_validation_cuda.json`,
+`results_guard_*_cuda.json`, `results_gsm8k_validation_cuda.json`, `results_niah_validation_cuda.json`, and for
+Phi-3.5's Turing pass-key `results_niah_phi35_longrope_fix_cuda.json`. Phi-3.5's first Turing run found the key 0% of
+the time above 4K: a LongRoPE bug in chunked prefill (each chunk picked its own short/long frequencies), fixed in
+2.0.0 and rerun.
+
+<!-- table:validation -->
+| Model | vLLM bf16 | vLLM fp8 (default) | Guard keeps in bf16 | vLLM fp8 + guard | Turing int8 KV | Turing int4 KV | Pass-key: fp8 / fp8 + guard / Turing int4 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Qwen2.5-1.5B-Instruct | 57.4% | 2.2% | 0 | 56.8% | 58.2% | 52.8% | 5.0% / 100.0% / 100.0% |
+| Llama-3.2-3B-Instruct | 67.2% | 65.8% | none | = fp8 | 67.0% | 64.4% | 100.0% / 100.0% / 100.0% |
+| gemma-2-2b-it | 40.8% | 40.4% | none | = fp8 | 40.2% | 38.0% | 100.0% / 100.0% / 100.0% |
+| Phi-3.5-mini-instruct | 71.8% | 66.6% | none | = fp8 | 79.8% | 77.8% | 100.0% / 100.0% / 100.0% |
+| mistral-7b-instruct-v0.3 | 47.8% | 47.0% | none | = fp8 | — | 46.0% (n=200) | 100.0% / 100.0% / 100.0% |
+| Qwen2.5-7B-Instruct | 74.6% | 2.4% | 0, 1, 27 | 70.2% | — | 71.5% (n=200) | 0.0% / 100.0% / 100.0% |
+<!-- /table -->
+
+- The guard keeps layers only where vLLM's default fp8 cache breaks the model: layer 0 of Qwen2.5-1.5B and layers
+  0, 1 and 27 of Qwen2.5-7B (GSM8K 2.2% and 2.4% without it). On the other four it keeps none, and fp8 there costs
+  at most 1.4 points.
+- **Limit:** Phi-3.5-mini loses 5.2 GSM8K points under fp8 (71.8% to 66.6%; each figure has a standard error of
+  about 2 points) and the guard does not flag it: its largest per-layer KL is 0.006, under the 0.02 threshold. A loss
+  spread thinly over many layers is not what a per-layer check catches.
+- Phi-3.5 scores higher in Turing (79.8% with int8 KV) than in vLLM bf16 (71.8%). Both runs use the same evaluator
+  and prompts; vLLM was started with a 16K maximum length, which may make it use LongRoPE's long frequencies for every
+  request. A vLLM run capped at 4K is queued to test that; until then the gap is unexplained.
+
 ### Reproduce
 ```bash
 python scripts/eval_kv_quality.py --models HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B,Qwen/Qwen2.5-1.5B \

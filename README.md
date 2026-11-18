@@ -60,7 +60,8 @@ or Ollama.
 
   vLLM fp8 with layer 0 skipped *by hand* matches Turing's quality at about half the time per request, which is the
   point: the calibration finds that layer automatically. It is also packaged on its own for vLLM users, under
-  Apache-2.0: [`packages/kv-layer-guard`](packages/kv-layer-guard). Measured on Qwen2.5 and SmolLM2 so far
+  Apache-2.0: [`packages/kv-layer-guard`](packages/kv-layer-guard). Validated on six instruct models (Qwen2.5 1.5B
+  and 7B, Llama 3.2, Gemma 2, Phi-3.5, Mistral), including one limit it does not catch
   ([benchmarks §2](docs/benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps)).
 * **Measured correctness.** The exact model reproduces HuggingFace's logits on 16 model families in the tests and on
   real checkpoints ([models & hardware](docs/models_and_hardware.md)); 13 real GGUF files agree with llama.cpp.

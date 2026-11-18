@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PAGES = ["README.md", *sorted(str(p.relative_to(ROOT)) for p in (ROOT / "docs").glob("*.md"))]
+PAGES = ["README.md", "packages/kv-layer-guard/README.md",
+         *sorted(str(p.relative_to(ROOT)) for p in (ROOT / "docs").glob("*.md"))]
 
 
 def load(name):
@@ -120,6 +121,39 @@ def t_vs_kv():
                          and x.get("kv_skip_layers", []) == skip)])
     return table(["KV cache", "Layers kept in bf16", "GSM8K", "Pass-key 2K–32K", "ΔNLL vs bf16", "s/request (16K, B=128)"],
                  out)
+
+
+def t_validation():
+    """kv-layer-guard and Turing's KV pools on six instruct models (L4 validation run, 2026-11-18): GSM8K (8-shot,
+    500 problems unless noted) and pass-key retrieval. Phi-3.5's Turing pass-key rows come from the rerun after the
+    LongRoPE fix (results_niah_phi35_longrope_fix_cuda.json); the first run's are superseded."""
+    vllm = load("results_quality_vllm_validation_cuda.json")
+    gsm = {(r["model"], r["kv_cache_dtype"]): r for r in load("results_gsm8k_validation_cuda.json")}
+    niah = {(r["model"], r["kv_cache_dtype"]): r for r in load("results_niah_validation_cuda.json")
+            if "Phi-3.5" not in r["model"]}
+    niah.update({(r["model"], r["kv_cache_dtype"]): r for r in load("results_niah_phi35_longrope_fix_cuda.json")})
+    guard = {}
+    for f in sorted(ROOT.glob("results_guard_*_cuda.json")):
+        g = json.loads(f.read_text())
+        guard[g["model"]] = g["kv_cache_dtype_skip_layers"]
+
+    def em(r):
+        n = r["gsm8k"]["n"] if "gsm8k" in r else r.get("samples", r.get("n"))
+        v = r["gsm8k"]["exact_match"] if "gsm8k" in r else r["exact_match"]
+        return pct(v) + ("" if n == 500 else f" (n={n})")
+    out = []
+    for model in dict.fromkeys(r["model"] for r in vllm):
+        rows = {(r["kv_cache_dtype"], tuple(r.get("kv_skip_layers", []))): r for r in vllm if r["model"] == model}
+        skip = tuple(guard.get(model, ()))
+        bf16, fp8 = rows[("auto", ())], rows[("fp8", ())]
+        guarded = rows.get(("fp8", skip)) if skip else fp8
+        tur = [gsm.get((model, kv)) for kv in ("int8", "int4")]
+        pk = [pct(x["niah"]["accuracy"]) for x in (fp8, guarded)] + \
+             [pct(niah[(model, "int4")]["accuracy"]) if (model, "int4") in niah else "—"]
+        out.append([short(model), em(bf16), em(fp8), ", ".join(skip) or "none", em(guarded) if skip else "= fp8",
+                    em(tur[0]) if tur[0] else "—", em(tur[1]) if tur[1] else "—", " / ".join(pk)])
+    return table(["Model", "vLLM bf16", "vLLM fp8 (default)", "Guard keeps in bf16", "vLLM fp8 + guard",
+                  "Turing int8 KV", "Turing int4 KV", "Pass-key: fp8 / fp8 + guard / Turing int4"], out)
 
 
 def t_longctx():

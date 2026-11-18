@@ -1,0 +1,1562 @@
+[
+  {
+    "n": 20,
+    "accuracy": 1.0,
+    "wall_seconds": 70.56,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": " 60494. The",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": " 65125. The",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": " 15306. The",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": " 43936. The",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": " 77013. It",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": " 73691. The",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": " 63075. The",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": " 49755. The",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": " 72468. The",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": " 56930. It",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": " 86465. Memor",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": " 38631. The",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": " 76150. The",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": " 28254. The",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": " 46941.",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.0,
+        "key": "28316",
+        "completion": " 28316. The",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.25,
+        "key": "22429",
+        "completion": " 22429. The",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.5,
+        "key": "91050",
+        "completion": " 91050. The",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.75,
+        "key": "42834",
+        "completion": " 42834. The",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 1.0,
+        "key": "79804",
+        "completion": " 79804. It",
+        "found": true
+      }
+    ],
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "kv_cache_dtype": "int8",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 20,
+    "accuracy": 1.0,
+    "wall_seconds": 72.57,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": " 60494. The",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": " 65125. The",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": " 15306. The",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": " 43936. The",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": " 77013. The",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": " 73691. The",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": " 63075. The",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": " 49755. The",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": " 72468. The",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": " 56930. It",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": " 86465. The",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": " 38631. The",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": " 76150. The",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": " 28254. The",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": " 46941. This",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.0,
+        "key": "28316",
+        "completion": " 28316. Remember",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.25,
+        "key": "22429",
+        "completion": " 22429. The",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.5,
+        "key": "91050",
+        "completion": " 91050. The",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.75,
+        "key": "42834",
+        "completion": " 42834. The",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 1.0,
+        "key": "79804",
+        "completion": " 79804. This",
+        "found": true
+      }
+    ],
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "kv_cache_dtype": "int4",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 20,
+    "accuracy": 1.0,
+    "wall_seconds": 153.34,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": " 60494. Remember it. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": " 65125. Remember it. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": " 15306. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": " 43936. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": " 77013. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": " 73691. Remember it. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": " 63075. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": " 49755. The pass key is",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": " 72468. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": " 56930. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": " 86465. The pass key is",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": " 38631. Remember it. ",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": " 76150. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": " 28254. The pass key is",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": " 46941. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 0.0,
+        "key": "28316",
+        "completion": " 28316. Remember it. ",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 0.25,
+        "key": "22429",
+        "completion": " 22429. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 0.5,
+        "key": "91050",
+        "completion": " 91050. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 0.75,
+        "key": "42834",
+        "completion": " 42834. \n\nThe grass is",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 1.0,
+        "key": "79804",
+        "completion": " 79804. \n\nThe pass key",
+        "found": true
+      }
+    ],
+    "model": "unsloth/Llama-3.2-3B-Instruct",
+    "kv_cache_dtype": "int8",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 20,
+    "accuracy": 1.0,
+    "wall_seconds": 151.53,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": " 60494. Remember it. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": " 65125. Remember it. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": " 15306. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": " 43936. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1876,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": " 77013. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": " 73691. Remember it. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": " 63075. The grass is green",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": " 49755. The pass key is",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": " 72468. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7564,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": " 56930. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": " 86465. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": " 38631. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": " 76150. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": " 28254. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15124,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": " 46941. \n\nThe pass key",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 0.0,
+        "key": "28316",
+        "completion": " 28316. Remember it. ",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 0.25,
+        "key": "22429",
+        "completion": " 22429. \n\nThe grass is",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 0.5,
+        "key": "91050",
+        "completion": " 91050. \n\nThe grass is",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 0.75,
+        "key": "42834",
+        "completion": " 42834. \n\nThe grass is",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 30244,
+        "depth": 1.0,
+        "key": "79804",
+        "completion": " 79804. \n\nWhat is the",
+        "found": true
+      }
+    ],
+    "model": "unsloth/Llama-3.2-3B-Instruct",
+    "kv_cache_dtype": "int4",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 15,
+    "accuracy": 1.0,
+    "wall_seconds": 25.27,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": " 60494. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": " 65125. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": " 15306. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": " 43936. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": " 77013. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": " 73691. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": " 63075. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": " 49755. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": " **72468**. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": " **56930**. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": " 86465. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": " 38631. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": " 76150. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": " 28254. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": " 46941. ",
+        "found": true
+      }
+    ],
+    "model": "unsloth/gemma-2-2b-it",
+    "kv_cache_dtype": "int8",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 15,
+    "accuracy": 1.0,
+    "wall_seconds": 24.52,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": " 60494. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": " 65125. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": " 15306. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": " 43936. ",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1883,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": " 77013. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": " 73691. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": " 63075. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": " 49755. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": " **72468**. ",
+        "found": true
+      },
+      {
+        "context_length": 4096,
+        "prompt_tokens": 3779,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": " **56930**. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": " 86465. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": " 38631. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": " 76150. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": " 28254. ",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7547,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": " 46941. ",
+        "found": true
+      }
+    ],
+    "model": "unsloth/gemma-2-2b-it",
+    "kv_cache_dtype": "int4",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 15,
+    "accuracy": 0.3333333333333333,
+    "wall_seconds": 117.44,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": "60494.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": "65125.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": "15306.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": "43936.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": "77013.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": "\n\n\n\n\n\n\n\n",
+        "found": false
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": "\n\n.\n.\n.\n",
+        "found": false
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": "\n\n.\n\n\n\n\n",
+        "found": false
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": "\n\n\n\n\n\n\n\n",
+        "found": false
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": "\n\n\n\n\n\n\n\n",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": ".\n\n\n.\n.\n",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": ".\n\n.\n.\n.",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": ".\n\n\n.\n.\n",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": ".\n\n\n.\n.\n",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": ".\n\n\n.\n.\n",
+        "found": false
+      }
+    ],
+    "model": "microsoft/Phi-3.5-mini-instruct",
+    "kv_cache_dtype": "int8",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 15,
+    "accuracy": 0.3333333333333333,
+    "wall_seconds": 124.1,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": "60494.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": "65125.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": "15306.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": "43936.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": "77013.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": "\n\n\n\n\n\n\n\n",
+        "found": false
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": "\n\n\n.\n\n\n\n",
+        "found": false
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": "\n\n\n\n\n\n\n\n",
+        "found": false
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": "\n\n\n\n\n\n\n\n",
+        "found": false
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": "\n\n\n\n\n\n\n\n",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": ".\n\n.\n.\n.",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": ".\n\n.\n.\n.",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": ".\n\n\n.\n.\n",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": ".\n\n\n.\n.\n",
+        "found": false
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": ".\n\n\n.\n.\n",
+        "found": false
+      }
+    ],
+    "model": "microsoft/Phi-3.5-mini-instruct",
+    "kv_cache_dtype": "int4",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 15,
+    "accuracy": 1.0,
+    "wall_seconds": 82.37,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1886,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": "60494.",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1886,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": "65125.",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1886,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": "15306.",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1886,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": "43936.",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1886,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": "77013.",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7550,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": "73691.",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7550,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": "63075.",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7550,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": "49755.",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7550,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": "72468.",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7550,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": "56930.",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15110,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": "86465.",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15110,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": "38631.",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15110,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": "76150.",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15110,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": "28254.",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15110,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": "46941.",
+        "found": true
+      }
+    ],
+    "model": "unsloth/mistral-7b-instruct-v0.3",
+    "kv_cache_dtype": "int4",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 20,
+    "accuracy": 1.0,
+    "wall_seconds": 194.4,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": " 60494. It",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": " 65125. Remember",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": " 15306. Remember",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": " 43936. Remember",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1953,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": " 77013. Remember",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": " 73691. It",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": " 63075. Remember",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": " 49755. Remember",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": " 72468. Remember",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7857,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": " 56930. Remember",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": " 86465. It",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": " 38631. It",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": " 76150. Remember",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": " 28254. Remember",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15729,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": " 46941. Remember",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.0,
+        "key": "28316",
+        "completion": " 28316. Remember",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.25,
+        "key": "22429",
+        "completion": " 22429. Remember",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.5,
+        "key": "91050",
+        "completion": " 91050. It",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 0.75,
+        "key": "42834",
+        "completion": " 42834. Remember",
+        "found": true
+      },
+      {
+        "context_length": 32768,
+        "prompt_tokens": 31449,
+        "depth": 1.0,
+        "key": "79804",
+        "completion": " 79804. Remember",
+        "found": true
+      }
+    ],
+    "model": "Qwen/Qwen2.5-7B-Instruct",
+    "kv_cache_dtype": "int4",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  }
+]
