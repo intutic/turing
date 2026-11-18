@@ -12,6 +12,7 @@ step v_setup_apt sudo apt-get install -y -q build-essential python3.10-dev
 step v_setup_torchaudio sudo pip uninstall -y torchaudio
 step v_setup_turing pip install -q --user -e '.[dev]'
 step v_setup_guard pip install -q --user -e packages/kv-layer-guard --no-deps
+step v_setup_venvpkg sudo apt-get install -y -q python3.10-venv  # the image lacks it; vLLM gets its own venv
 step v_setup_vllm bash -c "python3 -m venv ~/vllm-venv && ~/vllm-venv/bin/pip install -q vllm datasets && ~/vllm-venv/bin/pip install -q -e packages/kv-layer-guard --no-deps"
 VQ="env PATH=$HOME/vllm-venv/bin:$PATH $HOME/vllm-venv/bin/python scripts/eval_vllm_quality.py --out results_quality_vllm_validation_cuda.json"
 run_model() {  # tag, HF id, pass-key context lengths
