@@ -17,7 +17,7 @@ python setup.py build_ext --inplace
 
 ### 2. Testing & Quality Verification (Strict 0-Warning Invariant)
 ```bash
-# Run the entire test suite with strict warning escalation (all 667 tests MUST pass with 0 warnings on CUDA; 49 of them need CUDA and skip on Mac/CPU)
+# Run the entire test suite with strict warning escalation (all 705 tests MUST pass with 0 warnings on CUDA; on a Mac the CUDA-only ones and those needing uncached models skip)
 python -W error -m pytest -v
 
 # Run a specific test file
@@ -73,7 +73,7 @@ python scripts/eval_gguf_parity.py --help
 ## 🏗️ Architecture & Core Responsibilities
 
 - **`csrc/`**: C++20 SIMD headers (AVX2/FMA on x86_64, NEON on arm64; `turing_simd.hpp`), PyBind11 bindings (`pybind_bindings.cpp`), GGUF reader and exact dequantizer (`turing_gguf_cpp.hpp`), `ParallelReader` (`turing_parallel_reader.hpp`, io_uring or `pread`), cuFile loader (`turing_cufile.hpp`), and the standalone engine: BPE tokenizer (`turing_tokenizer_cpp.hpp`), forward pass (`turing_model_cpp.hpp`, Llama-layout GGUF, optional int8 KV), HTTP server (`turing_http_server.hpp`) and `turing-cli` (`turing_main.cpp`). The engine's weights, KV cache and SIMD scratch buffers are 64-byte aligned. Native code must compile with `-fvisibility=hidden` and LTO.
-- **`turing/core/`**: `kv_cache.py` (serving KV cache: one paged pool per model (`KVPool`), a page table per request (`KVCache`, copy-on-write forks), `native`/`int8`/`int4` storage, Quest page bounds) and `rope.py` (default, linear, dynamic, YaRN, LongRoPE, Llama 3, proportional). Library code outside the serving path, none measured on a model:
+- **`turing/core/`**: `kv_cache.py` (serving KV cache: one paged pool per model (`KVPool`), a page table per request (`KVCache`, copy-on-write forks), `native`/`int8`/`int4` storage with damaged layers kept in the model dtype (`select_kv_native_layers`) and int4 outlier-key smoothing, Quest page bounds) and `rope.py` (default, linear, dynamic, YaRN, LongRoPE, Llama 3, proportional). Library code outside the serving path, none measured on a model:
   - `cross_model_kv.py`: Closed-form $W^*$ ridge KV transfer with RoPE content decoupling and null-space projection.
   - `hybrid_memory.py`, `hybrid_attention.py`: Linear recurrence with anchor attention ($S_t = b_t S_{t-1} + K_t^T V_t$); needs a model trained with hybrid layers.
   - `lineage.py`: Multi-turn `clean_base` lineage controller.

@@ -73,7 +73,9 @@ def _eval_engine(args):
 
 def _write_eval(args, res):
     res.update(model=args.model, kv_cache_dtype=args.kv_cache_dtype, kv_page_budget=args.kv_page_budget,
-               quantization=args.quantization, activation_sparsity=args.activation_sparsity, device=args.device)
+               quantization=args.quantization, activation_sparsity=args.activation_sparsity, device=args.device,
+               dtype=getattr(args, "dtype", None), kv_smoothing=not getattr(args, "no_kv_smoothing", False),
+               batch_size=getattr(args, "batch_size", None))
     print(json.dumps(res, indent=2))
     if args.out:
         runs = json.load(open(args.out)) if os.path.exists(args.out) else []

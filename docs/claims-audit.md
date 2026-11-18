@@ -206,4 +206,4 @@ stay removed; v2.0 adds no performance number without a committed result.
 | Qwen 2.4T guide | Deleted (needs Blackwell FP4 and many GPUs; the guide also published a project ID and IP) | `test_no_private_identifiers.py` |
 | Sparse 2:4 prefill kernel; tiled fused RMSNorm-SwiGLU kernel | Deleted | — |
 | Comparison tables "not verified here" | Competitor cells now cite the competitor's documentation, or say "not checked" ([comparison](comparison.md)) | — |
-| Turing vs vLLM throughput | Still not measured; `scripts/benchmark_e2e_generation.py` exists, GPU run pending | — |
+| Turing vs vLLM throughput | Measured on an L4: vLLM 1.1–1.5× faster in fp16, about 2× at 4 bits (llama.cpp too); Turing's low-bit KV keeps quality where vLLM's default fp8 and per-token int4 do not | `results_e2e_generation_cuda.json`, `results_4bit_*`, `results_longctx_cuda.json`, `results_quality_vllm_cuda.json` |

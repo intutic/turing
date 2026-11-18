@@ -25,8 +25,8 @@ selects a LoRA adapter, §8). Run `turing serve --help` for the full list. The f
 | `--dtype` | checkpoint | `bf16`/`fp16`/`fp32`; default: the checkpoint's half type on CUDA, fp32 on CPU and MPS |
 | `--quantization` | `none` | `w4a16-rtn` or `w4a16-gptq`: 4-bit weights at load (GPTQ calibrates on WikiText-2; `turing convert` does it once) |
 | `--calib-windows` | `128` | GPTQ calibration windows of 2,048 tokens |
-| `--activation-sparsity` | `0` | TEAL-style: zero this share of every projection's inputs by magnitude. Lossy; on CUDA at batch 1 the projections use sparse GEMV kernels |
-| `--sparsity` | `0.0` | FFN channel pruning. `0.0` is the exact model; 50% costs +6.8 to +15.8 nats NLL on SmolLM2 ([benchmarks](benchmarks.md#2-quality-on-real-weights)) |
+| `--activation-sparsity` | `0` | TEAL-style: in batch-1 decode on CUDA, zero this share of every projection's inputs by magnitude and skip their weight rows; prefill and batched decode stay dense. Measured: 3–7% faster than 4-bit weights alone at batch 1, for 5–9 GSM8K points ([benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity)) |
+| `--sparsity` | `0.0` | FFN channel pruning. `0.0` is the exact model; 50% costs +6.8 to +15.8 nats NLL on SmolLM2 ([benchmarks §10](benchmarks.md#10-old-serving-defaults)) |
 | `--lora NAME=PATH` | none | Load a PEFT LoRA adapter (repeatable) |
 | `--mock` | off | Synthetic weights, for testing without a download |
 
@@ -34,8 +34,9 @@ selects a LoRA adapter, §8). Run `turing serve --help` for the full list. The f
 
 | Flag | Default | Effect |
 | :--- | :--- | :--- |
-| `--kv-cache-dtype` | `auto` | `native`, `int8` (per token and KV head) or `int4` (per 32 values); `auto` = `int8` on CUDA, `native` elsewhere. Measured quality: [benchmarks §2](benchmarks.md#2-quality-on-real-weights) |
-| `--kv-page-budget` | `1.0` | Quest: share of 16-token pages each decode step reads, for requests of at least 8,192 tokens. Measured at v1.7.0 to pay only at large batches and long contexts ([benchmarks §3](benchmarks.md#3-kv-cache-memory-and-decode-throughput)); since v2.0 it also runs inside CUDA graphs (not re-measured) |
+| `--kv-cache-dtype` | `auto` | `native`, `int8` (per token and KV head) or `int4` (per 32 values); `auto` = `int8` on CUDA, `native` elsewhere. Layers the format damages are found at startup and kept in the model dtype; int4 also scales down outlier key channels. Measured quality: [benchmarks §2](benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps) |
+| `--no-kv-smoothing` | off | int4 KV: store keys without outlier-channel smoothing |
+| `--kv-page-budget` | `1.0` | Quest: share of 16-token pages each decode step reads, for requests of at least 8,192 tokens. Runs inside CUDA graphs; measured slower than reading every page at every length up to 8K ([benchmarks §4](benchmarks.md#4-decode-throughput-against-huggingface-transformers)), so it is opt-in |
 | `--kv-cache-memory-fraction` | `0.6` | Share of free GPU memory, after the weights, for the paged KV pool |
 | `--max-batch-size` | `64` | Requests running (prefilling or decoding) at once |
 | `--no-cuda-graphs` | off | Run decode steps eagerly instead of replaying captured CUDA graphs |

@@ -13,9 +13,11 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
   for decode and a Triton dequantize for prefill (cd3caa8, 27e9215).
 - TEAL-style activation sparsity (`--activation-sparsity`, opt-in) with input-sparse fp16 and int4 GEMV kernels
   (44b29cd).
-- KV cache: per-channel key smoothing for int8/int4 pools (`kv_smoothing`, on by default); Qwen2.5-0.5B int4 goes
-  from +0.74 to +0.08 nats (5629e89). Quest page selection inside CUDA graphs (ddf24ad). `decode_attention`
-  kernel|sdpa switch (8675c3d).
+- KV cache: low-bit pools keep the layers their format damages in the model dtype, chosen at startup by a per-layer
+  KL calibration on random tokens (Qwen2.5-1.5B: int4 +2.33 → +0.013 nats, pass-key 0% → 100%, GSM8K 2% → 52.8%);
+  int4 also scales outlier key channels (16× the median or more) by powers of two, exact in any dtype; int8 is stored
+  unsmoothed (smoothing cost it 16 GSM8K points in bf16). Quest page selection inside CUDA graphs (ddf24ad).
+  `decode_attention` kernel|sdpa switch (8675c3d).
 - Engine: prefix caching, exact prompt-lookup speculative decoding with a load gate, stop tokens, top-k/top-p, logits
   processors, multi-LoRA per batch row (f9c7bfb, 3f4d12b, 8f185aa). Requests wait for KV pages instead of failing,
   and prefill fills a token budget across requests (0a12693).
@@ -33,8 +35,21 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
   `benchmark_w4a16.py`; real-model evals for cross-model KV transfer, lineage, k-slot pooling and debate (d8dc852,
   03b59f5). Results are in `docs/measured-differentiators.md`.
 
+- Measured comparison with vLLM 0.31 and llama.cpp on an L4 (Turing is slower: 1.1–1.5× in fp16, about 2× at 4 bits;
+  its low-bit KV keeps quality where vLLM's default fp8 and per-token int4 do not), long context at equal KV memory,
+  vLLM's KV caches on Turing's own GSM8K/pass-key/NLL checks (`scripts/benchmark_e2e_generation.py`,
+  `scripts/eval_vllm_quality.py`, `scripts/benchmark_llamacpp.py`).
+- `scripts/make_doc_tables.py`: every numeric table in the docs is generated from the committed results; a test fails
+  when they disagree.
+
 ### Changed
-- Documentation rewritten against the code; every number cites a committed results file (323a854, fd2cd21).
+- Documentation rewritten against the code; every number cites a committed results file (323a854, fd2cd21). The
+  README positions Turing as a research engine: it is slower than vLLM and llama.cpp.
+- int4 GEMM and input-sparse GEMV kernels split K across programs (1.5× faster at one row); `INT4_MAX_ROWS` 16 → 64
+  from the graph-timed crossover. Under CUDA graphs 4-bit weights decode 1.5–1.6× faster than fp16.
+- TEAL activation sparsity applies only to one-row decode on CUDA; prefill and batched decode stay dense (a
+  sparsified prefill broke attention-sink tokens: SmolLM2-1.7B +6.4 nats at 40%).
+- `jinja2>=3.1` is a dependency (transformers' chat templates refuse older versions).
 - `turing` and `turing.core` import lazily (1c6416b).
 
 ### Removed
@@ -51,6 +66,8 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 - CUDA graph capture and replay always run in inference mode; KV pool and int4 scratch tensors are normal tensors
   (0350b68, 13d38dd, 41692f2).
 - Masked GQA prefill on CUDA no longer falls back to SDPA's math path (32K prefill ran out of memory) (93271c1).
+- Cross-model KV on CUDA: a Triton inverse-RoPE kernel rotated every head after the first at the wrong position (the
+  lineage eval collapsed on the L4 and not on the Mac); removed with the duplicate CUDA transfer path.
 
 ### Fixed (c547190)
 - CLI: every `.gguf` path crashed with `UnboundLocalError` (missing module-level `import os`). `chat`, `serve` and

@@ -68,6 +68,7 @@ nav:
   - Kubernetes & llm-d: llmd-integration.md
   - Integrations: integrations.md
   - Benchmarks: benchmarks.md
+  - Research Findings: measured-differentiators.md
   - Claims Audit: claims-audit.md
   - Licensing: licensing.md
 

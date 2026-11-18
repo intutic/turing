@@ -3512,7 +3512,11 @@
     "kv_page_budget": 1.0,
     "quantization": "none",
     "activation_sparsity": 0.0,
-    "device": "cuda"
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": false,
+    "batch_size": 32,
+    "_note": "dtype, kv_smoothing and batch_size added from scripts/l4_session_diag.sh (the CLI did not record them then)"
   },
   {
     "n": 500,
@@ -7027,7 +7031,11 @@
     "kv_page_budget": 1.0,
     "quantization": "none",
     "activation_sparsity": 0.0,
-    "device": "cuda"
+    "device": "cuda",
+    "dtype": "fp16",
+    "kv_smoothing": true,
+    "batch_size": 32,
+    "_note": "dtype, kv_smoothing and batch_size added from scripts/l4_session_diag.sh (the CLI did not record them then)"
   },
   {
     "n": 500,
@@ -10542,6 +10550,10 @@
     "kv_page_budget": 1.0,
     "quantization": "none",
     "activation_sparsity": 0.0,
-    "device": "cuda"
+    "device": "cuda",
+    "dtype": "fp16",
+    "kv_smoothing": true,
+    "batch_size": 32,
+    "_note": "dtype, kv_smoothing and batch_size added from scripts/l4_session_diag.sh (the CLI did not record them then)"
   }
 ]

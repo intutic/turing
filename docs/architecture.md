@@ -35,7 +35,7 @@ because HF's SDPA path skips Gemma 2's attention soft-capping.
 
 **FFN channel pruning** (`--sparsity`, default 0) keeps the FFN channel tiles with the largest weight norms. Without
 retraining it is lossy: 50% raises next-token NLL by +6.8 to +15.8 nats on SmolLM2
-([benchmarks §2](benchmarks.md#2-quality-on-real-weights)).
+([benchmarks §10](benchmarks.md#10-old-serving-defaults)).
 
 ---
 
@@ -59,7 +59,7 @@ retraining it is lossy: 50% raises next-token NLL by +6.8 to +15.8 nats on SmolL
   (`csrc/turing_parallel_reader.hpp`, also exported as `NativeAsyncRingReader`) reads in 1 MiB requests with up to 64
   in flight, through io_uring when built with liburing and `pread` threads otherwise; `NativeGDSLoader`
   (`csrc/turing_cufile.hpp`) reads through cuFile when available, else into pinned memory and copies, and reports
-  which path ran. Cold reads are measured in [benchmarks §4](benchmarks.md#4-storage-ingestion-ladder-measured-cold-apple-m4-pro-ssd).
+  which path ran. Cold reads are measured in [benchmarks §8](benchmarks.md#8-storage-ingestion).
 
 ---
 
@@ -68,15 +68,17 @@ retraining it is lossy: 50% raises next-token NLL by +6.8 to +15.8 nats on SmolL
 * **4-bit weights** (`QuantLinear`, `turing/models/quant.py`; `--quantization w4a16-rtn|w4a16-gptq` or a `.tgate4`
   directory): attention and dense-MLP projections are quantized (groups of 64); embeddings, the LM head, routers and
   MoE experts stay in the model dtype. On CUDA a fused Triton int4 GEMM (`triton_w4a16.py`) handles up to
-  `INT4_MAX_ROWS` (16, an estimate that `scripts/benchmark_w4a16.py` is meant to replace with a measured crossover)
+  `INT4_MAX_ROWS` (64, from the measured crossover in [benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity))
   input rows, and dequantization into a shared scratch buffer plus cuBLAS handles more; off CUDA, dequantize then
-  matmul, which saves memory but is slower than dense weights. Quality and speed are measured by `scripts/eval_kv_quality.py`
-  (`rtn4`, `gptq4` arms) and `scripts/benchmark_weight_formats.py`; no result is committed yet.
+  matmul, which saves memory but is slower than dense weights. Measured: under CUDA graphs 4-bit decodes 1.5–1.6× faster than fp16, and GPTQ costs
+  about 5 GSM8K points on Qwen2.5-1.5B-Instruct ([benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity)).
 * **Activation sparsity** (`activation_sparsity.py`, `--activation-sparsity`, default 0): TEAL-style, training-free.
   Per-projection magnitude thresholds are calibrated on WikiText-2 so that the chosen share of every attention and MLP
-  projection input is zero. On CUDA, for one-row inputs, `triton_sparse_gemv.py` skips the weight rows of zero inputs;
-  it reads a transposed copy of each weight (fp16) or a transposed 4-bit copy (4-bit models), built on first use, so
-  the weights take extra memory. Lossy; quality and speed not yet measured.
+  projection input is zero. It applies only to one-row inputs on CUDA, where `triton_sparse_gemv.py` skips the weight
+  rows of zero inputs (prefill and batched decode stay dense: they gain no speed, and a sparsified prefill breaks
+  attention-sink tokens); it reads a transposed copy of each weight (fp16) or a transposed 4-bit copy (4-bit models),
+  built on first use, so the weights take extra memory. Measured: 3–7% faster than 4-bit alone at batch 1, for 5–9
+  GSM8K points.
 
 ---
 
@@ -85,7 +87,11 @@ retraining it is lossy: 50% raises next-token NLL by +6.8 to +15.8 nats on SmolL
 * **Pool**: one paged pool per model, 16-token pages, sized once from free GPU memory after the weights
   (`--kv-cache-memory-fraction`, default 0.6; 4 GiB off CUDA). Each request (`KVCache`) owns a row of the pool's
   device page table; forks share full pages copy-on-write. Storage is `native`, `int8` (asymmetric per token and KV
-  head, fp16 scale and zero) or `int4` (per group of 32 values). The engine reserves a request's pages at admission.
+  head, fp16 scale and zero) or `int4` (per group of 32 values). When a low-bit pool is created the model calibrates
+  it on 4 × 256 random tokens: layers whose K/V round trip moves the next-token distribution by more than 0.02 nats
+  are stored in the model dtype instead (`k_hi`/`v_hi`, at most a quarter of the layers), and for int4 key channels
+  at 16× their head's median are divided by a power of two (queries multiplied), which leaves q·k exact. The
+  engine reserves a request's pages at admission.
 * **Quest page selection** (`--kv-page-budget`): each page keeps the min and max of its keys; a decode step for a
   request of at least `kv_select_min_tokens` (8,192) tokens reads only the highest-scoring share of pages (first and
   last always kept).

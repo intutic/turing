@@ -1,124 +1,311 @@
 # 📊 Benchmarks
 
-Sections 2 and 3 are measured on real pretrained weights (SmolLM2 135M–1.7B) on an NVIDIA L4 and an Apple M4 Pro, by scripts in this repository whose raw results are committed (`results_*.json`). Section 1 is a single-layer timing on random weights. Nothing else is claimed here.
-
-Earlier versions of this page carried about 25 further sections (latent decode, hybrid prefill, LoRA hot-swap, gateway latency, prefill/decode duality, MoE pinning, ingest tiers, multi-model pipeline, kernel fusions and more). An audit traced every number to the code that was supposed to produce it and found that none had been measured on a real model, many had no committed result, and several were constants or formulas printed as results. Those sections were removed; [§5](#5-removed-results) summarises why, and the [claims audit](claims-audit.md) lists every number with its producing script and line.
-
----
-
-## 1. FFN Channel Pruning: Layer Time on Random Weights
-
-One FFN layer (gate, up, down; batch 1, fp16) with random weights, timed dense and with the FFN width cut to the pruned size, on one NVIDIA L4 (`scripts/benchmark_comprehensive_real_gpu.py`, part 3; recorded in `results_gcp_master_benchmark_v4.json`). The kernels are plain cuBLAS `F.linear` on smaller matrices, so the speedup only reflects the share of channels removed.
-
-| Layer shape (hidden × FFN → kept FFN) | Dense | Pruned | Ratio | Channels removed |
-| :--- | :---: | :---: | :---: | :---: |
-| 4,096 × 14,336 → 6,144 (Llama-3-8B shape) | 1.36 ms | 0.61 ms | 2.24× | 57.1% |
-| 8,192 × 28,672 → 12,288 (Llama-3.1-70B shape) | 5.41 ms | 2.33 ms | 2.32× | 57.1% |
-| 8,192 × 29,696 → 12,288 (Qwen-2.5-72B shape) | 5.60 ms | 2.33 ms | 2.41× | 58.6% |
-
-> **What pruning costs.** Pruning without retraining is not lossless: at 50% it raises next-token NLL by +6.8 to +15.8 nats on SmolLM2 (§2), so it is off by default (`--sparsity 0.0`). The table times one layer, not a model; no 8B or 70B checkpoint was run.
+Every table on this page is generated from a committed `results_*.json` file by `scripts/make_doc_tables.py`
+(`--check` fails when a table and its file disagree). GPU numbers are from one NVIDIA L4 (24 GB) on a Google Cloud
+`g2-standard-16` Spot VM; Mac numbers from an Apple M4 Pro. ± is one standard error; n is given where it matters.
+Comparisons with vLLM and llama.cpp are on the [comparison](comparison.md) page.
 
 ---
 
-## 2. Quality on Real Weights
+## 1. Summary
 
-Every number below is a paired next-token NLL difference on real pretrained weights, measured by `scripts/eval_kv_quality.py`: the same text windows are scored by the exact model and by each setting, and the table gives the mean difference per window ± its standard error. The exact model reproduces HuggingFace's logits (`tests/test_hf_parity.py`). Earlier versions of this page reported GSM8K/HumanEval/MMLU retention and throughput against vLLM that no script in the repository produced; they were removed.
+* **Turing is slower than vLLM and llama.cpp** in every configuration measured on the L4: 1.1–1.5× behind vLLM in
+  fp16, about 2× behind both at 4 bits, 1.4× behind vLLM per request at 16K context at equal quality.
+* **Its low-bit KV caches keep quality without settings** (§2): int8 is free, int4 costs about +0.02 nats, and both
+  pass every pass-key retrieval to 32K; vLLM's int8/int4 and default fp8 caches lose 16 to 57 GSM8K points on the same
+  model unless layer 0 is excluded by hand.
+* **4-bit weights** decode 1.5–1.6× faster than fp16 in Turing under CUDA graphs (§3), with GPTQ costing 5 GSM8K
+  points; TEAL activation sparsity adds 3–7% speed at batch 1 for 5–9 more points, which is rarely worth it.
 
-**A. Serving defaults** (Apple M4 Pro, fp32, WikiText-2 test, 8 windows of 2,048 tokens, last 256 positions scored; `results_serving_defaults_mps.json`). Δ is the mean paired NLL change ± its standard error.
+---
 
-| Model | Exact model (= HuggingFace) | FFN pruning 50% (old default) | Recirculation (old default) |
+## 2. KV cache quality and the layers it keeps
+
+**How the cache stays correct.** When a pool stores KV in int8 or int4, Turing calibrates once at startup on 4 × 256
+random tokens: each layer's K and V take the pool's round trip alone, and a layer whose next-token distribution moves
+by more than 0.02 nats (KL divergence) is kept in the model's dtype, at most a quarter of the layers. For int4, key
+channels at 16× or more of their head's median magnitude are also divided by a power of two (and the queries
+multiplied by it), which leaves q·k unchanged bit for bit. Why these rules, from diagnostics on real models:
+
+* On Qwen2.5-1.5B, int4 KV cost +1.93 nats, of which +1.77 came from layer 0's keys alone; every other layer cost
+  under 0.005 and quantizing every value cost +0.002. Random-token calibration finds that layer (KL 0.13 against a
+  median layer of 0.0006); attention-output error does not (Qwen2.5-0.5B's layer 0 has more error and costs +0.014).
+* Key smoothing helps int4 where the model has real outlier channels (Qwen2's bias channels reach 64× the median):
+  +0.040 → +0.013 nats on Qwen2.5-1.5B. Applied to SmolLM2's mild channels (at most 8×) it doubled int4's cost, and
+  applied to int8 in bf16 it cost 16 GSM8K points (42.2% against 58.2%), so it is int4-only and outlier-only.
+
+**NLL on WikiText-2** (fp16, 16 windows of 2,048 tokens, last 256 scored; paired against the exact model;
+`results_quality_cuda.json`):
+
+<!-- table:kv_quality -->
+| Setting (ΔNLL vs exact) | SmolLM2-360M | SmolLM2-1.7B | Qwen2.5-1.5B |
 | :--- | :---: | :---: | :---: |
-| SmolLM2-135M | NLL 2.606 (Δ vs HF -0.00000) | **+15.78 ± 1.73** | +0.00008 ± 0.00005 |
-| SmolLM2-360M | NLL 2.309 (Δ vs HF +0.00000) | **+8.92 ± 0.43** | +0.00085 ± 0.00058 |
-| SmolLM2-1.7B | NLL 1.921 (Δ vs HF -0.00000) | **+6.85 ± 0.21** | +0.00060 ± 0.00096 |
+| int8 KV | -0.0001 ± 0.0004 | -0.0001 ± 0.0003 | +0.0003 ± 0.0005 |
+| int4 KV (smoothed, protected layers) | +0.0245 ± 0.0043 | +0.0189 ± 0.0029 | +0.0126 ± 0.0042 |
+| int4 KV, no smoothing | +0.0245 ± 0.0043 | +0.0230 ± 0.0020 | +0.0402 ± 0.0081 |
+| Quest, 25% of pages | +0.0000 ± 0.0000 | +0.0000 ± 0.0000 | +0.0000 ± 0.0000 |
+| 4-bit weights, RTN | +0.1343 ± 0.0110 | +0.1279 ± 0.0118 | +0.0937 ± 0.0072 |
+| 4-bit weights, GPTQ | +0.0676 ± 0.0069 | +0.0474 ± 0.0074 | +0.0344 ± 0.0054 |
+| TEAL 25% (decode) | +0.0195 ± 0.0035 | +0.0270 ± 0.0057 | +0.0147 ± 0.0031 |
+| TEAL 40% (decode) | +0.0942 ± 0.0091 | +0.0983 ± 0.0087 | +0.0805 ± 0.0092 |
+| TEAL 50% (decode) | +0.2418 ± 0.0172 | +0.2323 ± 0.0139 | +0.1851 ± 0.0113 |
+| token by token vs one pass (sanity) | -0.0001 ± 0.0001 | -0.0000 ± 0.0001 | +0.0001 ± 0.0001 |
+<!-- /table -->
 
-**B. KV cache settings** (NVIDIA L4, fp16, WikiText-2 test, 16 windows of 2,048 tokens, last 128 positions scored; `results_kv_quality_cuda.json`). Low-bit arms are paired against the exact model; Quest arms run token by token and are paired against exact token-by-token decode.
+**Qwen2.5-1.5B-Instruct in bf16, against vLLM's own caches on the same checks** (GSM8K: first 500 test problems,
+8-shot, greedy; pass-key: 20 needles at 2K–32K; ΔNLL: 8 WikiText-2 windows; time per request from §5;
+`results_gsm8k_final_cuda.json`, `results_niah_final_cuda.json`, `results_quality_instruct_bf16_cuda.json`,
+`results_quality_vllm_cuda.json`, vLLM 0.31):
 
-| Setting | SmolLM2-135M | SmolLM2-360M | SmolLM2-1.7B |
+<!-- table:vs_kv -->
+| KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 3.51 |
+| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 3.56 |
+| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 3.54 |
+| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.60 |
+| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.71 |
+| vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
+| vLLM fp8_per_token_head | — | 0.6% | 0.0% | +2.404 ± 0.364 | — |
+| vLLM int8_per_token_head | — | 41.4% | 100.0% | +0.023 ± 0.007 | 4.72 |
+| vLLM int4_per_token_head | — | 0.6% | 0.0% | +8.127 ± 0.495 | 4.41 |
+| vLLM int4_per_token_head | layer 0 (manual) | 47.8% | 100.0% | +0.058 ± 0.010 | 4.30 |
+| vLLM turboquant_k8v4 | — | 52.0% | 100.0% | +0.001 ± 0.001 | — |
+<!-- /table -->
+
+The vLLM caches that collapse do so silently: the server starts and answers. Skipping layer 0 (vLLM's
+`kv_cache_dtype_skip_layers`) repairs fp8 and int4, which is what Turing's calibration does without being told.
+Scope: measured on Qwen2.5 (0.5B, 1.5B, 1.5B-Instruct) and SmolLM2 (360M, 1.7B).
+
+**GSM8K exact match** (Qwen2.5-1.5B-Instruct, first 500 test problems, 8-shot, greedy; `results_gsm8k_final_cuda.json`,
+`results_gsm8k_teal_cuda.json` (200 problems, batch 1, where TEAL applies), `results_gsm8k_diag_cuda.json`):
+
+<!-- table:gsm8k -->
+| Setting | dtype | Batch | GSM8K exact match |
 | :--- | :---: | :---: | :---: |
-| HuggingFace vs Turing exact (sanity) | -0.0003 ± 0.0001 | -0.0000 ± 0.0002 | +0.0002 ± 0.0002 |
-| Token-by-token vs one pass (sanity) | -0.0000 ± 0.0001 | -0.0002 ± 0.0001 | +0.0001 ± 0.0001 |
-| int8 KV (per token) | +0.0004 ± 0.0003 | -0.0001 ± 0.0005 | -0.0005 ± 0.0007 |
-| int4 KV (per 32 values) | +0.0246 ± 0.0072 | +0.0184 ± 0.0049 | +0.0245 ± 0.0051 |
-| Quest, 25% of pages | +0.0356 ± 0.0105 | +0.0235 ± 0.0052 | +0.0136 ± 0.0065 |
-| Quest, 10% of pages | +0.1474 ± 0.0223 | +0.1071 ± 0.0158 | +0.0450 ± 0.0137 |
-| int8 + Quest 25% | +0.0378 ± 0.0105 | +0.0246 ± 0.0051 | +0.0132 ± 0.0067 |
+| native KV | bf16 | 32 | 57.2% ± 2.2% |
+| int8 KV | bf16 | 32 | 58.2% ± 2.2% |
+| int4 KV | bf16 | 32 | 52.8% ± 2.2% |
+| native (TEAL baseline) | bf16 | 1 | 61.0% ± 3.5% (n=200) |
+| TEAL 40% | bf16 | 1 | 52.5% ± 3.5% (n=200) |
+| int8 KV, smoothing off | bf16 | 32 | 58.2% ± 2.2% |
+| int8 KV | fp16 | 32 | 59.0% ± 2.2% |
+| native KV | fp16 | 32 | 57.6% ± 2.2% |
+<!-- /table -->
 
-**C. Quest at 8K context** (SmolLM2-1.7B, its trained length; 8 windows of 8,192 tokens, last 128 positions scored; `results_kv_quality_8k_cuda.json`): 25% of pages +0.0014 ± 0.0039, 10% of pages +0.0172 ± 0.0062. Page selection costs less as the context grows (+0.013 at 2K for the same model), as the Quest paper reports.
+**Pass-key retrieval** (Qwen2.5-1.5B-Instruct, bf16, 5 depths per length; `results_niah_final_cuda.json`):
 
-The int8 cache costs nothing measurable (every Δ is within two standard errors of zero), which is why `--kv-cache-dtype auto` uses it on CUDA. int4 with per-32-value scales costs about +0.02 nats; Quest page selection at 25% costs +0.013 to +0.035 at 2K, less on the larger model and at longer context; these reproduce the published results (KIVI-style grouped 4-bit, Quest) at this scale.
+<!-- table:niah -->
+| KV cache | 2K | 8K | 16K | 32K | All |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| native KV | 5/5 | 5/5 | 5/5 | 5/5 | 100.0% |
+| int8 KV | 5/5 | 5/5 | 5/5 | 5/5 | 100.0% |
+| int4 KV | 5/5 | 5/5 | 5/5 | 5/5 | 100.0% |
+<!-- /table -->
 
 ### Reproduce
 ```bash
-python scripts/eval_kv_quality.py --models HuggingFaceTB/SmolLM2-135M,HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B \
-  --arms hf_native,exact_forward,exact_decode,int8,int4,quest25,quest10,int8_quest25 --context 2048 --decode 128 --windows 16
+python scripts/eval_kv_quality.py --models HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B,Qwen/Qwen2.5-1.5B \
+  --arms exact_forward,exact_decode,int8,int4,int4_nosmooth,quest25,rtn4,gptq4,teal25,teal40,teal50 --windows 16
+turing eval-accuracy --model Qwen/Qwen2.5-1.5B-Instruct --samples 500 --dtype bf16 --kv-cache-dtype int4
+turing eval-niah --model Qwen/Qwen2.5-1.5B-Instruct --context-len 2048 8192 16384 32768 --kv-cache-dtype int4
+~/vllm-venv/bin/python scripts/eval_vllm_quality.py --kv-cache-dtype fp8 --kv-skip-layers 0
 ```
 
 ---
 
-## 3. KV Cache: Memory and Decode Throughput
+## 3. 4-bit weights and activation sparsity
 
-**Memory.** K and V bytes per token, all layers, for a 70B-shaped model (80 layers, 8 KV heads, head_dim 128) at a 32K context: fp16 10.0 GiB; int8 5.16 GiB (−48%: head_dim + 4 bytes per head); int4 3.13 GiB (−69%). The cache is paged in 16-token pages from one pool, so a request leaves at most 15 token slots of a page unused.
+**Decode speed at batch 1** (512-token prompt, 128 greedy steps; `results_weight_formats_cuda.json`,
+`results_weight_formats_qwen_cuda.json`). Serving decodes through CUDA graphs; the eager column launches every kernel
+from Python and shows why that matters for small Triton kernels:
 
-**Decode throughput** on one NVIDIA L4 (fp16), measured by `scripts/benchmark_kv_decode.py`: one WikiText-2 prompt is prefilled (in 2,048-token chunks, as the engine does), its cache is copied into B independent requests, and 32 batched decode steps are timed through the serving path (`SubspaceCausalLM.forward` with one cache per request, as the engine runs it). The paged KV pool takes 85% of the free GPU memory; each setting sizes its own. The baseline is the same weights in HuggingFace transformers with its own cache, same GPU, batch and context.
+<!-- table:formats -->
+| Model | Weights | Decode tok/s (CUDA graphs) | Eager | Weight GiB |
+| :--- | :---: | :---: | :---: | :---: |
+| SmolLM2-1.7B | fp16 | 61.4 | 32.9 | 3.38 |
+| SmolLM2-1.7B | rtn4 | 96.5 | 17.4 | 1.20 |
+| SmolLM2-1.7B | gptq4 | 97.1 | 17.5 | 1.20 |
+| SmolLM2-1.7B | teal25 | 68.7 | 16.1 | 3.38 |
+| SmolLM2-1.7B | teal40 | 76.7 | 16.3 | 3.38 |
+| SmolLM2-1.7B | teal50 | 82.7 | 16.2 | 3.38 |
+| SmolLM2-1.7B | rtn4_teal40 | 123.4 | 15.7 | 1.20 |
+| Qwen2.5-1.5B | fp16 | 68.7 | 27.4 | 3.31 |
+| Qwen2.5-1.5B | rtn4 | 102.0 | 14.6 | 1.54 |
+| Qwen2.5-1.5B | gptq4 | 100.9 | 14.4 | 1.54 |
+| Qwen2.5-1.5B | teal25 | 73.1 | 13.6 | 3.31 |
+| Qwen2.5-1.5B | teal40 | 82.1 | 13.5 | 3.31 |
+| Qwen2.5-1.5B | teal50 | 88.7 | 13.4 | 3.31 |
+| Qwen2.5-1.5B | rtn4_teal40 | 114.9 | 13.1 | 1.54 |
+<!-- /table -->
 
-**SmolLM2-360M** (32 layers, 15/5 heads, head_dim 64; `results_kv_decode_cuda_smollm2_360m.json`). Generated tokens per second; 'pool full' = the KV pool (85% of free GPU memory) cannot hold the batch, OOM = CUDA out of memory, — = not run after a smaller batch did not fit; contexts above 8,192 exceed the model's trained length (speed only).
+**Where the int4 kernel beats dequantize + cuBLAS** (microseconds, summed over six layer shapes from 2048 × 2048 to
+14336 × 4096, timed as CUDA-graph replays; `results_w4a16_crossover_cuda.json`). The kernel splits K across programs so
+a narrow layer still fills the GPU; `INT4_MAX_ROWS = 64` follows from this table:
 
+<!-- table:crossover -->
+| Rows (M) | int4 kernel | int4, no K split | dequantize + cuBLAS | fp16 cuBLAS |
+| :--- | :---: | :---: | :---: | :---: |
+| 1 | 323 | 475 | 2,390 | 1,001 |
+| 2 | 366 | 485 | 2,722 | 1,022 |
+| 4 | 366 | 536 | 2,736 | 1,021 |
+| 8 | 391 | 636 | 2,745 | 1,029 |
+| 16 | 521 | 762 | 2,759 | 1,043 |
+| 32 | 1,060 | 1,163 | 2,889 | 1,159 |
+| 64 | 1,847 | 1,847 | 3,000 | 1,247 |
+| 128 | 3,187 | 3,208 | 3,128 | 1,386 |
+| 256 | 6,330 | 6,281 | 3,812 | 2,114 |
+| 512 | 12,460 | 12,456 | 5,392 | 3,539 |
+<!-- /table -->
+
+TEAL sparsifies projection inputs only in one-row decode on CUDA, where the input-sparse kernel skips the weight rows
+of zero inputs. Applied to a whole prefill it broke attention-sink tokens (SmolLM2-1.7B: +6.4 nats at 40%), so
+prefill and batched decode stay dense.
+
+---
+
+## 4. Decode throughput against HuggingFace transformers
+
+One WikiText-2 prompt is prefilled, its cache copied into B requests, and 32 batched decode steps are timed through
+the serving path; the paged pool takes 85% of free GPU memory. 'pool full' = the pool cannot hold the batch, OOM =
+CUDA out of memory, — = not run. Contexts above 8,192 exceed SmolLM2's trained length (speed only).
+
+**SmolLM2-360M** (`results_kv_decode_cuda_smollm2_360m.json`), generated tokens per second:
+
+<!-- table:decode_360m -->
 | Setting | 2K × B=1 | 2K × B=8 | 2K × B=32 | 2K × B=64 | 8K × B=1 | 8K × B=8 | 8K × B=32 | 8K × B=64 | 32K × B=1 | 32K × B=8 | 32K × B=32 | 32K × B=64 |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| HuggingFace transformers | 29 | 228 | 783 | 827 | 30 | 202 | 213 | OOM | 30 | 56 | OOM | — |
-| Turing, native, no CUDA graph | 24 | 190 | 755 | 1501 | 24 | 191 | 463 | pool full | OOM | — | — | — |
-| Turing, native cache | 162 | 888 | 1506 | 1715 | 131 | 382 | 468 | pool full | OOM | — | — | — |
-| Turing, int8 | 163 | 882 | 1518 | 1713 | 129 | 383 | 465 | 496 | OOM | — | — | — |
-| Turing, int4 | 163 | 825 | 1431 | 1597 | 127 | 353 | 440 | 458 | OOM | — | — | — |
-| Turing, int8 + Quest 25% | 24 | 188 | 743 | 1453 | 16 | 121 | 478 | 594 | OOM | — | — | — |
+| HuggingFace transformers | 31 | 241 | 774 | 820 | 31 | 201 | 212 | OOM | 31 | 56 | OOM | — |
+| Turing, native, no CUDA graph | 24 | 190 | 758 | 1,485 | 24 | 191 | 463 | pool full | OOM | — | — | — |
+| Turing, native cache | 164 | 895 | 1,510 | 1,716 | 132 | 381 | 468 | pool full | OOM | — | — | — |
+| Turing, int8 | 165 | 885 | 1,507 | 1,705 | 129 | 381 | 459 | 492 | OOM | — | — | — |
+| Turing, int4 | 164 | 831 | 1,434 | 1,590 | 128 | 352 | 433 | 450 | OOM | — | — | — |
+| Turing, int8 + Quest 25% | 164 | 876 | 1,488 | 1,690 | 104 | 260 | 256 | OOM | OOM | — | — | — |
+<!-- /table -->
 
-**SmolLM2-1.7B** (24 layers, 32/32 heads, head_dim 64; `results_kv_decode_cuda_smollm2_1p7b.json`). Generated tokens per second; 'pool full' = the KV pool (85% of free GPU memory) cannot hold the batch, OOM = CUDA out of memory, — = not run after a smaller batch did not fit; contexts above 8,192 exceed the model's trained length (speed only).
+**SmolLM2-1.7B** (`results_kv_decode_cuda_smollm2_1p7b.json`):
 
-| Setting | 2K × B=1 | 2K × B=8 | 2K × B=32 | 2K × B=64 | 8K × B=1 | 8K × B=8 | 8K × B=32 | 8K × B=64 | 32K × B=1 | 32K × B=8 | 32K × B=32 | 32K × B=64 |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| HuggingFace transformers | 40 | 137 | 159 | OOM | 29 | 43 | OOM | — | 10 | OOM | — | — |
-| Turing, native, no CUDA graph | 31 | 228 | 364 | pool full | 32 | 89 | pool full | — | 19 | pool full | — | — |
-| Turing, native cache | 56 | 234 | 366 | pool full | 41 | 90 | pool full | — | 19 | pool full | — | — |
-| Turing, int8 | 56 | 230 | 361 | 394 | 41 | 88 | pool full | — | 19 | pool full | — | — |
-| Turing, int4 | 55 | 215 | 329 | 356 | 39 | 81 | 97 | pool full | 17 | 23 | pool full | — |
-| Turing, int8 + Quest 25% | 31 | 217 | 346 | 382 | 19 | 109 | pool full | — | 20 | pool full | — | — |
+<!-- table:decode_1p7b -->
+| Setting | 2K × B=1 | 2K × B=8 | 2K × B=32 | 8K × B=1 | 8K × B=8 | 8K × B=32 | 32K × B=1 | 32K × B=8 | 32K × B=32 |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| HuggingFace transformers | 39 | 136 | 158 | 28 | 43 | OOM | 10 | OOM | — |
+| Turing, native, no CUDA graph | 31 | 223 | 353 | 31 | 87 | pool full | 18 | pool full | — |
+| Turing, native cache | 56 | 229 | 357 | 41 | 88 | pool full | 19 | pool full | — |
+| Turing, int8 | 56 | 227 | 356 | 40 | 87 | pool full | 19 | pool full | — |
+| Turing, int4 | 55 | 214 | 325 | 39 | 80 | pool full | 17 | pool full | — |
+| Turing, int8 + Quest 25% | 56 | 226 | 355 | 37 | 50 | pool full | 19 | OOM | — |
+<!-- /table -->
 
-What the tables show:
-* **CUDA graphs** remove the per-layer launch overhead: SmolLM2-360M at batch 1 and 2K decodes 162 tok/s against 24 eagerly and 29 for HuggingFace transformers; SmolLM2-1.7B 56 against 40. At batch 64 and 2K SmolLM2-360M reaches 1,715 tok/s against 827 (2.1×).
-* **Capacity:** the pool wastes at most one partial page per request, and int8/int4 hold 1.87×/3.17× the tokens of the native cache in the same memory. int8 fits SmolLM2-360M at 8K × 64 and SmolLM2-1.7B at 2K × 64, int4 SmolLM2-1.7B at 32K × 8; HuggingFace runs out of memory on all three.
-* **Long context, one request:** SmolLM2-1.7B at 32K decodes 19 tok/s against 10.
-* **Quest page selection** runs outside the CUDA graph (the page lists change every step) and pays only where reading the cache dominates:
+**Quest page selection at 25%** against reading every page, both int8, SmolLM2-360M, selection forced on at every
+length (`results_quest_threshold_cuda_smollm2_360m.json`; > 1 means Quest is faster):
 
-Quest page selection at 25% against reading every page, both int8, SmolLM2-360M (`results_quest_threshold_cuda_smollm2_360m.json`; selection forced on at every length). Tokens per second; ratio > 1 means Quest is faster.
+<!-- table:quest -->
+| Batch | 2K | 4K | 8K | 16K | 32K |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| 1 | 0.77× | 0.81× | 0.87× | OOM | OOM |
+| 8 | 0.64× | 0.89× | 0.88× | — | — |
+| 64 | 0.40× | 0.71× | 0.64× | — | — |
+<!-- /table -->
 
-| Batch | 1K | 2K | 4K | 8K | 16K | 32K |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| 1 | 0.09× | 0.09× | 0.10× | 0.13× | 0.15× | 0.21× |
-| 8 | 0.12× | 0.14× | 0.20× | 0.31× | 0.55× | 1.03× |
-| 64 | 0.31× | 0.54× | 0.99× | 1.19× | OOM | OOM |
-
-
-  So `kv_select_min_tokens` defaults to 8,192, and Quest stays opt-in (`--kv-page-budget`). At batch 1 it is 5–10× slower than reading every page.
-* **Not measured:** other engines (vLLM, SGLang, TensorRT-LLM, llama.cpp); this repository does not run them.
+Quest is slower at every length measured here, so it stays opt-in (`--kv-page-budget`) and starts only from
+`kv_select_min_tokens` (8,192) when enabled.
 
 ### Reproduce
 ```bash
 python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M \
   --settings hf_transformers,native_eager,native,int8,int4,int8_quest25 --contexts 2048,8192,32768 --batches 1,8,32,64
-# Quest against reading every page, selection forced on at every length:
-python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M --settings int8,int8_quest25 \
-  --contexts 1024,2048,4096,8192,16384,32768 --batches 1,8,64 --quest-min-tokens 0
 ```
-
-> **About the earlier NIAH section.** `scripts/stress_test_niah_breaking_point.py` quantized one 512-token page of random vectors per row; the "context length" only labelled the row, and no model was involved. Its 1,000,000-token and rank-table claims were removed, and the script was deleted in v2.0; `turing eval-niah` now runs pass-key retrieval through the engine on real weights.
 
 ---
 
-## 4. Storage Ingestion Ladder (measured cold, Apple M4 Pro SSD)
+## 5. Long context at equal KV memory
 
-`scripts/benchmark_ingest_ladder_all_tiers.py` reads a 2048 MiB file laid out as tensor-sized segments (one 7B-layer pattern repeated, 42 segments) into host memory. Before every cold run the file is written fresh through an `F_NOCACHE` descriptor (macOS) or dropped with `posix_fadvise(POSIX_FADV_DONTNEED)` (Linux), and `mincore` confirms that none of it is in the file cache; the warm row reads it again once it is fully cached. GB/s is bytes / wall time with 1 GB = 10⁹ bytes; ± is the standard error over n runs. The machine was shared with other jobs (load average about 10), so the spread is wide. Results: `results_ingest_ladder.json`.
+Qwen2.5-1.5B-Instruct, batches of 16 to 128 requests, each a 16K-token prompt and 256 new tokens, on one L4. vLLM runs at `gpu_memory_utilization` 0.85 and records the KV memory it took (14.6 GiB); every
+Turing setting gets the same bytes, so capacity differs only by bytes per token. Seconds per request
+(`results_longctx_cuda.json`):
 
+<!-- table:longctx -->
+| Engine, KV cache | KV capacity (tokens) | B=16 | B=32 | B=64 | B=128 |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Turing native | 547,568 | 3.67 | 3.59 | 3.53 | 3.51 |
+| Turing int8 | 993,184 | 3.74 | 3.64 | 3.59 | 3.56 |
+| Turing int4 | 1,304,864 | 3.80 | 3.61 | 3.57 | 3.54 |
+| Turing int4, Quest 25% | 1,135,712 | 4.58 | 4.24 | 3.98 | 3.87 |
+| vLLM auto | 547,856 | 2.37 | 2.37 | 2.53 | 2.60 |
+| vLLM fp8 | 1,069,392 | 1.90 | 1.75 | 1.72 | 1.71 |
+| vLLM fp8, skip layer 0 | 1,032,096 | 1.85 | 1.74 | 1.75 | 1.73 |
+| vLLM int8_per_token_head | 1,062,096 | 4.90 | 4.79 | 4.74 | 4.72 |
+| vLLM int4_per_token_head | 2,060,896 | 4.73 | 4.55 | 4.49 | 4.41 |
+| vLLM int4_per_token_head, skip layer 0 | 1,876,928 | 4.51 | 4.42 | 4.36 | 4.30 |
+<!-- /table -->
+
+Turing's int4 cache holds 2.4× the tokens of fp16, but its time per request does not change with the cache format:
+at this length it is bound by prefill, where vLLM's attention kernels are faster. Quality of each format is in §2;
+vLLM fp8 without a skipped layer is fast because it is wrong on this model.
+
+---
+
+## 6. Cold start
+
+Time from process start to the first generated token on the L4 (fresh process per run; cold = the model files
+dropped from the page cache, Python and CUDA libraries cached; `results_cold_start_cuda.json`):
+
+<!-- table:cold_start -->
+| Model | Format | Page cache | GB | n | Process start → first token, s | Load, s | Imports, s | Load → first token, s |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| SmolLM2-1.7B | safetensors | cold | 3.43 | 5 | 27.21 ± 0.02 | 18.87 ± 0.00 | 4.26 | 4.05 |
+| SmolLM2-1.7B | safetensors | warm | 3.43 | 5 | 10.23 ± 0.01 | 2.01 ± 0.00 | 4.15 | 4.05 |
+| SmolLM2-1.7B | tgate4 | cold | 1.29 | 5 | 21.50 ± 0.02 | 7.45 ± 0.00 | 4.16 | 9.87 |
+| SmolLM2-1.7B | tgate4 | warm | 1.29 | 5 | 15.32 ± 0.02 | 1.28 ± 0.00 | 4.16 | 9.86 |
+| Qwen2.5-1.5B | safetensors | cold | 3.10 | 5 | 27.39 ± 0.01 | 17.50 ± 0.00 | 4.17 | 5.69 |
+| Qwen2.5-1.5B | safetensors | warm | 3.10 | 5 | 12.25 ± 0.03 | 2.36 ± 0.00 | 4.17 | 5.70 |
+| Qwen2.5-1.5B | tgate4 | cold | 1.66 | 5 | 28.02 ± 0.54 | 10.16 ± 0.01 | 4.17 | 13.66 |
+| Qwen2.5-1.5B | tgate4 | warm | 1.66 | 5 | 19.49 ± 0.04 | 2.18 ± 0.01 | 4.17 | 13.11 |
+<!-- /table -->
+
+The 4-bit `.tgate4` directory loads 1.7–2.5× faster from a cold disk, but its first token comes later: Triton tunes the
+int4 kernels again in every new process, and the default int8 KV pool calibrates its layers.
+
+---
+
+## 7. MoE expert offload
+
+OLMoE-1B-7B (16 MoE layers × 64 experts, top-8) with every routed expert in host memory and a GPU expert cache of
+64–512 experts, against all experts on the GPU (4 WikiText-2 windows, 256-token prompts, 32 teacher-forced decode
+steps; `results_moe_offload_cuda.json`). "decider" picks copy-to-GPU or run-on-CPU per miss; "device" always copies:
+
+<!-- table:moe -->
+| Configuration | Decode tok/s | Expert-cache hit rate (decode) | Peak GPU GiB | Same greedy token as all-on-GPU |
+| :--- | :---: | :---: | :---: | :---: |
+| offload slots=64 lru decider | 4.90 | 17.8% | 2.7 | 98.4% |
+| offload slots=64 lru device | 0.56 | 0.0% | 2.7 | 99.2% |
+| offload slots=64 lfru decider | 5.11 | 17.7% | 2.7 | 98.4% |
+| offload slots=64 lfru device | 4.71 | 19.5% | 2.7 | 99.2% |
+| offload slots=128 lru decider | 5.80 | 34.0% | 3.4 | 99.2% |
+| offload slots=128 lru device | 0.74 | 25.2% | 3.4 | 99.2% |
+| offload slots=128 lfru decider | 5.87 | 34.3% | 3.4 | 99.2% |
+| offload slots=128 lfru device | 5.07 | 30.4% | 3.4 | 99.2% |
+| offload slots=256 lru decider | 6.10 | 36.2% | 4.9 | 99.2% |
+| offload slots=256 lru device | 0.99 | 44.8% | 4.9 | 99.2% |
+| offload slots=256 lfru decider | 5.94 | 36.2% | 4.9 | 99.2% |
+| offload slots=256 lfru device | 5.45 | 47.2% | 4.9 | 98.4% |
+| offload slots=512 lru decider | 6.00 | 36.2% | 7.9 | 99.2% |
+| offload slots=512 lru device | 1.83 | 71.7% | 7.9 | 99.2% |
+| offload slots=512 lfru decider | 5.96 | 36.2% | 7.9 | 99.2% |
+| offload slots=512 lfru device | 7.03 | 72.4% | 7.9 | 98.4% |
+| all experts on the GPU | 15.92 | — | 13.9 | — |
+<!-- /table -->
+
+---
+
+## 8. Storage ingestion
+
+`scripts/benchmark_ingest_ladder_all_tiers.py` reads a 2 GiB file of tensor-sized segments cold (written through
+`F_NOCACHE` on macOS, dropped with `posix_fadvise` on Linux, `mincore` confirms nothing is cached).
+
+**Apple M4 Pro SSD** (`results_ingest_ladder.json`; the machine was shared, so the spread is wide):
+
+<!-- table:ingest_mac -->
 | Row | Cache | GB/s | ms | n |
 | :--- | :---: | ---: | ---: | :---: |
 | Tier 0: mmap demand paging | cold | 0.75 ± 0.01 | 2,874 | 3 |
@@ -130,34 +317,80 @@ python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M --setti
 | Tier 5: ring reader, file in page cache (warm) | warm | 51.29 ± 1.36 | 42 | 3 |
 | Tier 3: .tgate4 compressed container | — | not measured | — | — |
 | Tier 4: GPUDirect Storage + layer pipelining | — | not measured | — | — |
+<!-- /table -->
 
-The earlier version of this table was not a cold measurement: it divided the whole file size by the time to read 10 tensors, derived Tier 3 as Tier 2 time × 0.25, hardcoded Tier 4 at 45.2 ms, and floored Tier 5 at 0.042 ms. Tier 3 has no loader that reads a `.tgate4` file end to end, and Tier 4 needs CUDA with cuFile, so neither is measured here. On this sequential layout queue depth 1 already reaches about 4.4 GB/s (kernel readahead helps sequential 1 MiB reads), which suggests most of the gain over the old reader below comes from capping requests at 1 MiB rather than from depth; random reads depend on depth far more (cift F1 on the same SSD: 1 MiB random reads went from 2.4 GB/s with 1 in flight to 6.0 GB/s with 64).
+**L4 VM boot disk** (`results_ingest_ladder_linux_l4.json`; a network-attached persistent disk):
 
-### Ring reader before and after (cold, interleaved A/B)
+<!-- table:ingest_linux -->
+| Row | Cache | GB/s | ms | n |
+| :--- | :---: | ---: | ---: | :---: |
+| Tier 0: mmap demand paging | cold | 0.19 ± 0.00 | 5,546 | 3 |
+| Tier 1: mmap + MADV_WILLNEED | cold | 0.19 ± 0.00 | 5,699 | 3 |
+| Tier 2: ring reader, read_segments_parallel (bytes) | cold | 0.19 ± 0.00 | 5,571 | 3 |
+| Tier 2: ring reader, read_segments_into (buffer) | cold | 0.19 ± 0.00 | 5,518 | 3 |
+| Tier 2: ring reader, read_segments_into, queue_depth=1 | cold | 0.19 ± 0.00 | 5,518 | 3 |
+| Tier 2: ring reader, read_segments_into, queue_depth=8 | cold | 0.19 ± 0.00 | 5,518 | 3 |
+| Tier 5: ring reader, file in page cache (warm) | warm | 4.28 ± 0.29 | 253 | 3 |
+| Tier 3: .tgate4 compressed container | — | not measured | — | — |
+| Tier 4: GPUDirect Storage + layer pipelining | — | not measured | — | — |
+<!-- /table -->
 
-`NativeAsyncRingReader` used to give each of 8 threads a run of whole tensors to `pread`, and ignored `queue_depth`. It now splits reads into requests of at most 1 MiB and keeps up to `queue_depth` (default 64) in flight, which is what this SSD needs to reach its bandwidth. `scripts/benchmark_ring_reader_ab.py` alternates the two builds in child processes on the same cold 2048 MiB file, calling `read_segments_parallel`. Results: `results_ring_reader_ab_mps.json`.
+**Ring reader before and after** the switch to ≤1 MiB requests with `queue_depth` in flight (cold, alternating
+builds; `results_ring_reader_ab_mps.json`):
 
+<!-- table:ring_ab -->
 | Build | GB/s (mean ± se) | GB/s (median) | ms | n |
 | :--- | ---: | ---: | ---: | :---: |
 | f936008 | 2.22 ± 0.35 | 2.33 | 1,225 | 8 |
 | current | 5.78 ± 0.41 | 6.23 | 393 | 8 |
-
-### Reproduce on your hardware
-```bash
-python scripts/benchmark_ingest_ladder_all_tiers.py --size-mib 2048 --repeats 3
-git archive f936008 | tar -x -C /tmp/base && (cd /tmp/base && python setup.py build_ext --inplace)
-python scripts/benchmark_ring_reader_ab.py --baseline /tmp/base --baseline-label f936008 --pairs 8
-```
+<!-- /table -->
 
 ---
 
-## 5. Removed Results
+## 9. C++ engine
 
-The [claims audit](claims-audit.md) has the full table (claim, producing script and line, classification). In summary, the removed sections fell into four groups:
+`turing-cli` decoding a synthetic 8-layer Llama-layout model, one thread (`results_cpp_engine_mps.json`,
+`results_cpp_engine_x86.json`):
 
-* **Constants or formulas printed as results.** Speculation-gating throughput (`50 × c` plain, `50 × (1.82 − 0.3(c−1)) × c` speculative, so "1.82× at c=1" was an input); lineage residual norms (≈30.7 is the norm of the injected noise, and the naive collapse was a hard-coded `× 1.5` per turn); the 5,500 ms cold-start baseline and its 21.6× speedup; ingest Tier 3 (`Tier 2 × 0.25`), Tier 4 (45.2 ms) and the Tier 5 floor (0.042 ms) (§4 now has a cold measurement); the 7.85× cross-model transfer speedup (`baseline = measured × 7.85`); "75.0% VRAM savings" (a literal in the print string); the 7.42 GB multi-model footprint (a sum of declared estimates); "100% parity / parse success / OK" strings that were never checked. These scripts now print only what they compute.
-* **Random tensors or stubs presented as model or system results.** The 131K-token NIAH scored one 512-row page of random keys; the "5-model pipeline" (Docling, GLiNER, BGE, reranker, LLM) loads no model (substring match, random embeddings, word overlap, no generation); serving, gateway and prefill/decode throughput used a random-initialised 4-layer toy model; MoE hit-rate and eviction counts come from a seeded synthetic Zipf trace; associative recall used toy models trained from scratch.
-* **No committed result, or contradicted by the committed one.** Most values in the old §4–§9, §11–§18 and §20–§26 appear in no results file, and the committed runs of the same scripts disagree, sometimes in direction (for example semantic-anchor restore on MPS was slower than the baseline, the fused speculative verify ran at 0.28× on the L4, and the batched option select was 0.15×).
-* **Comparisons that were not like for like.** A dense baseline without SDPA against a one-query hybrid layer; Python loops against vectorised kernels; cold page cache against warm; baselines whose first timed iteration paid kernel start-up.
+<!-- table:cpp -->
+| Machine | Build | KV cache | n | tok/s |
+| :--- | :---: | :---: | :---: | :---: |
+| Apple M4 Pro (NEON) | c547190 | native | 5 | 16.9 ± 0.0 |
+| Apple M4 Pro (NEON) | current | native | 5 | 124.6 ± 1.6 |
+| Apple M4 Pro (NEON) | current | int8 | 5 | 117.2 ± 3.5 |
+| L4 VM CPU (AVX2) | current | native | 5 | 25.3 ± 0.1 |
+| L4 VM CPU (AVX2) | current | int8 | 5 | 25.9 ± 0.0 |
+<!-- /table -->
 
-**Not measured by this repository:** other engines (vLLM, SGLang, TensorRT-LLM, llama.cpp), MoE checkpoints of any size, and any model larger than SmolLM2-1.7B. Earlier versions also showed a serving-concurrency table against those engines; it was computed from formulas in `scripts/run_all_benchmarks.py` (`18.5 × c^0.72 × 2.35` for Turing Engine) and was removed in v1.6.0.
+---
+
+## 10. Old serving defaults
+
+Before v1.6 `turing serve` pruned 50% of FFN channels and applied a random-basis "recirculation" by default.
+Measured on real weights (Apple M4 Pro, fp32; `results_serving_defaults_mps.json`), pruning without retraining is
+destructive; both are off now:
+
+<!-- table:serving_defaults -->
+| Model | Exact NLL (= HuggingFace) | FFN pruning 50% (old default) | Recirculation (old default) |
+| :--- | :---: | :---: | :---: |
+| SmolLM2-135M | 2.606 | +15.775 ± 1.731 | +0.000 ± 0.000 |
+| SmolLM2-360M | 2.309 | +8.920 ± 0.430 | +0.001 ± 0.001 |
+| SmolLM2-1.7B | 1.921 | +6.848 ± 0.215 | +0.001 ± 0.001 |
+<!-- /table -->
+
+---
+
+## 11. Removed results
+
+The [claims audit](claims-audit.md) lists every number earlier versions published, with its producing script and
+line. They fell into four groups:
+
+* **Constants or formulas printed as results**: speculation-gating throughput, lineage residual norms, a hard-coded
+  cold-start baseline, ingest tiers derived as `Tier 2 × 0.25` or hard-coded, a "7.85×" transfer speedup, "75.0%
+  VRAM savings" written into a print string.
+* **Random tensors or stubs presented as model results**: a 131K-token NIAH over one page of random keys, a
+  "5-model pipeline" that loaded no model, throughput of a random 4-layer toy model, MoE hit rates from a synthetic
+  Zipf trace.
+* **No committed result, or contradicted by the committed one.**
+* **Comparisons that were not like for like**: cold against warm caches, Python loops against vectorised kernels,
+  baselines that paid kernel start-up in their first timed iteration.

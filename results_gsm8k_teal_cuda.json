@@ -1412,7 +1412,10 @@
     "kv_page_budget": 1.0,
     "quantization": "none",
     "activation_sparsity": 0.0,
-    "device": "cuda"
+    "device": "cuda",
+    "dtype": "bf16",
+    "batch_size": 1,
+    "_note": "dtype and batch_size added from the runbook command (scripts/l4_session_phase5.sh); the CLI did not record them then"
   },
   {
     "n": 200,
@@ -2827,6 +2830,9 @@
     "kv_page_budget": 1.0,
     "quantization": "none",
     "activation_sparsity": 0.4,
-    "device": "cuda"
+    "device": "cuda",
+    "dtype": "bf16",
+    "batch_size": 1,
+    "_note": "dtype and batch_size added from the runbook command (scripts/l4_session_phase5.sh); the CLI did not record them then"
   }
 ]

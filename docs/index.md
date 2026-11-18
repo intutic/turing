@@ -1,48 +1,41 @@
 # Turing Engine
 
-**An inference server that reproduces HuggingFace's logits for 16 model families, with a paged int8/int4 KV cache, OpenAI, Anthropic and Ollama APIs in one process, and a standalone C++ engine.**
+**A small, readable LLM inference server for testing KV-cache and quantization ideas against real models, where every
+number in the docs comes from a committed results file.**
 
 [![Release](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](https://github.com/intutic/turing/blob/master/CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests](https://img.shields.io/badge/Tests-667%20%2849%20need%20CUDA%29-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-705-brightgreen.svg)]()
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
 ---
 
-## What is Turing Engine?
+## What it is
 
 An inference and serving runtime for NVIDIA GPUs, Apple Silicon Macs and CPUs. It loads HuggingFace checkpoints,
-llama.cpp GGUF files and its own 4-bit `.tgate4` directories, and by default reproduces the HuggingFace model's
-logits; every lossy option (KV quantization, Quest page selection, 4-bit weights, activation sparsity, FFN pruning)
-is opt-in.
+llama.cpp GGUF files and its own 4-bit `.tgate4` directories, reproduces the HuggingFace model's logits by default, and
+serves OpenAI, Anthropic and Ollama APIs from one process. Every lossy option (low-bit KV, Quest page selection, 4-bit
+weights, activation sparsity) is opt-in.
 
----
+## What it is not
 
-## Measured
+A faster engine. On one NVIDIA L4, vLLM is 1.1–1.5× faster in fp16 and about 2× faster at 4 bits, and llama.cpp is
+faster at batch 1 in 4 bits ([comparison](comparison.md)). For production serving use vLLM, SGLang or TensorRT-LLM;
+on a laptop, llama.cpp or Ollama.
 
-Raw results are committed as `results_*.json`; the [benchmarks](benchmarks.md) page has the tables.
+## What it is good for
 
-* **HuggingFace parity on real weights**: SmolLM2 135M–1.7B score the same mean NLL as HuggingFace to five decimals.
-* **GGUF parity with llama.cpp**: 13 real GGUF files across 12 families agree with llama.cpp on the top-1 token at
-  97–100% of 64 positions (`results_gguf_parity_mps.json`).
-* **KV cache**: int8 costs no measurable NLL on SmolLM2 135M–1.7B, int4 about +0.02 nats; on an NVIDIA L4 the
-  v1.7.0 engine decoded SmolLM2-360M at 1,715 tok/s at batch 64 and 2K context, against 827 for HuggingFace
-  transformers.
-* **C++ engine**: 7.4× the tokens per second of the previous release's binary on a synthetic model
-  (`results_cpp_engine_mps.json`).
-
-## Implemented, not yet measured
-
-* **Engine**: automatic prefix caching, prompt-lookup speculative decoding, multi-LoRA serving, CUDA graphs with
-  Quest page selection, batched decode on MPS and CPU.
-* **Weights**: 4-bit GPTQ/RTN (`turing convert`) and TEAL-style activation sparsity; their quality is measured by
-  `scripts/eval_kv_quality.py` and their speed by `scripts/benchmark_weight_formats.py`, but no run is committed yet.
-* **API**: chat templates, tools, reasoning budgets, JSON schema by constrained decoding (llguidance), embeddings,
-  rerank, extraction, Ollama `/api/pull`, llm-d KV events, Prometheus metrics.
-* **Distributed**: tensor and pipeline parallelism and prefill/decode disaggregation, tested as CPU processes only.
-* **Comparison with other engines**: none yet. `scripts/benchmark_e2e_generation.py` runs Turing and vLLM on the
-  same prompts; its GPU run is pending.
+* **Low-bit KV caches that stay correct without settings.** At startup Turing finds the layers int8/int4 storage
+  damages and keeps them in the model's dtype. On Qwen2.5-1.5B-Instruct its int8 and int4 caches pass every pass-key
+  retrieval to 32K and keep GSM8K within 5 points of bf16, where vLLM's default fp8 and its per-token int4 caches
+  drop to 0.6–2.4% unless layer 0 is excluded by hand ([benchmarks §2](benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps)).
+* **Measured correctness.** HuggingFace parity for 16 model types in the tests and on real checkpoints; 13 real GGUF
+  files agree with llama.cpp ([models & hardware](models_and_hardware.md)).
+* **Evals that run any idea against real models**: KV and weight quality (`scripts/eval_kv_quality.py`), GSM8K and
+  pass-key retrieval through the engine, and head-to-head benchmarks against vLLM and llama.cpp.
+* **Research components, measured honestly**, including the ones that did not work
+  ([research findings](measured-differentiators.md)).
 
 ---
 
@@ -67,5 +60,6 @@ turing serve --model Qwen/Qwen2.5-0.5B-Instruct --port 8000
 * [Kubernetes & llm-d](llmd-integration.md)
 * [Integrations](integrations.md)
 * [Benchmarks](benchmarks.md)
+* [Research findings](measured-differentiators.md)
 * [Claims audit](claims-audit.md)
 * [Licensing](licensing.md)

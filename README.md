@@ -1,40 +1,75 @@
 # ⚡ Turing Engine
 
-**An inference server that reproduces HuggingFace's logits for 16 model families, with a paged int8/int4 KV cache, OpenAI, Anthropic and Ollama APIs in one process, and a standalone C++ engine.**
+**A small, readable LLM inference server for testing KV-cache and quantization ideas against real models, where every
+number in the docs comes from a committed results file.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
 [![Release: v2.0.0](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 667 (49 need CUDA)](https://img.shields.io/badge/Tests-667%20%2849%20need%20CUDA%29-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 705](https://img.shields.io/badge/Tests-705-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
 ---
 
-## What it is, and what is measured
+## Is it faster than vLLM or llama.cpp?
 
-Turing Engine loads a HuggingFace checkpoint, a llama.cpp GGUF file or its own 4-bit `.tgate4` directory and serves
-it through a continuous-batching engine. By default the model is exact: every lossy option (KV quantization, Quest
-page selection, 4-bit weights, activation sparsity, FFN pruning) is opt-in.
+No. On one NVIDIA L4, on the same model and prompts, vLLM and llama.cpp are faster than Turing in every
+configuration measured, and their 4-bit models answer GSM8K about as well (Qwen2.5-1.5B-Instruct, 512-token prompts,
+256 new tokens; `results_4bit_speed_cuda.json`, `results_4bit_quality_*_cuda.json`):
 
-**Measured** (raw results are committed as `results_*.json`; see [benchmarks](docs/benchmarks.md)):
+<!-- table:vs_4bit -->
+| Setting | Batch 1, tok/s | Batch 8, tok/s | GSM8K (n=500) |
+| :--- | :---: | :---: | :---: |
+| llama.cpp Q4_K_M | 186 | 790 | 52.4% ± 2.2% |
+| vLLM GPTQ-Int4 (Qwen's checkpoint) | 169 | 1,078 | 50.2% ± 2.2% |
+| Turing GPTQ | 87 | 557 | 52.6% ± 2.2% |
+| Turing GPTQ + TEAL 25% | 90 | 531 | 47.2% ± 2.2% |
+| Turing GPTQ + TEAL 40% | 93 | 530 | 43.6% ± 2.2% |
+| vLLM fp16 (reference) | 75 | 533 | — |
+| Turing fp16 (reference) | 65 | 440 | — |
+<!-- /table -->
 
-* **HuggingFace parity on real weights.** SmolLM2 135M–1.7B: the exact model's mean NLL equals HuggingFace's to five
-  decimals (`results_serving_defaults_mps.json`).
-* **GGUF parity with llama.cpp.** 13 real GGUF files (Llama 3.2, a tiny Mixtral, Qwen2.5, Qwen3, Gemma 1/2/3, Phi-2,
-  Phi-3 and Phi-3.5, GPT-2, Pythia, OLMoE) agree with llama.cpp on the top-1 token at 97–100% of 64 positions
-  (`results_gguf_parity_mps.json`, Apple M4 Pro).
-* **KV cache quality and throughput.** The int8 cache costs no measurable NLL on SmolLM2 135M–1.7B; int4 costs about
-  +0.02 nats. On an NVIDIA L4, SmolLM2-360M at 2K context decoded 162 tok/s for one request (HuggingFace
-  transformers: 29) and 1,715 tok/s at batch 64 (827) with the v1.7.0 engine
-  (`results_kv_quality_cuda.json`, `results_kv_decode_cuda_smollm2_360m.json`).
-* **C++ engine.** `turing-cli` decodes a synthetic 8-layer model at 125.6 tok/s on one M4 Pro core, 7.4× the
-  previous release's binary (`results_cpp_engine_mps.json`).
+At short context in fp16 vLLM is 1.1–1.5× faster, and at 16K-token context 1.4× faster per request at equal quality
+([comparison](docs/comparison.md)). For production serving use vLLM, SGLang or TensorRT-LLM; on a laptop, llama.cpp
+or Ollama.
 
-**Not measured yet:** any comparison with vLLM, SGLang, TensorRT-LLM or llama.cpp throughput
-(`scripts/benchmark_e2e_generation.py` runs Turing and vLLM on the same prompts; its GPU run is pending); the speed
-of 4-bit weights and of activation sparsity; tensor and pipeline parallelism on GPUs (tested only with CPU
-processes); MoE checkpoints larger than OLMoE-1B-7B.
+## What it is good for
+
+* **Low-bit KV caches that do not silently break the model.** When a pool stores KV in int8 or int4, Turing measures
+  at startup which layers that format damages (each layer's K and V are round-tripped alone and the change in the
+  next-token distribution is measured on random tokens, in a few seconds) and keeps those layers in the model's
+  dtype; outlier key channels are scaled down for int4. On Qwen2.5-1.5B-Instruct vLLM's default fp8, per-token fp8
+  and per-token int4 caches collapse (GSM8K 0.6–2.4%); Turing's int8 and int4 keep it working with no setting:
+
+<!-- table:vs_kv -->
+| KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 3.51 |
+| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 3.56 |
+| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 3.54 |
+| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.60 |
+| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.71 |
+| vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
+| vLLM fp8_per_token_head | — | 0.6% | 0.0% | +2.404 ± 0.364 | — |
+| vLLM int8_per_token_head | — | 41.4% | 100.0% | +0.023 ± 0.007 | 4.72 |
+| vLLM int4_per_token_head | — | 0.6% | 0.0% | +8.127 ± 0.495 | 4.41 |
+| vLLM int4_per_token_head | layer 0 (manual) | 47.8% | 100.0% | +0.058 ± 0.010 | 4.30 |
+| vLLM turboquant_k8v4 | — | 52.0% | 100.0% | +0.001 ± 0.001 | — |
+<!-- /table -->
+
+  vLLM fp8 with layer 0 skipped *by hand* matches Turing's quality at about half the time per request, which is the
+  point: the calibration finds that layer automatically. Measured on Qwen2.5 and SmolLM2 so far
+  ([benchmarks §2](docs/benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps)).
+* **Measured correctness.** The exact model reproduces HuggingFace's logits on 16 model families in the tests and on
+  real checkpoints ([models & hardware](docs/models_and_hardware.md)); 13 real GGUF files agree with llama.cpp.
+* **A codebase small enough to change.** Paged KV pool, Triton decode kernels, GPTQ, TEAL sparsity, prefix caching,
+  speculative decoding and the OpenAI, Anthropic and Ollama APIs are a few Python modules and kernels, with a
+  standalone C++ engine beside them. The eval scripts (`scripts/eval_kv_quality.py`, `turing eval-accuracy`,
+  `turing eval-niah`, the Turing-vs-vLLM and llama.cpp benchmarks) run any idea against real models.
+
+**Not measured:** multi-GPU (tensor and pipeline parallelism are tested as CPU processes only), models larger than
+OLMoE-1B-7B, SGLang and TensorRT-LLM.
 
 ---
 
@@ -124,10 +159,10 @@ but none of those has been run.
 
 | Area | What the code does |
 | :--- | :--- |
-| KV cache | One paged pool per model (16-token pages), `native`/`int8`/`int4` storage, copy-on-write forks; Quest page selection (`--kv-page-budget`), also inside CUDA graphs |
+| KV cache | One paged pool per model (16-token pages), `native`/`int8`/`int4` storage with the layers that format damages kept in the model dtype (chosen at startup), copy-on-write forks; Quest page selection (`--kv-page-budget`), also inside CUDA graphs |
 | Prefix caching | Automatic: full pages indexed by chained token hashes, reused copy-on-write, evicted LRU (`--no-prefix-caching`) |
 | Speculative decoding | Prompt lookup (no draft model), `--draft-tokens` (default 4); output distribution equals plain decoding for greedy and sampling |
-| Weights | fp32/fp16/bf16; 4-bit GPTQ or RTN (`turing convert`, `--quantization`); TEAL-style activation sparsity (`--activation-sparsity`, off by default) |
+| Weights | fp32/fp16/bf16; 4-bit GPTQ or RTN (`turing convert`, `--quantization`); TEAL-style activation sparsity in batch-1 decode on CUDA (`--activation-sparsity`, off by default) |
 | LoRA | Several PEFT adapters at once (`--lora NAME=PATH`), chosen per request by `model: "base:NAME"` or `X-Turing-Adapter` |
 | API | Chat templates, tools (OpenAI and Anthropic; Hermes, Mistral and Llama 3 call formats), reasoning (`reasoning_content`, Anthropic thinking blocks, effort budgets), JSON schema by token-level constrained decoding, stop strings, usage with cached tokens |
 | Traffic | Admission control sized to the KV pool and three QoS lanes, on by default (429/503 with `Retry-After`) |
@@ -135,10 +170,10 @@ but none of those has been run.
 | Distributed | Tensor and pipeline parallelism (torchrun); prefill/decode disaggregation over TCP (`--prefill-worker`, `--prefill-server`) |
 | Evals | `turing eval-accuracy` (GSM8K exact match) and `turing eval-niah` (pass-key retrieval), through the engine on real weights |
 
-The repository also holds library components that are not in the serving path and have no measurement on a model:
-cross-model KV transfer, `clean_base` lineage, k-slot pooling, hybrid linear/softmax attention (needs a model
-trained with it), Matryoshka draft heads (untrained), an MoE expert-offload runner and assorted Triton and C++
-kernels. See [architecture](docs/architecture.md) and the [claims audit](docs/claims-audit.md).
+The repository also holds research components outside the serving path: cross-model KV transfer, `clean_base`
+lineage, k-slot pooling, an MoE expert-offload runner, hybrid linear/softmax attention (needs a model trained with it)
+and untrained Matryoshka draft heads. What was measured on real models, including what did not work, is in
+[research findings](docs/measured-differentiators.md).
 
 ---
 

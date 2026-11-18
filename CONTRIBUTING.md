@@ -37,7 +37,7 @@ python setup.py build_ext --inplace
 ## 🧪 Testing & Verification
 
 We enforce strict test cleanliness. All pull requests must pass the full test suite with **zero warnings**
-(667 tests; 49 need CUDA and skip elsewhere):
+(705 tests; the CUDA-only ones skip elsewhere):
 
 ```bash
 # Run the complete test suite with strict warning escalation
@@ -86,7 +86,7 @@ on `sys.path`). New scripts must do the same.
 1. **Fork the Repository**: Create a personal fork on GitHub.
 2. **Create a Feature Branch**: `git checkout -b feature/my-new-kernel`
 3. **Implement Your Changes**: Keep commits focused and provide clear, descriptive commit messages.
-4. **Verify Tests**: Run `python -W error -m pytest -v` and ensure all 667 tests pass cleanly (49 need CUDA).
+4. **Verify Tests**: Run `python -W error -m pytest -v` and ensure all 705 tests pass cleanly (CUDA-only ones skip on a Mac).
 5. **Submit PR**: Open a pull request against the `master` branch of `intutic/turing`. Include:
    - A clear summary of the motivation and changes.
    - Any benchmark results or hardware specifications (e.g. tested on NVIDIA L4 or Apple M3 Max).
