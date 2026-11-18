@@ -23,7 +23,9 @@ import json
 import os
 import platform
 import statistics
+import signal
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -100,12 +102,26 @@ def resident(paths):
 def run_once(target, device, dtype, engine="turing", python=sys.executable):
     env = dict(os.environ, HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
     env["PATH"] = os.path.dirname(python) + os.pathsep + env["PATH"]  # a venv's own tools (vLLM's ninja)
-    t0 = time.time()
-    p = subprocess.run([python, "-c", CHILD_VLLM if engine == "vllm" else CHILD, target, device, dtype or ""],
-                       cwd=ROOT, env=env, capture_output=True, text=True)
-    line = next((ln for ln in p.stdout.splitlines() if ln.startswith("COLDSTART ")), None)
+    # Output goes to files and the child leads its own process group: vLLM's engine-core helper inherits the child's
+    # pipes and outlives it, so waiting for a pipe's EOF (capture_output) blocked forever; the group is killed instead.
+    with tempfile.TemporaryFile("w+") as out, tempfile.TemporaryFile("w+") as err:
+        t0 = time.time()
+        p = subprocess.Popen([python, "-c", CHILD_VLLM if engine == "vllm" else CHILD, target, device, dtype or ""],
+                             cwd=ROOT, env=env, stdout=out, stderr=err, text=True, start_new_session=True)
+        try:
+            p.wait(timeout=900)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.wait()
+        out.seek(0); err.seek(0)
+        stdout, stderr = out.read(), err.read()
+    line = next((ln for ln in stdout.splitlines() if ln.startswith("COLDSTART ")), None)
     if p.returncode or line is None:
-        return dict(error=f"exit {p.returncode}: {(p.stderr or p.stdout)[-2000:]}")
+        return dict(error=f"exit {p.returncode}: {(stderr or stdout)[-2000:]}")
     r = json.loads(line[len("COLDSTART "):])
     return dict(ttft_s=r["t_first"] - t0, interpreter_s=r["t_start"] - t0, import_s=r["t_imported"] - r["t_start"],
                 load_s=r["t_loaded"] - r["t_imported"], first_token_s=r["t_first"] - r["t_loaded"],

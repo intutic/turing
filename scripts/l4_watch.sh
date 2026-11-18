@@ -4,7 +4,7 @@
 # last queue's marker appears. Usage: scripts/l4_watch.sh "PHASE10 DONE" l4_session_phase9.sh:PHASE9 l4_session_phase10.sh:PHASE10
 # With L4_FINISH=1, at the last marker it copies the results and logs back, checks every results file arrived, and
 # deletes the VM (the VM also powers itself off 120 min after the marker: scripts/l4_poweroff_when_done.sh).
-Z=us-central1-a; V=turing-bench-l4
+Z=${L4_ZONE:-us-central1-a}; V=turing-bench-l4  # L4_ZONE: the zone the VM lives in now
 last=$1; shift
 repo=${0:A:h:h}  # top level: inside a zsh function $0 is the function's name
 vm() { timeout 90 gcloud compute ssh ishangupta@$V --zone $Z --tunnel-through-iap --ssh-key-file $HOME/.ssh/google_compute_engine --quiet --command "$1" 2>/dev/null; }
@@ -24,7 +24,7 @@ finish() {  # copy everything back, verify, then delete the VM
   echo "results in $repo, logs in $logs; deleting $V"
   gcloud compute instances delete $V --zone $Z --quiet
 }
-seen=$(vm "grep -cE 'exit=[1-9]' ~/l4_status.txt"); echo "failures already seen: $seen"
+seen=""  # failed steps already in the log, read once the VM answers (empty would make an old failure look new)
 restarts=0
 while true; do
   s=$(gcloud compute instances describe $V --zone $Z --format='value(status)' 2>/dev/null)
@@ -32,10 +32,12 @@ while true; do
     restarts=$((restarts+1)); echo "$(date -u +%T) preempted, restart $restarts"
     [ $restarts -gt 8 ] && { echo "too many preemptions"; exit 1; }
     until gcloud compute instances start $V --zone $Z >/dev/null 2>&1; do sleep 60; done
-    until vm "true"; do sleep 20; done
+    # a preemption while waiting for SSH would otherwise leave this loop waiting forever
+    until vm "true"; do sleep 20; [ "$(gcloud compute instances describe $V --zone $Z --format='value(status)' 2>/dev/null)" = TERMINATED ] && continue 2; done
     vm "$relaunch"
     continue
   fi
+  [ -z "$seen" ] && { seen=$(vm "grep -cE 'exit=[1-9]' ~/l4_status.txt") && echo "failures already seen: $seen"; sleep 20; continue; }
   n=$(vm "grep -cE 'exit=[1-9]' ~/l4_status.txt")
   if [ -n "$n" ] && { [ "$n" -gt "$seen" ] || vm "grep -q '$last' ~/l4_status.txt"; }; then
     vm "grep -E 'exit=|DONE|^---' ~/l4_status.txt | tail -40"
