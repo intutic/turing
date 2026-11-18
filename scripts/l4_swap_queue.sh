@@ -4,9 +4,9 @@
 # Usage: l4_swap_queue.sh l4_session_validation.sh v_phi35_16k_turing_niah_int4
 until grep -q "end $2 exit=" ~/l4_status.txt; do sleep 15; done
 for p in $(pgrep -f "^bash scripts/$1"); do
-  kids=$(pgrep -P "$p")
-  kill "$p"            # the queue first, so it cannot log the interrupted step as failed
-  [ -n "$kids" ] && kill $kids
+  # The queue was started with setsid, so it leads its own process group: one signal stops the queue, its step and
+  # the step's grandchildren together (killing only children left a `bash -c` step's python running on the GPU).
+  kill -- -"$p"
 done
 sleep 3
 nvidia-smi --query-compute-apps=pid --format=csv,noheader | xargs -r kill -9
