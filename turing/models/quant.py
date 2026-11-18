@@ -150,9 +150,7 @@ class QuantLinear(nn.Module):
         if x.is_cuda and x2.shape[0] <= INT4_MAX_ROWS and x.dtype in (torch.float16, torch.bfloat16):
             from ..kernels.triton_w4a16 import HAS_TRITON, w4a16_gemm
             if HAS_TRITON:
-                y = w4a16_gemm(x2, self.qweight, self.scales, self.zeros, self.group)
-                if self.bias is not None:
-                    y = y + self.bias
+                y = w4a16_gemm(x2, self.qweight, self.scales, self.zeros, self.group, self.bias)
                 return y.view(*shape[:-1], self.out_features)
         n = self.out_features * self.in_features
         if x.is_cuda:
@@ -239,16 +237,50 @@ def quantize_layer(model: nn.Module, li: int, method: str, hs: Optional[List[tor
 
 @torch.no_grad()
 def quantize_model(model: nn.Module, method: str = "rtn", calib: Optional[torch.Tensor] = None,
-                   group: int = GROUP, batch: int = 4) -> nn.Module:
+                   group: int = GROUP, batch: int = 4, lm_head: bool = False) -> nn.Module:
     """Replace the model's linear layers by QuantLinear in place. method "rtn" needs no data; "gptq" needs calib
-    [n, T] token ids (WikiText-2 train windows, see calibration_windows) and runs the layers in order."""
+    [n, T] token ids (WikiText-2 train windows, see calibration_windows) and runs the layers in order. lm_head also
+    quantizes the LM head (quantize_head)."""
     if method == "gptq" and calib is None:
         raise ValueError("GPTQ needs calibration token ids")
     hs = embed_inputs(model, calib, batch) if method == "gptq" else None
     for li in range(len(model.layers)):
         hs = quantize_layer(model, li, method, hs, group)
+    if lm_head:
+        quantize_head(model, method, hs, group)
     model.config.quantization = f"w4a16-{method}"
     return model
+
+
+@torch.no_grad()
+def quantize_head(model: nn.Module, method: str, hs: Optional[List[torch.Tensor]] = None, group: int = GROUP) -> bool:
+    """The LM head as QuantLinear (speed plan P3: at batch 1 it is the largest single read of a 4-bit model, 466 MB of
+    fp16 on Qwen2.5-1.5B). GPTQ calibrates on hs, the last layer's outputs, through the final norm. A tied head gets
+    its own packed copy; the embedding keeps its weight for the lookup. False when the head's width is not a multiple
+    of the group (it stays as it is)."""
+    head = model.lm_head
+    if not isinstance(head, nn.Linear) or head.in_features % group:
+        return False
+    dev = head.weight.device
+    work = dev if dev.type == "cuda" else torch.device("cpu")
+    W = head.weight.float().to(work)
+    if method == "gptq":
+        H = torch.zeros(head.in_features, head.in_features, dtype=torch.float32, device=dev)
+        for h in hs:
+            if model.norm is not None:
+                h = model.norm(h)
+            if model.config.embed_proj_dim:
+                h = model.project_out(h)
+            x = h.reshape(-1, h.shape[-1]).float()
+            H += x.T @ x
+        c, s, z = gptq_quantize(W, H.to(work), group)
+    elif method == "rtn":
+        c, s, z = rtn_quantize(W, group)
+    else:
+        raise ValueError(f"quantization method '{method}' is not 'rtn' or 'gptq'")
+    bias = head.bias.to(work) if head.bias is not None else None
+    model.lm_head = QuantLinear.from_codes(c, s, z, bias, group).to(dev)
+    return True
 
 
 def calibration_windows(tokenizer, n: int = 128, T: int = 2048, seed: int = 0) -> torch.Tensor:
@@ -280,6 +312,9 @@ def save_quantized(model: nn.Module, out_dir: str, tokenizer=None) -> str:
     from safetensors.torch import save_file
     os.makedirs(out_dir, exist_ok=True)
     tensors = {k: v.detach().contiguous().cpu() for k, v in model.state_dict().items()}
+    for k, v in tensors.items():  # fused projections (fuse_projections) are views of one tensor; safetensors refuses
+        if v.untyped_storage().nbytes() != v.numel() * v.element_size():
+            tensors[k] = v.clone()
     for k in [k for k in tensors if k.endswith("lm_head.weight")]:  # tied heads share storage, safetensors refuses
         if tensors[k].data_ptr() == tensors.get("embed_tokens.weight", torch.empty(0)).data_ptr():
             tensors[k] = tensors[k].clone()

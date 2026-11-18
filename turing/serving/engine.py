@@ -533,9 +533,17 @@ class ContinuousBatchEngine:
         return logits if out is None else out
 
     def _sample(self, reqs: List[AsyncSequenceRequest], logits: torch.Tensor) -> List[int]:
-        """One token per row of logits [B, V], each with its request's processor and sampling settings (one host sync)."""
+        """One token per row of logits [B, V], each with its request's processor and sampling settings (one host sync).
+        Greedy rows without a processor share one argmax launch over the batch."""
+        plain = [r.logits_processor is None and r.temperature <= 1e-5 for r in reqs]
+        argmax = logits.argmax(-1) if any(plain) else None
+        if all(plain):
+            return argmax.tolist()
         rows = []
-        for r, row in zip(reqs, logits):
+        for i, (r, row) in enumerate(zip(reqs, logits)):
+            if plain[i]:
+                rows.append(argmax[i])
+                continue
             row = self._processed(r, row)
             p = self._probs(r, row)
             rows.append(row.argmax(-1) if p is None else torch.multinomial(p, 1)[0])

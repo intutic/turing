@@ -46,7 +46,8 @@ def run_turing(a, batches):
     if a.quantization != "none":  # as turing serve --quantization: GPTQ calibrated on WikiText-2 train windows
         from turing.models.quant import calibration_windows, quantize_model
         method = a.quantization.split("-")[-1]
-        quantize_model(model, method, calibration_windows(tok, a.calib_windows, 2048) if method == "gptq" else None)
+        quantize_model(model, method, calibration_windows(tok, a.calib_windows, 2048) if method == "gptq" else None,
+                       lm_head=a.quantize_lm_head)
     if a.activation_sparsity:  # as --activation-sparsity: applies to one-row decode on CUDA (batch 1)
         from turing.models.activation_sparsity import calibrate_and_apply
         from turing.models.quant import calibration_windows
@@ -88,7 +89,7 @@ def run_turing(a, batches):
                                  kv_page_budget=a.kv_page_budget, kv_capacity_tokens=pool.num_pages * pool.page_size,
                                  kv_pool_gib=round(pool.num_pages * pool.page_bytes() / 2 ** 30, 3),
                                  kv_native_layers=list(pool.native_layers), quantization=a.quantization,
-                                 activation_sparsity=a.activation_sparsity))
+                                 quantize_lm_head=a.quantize_lm_head, activation_sparsity=a.activation_sparsity))
                 print(json.dumps(rows[-1]), flush=True)
         finally:
             await engine.stop()
@@ -175,6 +176,7 @@ def main():
     ap.add_argument("--warmup-context", type=int, default=None, help="prompt length of the warm-up batches")
     ap.add_argument("--quantization", default="none", choices=["none", "w4a16-gptq", "w4a16-rtn"], help="turing")
     ap.add_argument("--calib-windows", type=int, default=32, help="turing GPTQ calibration windows (speed only)")
+    ap.add_argument("--quantize-lm-head", action="store_true", help="turing: with --quantization, the LM head too")
     ap.add_argument("--activation-sparsity", type=float, default=0.0, help="turing: TEAL sparsity")
     ap.add_argument("--out", default="results_e2e_generation_cuda.json")
     a = ap.parse_args()
@@ -198,6 +200,7 @@ def main():
                                    and r.get("kv_cache_dtype") == kvname and r.get("kv_skip_layers", []) == skipped
                                    and r.get("kv_page_budget", 1.0) == (a.kv_page_budget if a.engine == "turing" else 1.0)
                                    and r.get("quantization", "none") == (a.quantization if a.engine == "turing" else "none")
+                                   and r.get("quantize_lm_head", False) == (a.quantize_lm_head and a.engine == "turing")
                                    and r.get("activation_sparsity", 0.0) == (a.activation_sparsity
                                                                               if a.engine == "turing" else 0.0))]
     env = dict(platform=platform.platform(), runtime=version)

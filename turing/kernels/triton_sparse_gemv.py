@@ -6,6 +6,8 @@ W is kept transposed, WT [K, N], so input channel k is one contiguous row; rows 
 
 import functools
 
+from typing import Optional
+
 import torch
 
 try:
@@ -32,8 +34,10 @@ if HAS_TRITON:
                               for bk in (32, 64) for bn in (128, 256) for w in (4, 8)], key=["K", "N", "SPLIT"],
                      reset_to_zero=["Y"])
     @triton.jit
-    def _sparse_gemv_kernel(X, WT, Y, K, N, s_wk, SPLIT, BLOCK_K: tl.constexpr, BLOCK_N: tl.constexpr):
-        """Program (n block, k split): its share of K, atomically added into the fp32 output Y."""
+    def _sparse_gemv_kernel(X, WT, B, Y, K, N, s_wk, SPLIT, HAS_BIAS: tl.constexpr, DIRECT: tl.constexpr,
+                            BLOCK_K: tl.constexpr, BLOCK_N: tl.constexpr):
+        """Program (n block, k split): its share of K, atomically added into the fp32 output Y (the first split adds
+        the bias); with one split (DIRECT) stored in Y's dtype instead."""
         pid, pid_k = tl.program_id(0), tl.program_id(1)
         k_per = tl.cdiv(tl.cdiv(K, SPLIT), BLOCK_K) * BLOCK_K
         k_lo = pid_k * k_per
@@ -47,24 +51,32 @@ if HAS_TRITON:
             w = tl.load(WT + offs_k[:, None] * s_wk + offs_n[None, :], mask=live[:, None] & (offs_n[None, :] < N),
                         other=0.0)
             acc += tl.sum(w.to(tl.float32) * x.to(tl.float32)[:, None], axis=0)
-        tl.atomic_add(Y + offs_n, acc, mask=offs_n < N)
+        if HAS_BIAS:
+            acc += tl.load(B + offs_n, mask=(offs_n < N) & (pid_k == 0), other=0.0).to(tl.float32)
+        if DIRECT:
+            tl.store(Y + offs_n, acc.to(Y.dtype.element_ty), mask=offs_n < N)
+        else:
+            tl.atomic_add(Y + offs_n, acc, mask=offs_n < N)
 
 
-def sparse_gemv(x: torch.Tensor, wt: torch.Tensor) -> torch.Tensor:
-    """x [K] (mostly zeros), wt [K, N] contiguous -> y [N] in x's dtype."""
+def sparse_gemv(x: torch.Tensor, wt: torch.Tensor, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """x [K] (mostly zeros), wt [K, N] contiguous, bias [N] or None -> y [N] in x's dtype."""
     K, N = wt.shape
-    y = torch.zeros(N, device=x.device, dtype=torch.float32)
     split = _splits(triton.cdiv(N, 128), triton.cdiv(K, 64), x.device)
+    y = torch.empty(N, device=x.device, dtype=x.dtype) if split == 1 else \
+        torch.zeros(N, device=x.device, dtype=torch.float32)
     grid = lambda meta: (triton.cdiv(N, meta["BLOCK_N"]), split)
-    _sparse_gemv_kernel[grid](x, wt, y, K, N, wt.stride(0), split)
-    return y.to(x.dtype)
+    _sparse_gemv_kernel[grid](x, wt, bias if bias is not None else y, y, K, N, wt.stride(0), split,
+                              HAS_BIAS=bias is not None, DIRECT=split == 1)
+    return y if split == 1 else y.to(x.dtype)
 
 
 if HAS_TRITON:
     @triton.autotune(configs=[triton.Config({"BLOCK_K": bk}, num_warps=w) for bk in (32, 64, 128) for w in (2, 4)],
                      key=["K", "N", "SPLIT"], reset_to_zero=["Y"])
     @triton.jit
-    def _sparse_gemv_int4_kernel(X, WT, S, Z, Y, K, N, s_wk, s_sk, SPLIT, BLOCK_K: tl.constexpr):
+    def _sparse_gemv_int4_kernel(X, WT, S, Z, B, Y, K, N, s_wk, s_sk, SPLIT, HAS_BIAS: tl.constexpr,
+                                 DIRECT: tl.constexpr, BLOCK_K: tl.constexpr):
         """Program (64 outputs = one quantization group of every input row, k split): bytes [k share, 32] of packed
         codes, atomically added into the fp32 output Y."""
         pid, pid_k = tl.program_id(0), tl.program_id(1)
@@ -85,8 +97,15 @@ if HAS_TRITON:
             acc_lo += tl.sum(((b & 0x0F).to(tl.float32) - zp[:, None]) * xs, axis=0)
             acc_hi += tl.sum((((b >> 4) & 0x0F).to(tl.float32) - zp[:, None]) * xs, axis=0)
         n_even = pid * 64 + 2 * tl.arange(0, 32)
-        tl.atomic_add(Y + n_even, acc_lo, mask=n_even < N)
-        tl.atomic_add(Y + n_even + 1, acc_hi, mask=n_even + 1 < N)
+        if HAS_BIAS:  # the first split adds the bias
+            acc_lo += tl.load(B + n_even, mask=(n_even < N) & (pid_k == 0), other=0.0).to(tl.float32)
+            acc_hi += tl.load(B + n_even + 1, mask=(n_even + 1 < N) & (pid_k == 0), other=0.0).to(tl.float32)
+        if DIRECT:
+            tl.store(Y + n_even, acc_lo.to(Y.dtype.element_ty), mask=n_even < N)
+            tl.store(Y + n_even + 1, acc_hi.to(Y.dtype.element_ty), mask=n_even + 1 < N)
+        else:
+            tl.atomic_add(Y + n_even, acc_lo, mask=n_even < N)
+            tl.atomic_add(Y + n_even + 1, acc_hi, mask=n_even + 1 < N)
 
 
 def quantize_transposed_int4(w: torch.Tensor):
@@ -97,11 +116,14 @@ def quantize_transposed_int4(w: torch.Tensor):
     return pack(codes).to(w.device), scales.to(w.device), zeros.to(w.device)
 
 
-def sparse_gemv_int4(x: torch.Tensor, wt_packed: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor) -> torch.Tensor:
-    """x [K] (mostly zeros) times the transposed int4 weight -> y [N] in x's dtype."""
+def sparse_gemv_int4(x: torch.Tensor, wt_packed: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor,
+                     bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """x [K] (mostly zeros) times the transposed int4 weight, plus bias [N] or None -> y [N] in x's dtype."""
     K, N = wt_packed.shape[0], wt_packed.shape[1] * 2
-    y = torch.zeros(N, device=x.device, dtype=torch.float32)
     split = _splits(triton.cdiv(N, 64), triton.cdiv(K, 64), x.device)
-    _sparse_gemv_int4_kernel[(triton.cdiv(N, 64), split)](x, wt_packed, scales, zeros, y, K, N, wt_packed.stride(0),
-                                                          scales.stride(0), split)
-    return y.to(x.dtype)
+    y = torch.empty(N, device=x.device, dtype=x.dtype) if split == 1 else \
+        torch.zeros(N, device=x.device, dtype=torch.float32)
+    _sparse_gemv_int4_kernel[(triton.cdiv(N, 64), split)](x, wt_packed, scales, zeros, bias if bias is not None else y,
+                                                          y, K, N, wt_packed.stride(0), scales.stride(0), split,
+                                                          HAS_BIAS=bias is not None, DIRECT=split == 1)
+    return y if split == 1 else y.to(x.dtype)

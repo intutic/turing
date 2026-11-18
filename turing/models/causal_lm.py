@@ -16,6 +16,7 @@ from ..config import ModelConfig
 from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
 from ..core.kv_cache import INT4_GROUP, KVCache, KVPool, _dequantize, _quantize
 from ..kernels.triton_kv_decode import pool_decode_supported, triton_pool_decode
+from ..kernels import triton_fused_ops as fused_ops
 
 
 class RMSNorm(nn.Module):
@@ -27,7 +28,14 @@ class RMSNorm(nn.Module):
         self.eps, self.offset = eps, offset
         self.weight = nn.Parameter(torch.zeros(dim) if offset else torch.ones(dim))
 
+    def fusable(self, x: torch.Tensor) -> bool:
+        """The fused Triton norm applies (it reproduces this module's rounding; a weight in another dtype than x would
+        promote the Llama-style output, which it does not)."""
+        return fused_ops.fused_ops_supported(x) and (self.offset or self.weight.dtype == x.dtype)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.fusable(x):
+            return fused_ops.rms_norm(x, self.weight, self.eps, self.offset)
         xf = x.float()  # fp16 squares overflow for large activations
         normed = xf * torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + self.eps)
         if self.offset:
@@ -54,6 +62,62 @@ def activation(name: str):
     if name == "quick_gelu":
         return lambda x: x * torch.sigmoid(1.702 * x)
     raise ValueError(f"activation '{name}' is not supported")
+
+
+def _weight_of(m: nn.Module) -> torch.Tensor:
+    return m.qweight if hasattr(m, "qweight") else m.weight
+
+
+def fuse_linears(owner: nn.Module, key: str, parts: Tuple[nn.Module, ...]) -> bool:
+    """One linear layer over parts that share an input (q/k/v, gate/up), so a step launches one GEMM instead of
+    len(parts). The parts' weights become views of the fused weight: no extra memory, and the state dict, adapters and
+    hooks still see the separate layers. Kept outside the module tree (owner.__dict__[key]); used by fused_outputs only
+    while the parts are still the same objects on the same storage. False when the parts cannot be fused."""
+    from .quant import QuantLinear
+    kind = type(parts[0])
+    if kind not in (nn.Linear, QuantLinear) or any(type(p) is not kind for p in parts):
+        return False
+    w0 = _weight_of(parts[0])
+    if any(_weight_of(p).device != w0.device or _weight_of(p).dtype != w0.dtype or p.in_features != parts[0].in_features
+           or (p.bias is None) != (parts[0].bias is None) for p in parts):
+        return False
+    if kind is QuantLinear and any(p.group != parts[0].group for p in parts):
+        return False
+    sizes = [p.out_features for p in parts]
+    with torch.inference_mode(False), torch.no_grad():  # normal tensors: the model is used in and out of inference mode
+        if kind is QuantLinear:
+            fused = QuantLinear(parts[0].in_features, sum(sizes), parts[0].bias is not None, parts[0].group,
+                                device="meta")
+            names = ["qweight", "scales", "zeros"]
+        else:
+            fused = nn.Linear(parts[0].in_features, sum(sizes), bias=parts[0].bias is not None, device="meta")
+            names = ["weight"]
+        names += ["bias"] if parts[0].bias is not None else []
+        for name in names:
+            full = torch.cat([getattr(p, name).data for p in parts])
+            is_param = isinstance(getattr(parts[0], name), nn.Parameter)
+            grad = is_param and getattr(parts[0], name).requires_grad
+            setattr(fused, name, nn.Parameter(full, requires_grad=grad) if is_param else full)
+            lo = 0
+            for p, n in zip(parts, sizes):
+                view = full[lo:lo + n]
+                setattr(p, name, nn.Parameter(view, requires_grad=grad) if is_param else view)
+                lo += n
+    owner.__dict__[key] = (fused, parts, sizes)
+    return True
+
+
+def fused_outputs(owner: nn.Module, key: str, parts: Tuple[nn.Module, ...], x: torch.Tensor):
+    """The parts' outputs from their fused layer (fuse_linears), or None: not fused, a part replaced (LoRA, TEAL,
+    tensor parallel), its weight moved (.to()), or a hook on a part (calibration) that must see the separate call."""
+    f = owner.__dict__.get(key)
+    if f is None:
+        return None
+    fused, fparts, sizes = f
+    if any(a is not b or a._forward_hooks or a._forward_pre_hooks for a, b in zip(parts, fparts)) \
+            or _weight_of(parts[0]).data_ptr() != _weight_of(fused).data_ptr():
+        return None
+    return fused(x).split(sizes, dim=-1)
 
 
 class SubspaceMLP(nn.Module):
@@ -96,7 +160,11 @@ class SubspaceMLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.gate_proj is not None:
-            return self.down_proj(self.act(self.gate_proj(x)) * self.up_proj(x))
+            gu = fused_outputs(self, "_gate_up", (self.gate_proj, self.up_proj), x)
+            g, u = gu if gu is not None else (self.gate_proj(x), self.up_proj(x))
+            if self.act is F.silu and fused_ops.fused_ops_supported(g):
+                return self.down_proj(fused_ops.silu_mul(g, u))
+            return self.down_proj(self.act(g) * u)
         return self.down_proj(self.act(self.up_proj(x)))
 
 
@@ -225,7 +293,9 @@ class SubspaceAttention(nn.Module):
         batch, seq_len, _ = hidden_states.shape
         cfg = self.config
 
-        q, k, v = self.q_proj(hidden_states), self.k_proj(hidden_states), self.v_proj(hidden_states)
+        qkv = fused_outputs(self, "_qkv", (self.q_proj, self.k_proj, self.v_proj), hidden_states)
+        q, k, v = qkv if qkv is not None else \
+            (self.q_proj(hidden_states), self.k_proj(hidden_states), self.v_proj(hidden_states))
         if cfg.qk_norm_full:
             q, k = self.q_norm(q), self.k_norm(k)
         if cfg.clip_qkv is not None:  # OLMoE clamps after its norms
@@ -244,7 +314,10 @@ class SubspaceAttention(nn.Module):
             else:
                 cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos,
                                                    select_len=cache.rope_len if cache is not None else 0)
-            q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
+            if fused_ops.fused_ops_supported(q) and cos.shape[-1] % 2 == 0:
+                q, k = fused_ops.rope(q, k, cos, sin)  # one pass per tensor, the cast to q's dtype inside
+            else:
+                q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
         if self._k_absmax is not None:
             m = k.detach().abs().float().amax(dim=(0, 2))
             self._k_absmax = torch.maximum(self._k_absmax, m)
@@ -392,10 +465,14 @@ class SubspaceDecoderLayer(nn.Module):
             return x + attn_out + self.mlp(mlp_in), k_out, v_out
         if cfg.sandwich_norm:
             attn_out = self.attn_out_norm(attn_out)
-        x = x + attn_out
-        if not cfg.pre_norm:
-            x = self.input_layernorm(x)
-        h = self.post_attention_layernorm(x) if cfg.pre_norm else x
+        norm = self.post_attention_layernorm if cfg.pre_norm else None
+        if isinstance(norm, RMSNorm) and norm.fusable(attn_out) and x.dtype == attn_out.dtype:
+            h, x = fused_ops.rms_norm(attn_out, norm.weight, norm.eps, norm.offset, residual=x)  # add + norm, one pass
+        else:
+            x = x + attn_out
+            if not cfg.pre_norm:
+                x = self.input_layernorm(x)
+            h = self.post_attention_layernorm(x) if cfg.pre_norm else x
         m = self.mlp(h)
         if cfg.sandwich_norm:
             m = self.mlp_out_norm(m)
@@ -530,7 +607,22 @@ class SubspaceCausalLM(nn.Module):
             if lora:
                 set_active_adapters(self, None)
 
+    def fuse_projections(self) -> int:
+        """Fuse every layer's q/k/v and gate/up projections (fuse_linears); returns how many groups were fused."""
+        n = 0
+        for layer in self.layers:
+            a = layer.self_attn
+            n += fuse_linears(a, "_qkv", (a.q_proj, a.k_proj, a.v_proj))
+            m = layer.mlp
+            if isinstance(m, SubspaceMLP) and m.gate_proj is not None:
+                n += fuse_linears(m, "_gate_up", (m.gate_proj, m.up_proj))
+        self.__dict__["_projections_fused"] = True
+        return n
+
     def _forward(self, input_ids, past_key_values, logits_to_keep, lora):
+        if input_ids.is_cuda and not self.__dict__.get("_projections_fused") \
+                and not torch.cuda.is_current_stream_capturing():
+            self.fuse_projections()  # one GEMM per shared input on CUDA, where a launch costs as much as a small GEMM
         batch, seq_len = input_ids.shape
         cache, step = None, None
         if isinstance(past_key_values, list):

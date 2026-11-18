@@ -190,3 +190,26 @@ def test_sdpa_decode_attention_matches_the_kernel():
         caches = [model(p)[1] for p in prompts]
         outs.append(torch.cat([model(nxt[:, t:t + 1], past_key_values=caches)[0] for t in range(3)], 1))
     torch.testing.assert_close(outs[1], outs[0], atol=1e-3, rtol=0)
+
+
+@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
+def test_one_split_writes_the_output_directly_and_matches_the_split_path(kv_cache_dtype):
+    """n_splits = 1 (a large batch) stores attention without the reduce launch; same result as the split path. K and V
+    are passed as non-contiguous views of one fused projection, as the model's fused q/k/v gives them."""
+    from turing.kernels.triton_kv_decode import triton_pool_decode
+    g = torch.Generator(device="cuda").manual_seed(2)
+    H, Hkv, D = 12, 2, 128
+    pool = KVPool(1, Hkv, D, 256, torch.float16, "cuda", kv_cache_dtype)
+    caches = [_filled(pool, T, g) for T in (5, 300, 700)]
+    q = torch.randn(3, H, 1, D, device="cuda", generator=g).half()
+    kv = torch.randn(3, 1, 2 * Hkv * D, device="cuda", generator=g).half()
+    k = kv[..., :Hkv * D].view(3, 1, Hkv, D).transpose(1, 2)
+    v = kv[..., Hkv * D:].view(3, 1, Hkv, D).transpose(1, 2)
+    for c in caches:
+        c.reserve(c.length + 1)
+    twins = [c.clone(share=False) for c in caches]
+    rows = torch.tensor([[c.slot for c in caches], [c.length for c in caches]], dtype=torch.int32, device="cuda")
+    rows2 = torch.tensor([[c.slot for c in twins], [c.length for c in twins]], dtype=torch.int32, device="cuda")
+    split = triton_pool_decode(pool, 0, q, k, v, rows[0], rows[1])
+    one = triton_pool_decode(pool, 0, q, k, v, rows2[0], rows2[1], n_splits=1)
+    torch.testing.assert_close(one.float(), split.float(), atol=1e-3, rtol=0)

@@ -43,9 +43,9 @@ class SparseInputLinear(nn.Module):
                 if self._wt is None:  # int4: a transposed 4-bit copy (groups of 64 outputs per input row)
                     self._wt = quantize_transposed_int4(self.base.dequantized(torch.float32)) if quant \
                         else self.base.weight.t().contiguous()
-                y = sparse_gemv_int4(x.reshape(-1), *self._wt) if quant else sparse_gemv(x.reshape(-1), self._wt)
-                if self.base.bias is not None:
-                    y = y + self.base.bias
+                b = self.base.bias
+                y = sparse_gemv_int4(x.reshape(-1), *self._wt, bias=b) if quant else \
+                    sparse_gemv(x.reshape(-1), self._wt, bias=b)
                 return y.view(*x.shape[:-1], self.out_features)
         return self.base(x)
 
