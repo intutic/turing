@@ -412,7 +412,7 @@ class ContinuousBatchEngine:
             # Prefill: chunks of the prefilling requests, in priority order, until this step's token budget is spent
             # (compute-bound); a request's chunk is its remaining prompt, capped by what is left of the budget
             prefill = [r for r in self.running_batch if r.state == RequestState.PREFILLING]
-            budget = None
+            budget, work = None, []
             for req in prefill:
                 if budget is None:
                     budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) \
@@ -421,15 +421,29 @@ class ContinuousBatchEngine:
                     break
                 end = min(req.prefill_offset + budget, len(req.prompt_tokens))
                 budget -= end - req.prefill_offset
-                chunk = torch.tensor([req.prompt_tokens[req.prefill_offset:end]], dtype=torch.long, device=self.device)
-                logits, req.past_kv = self._forward(chunk, req.past_kv, [req.adapter], logits_to_keep=1)
+                work.append((req, end))
+            caches = [r.past_kv for r, _ in work]
+            if (len(work) > 1 and self.dist_driver is None and not any(r.adapter for r, _ in work)
+                    and all(isinstance(c, KVCache) for c in caches)
+                    and getattr(self.model, "can_pack_prefill", lambda _: False)(caches)):
+                # every chunk of this step in one forward (one set of GEMMs), attention per request
+                last = self.model.prefill_packed([r.prompt_tokens[r.prefill_offset:e] for r, e in work], caches)
+                done = [(r, e, last[i:i + 1]) for i, (r, e) in enumerate(work)]
+            else:
+                done = []
+                for req, end in work:
+                    chunk = torch.tensor([req.prompt_tokens[req.prefill_offset:end]], dtype=torch.long,
+                                         device=self.device)
+                    logits, req.past_kv = self._forward(chunk, req.past_kv, [req.adapter], logits_to_keep=1)
+                    done.append((req, end, logits[:, -1]))
+            for req, end, last_logits in done:
                 req.prefill_offset = end
                 if end >= len(req.prompt_tokens):
                     req.state = RequestState.DECODING
                     if self.prefix_cache is not None and self.dist_driver is None and not req.uncacheable:
                         self.prefix_cache.insert(req.prompt_tokens, req.past_kv,
                                                  self._prefix_key(req.adapter, req.past_kv.rope_len))
-                    token = self._sample([req], logits[:, -1])[0]
+                    token = self._sample([req], last_logits)[0]
                     now = time.time()  # after the forward and the sample (which syncs), so TTFT includes prefill
                     req.first_token_at = req.last_token_at = now
                     self.recent_ttft.append(now - req.created_at)

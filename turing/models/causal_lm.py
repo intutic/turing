@@ -17,6 +17,7 @@ from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
 from ..core.kv_cache import INT4_GROUP, KVCache, KVPool, _dequantize, _quantize
 from ..kernels.triton_kv_decode import pool_decode_supported, triton_pool_decode
 from ..kernels import triton_fused_ops as fused_ops
+from ..kernels.triton_kv_prefill import pool_prefill_supported, triton_pool_prefill
 
 
 class RMSNorm(nn.Module):
@@ -234,6 +235,29 @@ class DecodeStep:
         return self._freqs[key]
 
 
+class PackedPrefill:
+    """Prompt chunks of several requests as one row of tokens [1, T] (speed plan P4.3): the linear layers, norms and
+    MLPs run once over every chunk; attention appends and attends per request through the paged prefill kernel. Built
+    by SubspaceCausalLM.prefill_packed; positions [T] give RoPE (shared by every layer) and learned positions."""
+
+    def __init__(self, caches: List[KVCache], lens: List[int], device):
+        self.pool, self.caches, self.lens = caches[0].pool, caches, lens
+        self.starts = [c.length for c in caches]
+        self.offsets = [sum(lens[:i]) for i in range(len(lens))]
+        self.positions = torch.cat([torch.arange(s, s + n) for s, n in zip(self.starts, lens)]).to(device)
+        self.last = torch.tensor([o + n - 1 for o, n in zip(self.offsets, lens)], device=device)
+        self.top = max(s + n for s, n in zip(self.starts, lens))
+        self._freqs = {}
+
+    def freqs(self, rope) -> Tuple[torch.Tensor, torch.Tensor]:
+        """cos, sin [T, R] at each token's position (frequencies that do not depend on the sequence length)."""
+        key = (rope.dim, rope.base_theta, rope.params)
+        if key not in self._freqs:
+            cos, sin = rope.compute_freqs(self.top, device=self.positions.device)
+            self._freqs[key] = (cos[self.positions], sin[self.positions])
+        return self._freqs[key]
+
+
 
 
 class SubspaceAttention(nn.Module):
@@ -286,10 +310,12 @@ class SubspaceAttention(nn.Module):
         hidden_states: torch.Tensor,
         start_pos: Union[int, List[int]] = 0,
         cache: Optional[KVCache] = None,
-        step: Optional["DecodeStep"] = None
+        step: Optional["DecodeStep"] = None,
+        packed: Optional["PackedPrefill"] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         """Attention for new tokens at start_pos: through a KVCache (one request), a DecodeStep (one token per
-        request), or with neither, causal attention over these tokens alone, returning their k and v."""
+        request), a PackedPrefill (several requests' chunks), or with none, causal attention over these tokens alone,
+        returning their k and v."""
         batch, seq_len, _ = hidden_states.shape
         cfg = self.config
 
@@ -311,6 +337,8 @@ class SubspaceAttention(nn.Module):
                 cos, sin = step.freqs(self.rope)
                 r = cos.shape[-1]
                 cos, sin = cos.view(batch, 1, 1, r), sin.view(batch, 1, 1, r)
+            elif packed is not None:
+                cos, sin = packed.freqs(self.rope)
             else:
                 cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos,
                                                    select_len=cache.rope_len if cache is not None else 0)
@@ -329,6 +357,8 @@ class SubspaceAttention(nn.Module):
 
         if step is not None:  # one decode token for each request of the step
             return self.o_proj(self._decode_step(q, k, v, step)), None, None
+        if packed is not None:
+            return self.o_proj(self._attend_packed(q, k, v, packed)), None, None
         if cache is not None:
             return self.o_proj(self._attend_one(q, k, v, cache)), None, None
 
@@ -378,6 +408,9 @@ class SubspaceAttention(nn.Module):
         pool, layer, cfg = cache.pool, self.layer_idx, self.config
         start, total = cache.length, cache.length + seq_len
         pool.append(layer, cache, k, v)
+        if seq_len > 1 and pool_prefill_supported(pool, q):  # paged prefill kernel: no gather, no KV head copies
+            return triton_pool_prefill(pool, layer, q, cache.slot, start, self.scale, self.window or 0,
+                                       self.softcap or 0.0)
         mask, causal = None, False
         if (seq_len == 1 and self.window is None and cfg.kv_page_budget < 1.0 and pool.track_pages
                 and total >= cfg.kv_select_min_tokens):
@@ -391,6 +424,16 @@ class SubspaceAttention(nn.Module):
             causal = mask is None and seq_len > 1  # start == 0
         out = self._attend(q, k_all, v_all, mask, causal)
         return out.transpose(1, 2).reshape(batch, seq_len, self.num_heads * self.head_dim)
+
+    def _attend_packed(self, q, k, v, packed: "PackedPrefill") -> torch.Tensor:
+        """Each request's slice of the packed chunk: append its K/V, attend over its pages -> [1, T, H * D]."""
+        pool, layer, outs = packed.pool, self.layer_idx, []
+        for c, s0, off, n in zip(packed.caches, packed.starts, packed.offsets, packed.lens):
+            sl = slice(off, off + n)
+            pool.append(layer, c, k[:, :, sl], v[:, :, sl])
+            outs.append(triton_pool_prefill(pool, layer, q[:, :, sl], c.slot, s0, self.scale, self.window or 0,
+                                            self.softcap or 0.0))
+        return torch.cat(outs, dim=1)
 
     def _decode_step(self, q, k, v, step: "DecodeStep") -> torch.Tensor:
         """One decode token per request: [B, H, 1, D] -> [B, 1, H * D]. On CUDA three fused launches serve every
@@ -454,12 +497,13 @@ class SubspaceDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         start_pos: Union[int, List[int]] = 0,
         cache: Optional[KVCache] = None,
-        step: Optional["DecodeStep"] = None
+        step: Optional["DecodeStep"] = None,
+        packed: Optional["PackedPrefill"] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         cfg = self.config
         x = hidden_states
         h = self.input_layernorm(x) if cfg.pre_norm else x
-        attn_out, k_out, v_out = self.self_attn(h, start_pos=start_pos, cache=cache, step=step)
+        attn_out, k_out, v_out = self.self_attn(h, start_pos=start_pos, cache=cache, step=step, packed=packed)
         if cfg.parallel_residual:
             mlp_in = h if cfg.shared_layer_norm else self.post_attention_layernorm(x)
             return x + attn_out + self.mlp(mlp_in), k_out, v_out
@@ -607,6 +651,34 @@ class SubspaceCausalLM(nn.Module):
             if lora:
                 set_active_adapters(self, None)
 
+    def can_pack_prefill(self, caches: List[KVCache]) -> bool:
+        """Whether prefill_packed serves these caches: one CUDA pool the paged prefill kernel reads, RoPE whose
+        frequencies do not depend on a sequence's length (not dynamic or LongRoPE), no recirculation."""
+        from ..core.rope import RotaryEmbedding
+        if not caches or self.config.enable_recirculation or any(c.pool is not caches[0].pool for c in caches):
+            return False
+        if not pool_prefill_supported(caches[0].pool, self.embed_tokens.weight):
+            return False
+        return all(m.kind not in ("dynamic", "longrope") for m in self.modules() if isinstance(m, RotaryEmbedding))
+
+    @torch.inference_mode()
+    def prefill_packed(self, chunks: List[List[int]], caches: List[KVCache]) -> torch.Tensor:
+        """Prefill the next chunk of several requests in one forward (speed plan P4.3): chunks[i] continues caches[i]
+        (filled in place). Returns the logits of each chunk's last token [len(chunks), V]. Check can_pack_prefill
+        first."""
+        dev = self.embed_tokens.weight.device
+        if dev.type == "cuda" and not self.__dict__.get("_projections_fused"):
+            self.fuse_projections()
+        lens = [len(x) for x in chunks]
+        for c, n in zip(caches, lens):
+            c.reserve(c.length + n)
+        packed = PackedPrefill(caches, lens, dev)
+        ids = torch.tensor([[t for x in chunks for t in x]], dtype=torch.long, device=dev)
+        logits = self._body(ids, 0, None, None, packed=packed)[0]
+        for c, n in zip(caches, lens):
+            c.length += n
+        return logits
+
     def fuse_projections(self) -> int:
         """Fuse every layer's q/k/v and gate/up projections (fuse_linears); returns how many groups were fused."""
         n = 0
@@ -663,7 +735,7 @@ class SubspaceCausalLM(nn.Module):
             cache.length += seq_len
         return logits, returned
 
-    def _body(self, input_ids, start_pos, cache, step, logits_to_keep: int = 0) -> torch.Tensor:
+    def _body(self, input_ids, start_pos, cache, step, logits_to_keep: int = 0, packed=None) -> torch.Tensor:
         """Embedding, layers, norm and head for one forward (what a CUDA graph captures for a decode step)."""
         cfg = self.config
         hidden_states = self.embed_tokens(input_ids)
@@ -674,6 +746,8 @@ class SubspaceCausalLM(nn.Module):
         if cfg.learned_positions:
             if step is not None:  # [B] lengths before this token, on the device
                 pos = step.starts_t.long()[:, None]
+            elif packed is not None:
+                pos = packed.positions[None]
             else:
                 pos = torch.arange(start_pos, start_pos + input_ids.shape[1], device=input_ids.device)[None]
             hidden_states = hidden_states + self.embed_positions(pos + cfg.position_offset)
@@ -687,6 +761,8 @@ class SubspaceCausalLM(nn.Module):
 
             if step is not None:
                 hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, step=step)
+            elif packed is not None:
+                hidden_states, _, _ = layer(hidden_states, packed=packed)
             else:
                 hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, cache=cache)
 
@@ -694,7 +770,9 @@ class SubspaceCausalLM(nn.Module):
             if self.config.enable_recirculation and i == len(self.layers) - 2 and shallow_state is not None:
                 hidden_states = self.recirculation(hidden_states, shallow_state)
 
-        if logits_to_keep:
+        if packed is not None:  # each chunk's last token
+            hidden_states = hidden_states[:, packed.last]
+        elif logits_to_keep:
             hidden_states = hidden_states[:, -logits_to_keep:]
         if self.norm is not None:
             hidden_states = self.norm(hidden_states)
@@ -766,6 +844,76 @@ class SubspaceCausalLM(nn.Module):
         self._kv_layer_kl = kls
         return cfg.kv_native_layers
 
+    def _kv_calibration_file(self) -> Optional[str]:
+        """Where this model's KV calibration is kept between processes (speed plan P7.2: it was most of a new process's
+        time to first token): ~/.cache/turing/kv_calibration (TURING_CACHE_DIR overrides; "off" disables), one file
+        per model config, weight fingerprint, dtype, device type and KV storage."""
+        import hashlib
+        import json
+        import os
+        root = os.environ.get("TURING_CACHE_DIR", os.path.join(os.path.expanduser("~"), ".cache", "turing"))
+        if root == "off":
+            return None
+        cfg, w = self.config, self.embed_tokens.weight
+        h = hashlib.sha256(json.dumps({k: v for k, v in vars(cfg).items() if k not in ("kv_native_layers",)},
+                                      sort_keys=True, default=str).encode())
+        h.update(f"{w.dtype}|{w.device.type}".encode())
+        a0, a1 = self.layers[0].self_attn, self.layers[-1].self_attn
+        for t in (w[:8], getattr(a0.k_proj, "qweight", None), getattr(a0.k_proj, "weight", None),
+                  getattr(a1.v_proj, "qweight", None), getattr(a1.v_proj, "weight", None)):
+            if t is not None:  # a fingerprint of the weights the calibration depends on, not all of them
+                h.update(t.detach().reshape(-1)[:1 << 16].float().cpu().numpy().tobytes())
+        return os.path.join(root, "kv_calibration", h.hexdigest()[:32] + ".json")
+
+    def _load_kv_calibration(self, smooth: bool, choose: bool) -> bool:
+        import json
+        path = self._kv_calibration_file()
+        try:
+            with open(path) as f:
+                rec = json.load(f)
+        except (TypeError, OSError, ValueError):
+            return False
+        if (smooth and rec.get("k_smooth") is None) or (choose and rec.get("native_layers") is None):
+            return False
+        dtype = self.embed_tokens.weight.dtype
+        if smooth:
+            for a, sc in zip((layer.self_attn for layer in self.layers), rec["k_smooth"]):
+                scale = torch.tensor(sc, device=self.embed_tokens.weight.device)
+                a.k_smooth = scale[None, :, None, :].to(dtype)
+                a.q_smooth = scale.repeat_interleave(a.num_kv_groups, dim=0)[None, :, None, :].to(dtype)
+            self._kv_smoothed = True
+        if choose:
+            self.config.kv_native_layers = tuple(rec["native_layers"])
+            self._kv_native_auto = self.config.kv_cache_dtype
+            self._kv_layer_kl = rec.get("layer_kl")
+        return True
+
+    def _save_kv_calibration(self, smooth: bool, choose: bool) -> None:
+        import json
+        import os
+        path = self._kv_calibration_file()
+        if path is None:
+            return
+        rec = {}
+        try:
+            with open(path) as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            pass
+        attns = [layer.self_attn for layer in self.layers]
+        if smooth and all(a.k_smooth is not None for a in attns):
+            rec["k_smooth"] = [a.k_smooth[0, :, 0, :].float().cpu().tolist() for a in attns]
+        if choose and self.config.kv_native_layers is not None:
+            rec.update(native_layers=list(self.config.kv_native_layers), layer_kl=getattr(self, "_kv_layer_kl", None))
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.{os.getpid()}"
+            with open(tmp, "w") as f:
+                json.dump(rec, f)
+            os.replace(tmp, path)  # atomic: a concurrent process reads the old file or the new one
+        except OSError:
+            pass  # a read-only home: calibrate again next time
+
     def rope_switch_length(self) -> Optional[int]:
         """LongRoPE's original context, or None for other RoPE types. A sequence longer than it uses the long
         frequencies at every position; transformers recomputes the cache when generation crosses it."""
@@ -792,10 +940,14 @@ class SubspaceCausalLM(nn.Module):
                 torch.cuda.empty_cache()
             # int4 only: int8 needs no smoothing (+0.003 nats without it on Qwen2.5-1.5B-Instruct in bf16, +0.017 and
             # 15 GSM8K points lost with it)
-            if cfg.kv_cache_dtype == "int4" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False):
-                self.calibrate_kv_smoothing()
-            if cfg.kv_cache_dtype != "native" and cfg.kv_native_layers is None:
-                self.select_kv_native_layers()
+            smooth = cfg.kv_cache_dtype == "int4" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False)
+            choose = cfg.kv_cache_dtype != "native" and cfg.kv_native_layers is None
+            if (smooth or choose) and not self._load_kv_calibration(smooth, choose):
+                if smooth:
+                    self.calibrate_kv_smoothing()
+                if choose:
+                    self.select_kv_native_layers()
+                self._save_kv_calibration(smooth, choose)
             pool = KVPool.for_model(cfg, w.dtype, w.device)
             self._kv_pool = pool
         return pool

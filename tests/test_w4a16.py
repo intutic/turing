@@ -194,3 +194,34 @@ def test_quantized_lm_head_round_trips_and_stays_close(method, tmp_path):
     loaded, _ = load_quantized(str(tmp_path))
     assert isinstance(loaded.lm_head, QuantLinear)
     torch.testing.assert_close(loaded(ids)[0], b)
+
+
+def test_kv_calibration_is_kept_between_processes(tmp_path, monkeypatch):
+    """P7.2: a new model object with the same weights and KV settings takes the stored native layers and smoothing
+    scales instead of calibrating again; other weights miss the cache."""
+    import copy
+    from tests.test_hf_parity import _tiny
+    from turing.models.causal_lm import SubspaceCausalLM
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    monkeypatch.setenv("TURING_CACHE_DIR", str(tmp_path))
+    base = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"))  # head_dim 32: one int4 group per head
+    base.config.kv_cache_dtype = "int4"
+    first = copy.deepcopy(base)
+    first.kv_pool()
+    assert list((tmp_path / "kv_calibration").iterdir())
+    second = copy.deepcopy(base)
+    second.config.kv_native_layers = None
+    calls = []
+    monkeypatch.setattr(SubspaceCausalLM, "select_kv_native_layers", lambda self, *a, **k: calls.append(1))
+    monkeypatch.setattr(SubspaceCausalLM, "calibrate_kv_smoothing", lambda self, *a, **k: calls.append(1))
+    second.kv_pool()
+    assert not calls
+    assert second.config.kv_native_layers == first.config.kv_native_layers
+    for a, b in zip(first.layers, second.layers):
+        torch.testing.assert_close(a.self_attn.k_smooth, b.self_attn.k_smooth)
+    other = copy.deepcopy(base)
+    other.config.kv_native_layers = None
+    with torch.no_grad():
+        other.layers[0].self_attn.k_proj.weight.add_(1.0)
+    other.kv_pool()
+    assert calls  # different weights: calibrated again

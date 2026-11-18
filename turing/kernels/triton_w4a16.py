@@ -16,6 +16,10 @@ try:
     import triton
     import triton.language as tl
     HAS_TRITON = True
+    import inspect
+    # Triton >= 3.2 can keep autotuning results on disk (its cache dir): a new process skips the tuning runs
+    # (speed plan P7.2, cold start)
+    _TUNE_CACHE = {"cache_results": True} if "cache_results" in inspect.signature(triton.autotune).parameters else {}
 except ImportError:
     HAS_TRITON = False
     triton = None
@@ -25,7 +29,7 @@ if HAS_TRITON:
     _CONFIGS = [triton.Config({"BLOCK_M": bm, "BLOCK_N": bn, "BLOCK_K": bk}, num_warps=w, num_stages=s)
                 for bm in (16, 32) for bn in (64, 128) for bk in (64,) for w in (4,) for s in (2, 3)]
 
-    @triton.autotune(configs=_CONFIGS, key=["M", "N", "K", "SPLIT"], reset_to_zero=["Y"])
+    @triton.autotune(configs=_CONFIGS, key=["M", "N", "K", "SPLIT"], reset_to_zero=["Y"], **_TUNE_CACHE)
     @triton.jit
     def _w4a16_kernel(X, W, S, Z, Y, M, N, K,
                       s_xm, s_xk, s_wn, s_wk, s_sn, s_sg, s_ym, s_yn, SPLIT,
@@ -63,10 +67,20 @@ if HAS_TRITON:
 
 
 if HAS_TRITON:
+    # 16-row tiles for decode at batch 1-16; 32 and 64 rows let batches of up to 64 read each weight tile once
+    # (speed plan P6.1); autotuned per (M, N, K), results kept on disk where Triton allows (_TUNE_CACHE)
     _DIRECT_CONFIGS = [triton.Config({"BLOCK_M": 16, "BLOCK_N": bn, "BLOCK_K": 64}, num_warps=w, num_stages=s)
-                       for bn in (16, 32, 64) for w in (2, 4) for s in (2, 3, 4)]
+                       for bn in (16, 32, 64) for w in (2, 4) for s in (2, 3, 4)] + \
+                      [triton.Config({"BLOCK_M": bm, "BLOCK_N": bn, "BLOCK_K": 64}, num_warps=4, num_stages=s)
+                       for bm in (32, 64) for bn in (32, 64, 128) for s in (2, 3)]
 
-    @triton.autotune(configs=_DIRECT_CONFIGS, key=["M", "N", "K"])
+    def _rows_prune(configs, named_args, **kwargs):
+        """Tiles no taller than M rounded up to a power of two (at least 16): decode tries only 16-row tiles."""
+        cap = max(16, triton.next_power_of_2(named_args["M"]))
+        return [c for c in configs if c.kwargs["BLOCK_M"] <= cap] or configs
+
+    @triton.autotune(configs=_DIRECT_CONFIGS, key=["M", "N", "K"], prune_configs_by={"early_config_prune": _rows_prune},
+                     **_TUNE_CACHE)
     @triton.jit
     def _w4a16_direct_kernel(X, W, S, Z, B, Y, M, N, K, s_xm, s_xk, s_wn, s_wk, s_sn, s_sg, s_ym, s_yn,
                              HAS_BIAS: tl.constexpr, GROUP: tl.constexpr, BLOCK_M: tl.constexpr,

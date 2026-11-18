@@ -14,6 +14,10 @@ try:
     import triton
     import triton.language as tl
     HAS_TRITON = True
+    import inspect
+    # Triton >= 3.2 can keep autotuning results on disk (its cache dir): a new process skips the tuning runs
+    # (speed plan P7.2, cold start)
+    _TUNE_CACHE = {"cache_results": True} if "cache_results" in inspect.signature(triton.autotune).parameters else {}
 except ImportError:
     HAS_TRITON = False
 
@@ -32,7 +36,7 @@ def _splits(n_blocks: int, k_blocks: int, device) -> int:
 if HAS_TRITON:
     @triton.autotune(configs=[triton.Config({"BLOCK_K": bk, "BLOCK_N": bn}, num_warps=w)
                               for bk in (32, 64) for bn in (128, 256) for w in (4, 8)], key=["K", "N", "SPLIT"],
-                     reset_to_zero=["Y"])
+                     reset_to_zero=["Y"], **_TUNE_CACHE)
     @triton.jit
     def _sparse_gemv_kernel(X, WT, B, Y, K, N, s_wk, SPLIT, HAS_BIAS: tl.constexpr, DIRECT: tl.constexpr,
                             BLOCK_K: tl.constexpr, BLOCK_N: tl.constexpr):
@@ -73,7 +77,7 @@ def sparse_gemv(x: torch.Tensor, wt: torch.Tensor, bias: Optional[torch.Tensor] 
 
 if HAS_TRITON:
     @triton.autotune(configs=[triton.Config({"BLOCK_K": bk}, num_warps=w) for bk in (32, 64, 128) for w in (2, 4)],
-                     key=["K", "N", "SPLIT"], reset_to_zero=["Y"])
+                     key=["K", "N", "SPLIT"], reset_to_zero=["Y"], **_TUNE_CACHE)
     @triton.jit
     def _sparse_gemv_int4_kernel(X, WT, S, Z, B, Y, K, N, s_wk, s_sk, SPLIT, HAS_BIAS: tl.constexpr,
                                  DIRECT: tl.constexpr, BLOCK_K: tl.constexpr):
