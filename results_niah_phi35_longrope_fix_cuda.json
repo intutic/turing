@@ -1,0 +1,274 @@
+[
+  {
+    "n": 15,
+    "accuracy": 1.0,
+    "wall_seconds": 117.74,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": "60494.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": "65125.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": "15306.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": "43936.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": "77013.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": "73691.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": "63075.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": "49755.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": "72468.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": "56930.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": "86465.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": "38631.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": "76150.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": "28254.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": "46941.\n",
+        "found": true
+      }
+    ],
+    "model": "microsoft/Phi-3.5-mini-instruct",
+    "kv_cache_dtype": "int8",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  },
+  {
+    "n": 15,
+    "accuracy": 1.0,
+    "wall_seconds": 125.11,
+    "results": [
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.0,
+        "key": "60494",
+        "completion": "60494.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.25,
+        "key": "65125",
+        "completion": "65125.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.5,
+        "key": "15306",
+        "completion": "15306.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 0.75,
+        "key": "43936",
+        "completion": "43936.\n",
+        "found": true
+      },
+      {
+        "context_length": 2048,
+        "prompt_tokens": 1957,
+        "depth": 1.0,
+        "key": "77013",
+        "completion": "77013.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.0,
+        "key": "73691",
+        "completion": "73691.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.25,
+        "key": "63075",
+        "completion": "63075.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.5,
+        "key": "49755",
+        "completion": "49755.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 0.75,
+        "key": "72468",
+        "completion": "72468.\n",
+        "found": true
+      },
+      {
+        "context_length": 8192,
+        "prompt_tokens": 7861,
+        "depth": 1.0,
+        "key": "56930",
+        "completion": "56930.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.0,
+        "key": "86465",
+        "completion": "86465.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.25,
+        "key": "38631",
+        "completion": "38631.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.5,
+        "key": "76150",
+        "completion": "76150.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 0.75,
+        "key": "28254",
+        "completion": "28254.\n",
+        "found": true
+      },
+      {
+        "context_length": 16384,
+        "prompt_tokens": 15709,
+        "depth": 1.0,
+        "key": "46941",
+        "completion": "46941.\n",
+        "found": true
+      }
+    ],
+    "model": "microsoft/Phi-3.5-mini-instruct",
+    "kv_cache_dtype": "int4",
+    "kv_page_budget": 1.0,
+    "quantization": "none",
+    "activation_sparsity": 0.0,
+    "device": "cuda",
+    "dtype": "bf16",
+    "kv_smoothing": true,
+    "batch_size": null
+  }
+]

@@ -41,6 +41,11 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
   `scripts/eval_vllm_quality.py`, `scripts/benchmark_llamacpp.py`).
 - `scripts/make_doc_tables.py`: every numeric table in the docs is generated from the committed results; a test fails
   when they disagree.
+- `packages/kv-layer-guard` (Apache-2.0): the KV layer calibration for vLLM users, validated on six instruct models
+  (Qwen2.5 1.5B and 7B, Llama 3.2 3B, Gemma 2 2B, Phi-3.5-mini, Mistral 7B). It keeps layer 0 of Qwen2.5-1.5B and
+  layers 0, 1, 27 of Qwen2.5-7B, which restores GSM8K under vLLM's fp8 cache from 2.4% to 70.2% on the 7B (bf16
+  74.6%), and keeps none elsewhere. Limit: Phi-3.5-mini loses 5.2 GSM8K points under fp8 and the guard does not flag
+  it (docs/benchmarks.md §2).
 
 ### Changed
 - Documentation rewritten against the code; every number cites a committed results file (323a854, fd2cd21). The
@@ -61,6 +66,11 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
   (03b59f5, ee0bb3f).
 
 ### Fixed
+- LongRoPE (Phi-3/3.5): chunked prefill picked short or long frequencies per chunk, so prompts longer than the original
+  4K context mixed both and pass-key retrieval fell to 0% above 4K. Every chunk now uses what one forward over the
+  prompt would; when decoding crosses the original context the engine recomputes the cache with the long frequencies,
+  as transformers does; prefix-cache entries are kept apart by frequency set. Phi-3.5-mini pass-key at 2K–16K: 100%
+  with int8 and int4 KV (8115830).
 - Demo agents are scored on the plan they write, not on fixed configurations (ee0bb3f).
 - Cross-model KV: the native RoPE strip/apply was a no-op on 4-D tensors off CUDA (03b59f5).
 - CUDA graph capture and replay always run in inference mode; KV pool and int4 scratch tensors are normal tensors
