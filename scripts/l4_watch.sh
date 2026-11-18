@@ -12,7 +12,7 @@ relaunch="cd ~/jflux && echo '--- resumed after preemption (auto)' >> ~/l4_statu
 for q in "$@"; do relaunch="$relaunch; grep -q '${q#*:} DONE' ~/l4_status.txt || run ${q%%:*}"; done
 relaunch="$relaunch; (setsid nohup bash scripts/l4_poweroff_when_done.sh '$last' 120 > ~/l4_logs/poweroff.out 2>&1 < /dev/null &)"
 finish() {  # copy everything back, verify, then delete the VM
-  local RS="ssh -i $HOME/.ssh/google_compute_engine -o HostKeyAlias=$V -o ProxyCommand='gcloud compute start-iap-tunnel $V 22 --listen-on-stdin --zone $Z --verbosity=warning'"
+  local RS="ssh -i $HOME/.ssh/google_compute_engine -o StrictHostKeyChecking=accept-new -o HostKeyAlias=$V -o ProxyCommand='gcloud compute start-iap-tunnel $V 22 --listen-on-stdin --zone $Z --verbosity=warning'"
   local logs=$HOME/jflux-l4-logs/$(date +%Y-%m-%d)
   mkdir -p $logs
   # -u: a newer local file wins; the VM's results_ingest_ladder.json is its Linux run under the Mac file's name
