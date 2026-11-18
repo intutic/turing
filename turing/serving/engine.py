@@ -140,6 +140,7 @@ class ContinuousBatchEngine:
 
         # The model's paged KV pool, sized once from free memory after the weights (ModelConfig.kv_pool_*)
         self.kv_pool = self.model.kv_pool()
+        self._rope_switch = self.model.rope_switch_length()  # LongRoPE's original context (Phi-3), else None
         self.prefix_cache = PrefixCache(self.kv_pool) if prefix_caching and dist_driver is None else None
         self.eos_token_ids = set(eos_token_ids) if eos_token_ids is not None else _eos_ids(tokenizer)
         self.default_draft_tokens = draft_tokens  # n-gram drafts per step when the gate allows (0 = off)
@@ -255,6 +256,7 @@ class ContinuousBatchEngine:
         if isinstance(prefix_kv, KVCache):
             try:
                 req.past_kv = prefix_kv.clone()
+                req.past_kv.rope_len = prefix_len + len(prompt_tokens)
                 req.uncacheable = True  # its cache starts with tokens this request does not know: never index it
                 self._reserve(req.past_kv, req.past_kv.length + len(prompt_tokens) + max_new_tokens)
             except KVPoolExhausted as e:
@@ -304,10 +306,12 @@ class ContinuousBatchEngine:
     def _try_reserve(self, req: AsyncSequenceRequest) -> bool:
         """Give req a cache holding every page it can need (reusing cached prefix pages); False if the pool is short."""
         if self.prefix_cache is not None:  # at least one prompt token is prefilled
-            req.past_kv = self.prefix_cache.attach(req.prompt_tokens, req.adapter, limit=len(req.prompt_tokens) - 1)
+            req.past_kv = self.prefix_cache.attach(req.prompt_tokens, self._prefix_key(req.adapter, len(req.prompt_tokens)),
+                                                   limit=len(req.prompt_tokens) - 1)
             req.prefill_offset = req.cached_prompt_tokens = req.past_kv.length
         else:
             req.past_kv = KVCache(self.kv_pool)
+        req.past_kv.rope_len = len(req.prompt_tokens)  # chunked prefill uses what one forward over the prompt would
         try:
             self._reserve(req.past_kv, len(req.prompt_tokens) + req.max_new_tokens)
             return True
@@ -423,7 +427,8 @@ class ContinuousBatchEngine:
                 if end >= len(req.prompt_tokens):
                     req.state = RequestState.DECODING
                     if self.prefix_cache is not None and self.dist_driver is None and not req.uncacheable:
-                        self.prefix_cache.insert(req.prompt_tokens, req.past_kv, req.adapter)
+                        self.prefix_cache.insert(req.prompt_tokens, req.past_kv,
+                                                 self._prefix_key(req.adapter, req.past_kv.rope_len))
                     token = self._sample([req], logits[:, -1])[0]
                     now = time.time()  # after the forward and the sample (which syncs), so TTFT includes prefill
                     req.first_token_at = req.last_token_at = now
@@ -433,10 +438,15 @@ class ContinuousBatchEngine:
             # Decode: speculative rows one by one, the rest in one batched forward (bandwidth-bound)
             decode = [r for r in self.running_batch if r.state == RequestState.DECODING and r.first_token_at is not None
                       and r.generated_tokens]
-            decode = [r for r in decode if r.state == RequestState.DECODING]
+            crossing = [r for r in decode if self._crosses_rope_switch(r, 1)]
+            for r in crossing:
+                self._recompute_long_rope(r)
+            decode = [r for r in decode if r.state == RequestState.DECODING and r not in crossing]
             spec, plain = [], []
             for r in decode:
                 drafts = self._drafts(r, len(decode))
+                if drafts and self._crosses_rope_switch(r, 1 + len(drafts)):
+                    drafts = None  # verify only up to the switch; the step that crosses it recomputes the cache
                 (spec if drafts else plain).append((r, drafts))
             for r, drafts in spec:
                 self._speculative_step(r, drafts)
@@ -455,6 +465,32 @@ class ContinuousBatchEngine:
                     self._emit(r, self._sample([r], logits[:, -1])[0], time.time())
 
         self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
+
+    def _prefix_key(self, adapter: Optional[str], rope_len: int) -> Optional[str]:
+        """The prefix-cache namespace: keys computed with LongRoPE's long frequencies never match short ones."""
+        if self._rope_switch is None or rope_len <= self._rope_switch:
+            return adapter
+        return f"{adapter or ''}\x00longrope"
+
+    def _crosses_rope_switch(self, req: AsyncSequenceRequest, new_tokens: int) -> bool:
+        """True when req's cache holds short-frequency keys and new_tokens more would pass LongRoPE's switch."""
+        c = req.past_kv
+        return (self._rope_switch is not None and isinstance(c, KVCache) and not req.uncacheable
+                and c.rope_len <= self._rope_switch < c.length + new_tokens)
+
+    def _recompute_long_rope(self, req: AsyncSequenceRequest) -> None:
+        """The sequence is about to pass LongRoPE's original context: as transformers does for Phi-3
+        (Phi3ForCausalLM.prepare_inputs_for_generation), recompute the whole cache with the long frequencies, in one
+        forward into a fresh cache, and emit the next token from it."""
+        tokens = req.prompt_tokens + req.generated_tokens  # the last generated token has no KV yet
+        req.past_kv.free()
+        cache = KVCache(self.kv_pool)
+        cache.rope_len = len(tokens)
+        req.past_kv = cache
+        self._reserve(cache, len(req.prompt_tokens) + req.max_new_tokens)
+        ids = torch.tensor([tokens], dtype=torch.long, device=self.device)
+        logits, req.past_kv = self._forward(ids, cache, [req.adapter], logits_to_keep=1)
+        self._emit(req, self._sample([req], logits[:, -1])[0], time.time())
 
     def _emit(self, req: AsyncSequenceRequest, token: int, now: float) -> bool:
         """Deliver one sampled token; finish the request on a stop token or the length limit. True while it runs.
@@ -574,7 +610,8 @@ class ContinuousBatchEngine:
         if isinstance(req.past_kv, KVCache):
             if self.prefix_cache is not None and self.dist_driver is None and reason != "cancelled" \
                     and not req.uncacheable:
-                self.prefix_cache.insert(req.prompt_tokens + req.generated_tokens, req.past_kv, req.adapter)
+                self.prefix_cache.insert(req.prompt_tokens + req.generated_tokens, req.past_kv,
+                                         self._prefix_key(req.adapter, req.past_kv.rope_len))
             req.past_kv.free()  # return its pages to the pool (cached pages keep the index's reference)
         req.past_kv = None
         if self.admission is not None:

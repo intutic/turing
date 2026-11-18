@@ -242,7 +242,8 @@ class SubspaceAttention(nn.Module):
                 r = cos.shape[-1]
                 cos, sin = cos.view(batch, 1, 1, r), sin.view(batch, 1, 1, r)
             else:
-                cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos)
+                cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos,
+                                                   select_len=cache.rope_len if cache is not None else 0)
             q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
         if self._k_absmax is not None:
             m = k.detach().abs().float().amax(dim=(0, 2))
@@ -672,6 +673,13 @@ class SubspaceCausalLM(nn.Module):
         self._kv_native_auto = cfg.kv_cache_dtype  # chosen for this storage; a different one chooses again
         self._kv_layer_kl = kls
         return cfg.kv_native_layers
+
+    def rope_switch_length(self) -> Optional[int]:
+        """LongRoPE's original context, or None for other RoPE types. A sequence longer than it uses the long
+        frequencies at every position; transformers recomputes the cache when generation crosses it."""
+        from ..core.rope import RotaryEmbedding
+        lens = {m._original for m in self.modules() if isinstance(m, RotaryEmbedding) and m.kind == "longrope"}
+        return min(lens) if lens else None
 
     def kv_pool(self) -> KVPool:
         """This model's paged KV pool, created on first use (and again if the device, dtype or cache settings

@@ -52,7 +52,8 @@ ARCHS = {
         layer_types=["sliding_attention", "full_attention", "sliding_attention", "full_attention"])),
     "phi3": lambda: tf.Phi3ForCausalLM(tf.Phi3Config(**_COMMON, pad_token_id=0, sliding_window=6)),
     "phi3_longrope": lambda: tf.Phi3ForCausalLM(tf.Phi3Config(
-        **{**_COMMON, "max_position_embeddings": 64}, pad_token_id=0, rope_parameters=_longrope(16))),
+        **{**_COMMON, "max_position_embeddings": 64}, pad_token_id=0, rope_parameters=_longrope(16),
+        original_max_position_embeddings=16)),  # Phi3Config otherwise resets it to 4096: nothing would cross it
     "phi2": lambda: tf.PhiForCausalLM(tf.PhiConfig(**{k: v for k, v in _COMMON.items() if k != "rms_norm_eps"},
                                                    partial_rotary_factor=0.4)),
     "phi2_qk_layernorm": lambda: tf.PhiForCausalLM(tf.PhiConfig(
@@ -81,7 +82,7 @@ ARCHS = {
 }
 
 
-INCREMENTAL_REF = {"longrope"}
+INCREMENTAL_REF = {"longrope", "phi3_longrope"}
 
 
 def _hf_incremental(hf, ids):
@@ -186,3 +187,68 @@ def test_gemma2_soft_capping_is_applied_when_scores_are_large():
     ids = torch.randint(0, V, (1, 12), generator=torch.Generator().manual_seed(4))
     model = RealHuggingFaceLoader.convert_hf_model(hf)
     torch.testing.assert_close(model(ids)[0], hf(ids).logits, atol=1e-3, rtol=0)
+
+
+def _sharp_phi3_longrope():
+    """The tiny LongRoPE Phi-3 with larger q/k weights: near-uniform attention would hide which frequencies ran."""
+    hf = _tiny("phi3_longrope")
+    with torch.no_grad():
+        for layer in hf.model.layers:
+            layer.self_attn.qkv_proj.weight.mul_(6.0)
+    return hf
+
+
+@torch.no_grad()
+def test_longrope_chunked_prefill_with_the_prompt_length_matches_a_one_shot_prefill():
+    """Phi-3.5's LongRoPE picks short or long frequencies by sequence length. HF prefills a prompt in one forward, so
+    a prompt past the original context gets long frequencies at every position; chunked prefill must do the same
+    when the cache knows the prompt length (rope_len), or keys before the switch keep short ones (the 8K pass-key
+    failure on Phi-3.5-mini)."""
+    from turing.core.kv_cache import KVCache
+    hf = _sharp_phi3_longrope()
+    ids = torch.randint(0, V, (1, 30), generator=torch.Generator().manual_seed(3))
+    ref = hf(ids).logits  # 24-token prompt (past the original 16) then 6 decode steps: long frequencies throughout
+    model = RealHuggingFaceLoader.convert_hf_model(hf, sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
+    cache = KVCache(model.kv_pool())
+    cache.rope_len = 24
+    outs = []
+    for a, b in [(0, 8), (8, 16), (16, 24)] + [(t, t + 1) for t in range(24, 30)]:
+        logits, cache = model(ids[:, a:b], past_key_values=cache)
+        outs.append(logits)
+    torch.testing.assert_close(torch.cat(outs, dim=1), ref, atol=1e-3, rtol=0)
+
+
+def test_engine_prefills_a_long_longrope_prompt_as_hf_does_and_keeps_its_prefix_apart():
+    """Through the serving engine (chunked prefill, prefix cache): greedy tokens match one HF forward over the whole
+    sequence at every step: short frequencies while it fits the original context, long ones at every position after
+    (transformers recomputes Phi-3's cache at the crossing for that; its 5.17 generate gets that step wrong, giving
+    a token neither the full nor the incremental forward gives). Covers a short prompt that crosses while decoding,
+    then a long prompt sharing its start, which must not reuse the short prompt's cached keys."""
+    import asyncio
+    from turing.config import TuringConfig
+    from turing.serving.engine import ContinuousBatchEngine
+    hf = _sharp_phi3_longrope()
+    model = RealHuggingFaceLoader.convert_hf_model(hf, sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
+
+    def hf_greedy(prompt, n):
+        seq = list(prompt)
+        with torch.no_grad():
+            for _ in range(n):
+                seq.append(hf(torch.tensor([seq])).logits[0, -1].argmax().item())
+        return seq[len(prompt):]
+
+    async def run(prompts):
+        engine = ContinuousBatchEngine(model.config, TuringConfig(device="cpu"), prefill_chunk_size=8, model=model)
+        await engine.start()
+        try:
+            return [[t async for t in engine.stream_generate(prompt_tokens=p, max_new_tokens=8, temperature=0.0)]
+                    for p in prompts]
+        finally:
+            await engine.stop()
+
+    for seed in (6, 7):  # seeds where both prompts' tokens differ without the fix
+        long = torch.randint(0, V, (40,), generator=torch.Generator().manual_seed(seed)).tolist()
+        short = long[:12]  # crosses the original 16 while decoding; cached first, with short frequencies
+        got_short, got_long = asyncio.run(run([short, long]))
+        assert got_short == hf_greedy(short, 8)
+        assert got_long == hf_greedy(long, 8)

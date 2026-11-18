@@ -108,11 +108,13 @@ class RotaryEmbedding(nn.Module):
             return self._original + 1 if seq_len > self._original else None
         return None
 
-    def compute_freqs(self, seq_len: int, device: torch.device, start: int = 0) -> Tuple[torch.Tensor, torch.Tensor]:
-        """cos and sin [seq_len - start, dim] for positions start .. seq_len - 1 (seq_len is the sequence's total
-        length, which picks the frequencies of dynamic and longrope scaling, as transformers does per forward)."""
+    def compute_freqs(self, seq_len: int, device: torch.device, start: int = 0, select_len: int = 0
+                      ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """cos and sin [seq_len - start, dim] for positions start .. seq_len - 1. The larger of seq_len and select_len
+        picks the frequencies of dynamic and longrope scaling, as transformers does per forward: a chunk of a longer
+        prompt passes the prompt's length so every chunk gets what one forward over the prompt would."""
         return _rope_table(self.dim, self.base_theta, self.max_position_embeddings, self.params,
-                           self._variant(seq_len), start, seq_len, torch.device(device))
+                           self._variant(max(seq_len, select_len)), start, seq_len, torch.device(device))
 
     def compute_freqs_device(self, positions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """cos, sin [B, dim] for one position per row from a device tensor, with no host sync (safe in a CUDA graph).

@@ -72,6 +72,9 @@ def main():
     ap.add_argument("--decode", type=int, default=256)
     ap.add_argument("--windows", type=int, default=8)
     ap.add_argument("--checks", default="gsm8k,niah,nll", help="any of gsm8k, niah, nll")
+    ap.add_argument("--max-model-len", type=int, default=None,
+                    help="vLLM's max_model_len (default: the longest pass-key context + 32, or 4128); for a LongRoPE "
+                         "model (Phi-3) it may decide which frequencies vLLM uses for every request")
     ap.add_argument("--out", default="results_quality_vllm_cuda.json")
     a = ap.parse_args()
 
@@ -82,9 +85,10 @@ def main():
     acc_eval, niah = turing_evals()
     tok = AutoTokenizer.from_pretrained(a.model)
     skip = [x for x in a.kv_skip_layers.split(",") if x]
+    max_model_len = a.max_model_len or (max(a.context_len) if "niah" in a.checks else 4096) + 32
     llm = LLM(a.model, dtype=a.dtype, kv_cache_dtype=a.kv_cache_dtype, enable_prefix_caching=False,
               **({"kv_cache_dtype_skip_layers": skip} if skip else {}),
-              max_model_len=(max(a.context_len) if "niah" in a.checks else 4096) + 32,
+              max_model_len=max_model_len,
               gpu_memory_utilization=0.85)
 
     def vllm_generate(engine, prompts, max_new_tokens, batch_size=8):
@@ -94,7 +98,7 @@ def main():
     acc_eval.engine_generate = niah.engine_generate = vllm_generate  # the evaluators' only engine call
     engine = Engine(tok)
     row = dict(engine="vllm", runtime=f"vllm {vllm.__version__}", model=a.model, dtype=a.dtype,
-               kv_cache_dtype=a.kv_cache_dtype, kv_skip_layers=skip)
+               kv_cache_dtype=a.kv_cache_dtype, kv_skip_layers=skip, max_model_len=max_model_len)
 
     checks = set(a.checks.split(","))
     t0 = time.perf_counter()

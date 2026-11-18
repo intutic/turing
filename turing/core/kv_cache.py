@@ -396,6 +396,7 @@ class KVCache:
         self.slot = pool.new_slot()
         self.pages: List[int] = []
         self.length = 0
+        self.rope_len = 0  # the length that picks length-dependent RoPE frequencies in prefill (its prompt's length)
 
     def __len__(self) -> int:
         return self.pool.num_layers
@@ -424,7 +425,7 @@ class KVCache:
         c.pages += rest
         if c.pages:
             self.pool.page_table[c.slot, :len(c.pages)] = torch.tensor(c.pages, dtype=torch.int32)
-        c.length = self.length
+        c.length, c.rope_len = self.length, self.rope_len
         return c
 
     def free(self) -> None:
