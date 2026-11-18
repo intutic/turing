@@ -4,6 +4,7 @@
 # last queue's marker appears. Usage: scripts/l4_watch.sh "PHASE10 DONE" l4_session_phase9.sh:PHASE9 l4_session_phase10.sh:PHASE10
 # With L4_FINISH=1, at the last marker it copies the results and logs back, checks every results file arrived, and
 # deletes the VM (the VM also powers itself off 120 min after the marker: scripts/l4_poweroff_when_done.sh).
+# With L4_SYNC=1 it copies this checkout to the VM (scripts/l4_sync.sh) before relaunching after a preemption.
 Z=${L4_ZONE:-us-central1-a}; V=turing-bench-l4  # L4_ZONE: the zone the VM lives in now
 last=$1; shift
 repo=${0:A:h:h}  # top level: inside a zsh function $0 is the function's name
@@ -34,6 +35,7 @@ while true; do
     until gcloud compute instances start $V --zone $Z >/dev/null 2>&1; do sleep 60; done
     # a preemption while waiting for SSH would otherwise leave this loop waiting forever
     until vm "true"; do sleep 20; [ "$(gcloud compute instances describe $V --zone $Z --format='value(status)' 2>/dev/null)" = TERMINATED ] && continue 2; done
+    [ "${L4_SYNC:-0}" = 1 ] && $repo/scripts/l4_sync.sh >/dev/null  # L4_SYNC=1: this checkout's tracked files first
     vm "$relaunch"
     continue
   fi
