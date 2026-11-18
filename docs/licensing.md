@@ -13,6 +13,13 @@ Turing Engine is licensed under the **Business Source License 1.1 (BSL 1.1)**.
 
 ---
 
+## Apache-2.0 component
+
+`packages/kv-layer-guard/` (the KV layer calibration, packaged for use with vLLM) is under the **Apache License 2.0**,
+not the BSL; its directory has its own [`LICENSE`](https://github.com/intutic/turing/blob/master/packages/kv-layer-guard/LICENSE).
+
+---
+
 ## 🔄 Automatic Open-Source Conversion
 On **August 24, 2030** (or the fourth anniversary of the first public release), the licensed work converts automatically to the **Apache License, Version 2.0**.
 

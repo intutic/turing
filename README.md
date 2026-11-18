@@ -59,7 +59,8 @@ or Ollama.
 <!-- /table -->
 
   vLLM fp8 with layer 0 skipped *by hand* matches Turing's quality at about half the time per request, which is the
-  point: the calibration finds that layer automatically. Measured on Qwen2.5 and SmolLM2 so far
+  point: the calibration finds that layer automatically. It is also packaged on its own for vLLM users, under
+  Apache-2.0: [`packages/kv-layer-guard`](packages/kv-layer-guard). Measured on Qwen2.5 and SmolLM2 so far
   ([benchmarks §2](docs/benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps)).
 * **Measured correctness.** The exact model reproduces HuggingFace's logits on 16 model families in the tests and on
   real checkpoints ([models & hardware](docs/models_and_hardware.md)); 13 real GGUF files agree with llama.cpp.
@@ -223,4 +224,5 @@ print(client.chat(model="Qwen/Qwen2.5-7B-Instruct", messages=[{"role": "user", "
 
 Turing Engine is licensed under the **Business Source License 1.1 (BSL 1.1)**.
 * **Free for non-production use**: development, local testing, academic research, personal single-GPU workstations and benchmarking ([`LICENSE`](LICENSE), Additional Use Grant). Production use (multi-GPU clusters, commercial hosting, revenue-generating API traffic) needs a separate commercial license.
+* `packages/kv-layer-guard/` (the KV layer calibration, usable with vLLM) is under the **Apache License 2.0** now.
 * Converts automatically to **Apache 2.0** on **August 24, 2030** or the fourth anniversary of the first public release (as [`LICENSE`](LICENSE) §3 states).
