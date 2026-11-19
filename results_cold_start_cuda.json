@@ -37,6 +37,390 @@
   },
   "rows": [
     {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "format": "safetensors",
+      "cache": "cold",
+      "n": 5,
+      "errors": 0,
+      "files": 7,
+      "bytes": 3098955668,
+      "runs": [
+        {
+          "ttft_s": 25.71129822731018,
+          "interpreter_s": 0.024933576583862305,
+          "import_s": 5.717186212539673,
+          "load_s": 17.975526332855225,
+          "first_token_s": 1.993652105331421,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 25.353926420211792,
+          "interpreter_s": 0.024835824966430664,
+          "import_s": 5.649796009063721,
+          "load_s": 17.68395686149597,
+          "first_token_s": 1.995337724685669,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 25.378853797912598,
+          "interpreter_s": 0.025453805923461914,
+          "import_s": 5.655342102050781,
+          "load_s": 17.70078682899475,
+          "first_token_s": 1.9972710609436035,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 25.304035663604736,
+          "interpreter_s": 0.025614261627197266,
+          "import_s": 5.6381964683532715,
+          "load_s": 17.653569221496582,
+          "first_token_s": 1.9866557121276855,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 25.410674571990967,
+          "interpreter_s": 0.026250362396240234,
+          "import_s": 5.683671474456787,
+          "load_s": 17.701900005340576,
+          "first_token_s": 1.9988527297973633,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 0.0
+        }
+      ],
+      "ttft_s": {
+        "mean": 25.431757736206055,
+        "se": 0.07202668055866153
+      },
+      "load_s": {
+        "mean": 17.74314785003662,
+        "se": 0.05874670368981922
+      },
+      "import_s": {
+        "mean": 5.668838453292847,
+        "se": 0.014214819311452215
+      },
+      "first_token_s": {
+        "mean": 1.9943538665771485,
+        "se": 0.0021150865324777025
+      },
+      "interpreter_s": {
+        "mean": 0.025417566299438477,
+        "se": 0.0002555602399115471
+      },
+      "resident_before_max": 0.0,
+      "resident_before_min": 0.0,
+      "dtype": "torch.bfloat16",
+      "tokens_agree": true
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "format": "safetensors",
+      "cache": "warm",
+      "n": 5,
+      "errors": 0,
+      "files": 7,
+      "bytes": 3098955668,
+      "runs": [
+        {
+          "ttft_s": 10.041924715042114,
+          "interpreter_s": 0.025867223739624023,
+          "import_s": 5.595545768737793,
+          "load_s": 2.4430155754089355,
+          "first_token_s": 1.9774961471557617,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 10.025660276412964,
+          "interpreter_s": 0.025525808334350586,
+          "import_s": 5.539194345474243,
+          "load_s": 2.472254753112793,
+          "first_token_s": 1.9886853694915771,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 10.016709566116333,
+          "interpreter_s": 0.025257349014282227,
+          "import_s": 5.552421569824219,
+          "load_s": 2.456698179244995,
+          "first_token_s": 1.982332468032837,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 10.11212944984436,
+          "interpreter_s": 0.025368690490722656,
+          "import_s": 5.639801263809204,
+          "load_s": 2.4525649547576904,
+          "first_token_s": 1.9943945407867432,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 9.98550796508789,
+          "interpreter_s": 0.026056528091430664,
+          "import_s": 5.548813581466675,
+          "load_s": 2.429338216781616,
+          "first_token_s": 1.981299638748169,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15488157696,
+          "resident_before": 1.0
+        }
+      ],
+      "ttft_s": {
+        "mean": 10.036386394500733,
+        "se": 0.021045813349959135
+      },
+      "load_s": {
+        "mean": 2.450774335861206,
+        "se": 0.007139370163818563
+      },
+      "import_s": {
+        "mean": 5.575155305862427,
+        "se": 0.018839812532991634
+      },
+      "first_token_s": {
+        "mean": 1.9848416328430176,
+        "se": 0.0029902353736708386
+      },
+      "interpreter_s": {
+        "mean": 0.025615119934082033,
+        "se": 0.0001508478626958416
+      },
+      "resident_before_max": 1.0,
+      "resident_before_min": 1.0,
+      "dtype": "torch.bfloat16",
+      "tokens_agree": true
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "format": "tgate4",
+      "cache": "cold",
+      "n": 5,
+      "errors": 0,
+      "files": 4,
+      "bytes": 1661801780,
+      "runs": [
+        {
+          "ttft_s": 17.722628831863403,
+          "interpreter_s": 0.02520751953125,
+          "import_s": 5.507358551025391,
+          "load_s": 10.148642301559448,
+          "first_token_s": 2.0414204597473145,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 17.85304307937622,
+          "interpreter_s": 0.025526762008666992,
+          "import_s": 5.588440656661987,
+          "load_s": 10.179966449737549,
+          "first_token_s": 2.0591092109680176,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 17.82290482521057,
+          "interpreter_s": 0.02506542205810547,
+          "import_s": 5.5834455490112305,
+          "load_s": 10.17094111442566,
+          "first_token_s": 2.043452739715576,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 17.87128448486328,
+          "interpreter_s": 0.02545022964477539,
+          "import_s": 5.611402273178101,
+          "load_s": 10.183200359344482,
+          "first_token_s": 2.051231622695923,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 17.878743648529053,
+          "interpreter_s": 0.02560591697692871,
+          "import_s": 5.611455678939819,
+          "load_s": 10.18966794013977,
+          "first_token_s": 2.052014112472534,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 0.0
+        }
+      ],
+      "ttft_s": {
+        "mean": 17.829720973968506,
+        "se": 0.02845158646206546
+      },
+      "load_s": {
+        "mean": 10.174483633041381,
+        "se": 0.007130671880429723
+      },
+      "import_s": {
+        "mean": 5.5804205417633055,
+        "se": 0.01915016295420061
+      },
+      "first_token_s": {
+        "mean": 2.049445629119873,
+        "se": 0.0031897473316296015
+      },
+      "interpreter_s": {
+        "mean": 0.02537117004394531,
+        "se": 0.0001014467159806161
+      },
+      "resident_before_max": 0.0,
+      "resident_before_min": 0.0,
+      "dtype": "torch.float16",
+      "tokens_agree": true
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "format": "tgate4",
+      "cache": "warm",
+      "n": 5,
+      "errors": 0,
+      "files": 4,
+      "bytes": 1661801780,
+      "runs": [
+        {
+          "ttft_s": 9.84340786933899,
+          "interpreter_s": 0.0248565673828125,
+          "import_s": 5.586996078491211,
+          "load_s": 2.1696932315826416,
+          "first_token_s": 2.061861991882324,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 9.897481679916382,
+          "interpreter_s": 0.025475263595581055,
+          "import_s": 5.5953943729400635,
+          "load_s": 2.2071762084960938,
+          "first_token_s": 2.0694358348846436,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 9.800751447677612,
+          "interpreter_s": 0.02521347999572754,
+          "import_s": 5.541637182235718,
+          "load_s": 2.1770646572113037,
+          "first_token_s": 2.0568361282348633,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 9.843995094299316,
+          "interpreter_s": 0.02519059181213379,
+          "import_s": 5.574060916900635,
+          "load_s": 2.197018623352051,
+          "first_token_s": 2.047724962234497,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 9.770157814025879,
+          "interpreter_s": 0.025719881057739258,
+          "import_s": 5.5243048667907715,
+          "load_s": 2.1810431480407715,
+          "first_token_s": 2.0390899181365967,
+          "token": 264,
+          "dtype": "torch.float16",
+          "device": "cuda",
+          "peak_device_bytes": 15022023168,
+          "resident_before": 1.0
+        }
+      ],
+      "ttft_s": {
+        "mean": 9.831158781051636,
+        "se": 0.021632454687903282
+      },
+      "load_s": {
+        "mean": 2.1863991737365724,
+        "se": 0.00685334442735486
+      },
+      "import_s": {
+        "mean": 5.5644786834716795,
+        "se": 0.01358363327074498
+      },
+      "first_token_s": {
+        "mean": 2.054989767074585,
+        "se": 0.005314640082500948
+      },
+      "interpreter_s": {
+        "mean": 0.02529115676879883,
+        "se": 0.00014538135464891658
+      },
+      "resident_before_max": 1.0,
+      "resident_before_min": 1.0,
+      "dtype": "torch.float16",
+      "tokens_agree": true
+    },
+    {
       "model": "HuggingFaceTB/SmolLM2-1.7B",
       "format": "safetensors",
       "cache": "cold",
@@ -410,386 +794,6 @@
       "interpreter_s": {
         "mean": 0.024637842178344728,
         "se": 0.00018670032976312621
-      },
-      "resident_before_max": 1.0,
-      "resident_before_min": 1.0,
-      "dtype": "torch.float16",
-      "tokens_agree": true
-    },
-    {
-      "model": "Qwen/Qwen2.5-1.5B",
-      "format": "safetensors",
-      "cache": "cold",
-      "n": 5,
-      "errors": 0,
-      "files": 7,
-      "bytes": 3098955511,
-      "runs": [
-        {
-          "ttft_s": 27.365134477615356,
-          "interpreter_s": 0.02438807487487793,
-          "import_s": 4.157384634017944,
-          "load_s": 17.494771242141724,
-          "first_token_s": 5.6885905265808105,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 0.0
-        },
-        {
-          "ttft_s": 27.40840482711792,
-          "interpreter_s": 0.0245511531829834,
-          "import_s": 4.162880897521973,
-          "load_s": 17.487821340560913,
-          "first_token_s": 5.733151435852051,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 0.0
-        },
-        {
-          "ttft_s": 27.39455246925354,
-          "interpreter_s": 0.025034427642822266,
-          "import_s": 4.1909918785095215,
-          "load_s": 17.49588179588318,
-          "first_token_s": 5.682644367218018,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 0.0
-        },
-        {
-          "ttft_s": 27.396089792251587,
-          "interpreter_s": 0.02476191520690918,
-          "import_s": 4.180666446685791,
-          "load_s": 17.497780084609985,
-          "first_token_s": 5.692881345748901,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 0.0
-        },
-        {
-          "ttft_s": 27.37436056137085,
-          "interpreter_s": 0.024689197540283203,
-          "import_s": 4.181697130203247,
-          "load_s": 17.499325037002563,
-          "first_token_s": 5.668649196624756,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 0.0
-        }
-      ],
-      "ttft_s": {
-        "mean": 27.38770842552185,
-        "se": 0.00785231775771994
-      },
-      "load_s": {
-        "mean": 17.49511590003967,
-        "se": 0.0019840702721419115
-      },
-      "import_s": {
-        "mean": 4.174724197387695,
-        "se": 0.006282888576981821
-      },
-      "first_token_s": {
-        "mean": 5.693183374404907,
-        "se": 0.010797286603865773
-      },
-      "interpreter_s": {
-        "mean": 0.024684953689575195,
-        "se": 0.00010819259115059389
-      },
-      "resident_before_max": 0.0,
-      "resident_before_min": 0.0,
-      "dtype": "torch.bfloat16",
-      "tokens_agree": true
-    },
-    {
-      "model": "Qwen/Qwen2.5-1.5B",
-      "format": "safetensors",
-      "cache": "warm",
-      "n": 5,
-      "errors": 0,
-      "files": 7,
-      "bytes": 3098955511,
-      "runs": [
-        {
-          "ttft_s": 12.244771242141724,
-          "interpreter_s": 0.024821758270263672,
-          "import_s": 4.17634654045105,
-          "load_s": 2.3445024490356445,
-          "first_token_s": 5.699100494384766,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 1.0
-        },
-        {
-          "ttft_s": 12.187520027160645,
-          "interpreter_s": 0.025034427642822266,
-          "import_s": 4.145563125610352,
-          "load_s": 2.3736064434051514,
-          "first_token_s": 5.643316030502319,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 1.0
-        },
-        {
-          "ttft_s": 12.263758659362793,
-          "interpreter_s": 0.024831771850585938,
-          "import_s": 4.161944627761841,
-          "load_s": 2.3664002418518066,
-          "first_token_s": 5.71058201789856,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 1.0
-        },
-        {
-          "ttft_s": 12.218727588653564,
-          "interpreter_s": 0.024632692337036133,
-          "import_s": 4.1658525466918945,
-          "load_s": 2.3598382472991943,
-          "first_token_s": 5.6684041023254395,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 1.0
-        },
-        {
-          "ttft_s": 12.341199159622192,
-          "interpreter_s": 0.024446487426757812,
-          "import_s": 4.176459550857544,
-          "load_s": 2.3628792762756348,
-          "first_token_s": 5.777413845062256,
-          "token": 264,
-          "dtype": "torch.bfloat16",
-          "device": "cuda",
-          "peak_device_bytes": 15472449024,
-          "resident_before": 1.0
-        }
-      ],
-      "ttft_s": {
-        "mean": 12.251195335388184,
-        "se": 0.02589256062653135
-      },
-      "load_s": {
-        "mean": 2.3614453315734862,
-        "se": 0.004817384989872972
-      },
-      "import_s": {
-        "mean": 4.1652332782745365,
-        "se": 0.005690551000174054
-      },
-      "first_token_s": {
-        "mean": 5.699763298034668,
-        "se": 0.022712094387411258
-      },
-      "interpreter_s": {
-        "mean": 0.024753427505493163,
-        "se": 9.96386470797159e-05
-      },
-      "resident_before_max": 1.0,
-      "resident_before_min": 1.0,
-      "dtype": "torch.bfloat16",
-      "tokens_agree": true
-    },
-    {
-      "model": "Qwen/Qwen2.5-1.5B",
-      "format": "tgate4",
-      "cache": "cold",
-      "n": 5,
-      "errors": 0,
-      "files": 4,
-      "bytes": 1661801695,
-      "runs": [
-        {
-          "ttft_s": 30.1785626411438,
-          "interpreter_s": 0.02475452423095703,
-          "import_s": 4.15658164024353,
-          "load_s": 10.159785985946655,
-          "first_token_s": 15.837440490722656,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 0.0
-        },
-        {
-          "ttft_s": 27.4092059135437,
-          "interpreter_s": 0.02465057373046875,
-          "import_s": 4.163008689880371,
-          "load_s": 10.167404174804688,
-          "first_token_s": 13.054142475128174,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 0.0
-        },
-        {
-          "ttft_s": 27.448756456375122,
-          "interpreter_s": 0.0248868465423584,
-          "import_s": 4.170094013214111,
-          "load_s": 10.148071527481079,
-          "first_token_s": 13.105704069137573,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 0.0
-        },
-        {
-          "ttft_s": 27.605498790740967,
-          "interpreter_s": 0.026389360427856445,
-          "import_s": 4.2025957107543945,
-          "load_s": 10.190398693084717,
-          "first_token_s": 13.186115026473999,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 0.0
-        },
-        {
-          "ttft_s": 27.44825839996338,
-          "interpreter_s": 0.024594545364379883,
-          "import_s": 4.162954330444336,
-          "load_s": 10.147853136062622,
-          "first_token_s": 13.112856388092041,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 0.0
-        }
-      ],
-      "ttft_s": {
-        "mean": 28.018056440353394,
-        "se": 0.541177517109401
-      },
-      "load_s": {
-        "mean": 10.162702703475953,
-        "se": 0.007849394491186603
-      },
-      "import_s": {
-        "mean": 4.171046876907349,
-        "se": 0.008171847089255167
-      },
-      "first_token_s": {
-        "mean": 13.659251689910889,
-        "se": 0.5449534250923862
-      },
-      "interpreter_s": {
-        "mean": 0.0250551700592041,
-        "se": 0.0003372430843529915
-      },
-      "resident_before_max": 0.0,
-      "resident_before_min": 0.0,
-      "dtype": "torch.float16",
-      "tokens_agree": true
-    },
-    {
-      "model": "Qwen/Qwen2.5-1.5B",
-      "format": "tgate4",
-      "cache": "warm",
-      "n": 5,
-      "errors": 0,
-      "files": 4,
-      "bytes": 1661801695,
-      "runs": [
-        {
-          "ttft_s": 19.571975231170654,
-          "interpreter_s": 0.024945974349975586,
-          "import_s": 4.184819221496582,
-          "load_s": 2.1832473278045654,
-          "first_token_s": 13.178962707519531,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 1.0
-        },
-        {
-          "ttft_s": 19.408735513687134,
-          "interpreter_s": 0.024312496185302734,
-          "import_s": 4.165947914123535,
-          "load_s": 2.1607046127319336,
-          "first_token_s": 13.057770490646362,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 1.0
-        },
-        {
-          "ttft_s": 19.399726152420044,
-          "interpreter_s": 0.024931907653808594,
-          "import_s": 4.165146827697754,
-          "load_s": 2.1737592220306396,
-          "first_token_s": 13.035888195037842,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 1.0
-        },
-        {
-          "ttft_s": 19.45686149597168,
-          "interpreter_s": 0.025266408920288086,
-          "import_s": 4.180915355682373,
-          "load_s": 2.189657688140869,
-          "first_token_s": 13.06102204322815,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 1.0
-        },
-        {
-          "ttft_s": 19.616284370422363,
-          "interpreter_s": 0.024592161178588867,
-          "import_s": 4.173956394195557,
-          "load_s": 2.1848020553588867,
-          "first_token_s": 13.232933759689331,
-          "token": 264,
-          "dtype": "torch.float16",
-          "device": "cuda",
-          "peak_device_bytes": 14992403968,
-          "resident_before": 1.0
-        }
-      ],
-      "ttft_s": {
-        "mean": 19.490716552734376,
-        "se": 0.0438842558562677
-      },
-      "load_s": {
-        "mean": 2.1784341812133787,
-        "se": 0.00512774877939255
-      },
-      "import_s": {
-        "mean": 4.17415714263916,
-        "se": 0.003924097840281406
-      },
-      "first_token_s": {
-        "mean": 13.113315439224243,
-        "se": 0.03900828446954975
-      },
-      "interpreter_s": {
-        "mean": 0.024809789657592774,
-        "se": 0.00016380219457617418
       },
       "resident_before_max": 1.0,
       "resident_before_min": 1.0,

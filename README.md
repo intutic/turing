@@ -14,26 +14,38 @@ number in the docs comes from a committed results file.**
 
 ## Is it faster than vLLM or llama.cpp?
 
-No. On one NVIDIA L4, on the same model and prompts, vLLM and llama.cpp are faster than Turing in every
-configuration measured, and their 4-bit models answer GSM8K about as well (Qwen2.5-1.5B-Instruct, 512-token prompts,
-256 new tokens; `results_4bit_speed_cuda.json`, `results_4bit_quality_*_cuda.json`):
+Mostly no; in a few measured settings, yes. On one NVIDIA L4, same model and prompts (Qwen2.5-1.5B-Instruct,
+512-token prompts, 256 new tokens; `results_4bit_speed_cuda.json`, `results_4bit_quality_*_cuda.json`):
 
 <!-- table:vs_4bit -->
-| Setting | Batch 1, tok/s | Batch 8, tok/s | GSM8K (n=500) |
-| :--- | :---: | :---: | :---: |
-| llama.cpp Q4_K_M | 186 | 790 | 52.4% ± 2.2% |
-| vLLM GPTQ-Int4 (Qwen's checkpoint) | 169 | 1,078 | 50.2% ± 2.2% |
-| Turing GPTQ | 87 | 557 | 52.6% ± 2.2% |
-| Turing GPTQ + 4-bit LM head (opt-in) | — | — | — |
-| Turing GPTQ + TEAL 25% | 90 | 531 | 47.2% ± 2.2% |
-| Turing GPTQ + TEAL 40% | 93 | 530 | 43.6% ± 2.2% |
-| vLLM fp16 (reference) | 75 | 533 | — |
-| Turing fp16 (reference) | 65 | 440 | — |
+| Setting | Batch 1, tok/s | Batch 8, tok/s | Batch 64, tok/s | GSM8K (n=500) |
+| :--- | :---: | :---: | :---: | :---: |
+| llama.cpp Q4_K_M | 180 | 752 | 2,157 | 52.4% ± 2.2% |
+| vLLM GPTQ-Int4 (Qwen's checkpoint) | 171 | 1,093 | 3,065 | 50.2% ± 2.2% |
+| Turing GPTQ | 155 | 1,035 | 2,739 | 50.4% ± 2.2% |
+| Turing GPTQ + 4-bit LM head (opt-in) | 197 | 1,266 | 2,961 | 51.8% ± 2.2% |
+| Turing GPTQ + TEAL 25% | 107 | 953 | 2,600 | 46.2% ± 2.2% |
+| Turing GPTQ + TEAL 40% | 112 | 960 | 2,614 | 42.0% ± 2.2% |
+| vLLM fp16 (reference) | 75 | 537 | 2,235 | — |
+| Turing fp16 (reference) | 73 | 530 | 2,152 | — |
 <!-- /table -->
 
-At short context in fp16 vLLM is 1.1–1.5× faster, and at 16K-token context 1.4× faster per request at equal quality
-([comparison](docs/comparison.md)). For production serving use vLLM, SGLang or TensorRT-LLM; on a laptop, llama.cpp
-or Ollama.
+* **fp16:** vLLM is 1.01–1.04× faster at batch 1–64. On SmolLM2 at 1,024-token prompts Turing reaches 88–103% of
+  vLLM's throughput, and its first token at batch 64 on SmolLM2-1.7B takes 2.3× as long (6.7 s against 2.9 s).
+* **4 bits, fp16 LM head (default):** vLLM is 1.06–1.12× faster. llama.cpp is 1.17× faster at batch 1; Turing is
+  faster than llama.cpp at batch 8 and 64 (1.38× and 1.27×).
+* **4 bits with the opt-in 4-bit LM head** (`--quantize-lm-head`): Turing is 1.15× vLLM at batch 1 and 8 and 1.09×
+  llama.cpp at batch 1; vLLM stays 1.04× faster at batch 64. This quantizes one more matrix than vLLM's GPTQ
+  checkpoint does; GSM8K 51.8% against vLLM's 50.2% (each ± 2.2%).
+* **16K-token prompts, fp16 KV at equal memory:** Turing is 1.0–1.22× faster per request than vLLM, more at larger
+  batches. vLLM's fp8 cache with layer 0 kept in fp16 (the setting that is correct on this model) is 1.3–1.4×
+  faster than Turing's int8 at equal quality.
+* **Cold start:** from process start to first token Turing takes 25.4 s from a cold page cache and 10.0 s warm,
+  2.0–3.4× sooner than vLLM (51.7 s, 34.2 s); llama.cpp with its 4-bit GGUF takes 7.1 s and 1.3 s
+  (`results_cold_start_*_cuda.json`).
+
+Details and every other setting are in the [comparison](docs/comparison.md). For production serving use vLLM, SGLang
+or TensorRT-LLM; on a laptop, llama.cpp or Ollama.
 
 ## What it is good for
 
@@ -46,11 +58,11 @@ or Ollama.
 <!-- table:vs_kv -->
 | KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 3.51 |
-| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 3.56 |
-| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 3.54 |
-| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.60 |
-| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.71 |
+| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 2.05 |
+| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 2.32 |
+| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.95 |
+| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
+| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.66 |
 | vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
 | vLLM fp8_per_token_head | — | 0.6% | 0.0% | +2.404 ± 0.364 | — |
 | vLLM int8_per_token_head | — | 41.4% | 100.0% | +0.023 ± 0.007 | 4.72 |

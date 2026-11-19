@@ -35,8 +35,10 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
   `benchmark_w4a16.py`; real-model evals for cross-model KV transfer, lineage, k-slot pooling and debate (d8dc852,
   03b59f5). Results are in `docs/measured-differentiators.md`.
 
-- Measured comparison with vLLM 0.31 and llama.cpp on an L4 (Turing is slower: 1.1–1.5× in fp16, about 2× at 4 bits;
-  its low-bit KV keeps quality where vLLM's default fp8 and per-token int4 do not), long context at equal KV memory,
+- Measured comparison with vLLM 0.31 and llama.cpp on an L4 (Qwen2.5-1.5B: vLLM is 1.01–1.04× faster in fp16 and
+  1.06–1.12× at 4 bits; with the opt-in 4-bit LM head Turing is 1.15× vLLM at batch 1 and 8; at 16K-token prompts
+  Turing's fp16 is 1.0–1.22× faster per request and vLLM's fp8 with layer 0 kept 1.3–1.4× faster than Turing's int8;
+  Turing's low-bit KV keeps quality where vLLM's default fp8 and per-token int4 do not), long context at equal KV memory,
   vLLM's KV caches on Turing's own GSM8K/pass-key/NLL checks (`scripts/benchmark_e2e_generation.py`,
   `scripts/eval_vllm_quality.py`, `scripts/benchmark_llamacpp.py`).
 - `scripts/make_doc_tables.py`: every numeric table in the docs is generated from the committed results; a test fails
@@ -47,9 +49,16 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
   74.6%), and keeps none elsewhere. Limit: Phi-3.5-mini loses 5.2 GSM8K points under fp8 and the guard does not flag
   it (docs/benchmarks.md §2).
 
+- Speed plan (all on one L4): Marlin int4 GEMM vendored from vLLM v0.31.0 (optional, `TURING_BUILD_MARLIN=1`, serves
+  1–1,024 rows; eddf763); opt-in 4-bit LM head (`--quantize-lm-head`); FlashInfer prefill for pages in the model dtype
+  when `flashinfer` is installed, one plan per forward for all packed prompts (30ddea4, 669c2ee); decode attention on
+  tensor cores, RoPE for q and k in one launch, the residual add fused into the next norm; the first token no longer
+  waits behind a decode step; int4-KV prefill with a cached prefix through gather + SDPA (6a8303c). Qwen2.5-1.5B 4-bit
+  batch-1 decode 87.7 → 154.8 tok/s (196.8 with the 4-bit head).
+
 ### Changed
 - Documentation rewritten against the code; every number cites a committed results file (323a854, fd2cd21). The
-  README positions Turing as a research engine: it is slower than vLLM and llama.cpp.
+  README positions Turing as a research engine for KV-cache and quantization work, not a production server.
 - int4 GEMM and input-sparse GEMV kernels split K across programs (1.5× faster at one row); `INT4_MAX_ROWS` 16 → 64
   from the graph-timed crossover. Under CUDA graphs 4-bit weights decode 1.5–1.6× faster than fp16.
 - TEAL activation sparsity applies only to one-row decode on CUDA; prefill and batched decode stay dense (a

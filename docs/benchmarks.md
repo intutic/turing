@@ -9,8 +9,10 @@ Comparisons with vLLM and llama.cpp are on the [comparison](comparison.md) page.
 
 ## 1. Summary
 
-* **Turing is slower than vLLM and llama.cpp** in every configuration measured on the L4: 1.1–1.5× behind vLLM in
-  fp16, about 2× behind both at 4 bits, 1.4× behind vLLM per request at 16K context at equal quality.
+* **Turing is close to vLLM and ahead in a few settings** on the L4 (§5, [comparison](comparison.md)): vLLM is
+  1.01–1.04× faster in fp16 and 1.06–1.12× at 4 bits; with the opt-in 4-bit LM head Turing is 1.15× vLLM at batch 1
+  and 8; at 16K-token prompts Turing's fp16 is 1.0–1.22× faster per request, and vLLM's fp8 with layer 0 kept is
+  1.3–1.4× faster than Turing's int8 at equal quality.
 * **Its low-bit KV caches keep quality without settings** (§2): int8 is free, int4 costs about +0.02 nats, and both
   pass every pass-key retrieval to 32K; vLLM's int8/int4 and default fp8 caches lose 16 to 57 GSM8K points on the same
   model unless layer 0 is excluded by hand.
@@ -60,11 +62,11 @@ multiplied by it), which leaves q·k unchanged bit for bit. Why these rules, fro
 <!-- table:vs_kv -->
 | KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 3.51 |
-| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 3.56 |
-| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 3.54 |
-| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.60 |
-| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.71 |
+| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 2.05 |
+| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 2.32 |
+| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.95 |
+| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
+| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.66 |
 | vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
 | vLLM fp8_per_token_head | — | 0.6% | 0.0% | +2.404 ± 0.364 | — |
 | vLLM int8_per_token_head | — | 41.4% | 100.0% | +0.023 ± 0.007 | 4.72 |
@@ -169,23 +171,24 @@ from Python and shows why that matters for small Triton kernels:
 | Qwen2.5-1.5B | rtn4_teal40 | 114.9 | 13.1 | 1.54 |
 <!-- /table -->
 
-**Where the int4 kernel beats dequantize + cuBLAS** (microseconds, summed over six layer shapes from 2048 × 2048 to
-14336 × 4096, timed as CUDA-graph replays; `results_w4a16_crossover_cuda.json`). The kernel splits K across programs so
-a narrow layer still fills the GPU; `INT4_MAX_ROWS = 64` follows from this table:
+**Where each int4 kernel wins** (microseconds, summed over seven layer shapes from 1536 × 1536 to the 1536 × 151,936
+LM head of Qwen2.5-1.5B, timed as CUDA-graph replays; `results_w4a16_crossover_cuda.json`). The Triton kernel splits K
+across programs so a narrow layer still fills the GPU, and serves up to `INT4_MAX_ROWS = 64` rows. Marlin (vendored from
+vLLM, built only with `TURING_BUILD_MARLIN=1`) is faster at every row count here, so when it is built `QuantLinear`
+sends it 1–1,024 rows:
 
 <!-- table:crossover -->
-| Rows (M) | int4 kernel | int4, no K split | dequantize + cuBLAS | fp16 cuBLAS |
-| :--- | :---: | :---: | :---: | :---: |
-| 1 | 323 | 475 | 2,390 | 1,001 |
-| 2 | 366 | 485 | 2,722 | 1,022 |
-| 4 | 366 | 536 | 2,736 | 1,021 |
-| 8 | 391 | 636 | 2,745 | 1,029 |
-| 16 | 521 | 762 | 2,759 | 1,043 |
-| 32 | 1,060 | 1,163 | 2,889 | 1,159 |
-| 64 | 1,847 | 1,847 | 3,000 | 1,247 |
-| 128 | 3,187 | 3,208 | 3,128 | 1,386 |
-| 256 | 6,330 | 6,281 | 3,812 | 2,114 |
-| 512 | 12,460 | 12,456 | 5,392 | 3,539 |
+| Rows (M) | int4 kernel | int4, no K split | dequantize + cuBLAS | fp16 cuBLAS | Marlin (optional) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| 1 | 1,385 | 1,408 | 6,712 | 3,076 | 611 |
+| 2 | 2,160 | 2,198 | 7,270 | 3,058 | 615 |
+| 4 | 1,453 | 1,554 | 7,282 | 3,066 | 623 |
+| 8 | 1,472 | 1,624 | 7,306 | 3,088 | 634 |
+| 16 | 1,756 | 1,932 | 7,344 | 3,108 | 680 |
+| 32 | 2,425 | 2,485 | 7,727 | 3,452 | 843 |
+| 64 | 3,776 | 3,809 | 7,805 | 3,528 | 1,270 |
+| 128 | 6,860 | 6,884 | 8,054 | 3,849 | 2,448 |
+| 256 | 12,823 | 12,868 | 9,767 | 5,740 | 4,862 |
 <!-- /table -->
 
 TEAL sparsifies projection inputs only in one-row decode on CUDA, where the input-sparse kernel skips the weight rows
@@ -257,20 +260,23 @@ Turing setting gets the same bytes, so capacity differs only by bytes per token.
 <!-- table:longctx -->
 | Engine, KV cache | KV capacity (tokens) | B=16 | B=32 | B=64 | B=128 |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| Turing native | 547,568 | 3.67 | 3.59 | 3.53 | 3.51 |
-| Turing int8 | 993,184 | 3.74 | 3.64 | 3.59 | 3.56 |
-| Turing int4 | 1,304,864 | 3.80 | 3.61 | 3.57 | 3.54 |
-| Turing int4, Quest 25% | 1,135,712 | 4.58 | 4.24 | 3.98 | 3.87 |
-| vLLM auto | 547,856 | 2.37 | 2.37 | 2.53 | 2.60 |
-| vLLM fp8 | 1,069,392 | 1.90 | 1.75 | 1.72 | 1.71 |
+| Turing native | 547,840 | 2.25 | 2.12 | 2.07 | 2.05 |
+| Turing int8 | 993,648 | 2.52 | 2.37 | 2.34 | 2.32 |
+| Turing int4 | 1,305,488 | 3.14 | 3.03 | 2.98 | 2.95 |
+| Turing int4, Quest 25% | 1,136,256 | 3.78 | 3.66 | 3.48 | 3.40 |
+| vLLM auto | 547,856 | 2.26 | 2.27 | 2.43 | 2.51 |
+| vLLM fp8 | 1,068,816 | 1.83 | 1.70 | 1.67 | 1.66 |
 | vLLM fp8, skip layer 0 | 1,032,096 | 1.85 | 1.74 | 1.75 | 1.73 |
 | vLLM int8_per_token_head | 1,062,096 | 4.90 | 4.79 | 4.74 | 4.72 |
 | vLLM int4_per_token_head | 2,060,896 | 4.73 | 4.55 | 4.49 | 4.41 |
 | vLLM int4_per_token_head, skip layer 0 | 1,876,928 | 4.51 | 4.42 | 4.36 | 4.30 |
 <!-- /table -->
 
-Turing's int4 cache holds 2.4× the tokens of fp16, but its time per request does not change with the cache format:
-at this length it is bound by prefill, where vLLM's attention kernels are faster. Quality of each format is in §2;
+In fp16 Turing is 1.0–1.22× faster per request than vLLM; prefill attention over pages in the model dtype runs through
+FlashInfer when it is installed. Turing's int4 cache holds 2.4× the tokens of fp16 but takes 1.4× its time per request
+(2.95 against 2.05 s at B=128), and int8 1.1×: their prefill reads quantized pages through Turing's own kernel. Quest
+at 25% of pages is slower still (3.40 s at B=128). vLLM's
+fp8 cache with layer 0 kept is 1.3–1.4× faster than Turing's int8 at equal quality. Quality of each format is in §2;
 vLLM fp8 without a skipped layer is fast because it is wrong on this model.
 
 ---
@@ -283,18 +289,21 @@ dropped from the page cache, Python and CUDA libraries cached; `results_cold_sta
 <!-- table:cold_start -->
 | Model | Format | Page cache | GB | n | Process start → first token, s | Load, s | Imports, s | Load → first token, s |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Qwen2.5-1.5B-Instruct | safetensors | cold | 3.10 | 5 | 25.43 ± 0.07 | 17.74 ± 0.06 | 5.67 | 1.99 |
+| Qwen2.5-1.5B-Instruct | safetensors | warm | 3.10 | 5 | 10.04 ± 0.02 | 2.45 ± 0.01 | 5.58 | 1.98 |
+| Qwen2.5-1.5B-Instruct | tgate4 | cold | 1.66 | 5 | 17.83 ± 0.03 | 10.17 ± 0.01 | 5.58 | 2.05 |
+| Qwen2.5-1.5B-Instruct | tgate4 | warm | 1.66 | 5 | 9.83 ± 0.02 | 2.19 ± 0.01 | 5.56 | 2.05 |
 | SmolLM2-1.7B | safetensors | cold | 3.43 | 5 | 27.21 ± 0.02 | 18.87 ± 0.00 | 4.26 | 4.05 |
 | SmolLM2-1.7B | safetensors | warm | 3.43 | 5 | 10.23 ± 0.01 | 2.01 ± 0.00 | 4.15 | 4.05 |
 | SmolLM2-1.7B | tgate4 | cold | 1.29 | 5 | 21.50 ± 0.02 | 7.45 ± 0.00 | 4.16 | 9.87 |
 | SmolLM2-1.7B | tgate4 | warm | 1.29 | 5 | 15.32 ± 0.02 | 1.28 ± 0.00 | 4.16 | 9.86 |
-| Qwen2.5-1.5B | safetensors | cold | 3.10 | 5 | 27.39 ± 0.01 | 17.50 ± 0.00 | 4.17 | 5.69 |
-| Qwen2.5-1.5B | safetensors | warm | 3.10 | 5 | 12.25 ± 0.03 | 2.36 ± 0.00 | 4.17 | 5.70 |
-| Qwen2.5-1.5B | tgate4 | cold | 1.66 | 5 | 28.02 ± 0.54 | 10.16 ± 0.01 | 4.17 | 13.66 |
-| Qwen2.5-1.5B | tgate4 | warm | 1.66 | 5 | 19.49 ± 0.04 | 2.18 ± 0.01 | 4.17 | 13.11 |
 <!-- /table -->
 
-The 4-bit `.tgate4` directory loads 1.7–2.5× faster from a cold disk, but its first token comes later: Triton tunes the
-int4 kernels again in every new process, and the default int8 KV pool calibrates its layers.
+The 4-bit `.tgate4` directory loads 1.7–2.5× faster from a cold disk. On Qwen2.5-1.5B its first token now follows the
+load by about 2 s in either format. The SmolLM2-1.7B rows come from an earlier version of the code and were not rerun;
+their 4–10 s from load to first token may not reflect the current code. For comparison, vLLM takes 51.7 s cold
+and 34.2 s warm to its first token on the same Qwen files and llama.cpp 7.1 s and 1.3 s with its 4-bit GGUF
+(`results_cold_start_vs_vllm_cuda.json`, `results_cold_start_llamacpp_cuda.json`).
 
 ---
 
