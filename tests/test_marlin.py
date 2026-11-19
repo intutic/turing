@@ -107,7 +107,7 @@ def test_marlin_supported_shapes():
 
 @needs_marlin
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("M", [2, 8, 64])
+@pytest.mark.parametrize("M", [1, 2, 8, 64])
 def test_quant_linear_marlin_path_matches_triton(dtype, M):
     """QuantLinear routes MARLIN_MIN_ROWS..MARLIN_MAX_ROWS rows to Marlin; it agrees with the Triton int4 GEMM, and a
     fused q/k/v QuantLinear (fuse_linears) gets its own Marlin copy."""
@@ -136,3 +136,20 @@ def test_quant_linear_marlin_path_matches_triton(dtype, M):
     for p, o in zip(parts, outs):
         r = w4a16_gemm(x, p.qweight, p.scales, p.zeros, p.group, p.bias).float()
         torch.testing.assert_close(o.float(), r, atol=1e-2 * r.abs().max().item(), rtol=1e-2)
+
+
+@needs_marlin
+def test_marlin_copies_are_built_before_the_kv_pool_is_sized():
+    """Every 4-bit layer a CUDA forward uses (fused q/k/v and gate/up, the unfused rest) has its Marlin copy, or its
+    'unsupported' mark, once the KV pool exists: none is allocated later, out of memory the pool has taken."""
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    from turing.models.quant import QuantLinear, quantize_model
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama")).half().cuda()
+    quantize_model(model, "rtn")
+    model.config.kv_pool_gib = 0.01
+    model.kv_pool()
+    fused = [o.__dict__[k][0] for o in model.modules() for k in ("_qkv", "_gate_up") if k in o.__dict__]
+    parts = {id(p) for o in model.modules() for k in ("_qkv", "_gate_up") if k in o.__dict__ for p in o.__dict__[k][1]}
+    used = fused + [m for m in model.modules() if isinstance(m, QuantLinear) and id(m) not in parts]
+    assert fused and used and all(torch.float16 in m._marlin for m in used)

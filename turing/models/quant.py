@@ -30,9 +30,10 @@ QMAX = 2 ** BITS - 1
 # replays (results_w4a16_crossover_cuda.json, summed over six layer shapes from 2048x2048 to 14336x4096): 1847 against
 # 3000 us at 64 rows, about equal at 128, 6330 against 3812 at 256.
 INT4_MAX_ROWS = 64
-# Rows routed to the Marlin kernel when the optional extension is built (turing.kernels.marlin); M = 1 stays on the
-# Triton GEMV. Starting values, to be set from scripts/benchmark_w4a16.py's marlin_us column.
-MARLIN_MIN_ROWS, MARLIN_MAX_ROWS = 2, 1024
+# Rows routed to the Marlin kernel when the optional extension is built (turing.kernels.marlin). On the L4 it beat the
+# Triton kernels at every row count from 1 to 256 on Qwen2.5-1.5B's shapes (results_w4a16_crossover_ckpt7_cuda.json:
+# 22.6 against 98.8 us at one row on the 1536x17920 gate/up layer).
+MARLIN_MIN_ROWS, MARLIN_MAX_ROWS = 1, 1024
 
 
 def _grid(w: torch.Tensor, qmax: int = QMAX) -> Tuple[torch.Tensor, torch.Tensor]:

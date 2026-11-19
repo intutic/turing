@@ -688,6 +688,28 @@ class SubspaceCausalLM(nn.Module):
             c.length += n
         return logits
 
+    def _prepare_marlin(self, dtype: torch.dtype) -> None:
+        """Build the Marlin copy (turing.kernels.marlin) of every 4-bit layer a CUDA forward uses: the fused q/k/v and
+        gate/up layers and the unfused rest. QuantLinear would build them on first use, after the KV pool has taken the
+        free memory, where a 7B model's copies may not fit."""
+        from .quant import QuantLinear
+        from ..kernels.marlin import HAS_MARLIN
+        if not HAS_MARLIN or not any(isinstance(m, QuantLinear) for m in self.modules()):
+            return
+        if not self.__dict__.get("_projections_fused"):
+            self.fuse_projections()
+        used, parts = [], set()
+        for owner in self.modules():
+            for key in ("_qkv", "_gate_up"):
+                f = owner.__dict__.get(key)
+                if f is not None:  # (fused layer, its parts, sizes): see fuse_linears
+                    used.append(f[0])
+                    parts.update(id(p) for p in f[1])
+        used += [m for m in self.modules() if isinstance(m, QuantLinear) and id(m) not in parts]
+        for m in used:
+            if isinstance(m, QuantLinear):
+                m._marlin_weights(dtype)
+
     def fuse_projections(self) -> int:
         """Fuse every layer's q/k/v and gate/up projections (fuse_linears); returns how many groups were fused."""
         n = 0
@@ -965,6 +987,8 @@ class SubspaceCausalLM(nn.Module):
                 if choose:
                     self.select_kv_native_layers()
                 self._save_kv_calibration(smooth, choose)
+            if w.device.type == "cuda":
+                self._prepare_marlin(w.dtype)  # before the pool takes the free memory
             pool = KVPool.for_model(cfg, w.dtype, w.device)
             self._kv_pool = pool
         return pool
