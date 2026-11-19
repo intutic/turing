@@ -1,0 +1,384 @@
+{
+  "rows": [
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "quantization": "none",
+      "batch": 8,
+      "context": 512,
+      "steps": 126,
+      "step_ms": 15.304609999930108,
+      "forward_ms": 14.959570999963034,
+      "forward_device_ms": 14.65979499999997,
+      "top_kernels": [
+        [
+          "void cutlass::Kernel2<cutlass_80_wmma_tensorop_f16_s161616gemm_f16_16x16_128x2_tn_align8>(",
+          12958.0
+        ],
+        [
+          "_pool_decode_kernel",
+          1242.0
+        ],
+        [
+          "_kv_reduce_kernel",
+          123.7
+        ],
+        [
+          "_rms_norm_kernel",
+          97.0
+        ],
+        [
+          "_rope_kernel",
+          74.7
+        ],
+        [
+          "_silu_mul_kernel",
+          46.4
+        ],
+        [
+          "_pool_append_kernel",
+          42.7
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<c10::Half>, ",
+          37.8
+        ],
+        [
+          "Memcpy DtoD (Device -> Device)",
+          13.9
+        ],
+        [
+          "void at::native::(anonymous namespace)::indexSelectSmallIndex<c10::Half, long, unsigned in",
+          11.8
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::cos_kernel_cuda(at::TensorIt",
+          2.3
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor<float, float, ",
+          2.3
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::sin_kernel_cuda(at::TensorIt",
+          2.3
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native:",
+          1.6
+        ],
+        [
+          "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::Tenso",
+          1.5
+        ],
+        [
+          "void at::native::(anonymous namespace)::CatArrayBatchedCopy_alignedK_contig<at::native::(a",
+          1.4
+        ],
+        [
+          "Memcpy HtoD (Pageable -> Device)",
+          0.4
+        ]
+      ],
+      "note": "medians over steps where all B requests decode; step - forward = the engine's own work"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "quantization": "w4a16-rtn",
+      "batch": 8,
+      "context": 512,
+      "steps": 126,
+      "step_ms": 10.481283999979496,
+      "forward_ms": 10.144094999986919,
+      "forward_device_ms": 9.470878000000011,
+      "top_kernels": [
+        [
+          "_w4a16_direct_kernel",
+          3099.7
+        ],
+        [
+          "_w4a16_kernel",
+          2459.0
+        ],
+        [
+          "void cutlass::Kernel2<cutlass_80_wmma_tensorop_f16_s161616gemm_f16_16x16_128x2_tn_align8>(",
+          1890.1
+        ],
+        [
+          "_pool_decode_kernel",
+          1302.8
+        ],
+        [
+          "_kv_reduce_kernel",
+          130.6
+        ],
+        [
+          "_rms_norm_kernel",
+          101.8
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::float16_copy_kernel_cuda(at:",
+          97.6
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::arr",
+          83.9
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native:",
+          78.8
+        ],
+        [
+          "_rope_kernel",
+          73.9
+        ],
+        [
+          "_silu_mul_kernel",
+          42.3
+        ],
+        [
+          "_pool_append_kernel",
+          37.3
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<c10::Half>, ",
+          33.5
+        ],
+        [
+          "Memcpy DtoD (Device -> Device)",
+          14.2
+        ],
+        [
+          "void at::native::(anonymous namespace)::indexSelectSmallIndex<c10::Half, long, unsigned in",
+          13.0
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor<float, float, ",
+          2.5
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::sin_kernel_cuda(at::TensorIt",
+          2.4
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::cos_kernel_cuda(at::TensorIt",
+          2.3
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native:",
+          1.7
+        ],
+        [
+          "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::Tenso",
+          1.5
+        ],
+        [
+          "void at::native::(anonymous namespace)::CatArrayBatchedCopy_alignedK_contig<at::native::(a",
+          1.4
+        ],
+        [
+          "Memcpy HtoD (Pageable -> Device)",
+          0.4
+        ]
+      ],
+      "note": "medians over steps where all B requests decode; step - forward = the engine's own work"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "quantization": "none",
+      "batch": 64,
+      "context": 512,
+      "steps": 112,
+      "step_ms": 25.90474549992905,
+      "forward_ms": 25.189511999997194,
+      "forward_device_ms": 23.64916199999996,
+      "top_kernels": [
+        [
+          "_pool_decode_kernel",
+          8628.2
+        ],
+        [
+          "ampere_fp16_s16816gemm_fp16_128x64_ldg8_f2f_stages_32x6_tn",
+          7314.5
+        ],
+        [
+          "ampere_fp16_s16816gemm_fp16_128x64_ldg8_f2f_stages_64x3_tn",
+          3409.6
+        ],
+        [
+          "void cutlass::Kernel2<cutlass_80_tensorop_f16_s16816gemm_relu_f16_256x128_32x3_tn_align8>(",
+          2137.5
+        ],
+        [
+          "ampere_fp16_s16816gemm_fp16_64x64_ldg8_relu_f2f_stages_64x5_tn",
+          822.8
+        ],
+        [
+          "void cutlass::Kernel2<cutlass_80_wmma_tensorop_f16_s161616gemm_f16_32x32_128x2_tn_align8>(",
+          693.8
+        ],
+        [
+          "_rms_norm_kernel",
+          128.7
+        ],
+        [
+          "_rope_kernel",
+          107.2
+        ],
+        [
+          "_silu_mul_kernel",
+          83.0
+        ],
+        [
+          "Memcpy DtoD (Device -> Device)",
+          70.4
+        ],
+        [
+          "void cublasLt::splitKreduce_kernel<32, 16, int, __half, __half, float, __half, false, __ha",
+          69.8
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<c10::Half>, ",
+          59.8
+        ],
+        [
+          "_kv_reduce_kernel",
+          55.8
+        ],
+        [
+          "_pool_append_kernel",
+          51.8
+        ],
+        [
+          "void at::native::vectorized_gather_kernel<16, long>(char*, char*, long*, int, long, long, ",
+          2.6
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor<float, float, ",
+          2.5
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native:",
+          2.4
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::cos_kernel_cuda(at::TensorIt",
+          2.4
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::sin_kernel_cuda(at::TensorIt",
+          2.4
+        ],
+        [
+          "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::Tenso",
+          1.9
+        ],
+        [
+          "void at::native::(anonymous namespace)::CatArrayBatchedCopy_alignedK_contig<at::native::(a",
+          1.5
+        ],
+        [
+          "Memcpy HtoD (Pageable -> Device)",
+          0.4
+        ]
+      ],
+      "note": "medians over steps where all B requests decode; step - forward = the engine's own work"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "quantization": "w4a16-rtn",
+      "batch": 64,
+      "context": 512,
+      "steps": 112,
+      "step_ms": 29.16720999996869,
+      "forward_ms": 28.429940500018347,
+      "forward_device_ms": 24.767348000000005,
+      "top_kernels": [
+        [
+          "_pool_decode_kernel",
+          8723.2
+        ],
+        [
+          "_w4a16_direct_kernel",
+          8320.7
+        ],
+        [
+          "_w4a16_kernel",
+          4860.7
+        ],
+        [
+          "void cutlass::Kernel2<cutlass_80_tensorop_f16_s16816gemm_relu_f16_256x128_32x3_tn_align8>(",
+          2160.5
+        ],
+        [
+          "_rms_norm_kernel",
+          131.6
+        ],
+        [
+          "_rope_kernel",
+          113.9
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::float16_copy_kernel_cuda(at:",
+          81.5
+        ],
+        [
+          "_silu_mul_kernel",
+          77.9
+        ],
+        [
+          "Memcpy DtoD (Device -> Device)",
+          71.2
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<float>, std::arr",
+          67.4
+        ],
+        [
+          "_kv_reduce_kernel",
+          54.2
+        ],
+        [
+          "_pool_append_kernel",
+          47.0
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<c10::Half>, ",
+          41.1
+        ],
+        [
+          "void at::native::vectorized_gather_kernel<16, long>(char*, char*, long*, int, long, long, ",
+          2.8
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor<float, float, ",
+          2.8
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::cos_kernel_cuda(at::TensorIt",
+          2.7
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::sin_kernel_cuda(at::TensorIt",
+          2.7
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native:",
+          1.9
+        ],
+        [
+          "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::Tenso",
+          1.7
+        ],
+        [
+          "void at::native::(anonymous namespace)::CatArrayBatchedCopy_alignedK_contig<at::native::(a",
+          1.7
+        ],
+        [
+          "Memcpy HtoD (Pageable -> Device)",
+          0.4
+        ]
+      ],
+      "note": "medians over steps where all B requests decode; step - forward = the engine's own work"
+    }
+  ]
+}
