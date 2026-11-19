@@ -1,0 +1,44 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "runtime": "2.9.1+cu129"
+  },
+  "rows": [
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "batch": 1,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 5.22,
+      "output_tok_per_s": 49.0,
+      "mean_ttft_s": 0.1337,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 147632,
+      "kv_pool_gib": 7.884,
+      "kv_native_layers": [],
+      "quantization": "w4a16-rtn",
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-7B-Instruct",
+      "batch": 8,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 6.477,
+      "output_tok_per_s": 316.2,
+      "mean_ttft_s": 0.8519,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 147632,
+      "kv_pool_gib": 7.884,
+      "kv_native_layers": [],
+      "quantization": "w4a16-rtn",
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0
+    }
+  ]
+}
