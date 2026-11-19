@@ -496,11 +496,20 @@ class SubspaceDecoderLayer(nn.Module):
         start_pos: Union[int, List[int]] = 0,
         cache: Optional[KVCache] = None,
         step: Optional["DecodeStep"] = None,
-        packed: Optional["PackedPrefill"] = None
+        packed: Optional["PackedPrefill"] = None,
+        pending: Optional[torch.Tensor] = None,
+        defer: bool = False
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """pending: the previous layer's MLP output, not yet added to hidden_states; the add and this layer's input norm
+        run as one fused pass. defer: return (x, MLP output, None) instead of (x + MLP output, k, v), for the next layer
+        or the final norm to add (one launch fewer per layer; SubspaceCausalLM._body decides when both apply)."""
         cfg = self.config
         x = hidden_states
-        h = self.input_layernorm(x) if cfg.pre_norm else x
+        if pending is not None:
+            n = self.input_layernorm
+            h, x = fused_ops.rms_norm(pending, n.weight, n.eps, n.offset, residual=x)
+        else:
+            h = self.input_layernorm(x) if cfg.pre_norm else x
         attn_out, k_out, v_out = self.self_attn(h, start_pos=start_pos, cache=cache, step=step, packed=packed)
         if cfg.parallel_residual:
             mlp_in = h if cfg.shared_layer_norm else self.post_attention_layernorm(x)
@@ -518,6 +527,8 @@ class SubspaceDecoderLayer(nn.Module):
         m = self.mlp(h)
         if cfg.sandwich_norm:
             m = self.mlp_out_norm(m)
+        if defer:
+            return x, m, None
         x = x + m
         if not cfg.pre_norm:
             x = self.post_attention_layernorm(x)
@@ -751,18 +762,21 @@ class SubspaceCausalLM(nn.Module):
             hidden_states = hidden_states + self.embed_positions(pos + cfg.position_offset)
 
         shallow_state = None
+        # each layer's residual add runs inside the next layer's input norm (or the final norm): pre-norm RMSNorm models
+        defer = (not cfg.enable_recirculation and cfg.pre_norm and not cfg.parallel_residual and not cfg.sandwich_norm
+                 and isinstance(self.norm, RMSNorm) and self.norm.fusable(hidden_states)
+                 and all(isinstance(layer.input_layernorm, RMSNorm) for layer in self.layers))
+        kw = dict(start_pos=start_pos, step=step) if step is not None else dict(packed=packed) if packed is not None \
+            else dict(start_pos=start_pos, cache=cache)
+        pending = None
 
         for i, layer in enumerate(self.layers):
             # Capture shallow state at router boundary
             if self.config.enable_recirculation and i == self.router_layer_idx:
                 shallow_state = hidden_states.clone()
 
-            if step is not None:
-                hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, step=step)
-            elif packed is not None:
-                hidden_states, _, _ = layer(hidden_states, packed=packed)
-            else:
-                hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, cache=cache)
+            hidden_states, out, _ = layer(hidden_states, pending=pending, defer=defer, **kw)
+            pending = out if defer else None
 
             # Apply deep-to-shallow recurrence at the penultimate layer if state captured
             if self.config.enable_recirculation and i == len(self.layers) - 2 and shallow_state is not None:
@@ -770,9 +784,14 @@ class SubspaceCausalLM(nn.Module):
 
         if packed is not None:  # each chunk's last token
             hidden_states = hidden_states[:, packed.last]
+            pending = pending[:, packed.last] if pending is not None else None
         elif logits_to_keep:
             hidden_states = hidden_states[:, -logits_to_keep:]
-        if self.norm is not None:
+            pending = pending[:, -logits_to_keep:] if pending is not None else None
+        if pending is not None:  # the last layer's residual add, fused with the final norm
+            hidden_states, _ = fused_ops.rms_norm(pending, self.norm.weight, self.norm.eps, self.norm.offset,
+                                                  residual=hidden_states)
+        elif self.norm is not None:
             hidden_states = self.norm(hidden_states)
         if cfg.embed_proj_dim:
             hidden_states = self.project_out(hidden_states)

@@ -55,15 +55,25 @@ if HAS_TRITON:
         tl.store(Y + row * s_y + cols, (a.to(tl.float32) * u.to(tl.float32)).to(Y.dtype.element_ty), mask=mask)
 
     @triton.jit
-    def _rope_kernel(X, C, Sn, Y, H, L, s_xb, s_xh, s_xl, s_cb, s_cl, s_yb, s_yh, s_yl,
-                     D: tl.constexpr, R: tl.constexpr, BLOCK_D: tl.constexpr):
-        """One (b, h, l) vector: y[:R] = x*cos + rotate_half(x)*sin (each product rounded, then the sum), y[R:] = x."""
+    def _rope_kernel(X, XK, C, Sn, Y, YK, H, HK, L, n_q, s_xb, s_xh, s_xl, s_kb, s_kh, s_kl, s_cb, s_cl,
+                     s_yb, s_yh, s_yl, s_zb, s_zh, s_zl, D: tl.constexpr, R: tl.constexpr, BLOCK_D: tl.constexpr):
+        """One (b, h, l) vector of q (the first n_q programs) or of k (the rest): y[:R] = x*cos + rotate_half(x)*sin
+        (each product rounded, then the sum), y[R:] = x."""
         pid = tl.program_id(0).to(tl.int64)
-        l = pid % L
-        h = (pid // L) % H
-        b = pid // (L * H)
+        if pid < n_q:
+            l = pid % L
+            h = (pid // L) % H
+            b = pid // (L * H)
+            x_row = X + b * s_xb + h * s_xh + l * s_xl
+            y_row = Y + b * s_yb + h * s_yh + l * s_yl
+        else:
+            p = pid - n_q
+            l = p % L
+            h = (p // L) % HK
+            b = p // (L * HK)
+            x_row = XK + b * s_kb + h * s_kh + l * s_kl
+            y_row = YK + b * s_zb + h * s_zh + l * s_zl
         d = tl.arange(0, BLOCK_D)
-        x_row = X + b * s_xb + h * s_xh + l * s_xl
         x = tl.load(x_row + d, mask=d < D, other=0.0)
         half = R // 2
         rot_mask = d < R
@@ -75,7 +85,7 @@ if HAS_TRITON:
         t1 = (x.to(tl.float32) * c.to(tl.float32)).to(x.dtype)
         t2 = (xp.to(tl.float32) * s.to(tl.float32)).to(x.dtype)
         y = tl.where(rot_mask, (t1.to(tl.float32) + t2.to(tl.float32)).to(x.dtype), x)
-        tl.store(Y + b * s_yb + h * s_yh + l * s_yl + d, y, mask=d < D)
+        tl.store(y_row + d, y, mask=d < D)
 
 
 def fused_ops_supported(x: torch.Tensor) -> bool:
@@ -119,17 +129,21 @@ def silu_mul(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
     return y.view(gate.shape)
 
 
-def _rope_one(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    B, H, L, D = x.shape
-    if x.stride(-1) != 1:
-        x = x.contiguous()
-    y = torch.empty(B, H, L, D, device=x.device, dtype=x.dtype)
-    R = cos.shape[-1]
+def _rope_both(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
+    """q and k in one launch (k's programs follow q's)."""
+    q = q if q.stride(-1) == 1 else q.contiguous()
+    k = k if k.stride(-1) == 1 else k.contiguous()
+    B, H, L, D = q.shape
+    HK = k.shape[1]
+    yq = torch.empty(q.shape, device=q.device, dtype=q.dtype)
+    yk = torch.empty(k.shape, device=k.device, dtype=k.dtype)
     s_cb = cos.stride(0) if cos.dim() == 4 else 0
-    s_cl = cos.stride(-2)
-    _rope_kernel[(B * H * L,)](x, cos, sin, y, H, L, x.stride(0), x.stride(1), x.stride(2), s_cb, s_cl,
-                               y.stride(0), y.stride(1), y.stride(2), D=D, R=R, BLOCK_D=triton.next_power_of_2(D))
-    return y
+    _rope_kernel[(B * (H + HK) * L,)](q, k, cos, sin, yq, yk, H, HK, L, B * H * L,
+                                      q.stride(0), q.stride(1), q.stride(2), k.stride(0), k.stride(1), k.stride(2),
+                                      s_cb, cos.stride(-2), yq.stride(0), yq.stride(1), yq.stride(2),
+                                      yk.stride(0), yk.stride(1), yk.stride(2), D=D, R=cos.shape[-1],
+                                      BLOCK_D=triton.next_power_of_2(D))
+    return yq, yk
 
 
 def rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
@@ -139,4 +153,4 @@ def rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor)
         cos, sin = cos.contiguous(), sin.contiguous()
     if sin.stride() != cos.stride():
         cos, sin = cos.contiguous(), sin.contiguous()
-    return _rope_one(q, cos, sin), _rope_one(k, cos, sin)
+    return _rope_both(q, k, cos, sin)
