@@ -1,0 +1,49 @@
+{
+  "gpu": "NVIDIA L4",
+  "torch": "2.13.0+cu130",
+  "rows": [
+    {
+      "kv_cache_dtype": "native",
+      "start": 0,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 0.4593994999595452,
+      "gather_sdpa_ms": 1.1548524998943321,
+      "flashinfer_ms": 0.30806850008957554,
+      "flashinfer": "0.7.0.post1"
+    },
+    {
+      "kv_cache_dtype": "native",
+      "start": 6144,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 2.4344440000731993,
+      "gather_sdpa_ms": 4.427442499945755,
+      "flashinfer_ms": 1.4691050002966222,
+      "flashinfer": "0.7.0.post1"
+    },
+    {
+      "kv_cache_dtype": "native",
+      "start": 14336,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 5.835321999938969,
+      "gather_sdpa_ms": 9.236501000032149,
+      "flashinfer_ms": 3.384538499858536,
+      "flashinfer": "0.7.0.post1"
+    }
+  ],
+  "note": "milliseconds per call (one layer), median; causal chunk after `start` cached tokens"
+}
