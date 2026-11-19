@@ -7,13 +7,16 @@ per-layer K and V pages [pages, Hkv, 16, D] are FlashInfer's HND layout, read in
 """
 
 from typing import Optional
+import warnings
 
 import torch
 
 from ..core.kv_cache import KVPool
 
 try:
-    import flashinfer
+    with warnings.catch_warnings():  # 0.7 warns about its own deprecated imports; -W error must not turn that off
+        warnings.simplefilter("ignore")
+        import flashinfer
     HAS_FLASHINFER = True
 except Exception:  # not installed, or built for another torch/CUDA: Turing's own kernel serves every layer
     flashinfer = None
