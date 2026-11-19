@@ -18,6 +18,7 @@ from ..core.kv_cache import INT4_GROUP, KVCache, KVPool, _dequantize, _quantize
 from ..kernels.triton_kv_decode import pool_decode_supported, triton_pool_decode
 from ..kernels import triton_fused_ops as fused_ops
 from ..kernels.triton_kv_prefill import pool_prefill_preferred, pool_prefill_supported, triton_pool_prefill
+from ..kernels.flashinfer_prefill import flashinfer_prefill, flashinfer_prefill_supported
 
 
 class RMSNorm(nn.Module):
@@ -408,6 +409,8 @@ class SubspaceAttention(nn.Module):
         pool, layer, cfg = cache.pool, self.layer_idx, self.config
         start, total = cache.length, cache.length + seq_len
         pool.append(layer, cache, k, v)
+        if seq_len > 1 and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # D10 fallback
+            return flashinfer_prefill(pool, layer, q, cache.slot, start, self.scale)
         if seq_len > 1 and pool_prefill_preferred(pool, layer, q, start):  # paged prefill kernel: no gather or copies
             return triton_pool_prefill(pool, layer, q, cache.slot, start, self.scale, self.window or 0,
                                        self.softcap or 0.0)
