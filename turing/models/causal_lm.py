@@ -17,7 +17,7 @@ from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
 from ..core.kv_cache import INT4_GROUP, KVCache, KVPool, _dequantize, _quantize
 from ..kernels.triton_kv_decode import pool_decode_supported, triton_pool_decode
 from ..kernels import triton_fused_ops as fused_ops
-from ..kernels.triton_kv_prefill import pool_prefill_supported, triton_pool_prefill
+from ..kernels.triton_kv_prefill import pool_prefill_preferred, pool_prefill_supported, triton_pool_prefill
 
 
 class RMSNorm(nn.Module):
@@ -408,7 +408,7 @@ class SubspaceAttention(nn.Module):
         pool, layer, cfg = cache.pool, self.layer_idx, self.config
         start, total = cache.length, cache.length + seq_len
         pool.append(layer, cache, k, v)
-        if seq_len > 1 and pool_prefill_supported(pool, q):  # paged prefill kernel: no gather, no KV head copies
+        if seq_len > 1 and pool_prefill_preferred(pool, layer, q, start):  # paged prefill kernel: no gather or copies
             return triton_pool_prefill(pool, layer, q, cache.slot, start, self.scale, self.window or 0,
                                        self.softcap or 0.0)
         mask, causal = None, False
@@ -427,12 +427,10 @@ class SubspaceAttention(nn.Module):
 
     def _attend_packed(self, q, k, v, packed: "PackedPrefill") -> torch.Tensor:
         """Each request's slice of the packed chunk: append its K/V, attend over its pages -> [1, T, H * D]."""
-        pool, layer, outs = packed.pool, self.layer_idx, []
-        for c, s0, off, n in zip(packed.caches, packed.starts, packed.offsets, packed.lens):
+        outs = []
+        for c, off, n in zip(packed.caches, packed.offsets, packed.lens):  # packed.starts[i] is c.length
             sl = slice(off, off + n)
-            pool.append(layer, c, k[:, :, sl], v[:, :, sl])
-            outs.append(triton_pool_prefill(pool, layer, q[:, :, sl], c.slot, s0, self.scale, self.window or 0,
-                                            self.softcap or 0.0))
+            outs.append(self._attend_one(q[:, :, sl], k[:, :, sl], v[:, :, sl], c))
         return torch.cat(outs, dim=1)
 
     def _decode_step(self, q, k, v, step: "DecodeStep") -> torch.Tensor:

@@ -179,3 +179,20 @@ def test_a_failing_step_fails_its_requests_instead_of_hanging_and_the_engine_kee
             await engine.stop()
     assert len(asyncio.run(go())) == 4
     assert engine.kv_pool.used_pages == 0
+
+
+def test_the_step_that_finishes_a_prefill_emits_only_the_first_token():
+    """The consumer gets the first token without waiting for a decode forward in the same step (speed plan P4.1)."""
+    engine = _engine(prefix_caching=False, draft_tokens=0)
+    step, emit, steps, at = engine._step_batch, engine._emit, [0], []
+
+    def counted():
+        steps[0] += 1
+        step()
+
+    def recorded(req, token, now):
+        at.append(steps[0])
+        return emit(req, token, now)
+    engine._step_batch, engine._emit = counted, recorded
+    _, outs = _run(engine, dict(prompt_tokens=PROMPT, max_new_tokens=3, temperature=0.0))
+    assert len(outs[0]) == 3 and len(set(at)) == 3  # one token per step

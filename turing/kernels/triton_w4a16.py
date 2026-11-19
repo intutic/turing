@@ -126,8 +126,10 @@ def w4a16_gemm(x: torch.Tensor, qweight: torch.Tensor, scales: torch.Tensor, zer
     if group % 64:
         raise ValueError("the int4 kernel needs a group size that is a multiple of 64")
     from .triton_sparse_gemv import _sm_count, _splits
-    if split is None:  # direct when 32-column tiles already give every SM a program; else share K across programs
-        split = 1 if triton.cdiv(M, 16) * triton.cdiv(N, 32) >= _sm_count(x.device.index or 0) else \
+    if split is None:  # direct when 32-column tiles give every SM about 4 programs; else share K across programs
+        # (L4, results_w4a16_crossover_ckpt2_cuda.json: at 1 program per SM the direct kernel took 27 us on a 2048x2048
+        # layer at M = 1 against split-K's 11)
+        split = 1 if triton.cdiv(M, 16) * triton.cdiv(N, 32) >= 4 * _sm_count(x.device.index or 0) else \
             _splits(triton.cdiv(M, 16) * triton.cdiv(N, 64), triton.cdiv(K, 64), x.device)
     if split == 1:
         y = torch.empty(M, N, device=x.device, dtype=x.dtype)

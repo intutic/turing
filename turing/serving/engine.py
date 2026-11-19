@@ -465,8 +465,11 @@ class ContinuousBatchEngine:
                     self._emit(req, token, now)
 
             # Decode: speculative rows one by one, the rest in one batched forward (bandwidth-bound)
+            # a request whose first token came from this step's prefill decodes from the next step: its consumer gets
+            # that token now instead of after a decode forward (one step time of TTFT, P4.1)
+            first = {id(r) for r, e, _ in done if e >= len(r.prompt_tokens)}
             decode = [r for r in self.running_batch if r.state == RequestState.DECODING and r.first_token_at is not None
-                      and r.generated_tokens]
+                      and r.generated_tokens and id(r) not in first]
             crossing = [r for r in decode if self._crosses_rope_switch(r, 1)]
             for r in crossing:
                 self._recompute_long_rope(r)

@@ -23,9 +23,26 @@ if HAS_TRITON:
     import triton.language as tl
     from triton.language.extra import libdevice
     from .triton_kv_decode import _load_rows
+    from .triton_w4a16 import _TUNE_CACHE
 
+    # Tiles tuned per (shape, storage, chunk-length bucket) on first use, choices kept on disk where Triton allows. With
+    # one fixed tile the kernel ran 1.6-1.7x FlashInfer's paged prefill on native fp16 pages (L4,
+    # results_prefill_attention_flashinfer_cuda.json). fp32 (IEEE) keeps the small tiles its dequantized rows need.
+    _PREFILL_CONFIGS = [triton.Config({"BLOCK_M": bm, "BLOCK_N": bn}, num_warps=w, num_stages=s)
+                        for bm, bn, w, s in ((64, 32, 4, 2), (64, 64, 4, 2), (64, 64, 4, 3), (128, 32, 8, 2),
+                                             (128, 64, 8, 2), (128, 64, 8, 3), (64, 32, 4, 3), (32, 32, 4, 2))]
+
+    def _prefill_prune(configs, named_args, **kwargs):
+        args = {**named_args, **kwargs}  # constexprs arrive in kwargs or named_args depending on the Triton version
+        if not args["IEEE"]:
+            return configs
+        b = 64 if args["D"] <= 64 else 32  # fp32: the one tile that fits the L4's shared memory, as before tuning
+        return [c for c in configs if (c.kwargs["BLOCK_M"], c.kwargs["BLOCK_N"], c.num_warps, c.num_stages) == (b, b, 4, 2)]
+
+    @triton.autotune(configs=_PREFILL_CONFIGS, key=["LB", "G", "D", "MODE", "WINDOW", "SOFTCAP", "IEEE"],
+                     prune_configs_by={"early_config_prune": _prefill_prune}, **_TUNE_CACHE)
     @triton.jit
-    def _pool_prefill_kernel(Q, PT, K, V, KS, KZ, VS, VZ, OUT, slot, start, L, s_qh, s_ql, pt_stride,
+    def _pool_prefill_kernel(Q, PT, K, V, KS, KZ, VS, VZ, OUT, slot, start, L, LB, s_qh, s_ql, pt_stride,
                              sm_scale, softcap, window,
                              G: tl.constexpr, D: tl.constexpr, HKV: tl.constexpr, BLOCK_M: tl.constexpr,
                              BLOCK_N: tl.constexpr, MODE: tl.constexpr, GROUP: tl.constexpr, WINDOW: tl.constexpr,
@@ -86,6 +103,13 @@ def pool_prefill_supported(pool: KVPool, q: torch.Tensor) -> bool:
     return pool_decode_supported(pool, q)
 
 
+def pool_prefill_preferred(pool: KVPool, layer: int, q: torch.Tensor, start: int) -> bool:
+    """Whether to run the paged kernel for this chunk rather than gather + SDPA. The kernel dequantizes the cached
+    prefix once per block of queries; for a layer stored in int4 that costs more than one gather once a prefix is cached
+    (L4, results_prefill_attention_cuda.json: 15.3 against 10.1 ms per layer at 14K cached tokens, equal with none)."""
+    return pool_prefill_supported(pool, q) and (start == 0 or pool.layer_fields(layer, "k")[3] != "int4")
+
+
 def triton_pool_prefill(pool: KVPool, layer: int, q: torch.Tensor, slot: int, start: int,
                         scale: Optional[float] = None, window: int = 0, softcap: float = 0.0) -> torch.Tensor:
     """Attention of a chunk's queries q [1, H, L, D] at positions start .. start + L - 1 over one request's pages
@@ -100,13 +124,10 @@ def triton_pool_prefill(pool: KVPool, layer: int, q: torch.Tensor, slot: int, st
     if q.stride(-1) != 1:
         q = q.contiguous()
     out = torch.empty(L, H, D, device=q.device, dtype=q.dtype)
-    ieee = q.dtype == torch.float32
-    BLOCK_M = 64 if D <= 64 or not ieee else 32
-    BLOCK_N = 32 if D > 64 else 64  # the fp32 dequantized K and V tiles must fit the L4's shared memory
-    grid = (triton.cdiv(L * G, BLOCK_M), Hkv)
-    _pool_prefill_kernel[grid](q, pool.page_table, kc, vc, *scales, out, slot, start, L, q.stride(1), q.stride(2),
+    grid = lambda meta: (triton.cdiv(L * G, meta["BLOCK_M"]), Hkv)
+    _pool_prefill_kernel[grid](q, pool.page_table, kc, vc, *scales, out, slot, start, L,
+                               min(triton.next_power_of_2(L), 2048), q.stride(1), q.stride(2),
                                pool.page_table.stride(0), scale if scale is not None else 1.0 / math.sqrt(D),
-                               float(softcap), int(window), G=G, D=D, HKV=Hkv, BLOCK_M=BLOCK_M, BLOCK_N=BLOCK_N,
-                               MODE=mode, GROUP=INT4_GROUP, WINDOW=window > 0, SOFTCAP=softcap > 0, IEEE=ieee,
-                               num_warps=4, num_stages=2)
+                               float(softcap), int(window), G=G, D=D, HKV=Hkv, MODE=mode, GROUP=INT4_GROUP,
+                               WINDOW=window > 0, SOFTCAP=softcap > 0, IEEE=q.dtype == torch.float32)
     return out.view(1, L, H * D)

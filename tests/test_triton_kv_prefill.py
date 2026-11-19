@@ -79,3 +79,13 @@ def test_packed_prefill_matches_one_request_at_a_time(arch):
         k, v = model.kv_pool().read(0, c, c.length)
         kr, vr = model.kv_pool().read(0, ref, ref.length)
         torch.testing.assert_close(k, kr, atol=1e-3, rtol=1e-3)
+
+
+def test_int4_layers_with_a_cached_prefix_take_the_gather_path_and_the_rest_the_kernel():
+    from turing.kernels.triton_kv_prefill import pool_prefill_preferred
+    q = torch.zeros(1, 4, 8, 64, device="cuda", dtype=torch.float16)
+    int4 = KVPool(2, 2, 64, 8, torch.float16, "cuda", "int4", native_layers=(1,))
+    assert pool_prefill_preferred(int4, 0, q, 0)  # no prefix: the kernel
+    assert not pool_prefill_preferred(int4, 0, q, 16)  # int4 prefix: one gather beats per-block dequantization
+    assert pool_prefill_preferred(int4, 1, q, 16)  # a layer kept native in an int4 pool
+    assert pool_prefill_preferred(KVPool(2, 2, 64, 8, torch.float16, "cuda", "int8"), 0, q, 16)
