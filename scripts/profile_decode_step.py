@@ -100,7 +100,9 @@ def prefill_s(model, ids, chunk, dev):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct")
-    ap.add_argument("--settings", default="fp16,rtn4", help="fp16 and/or rtn4 (speed is the same for GPTQ)")
+    ap.add_argument("--settings", default="fp16,rtn4",
+                    help="fp16, rtn4 and/or rtn4h (the head too; speed is the same for GPTQ); a '+compile' suffix (fp16+compile) wraps "
+                         "every layer's MLP and norms in torch.compile (speed plan P2.4, decision D11)")
     ap.add_argument("--context", type=int, default=512)
     ap.add_argument("--long-context", type=int, default=16384)
     ap.add_argument("--chunk", type=int, default=2048)
@@ -118,10 +120,24 @@ def main():
     rows = []
     for name in a.settings.split(","):
         model = copy.deepcopy(base)
-        if name == "rtn4":
-            quantize_model(model, "rtn", None)
+        if name.split("+")[0] in ("rtn4", "rtn4h"):  # rtn4h: the LM head in 4 bits too (speed plan P3)
+            quantize_model(model, "rtn", None, lm_head=name.split("+")[0] == "rtn4h")
+        compile_s = None
+        if name.endswith("+compile"):
+            for layer in model.layers:
+                for attr in ("mlp", "input_layernorm", "post_attention_layernorm"):
+                    if hasattr(layer, attr):
+                        setattr(layer, attr, torch.compile(getattr(layer, attr)))
+            with torch.inference_mode():  # first call through every compiled module: the compile cost
+                sync(dev)
+                t = time.perf_counter()
+                _, past = model(ids, logits_to_keep=1)
+                model(ids[:, -1:], past_key_values=past)
+                sync(dev)
+                compile_s = time.perf_counter() - t
+                del past
         wb = weight_bytes(model)
-        row = dict(model=a.model, setting=name, weight_bytes=wb, context=a.context,
+        row = dict(model=a.model, setting=name, weight_bytes=wb, context=a.context, compile_s=compile_s,
                    floor_ms=wb / 1e9 / bw * 1e3 if bw else None,
                    graph_step_ms=steps_wall_ms(model, ids, a.steps, dev, True) if cuda else None,
                    eager_step_ms=steps_wall_ms(model, ids, a.steps, dev, False))

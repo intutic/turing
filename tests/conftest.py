@@ -1,6 +1,10 @@
 import gc
+import os
 import warnings
 import pytest
+
+# tests calibrate from scratch (no KV calibration kept in ~/.cache between runs); the cache's own test turns it on
+os.environ.setdefault("TURING_CACHE_DIR", "off")
 
 @pytest.fixture(autouse=True)
 def clean_memory_and_warnings():

@@ -13,7 +13,8 @@ outputs of the already-quantized layers before it (the reference algorithm's seq
 
 QuantLinear picks its kernel by the number of rows: on CUDA up to INT4_MAX_ROWS rows (decode) the fused Triton
 W4A16 GEMM reads the packed weights; above it (prefill) the layer is dequantized into a shared scratch buffer and
-multiplied by cuBLAS. Off CUDA it dequantizes and multiplies.
+multiplied by cuBLAS. Off CUDA it dequantizes and multiplies. Where the optional Marlin extension is built
+(turing.kernels.marlin), MARLIN_MIN_ROWS to MARLIN_MAX_ROWS rows go to Marlin first, from a repacked copy of the layer.
 """
 
 import math
@@ -29,6 +30,10 @@ QMAX = 2 ** BITS - 1
 # replays (results_w4a16_crossover_cuda.json, summed over six layer shapes from 2048x2048 to 14336x4096): 1847 against
 # 3000 us at 64 rows, about equal at 128, 6330 against 3812 at 256.
 INT4_MAX_ROWS = 64
+# Rows routed to the Marlin kernel when the optional extension is built (turing.kernels.marlin). On the L4 it beat the
+# Triton kernels at every row count from 1 to 256 on Qwen2.5-1.5B's shapes (results_w4a16_crossover_ckpt7_cuda.json:
+# 22.6 against 98.8 us at one row on the 1536x17920 gate/up layer).
+MARLIN_MIN_ROWS, MARLIN_MAX_ROWS = 1, 1024
 
 
 def _grid(w: torch.Tensor, qmax: int = QMAX) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -128,6 +133,7 @@ class QuantLinear(nn.Module):
         self.register_buffer("scales", torch.zeros(out_features, in_features // group, dtype=torch.float16, device=device))
         self.register_buffer("zeros", torch.zeros(out_features, in_features // group, dtype=torch.uint8, device=device))
         self.bias = nn.Parameter(torch.zeros(out_features, device=device, dtype=dtype), requires_grad=False) if bias else None
+        self._marlin = {}  # activation dtype -> MarlinWeights or None (unsupported), built on first use
 
     @classmethod
     def from_codes(cls, codes, scales, zeros, bias: Optional[torch.Tensor], group: int = GROUP) -> "QuantLinear":
@@ -144,15 +150,29 @@ class QuantLinear(nn.Module):
     def dequantized(self, dtype: torch.dtype) -> torch.Tensor:
         return dequantize(self.qweight, self.scales, self.zeros, dtype)
 
+    def _marlin_weights(self, dtype: torch.dtype):
+        """Marlin's copy of this layer for `dtype` activations (turing.kernels.marlin), or None where it does not run.
+        Built once; assumes the buffers are not modified afterwards."""
+        if dtype not in self._marlin:
+            if torch.cuda.is_current_stream_capturing():  # the repack cannot run inside a CUDA-graph capture
+                return None
+            from ..kernels.marlin import marlin_pack, marlin_supported
+            ok = marlin_supported(self.out_features, self.in_features, self.group, dtype, self.qweight.device)
+            self._marlin[dtype] = marlin_pack(self.qweight, self.scales, self.zeros, dtype, self.bias) if ok else None
+        return self._marlin[dtype]
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         shape = x.shape
         x2 = x.reshape(-1, self.in_features)
+        if x.is_cuda and MARLIN_MIN_ROWS <= x2.shape[0] <= MARLIN_MAX_ROWS and x.dtype in (torch.float16, torch.bfloat16):
+            from ..kernels.marlin import HAS_MARLIN, marlin_gemm
+            w = self._marlin_weights(x.dtype) if HAS_MARLIN else None
+            if w is not None:
+                return marlin_gemm(x2, w).view(*shape[:-1], self.out_features)
         if x.is_cuda and x2.shape[0] <= INT4_MAX_ROWS and x.dtype in (torch.float16, torch.bfloat16):
             from ..kernels.triton_w4a16 import HAS_TRITON, w4a16_gemm
             if HAS_TRITON:
-                y = w4a16_gemm(x2, self.qweight, self.scales, self.zeros, self.group)
-                if self.bias is not None:
-                    y = y + self.bias
+                y = w4a16_gemm(x2, self.qweight, self.scales, self.zeros, self.group, self.bias)
                 return y.view(*shape[:-1], self.out_features)
         n = self.out_features * self.in_features
         if x.is_cuda:
@@ -239,16 +259,50 @@ def quantize_layer(model: nn.Module, li: int, method: str, hs: Optional[List[tor
 
 @torch.no_grad()
 def quantize_model(model: nn.Module, method: str = "rtn", calib: Optional[torch.Tensor] = None,
-                   group: int = GROUP, batch: int = 4) -> nn.Module:
+                   group: int = GROUP, batch: int = 4, lm_head: bool = False) -> nn.Module:
     """Replace the model's linear layers by QuantLinear in place. method "rtn" needs no data; "gptq" needs calib
-    [n, T] token ids (WikiText-2 train windows, see calibration_windows) and runs the layers in order."""
+    [n, T] token ids (WikiText-2 train windows, see calibration_windows) and runs the layers in order. lm_head also
+    quantizes the LM head (quantize_head)."""
     if method == "gptq" and calib is None:
         raise ValueError("GPTQ needs calibration token ids")
     hs = embed_inputs(model, calib, batch) if method == "gptq" else None
     for li in range(len(model.layers)):
         hs = quantize_layer(model, li, method, hs, group)
+    if lm_head:
+        quantize_head(model, method, hs, group)
     model.config.quantization = f"w4a16-{method}"
     return model
+
+
+@torch.no_grad()
+def quantize_head(model: nn.Module, method: str, hs: Optional[List[torch.Tensor]] = None, group: int = GROUP) -> bool:
+    """The LM head as QuantLinear (speed plan P3: at batch 1 it is the largest single read of a 4-bit model, 466 MB of
+    fp16 on Qwen2.5-1.5B). GPTQ calibrates on hs, the last layer's outputs, through the final norm. A tied head gets
+    its own packed copy; the embedding keeps its weight for the lookup. False when the head's width is not a multiple
+    of the group (it stays as it is)."""
+    head = model.lm_head
+    if not isinstance(head, nn.Linear) or head.in_features % group:
+        return False
+    dev = head.weight.device
+    work = dev if dev.type == "cuda" else torch.device("cpu")
+    W = head.weight.float().to(work)
+    if method == "gptq":
+        H = torch.zeros(head.in_features, head.in_features, dtype=torch.float32, device=dev)
+        for h in hs:
+            if model.norm is not None:
+                h = model.norm(h)
+            if model.config.embed_proj_dim:
+                h = model.project_out(h)
+            x = h.reshape(-1, h.shape[-1]).float()
+            H += x.T @ x
+        c, s, z = gptq_quantize(W, H.to(work), group)
+    elif method == "rtn":
+        c, s, z = rtn_quantize(W, group)
+    else:
+        raise ValueError(f"quantization method '{method}' is not 'rtn' or 'gptq'")
+    bias = head.bias.to(work) if head.bias is not None else None
+    model.lm_head = QuantLinear.from_codes(c, s, z, bias, group).to(dev)
+    return True
 
 
 def calibration_windows(tokenizer, n: int = 128, T: int = 2048, seed: int = 0) -> torch.Tensor:
@@ -280,6 +334,9 @@ def save_quantized(model: nn.Module, out_dir: str, tokenizer=None) -> str:
     from safetensors.torch import save_file
     os.makedirs(out_dir, exist_ok=True)
     tensors = {k: v.detach().contiguous().cpu() for k, v in model.state_dict().items()}
+    for k, v in tensors.items():  # fused projections (fuse_projections) are views of one tensor; safetensors refuses
+        if v.untyped_storage().nbytes() != v.numel() * v.element_size():
+            tensors[k] = v.clone()
     for k in [k for k in tensors if k.endswith("lm_head.weight")]:  # tied heads share storage, safetensors refuses
         if tensors[k].data_ptr() == tensors.get("embed_tokens.weight", torch.empty(0)).data_ptr():
             tensors[k] = tensors[k].clone()

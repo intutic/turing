@@ -17,7 +17,7 @@ import torch
 from ..config import ModelConfig
 from .causal_lm import SubspaceCausalLM
 from .hf_loader import FAMILIES, _Writer, _config_kwargs, _copy_weights, resolve_dtype
-from .quant import calibration_windows, embed_inputs, quantize_layer, save_quantized
+from .quant import calibration_windows, embed_inputs, quantize_head, quantize_layer, save_quantized
 
 
 class ShardedStateDict(Mapping):
@@ -102,10 +102,11 @@ class StreamingHFSubspaceLoader:
     """Converts one HuggingFace checkpoint into out_dir/model.tgate4 (see the module docstring)."""
 
     def __init__(self, repo_id: str, token: Optional[str] = None, target_device: str = "cpu",
-                 method: str = "gptq", calib_windows: int = 128, calib_tokens: int = 2048):
+                 method: str = "gptq", calib_windows: int = 128, calib_tokens: int = 2048, lm_head: bool = False):
         self.repo_id, self.token = repo_id, token or os.environ.get("HF_TOKEN")
         self.device = torch.device(target_device)
         self.method, self.calib_windows, self.calib_tokens = method, calib_windows, calib_tokens
+        self.lm_head = lm_head
 
     def _folder(self) -> str:
         if os.path.isdir(self.repo_id):
@@ -146,6 +147,8 @@ class StreamingHFSubspaceLoader:
             if self.device.type == "cuda":
                 peak = max(peak, torch.cuda.max_memory_allocated())
         put.check()
+        if self.lm_head:
+            quantize_head(model, self.method, hs)
         model.to("cpu")
         cfg.quantization = f"w4a16-{self.method}"
         path = save_quantized(model, out_dir, tokenizer)

@@ -49,3 +49,23 @@ def test_sparse_int4_gemv_matches_its_dequantized_weight():
     x[torch.rand(K, device="cuda") < 0.5] = 0
     ref = x.float() @ wt
     torch.testing.assert_close(sparse_gemv_int4(x, q, s, z).float(), ref, atol=1e-2 * ref.abs().max().item(), rtol=1e-2)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for the Triton sparse GEMV")
+@pytest.mark.parametrize("K,N", [(1536, 256), (256, 65536)])  # split K; one split (the direct store)
+def test_sparse_gemvs_add_the_bias_in_the_kernel(K, N):
+    from turing.kernels.triton_sparse_gemv import quantize_transposed_int4, sparse_gemv, sparse_gemv_int4
+    from turing.models.quant import dequantize
+    torch.manual_seed(0)
+    x = torch.randn(K, device="cuda", dtype=torch.float16)
+    x[torch.rand(K, device="cuda") < 0.5] = 0
+    bias = torch.randn(N, device="cuda", dtype=torch.float16)
+    wt = torch.randn(K, N, device="cuda", dtype=torch.float16)
+    ref = x.float() @ wt.float() + bias.float()
+    y = sparse_gemv(x, wt, bias)
+    assert y.dtype == torch.float16
+    torch.testing.assert_close(y.float(), ref, atol=1e-2 * ref.abs().max().item(), rtol=1e-2)
+    q, s, z = quantize_transposed_int4(wt.float().t())
+    ref4 = x.float() @ dequantize(q, s, z, torch.float32) + bias.float()
+    torch.testing.assert_close(sparse_gemv_int4(x, q, s, z, bias).float(), ref4, atol=1e-2 * ref4.abs().max().item(),
+                               rtol=1e-2)

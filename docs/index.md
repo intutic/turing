@@ -20,8 +20,8 @@ weights, activation sparsity) is opt-in.
 
 ## What it is not
 
-A faster engine. On one NVIDIA L4, vLLM is 1.1–1.5× faster in fp16 and about 2× faster at 4 bits, and llama.cpp is
-faster at batch 1 in 4 bits ([comparison](comparison.md)). For production serving use vLLM, SGLang or TensorRT-LLM;
+A production server. On one NVIDIA L4 vLLM is 1.01–1.04× faster in fp16 and 1.06–1.12× at 4 bits; Turing is ahead
+only with its opt-in 4-bit LM head at batch 1 and 8, and at 16K-token prompts in fp16 ([comparison](comparison.md)). For production serving use vLLM, SGLang or TensorRT-LLM;
 on a laptop, llama.cpp or Ollama.
 
 ## What it is good for

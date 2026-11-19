@@ -16,6 +16,9 @@ from ..config import ModelConfig
 from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
 from ..core.kv_cache import INT4_GROUP, KVCache, KVPool, _dequantize, _quantize
 from ..kernels.triton_kv_decode import pool_decode_supported, triton_pool_decode
+from ..kernels import triton_fused_ops as fused_ops
+from ..kernels.triton_kv_prefill import pool_prefill_preferred, pool_prefill_supported, triton_pool_prefill
+from ..kernels.flashinfer_prefill import flashinfer_prefill, flashinfer_prefill_supported
 
 
 class RMSNorm(nn.Module):
@@ -27,7 +30,14 @@ class RMSNorm(nn.Module):
         self.eps, self.offset = eps, offset
         self.weight = nn.Parameter(torch.zeros(dim) if offset else torch.ones(dim))
 
+    def fusable(self, x: torch.Tensor) -> bool:
+        """The fused Triton norm applies (it reproduces this module's rounding; a weight in another dtype than x would
+        promote the Llama-style output, which it does not)."""
+        return fused_ops.fused_ops_supported(x) and (self.offset or self.weight.dtype == x.dtype)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.fusable(x):
+            return fused_ops.rms_norm(x, self.weight, self.eps, self.offset)
         xf = x.float()  # fp16 squares overflow for large activations
         normed = xf * torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + self.eps)
         if self.offset:
@@ -54,6 +64,62 @@ def activation(name: str):
     if name == "quick_gelu":
         return lambda x: x * torch.sigmoid(1.702 * x)
     raise ValueError(f"activation '{name}' is not supported")
+
+
+def _weight_of(m: nn.Module) -> torch.Tensor:
+    return m.qweight if hasattr(m, "qweight") else m.weight
+
+
+def fuse_linears(owner: nn.Module, key: str, parts: Tuple[nn.Module, ...]) -> bool:
+    """One linear layer over parts that share an input (q/k/v, gate/up), so a step launches one GEMM instead of
+    len(parts). The parts' weights become views of the fused weight: no extra memory, and the state dict, adapters and
+    hooks still see the separate layers. Kept outside the module tree (owner.__dict__[key]); used by fused_outputs only
+    while the parts are still the same objects on the same storage. False when the parts cannot be fused."""
+    from .quant import QuantLinear
+    kind = type(parts[0])
+    if kind not in (nn.Linear, QuantLinear) or any(type(p) is not kind for p in parts):
+        return False
+    w0 = _weight_of(parts[0])
+    if any(_weight_of(p).device != w0.device or _weight_of(p).dtype != w0.dtype or p.in_features != parts[0].in_features
+           or (p.bias is None) != (parts[0].bias is None) for p in parts):
+        return False
+    if kind is QuantLinear and any(p.group != parts[0].group for p in parts):
+        return False
+    sizes = [p.out_features for p in parts]
+    with torch.inference_mode(False), torch.no_grad():  # normal tensors: the model is used in and out of inference mode
+        if kind is QuantLinear:
+            fused = QuantLinear(parts[0].in_features, sum(sizes), parts[0].bias is not None, parts[0].group,
+                                device="meta")
+            names = ["qweight", "scales", "zeros"]
+        else:
+            fused = nn.Linear(parts[0].in_features, sum(sizes), bias=parts[0].bias is not None, device="meta")
+            names = ["weight"]
+        names += ["bias"] if parts[0].bias is not None else []
+        for name in names:
+            full = torch.cat([getattr(p, name).data for p in parts])
+            is_param = isinstance(getattr(parts[0], name), nn.Parameter)
+            grad = is_param and getattr(parts[0], name).requires_grad
+            setattr(fused, name, nn.Parameter(full, requires_grad=grad) if is_param else full)
+            lo = 0
+            for p, n in zip(parts, sizes):
+                view = full[lo:lo + n]
+                setattr(p, name, nn.Parameter(view, requires_grad=grad) if is_param else view)
+                lo += n
+    owner.__dict__[key] = (fused, parts, sizes)
+    return True
+
+
+def fused_outputs(owner: nn.Module, key: str, parts: Tuple[nn.Module, ...], x: torch.Tensor):
+    """The parts' outputs from their fused layer (fuse_linears), or None: not fused, a part replaced (LoRA, TEAL,
+    tensor parallel), its weight moved (.to()), or a hook on a part (calibration) that must see the separate call."""
+    f = owner.__dict__.get(key)
+    if f is None:
+        return None
+    fused, fparts, sizes = f
+    if any(a is not b or a._forward_hooks or a._forward_pre_hooks for a, b in zip(parts, fparts)) \
+            or _weight_of(parts[0]).data_ptr() != _weight_of(fused).data_ptr():
+        return None
+    return fused(x).split(sizes, dim=-1)
 
 
 class SubspaceMLP(nn.Module):
@@ -96,7 +162,11 @@ class SubspaceMLP(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.gate_proj is not None:
-            return self.down_proj(self.act(self.gate_proj(x)) * self.up_proj(x))
+            gu = fused_outputs(self, "_gate_up", (self.gate_proj, self.up_proj), x)
+            g, u = gu if gu is not None else (self.gate_proj(x), self.up_proj(x))
+            if self.act is F.silu and fused_ops.fused_ops_supported(g):
+                return self.down_proj(fused_ops.silu_mul(g, u))
+            return self.down_proj(self.act(g) * u)
         return self.down_proj(self.act(self.up_proj(x)))
 
 
@@ -166,6 +236,29 @@ class DecodeStep:
         return self._freqs[key]
 
 
+class PackedPrefill:
+    """Prompt chunks of several requests as one row of tokens [1, T] (speed plan P4.3): the linear layers, norms and
+    MLPs run once over every chunk; attention appends and attends per request through the paged prefill kernel. Built
+    by SubspaceCausalLM.prefill_packed; positions [T] give RoPE (shared by every layer) and learned positions."""
+
+    def __init__(self, caches: List[KVCache], lens: List[int], device):
+        self.pool, self.caches, self.lens = caches[0].pool, caches, lens
+        self.starts = [c.length for c in caches]
+        self.offsets = [sum(lens[:i]) for i in range(len(lens))]
+        self.positions = torch.cat([torch.arange(s, s + n) for s, n in zip(self.starts, lens)]).to(device)
+        self.last = torch.tensor([o + n - 1 for o, n in zip(self.offsets, lens)], device=device)
+        self.top = max(s + n for s, n in zip(self.starts, lens))
+        self._freqs = {}
+
+    def freqs(self, rope) -> Tuple[torch.Tensor, torch.Tensor]:
+        """cos, sin [T, R] at each token's position (frequencies that do not depend on the sequence length)."""
+        key = (rope.dim, rope.base_theta, rope.params)
+        if key not in self._freqs:
+            cos, sin = rope.compute_freqs(self.top, device=self.positions.device)
+            self._freqs[key] = (cos[self.positions], sin[self.positions])
+        return self._freqs[key]
+
+
 
 
 class SubspaceAttention(nn.Module):
@@ -218,14 +311,18 @@ class SubspaceAttention(nn.Module):
         hidden_states: torch.Tensor,
         start_pos: Union[int, List[int]] = 0,
         cache: Optional[KVCache] = None,
-        step: Optional["DecodeStep"] = None
+        step: Optional["DecodeStep"] = None,
+        packed: Optional["PackedPrefill"] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         """Attention for new tokens at start_pos: through a KVCache (one request), a DecodeStep (one token per
-        request), or with neither, causal attention over these tokens alone, returning their k and v."""
+        request), a PackedPrefill (several requests' chunks), or with none, causal attention over these tokens alone,
+        returning their k and v."""
         batch, seq_len, _ = hidden_states.shape
         cfg = self.config
 
-        q, k, v = self.q_proj(hidden_states), self.k_proj(hidden_states), self.v_proj(hidden_states)
+        qkv = fused_outputs(self, "_qkv", (self.q_proj, self.k_proj, self.v_proj), hidden_states)
+        q, k, v = qkv if qkv is not None else \
+            (self.q_proj(hidden_states), self.k_proj(hidden_states), self.v_proj(hidden_states))
         if cfg.qk_norm_full:
             q, k = self.q_norm(q), self.k_norm(k)
         if cfg.clip_qkv is not None:  # OLMoE clamps after its norms
@@ -241,10 +338,15 @@ class SubspaceAttention(nn.Module):
                 cos, sin = step.freqs(self.rope)
                 r = cos.shape[-1]
                 cos, sin = cos.view(batch, 1, 1, r), sin.view(batch, 1, 1, r)
+            elif packed is not None:
+                cos, sin = packed.freqs(self.rope)
             else:
                 cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos,
                                                    select_len=cache.rope_len if cache is not None else 0)
-            q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
+            if fused_ops.fused_ops_supported(q) and cos.shape[-1] % 2 == 0:
+                q, k = fused_ops.rope(q, k, cos, sin)  # one pass per tensor, the cast to q's dtype inside
+            else:
+                q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
         if self._k_absmax is not None:
             m = k.detach().abs().float().amax(dim=(0, 2))
             self._k_absmax = torch.maximum(self._k_absmax, m)
@@ -256,6 +358,8 @@ class SubspaceAttention(nn.Module):
 
         if step is not None:  # one decode token for each request of the step
             return self.o_proj(self._decode_step(q, k, v, step)), None, None
+        if packed is not None:
+            return self.o_proj(self._attend_packed(q, k, v, packed)), None, None
         if cache is not None:
             return self.o_proj(self._attend_one(q, k, v, cache)), None, None
 
@@ -305,6 +409,11 @@ class SubspaceAttention(nn.Module):
         pool, layer, cfg = cache.pool, self.layer_idx, self.config
         start, total = cache.length, cache.length + seq_len
         pool.append(layer, cache, k, v)
+        if seq_len > 1 and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # D10 fallback
+            return flashinfer_prefill(pool, layer, q, [cache.slot], [start], [seq_len], self.scale)
+        if seq_len > 1 and pool_prefill_preferred(pool, layer, q, start):  # paged prefill kernel: no gather or copies
+            return triton_pool_prefill(pool, layer, q, cache.slot, start, self.scale, self.window or 0,
+                                       self.softcap or 0.0)
         mask, causal = None, False
         if (seq_len == 1 and self.window is None and cfg.kv_page_budget < 1.0 and pool.track_pages
                 and total >= cfg.kv_select_min_tokens):
@@ -318,6 +427,20 @@ class SubspaceAttention(nn.Module):
             causal = mask is None and seq_len > 1  # start == 0
         out = self._attend(q, k_all, v_all, mask, causal)
         return out.transpose(1, 2).reshape(batch, seq_len, self.num_heads * self.head_dim)
+
+    def _attend_packed(self, q, k, v, packed: "PackedPrefill") -> torch.Tensor:
+        """Each request's slice of the packed chunk: append its K/V, attend over its pages -> [1, T, H * D]."""
+        pool, layer = packed.pool, self.layer_idx
+        if flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # every request in one call
+            for c, off, n in zip(packed.caches, packed.offsets, packed.lens):
+                pool.append(layer, c, k[:, :, off:off + n], v[:, :, off:off + n])
+            return flashinfer_prefill(pool, layer, q, [c.slot for c in packed.caches], packed.starts, packed.lens,
+                                      self.scale)
+        outs = []
+        for c, off, n in zip(packed.caches, packed.offsets, packed.lens):  # packed.starts[i] is c.length
+            sl = slice(off, off + n)
+            outs.append(self._attend_one(q[:, :, sl], k[:, :, sl], v[:, :, sl], c))
+        return torch.cat(outs, dim=1)
 
     def _decode_step(self, q, k, v, step: "DecodeStep") -> torch.Tensor:
         """One decode token per request: [B, H, 1, D] -> [B, 1, H * D]. On CUDA three fused launches serve every
@@ -381,24 +504,40 @@ class SubspaceDecoderLayer(nn.Module):
         hidden_states: torch.Tensor,
         start_pos: Union[int, List[int]] = 0,
         cache: Optional[KVCache] = None,
-        step: Optional["DecodeStep"] = None
+        step: Optional["DecodeStep"] = None,
+        packed: Optional["PackedPrefill"] = None,
+        pending: Optional[torch.Tensor] = None,
+        defer: bool = False
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """pending: the previous layer's MLP output, not yet added to hidden_states; the add and this layer's input norm
+        run as one fused pass. defer: return (x, MLP output, None) instead of (x + MLP output, k, v), for the next layer
+        or the final norm to add (one launch fewer per layer; SubspaceCausalLM._body decides when both apply)."""
         cfg = self.config
         x = hidden_states
-        h = self.input_layernorm(x) if cfg.pre_norm else x
-        attn_out, k_out, v_out = self.self_attn(h, start_pos=start_pos, cache=cache, step=step)
+        if pending is not None:
+            n = self.input_layernorm
+            h, x = fused_ops.rms_norm(pending, n.weight, n.eps, n.offset, residual=x)
+        else:
+            h = self.input_layernorm(x) if cfg.pre_norm else x
+        attn_out, k_out, v_out = self.self_attn(h, start_pos=start_pos, cache=cache, step=step, packed=packed)
         if cfg.parallel_residual:
             mlp_in = h if cfg.shared_layer_norm else self.post_attention_layernorm(x)
             return x + attn_out + self.mlp(mlp_in), k_out, v_out
         if cfg.sandwich_norm:
             attn_out = self.attn_out_norm(attn_out)
-        x = x + attn_out
-        if not cfg.pre_norm:
-            x = self.input_layernorm(x)
-        h = self.post_attention_layernorm(x) if cfg.pre_norm else x
+        norm = self.post_attention_layernorm if cfg.pre_norm else None
+        if isinstance(norm, RMSNorm) and norm.fusable(attn_out) and x.dtype == attn_out.dtype:
+            h, x = fused_ops.rms_norm(attn_out, norm.weight, norm.eps, norm.offset, residual=x)  # add + norm, one pass
+        else:
+            x = x + attn_out
+            if not cfg.pre_norm:
+                x = self.input_layernorm(x)
+            h = self.post_attention_layernorm(x) if cfg.pre_norm else x
         m = self.mlp(h)
         if cfg.sandwich_norm:
             m = self.mlp_out_norm(m)
+        if defer:
+            return x, m, None
         x = x + m
         if not cfg.pre_norm:
             x = self.post_attention_layernorm(x)
@@ -530,7 +669,72 @@ class SubspaceCausalLM(nn.Module):
             if lora:
                 set_active_adapters(self, None)
 
+    def can_pack_prefill(self, caches: List[KVCache]) -> bool:
+        """Whether prefill_packed serves these caches: one CUDA pool the paged prefill kernel reads, RoPE whose
+        frequencies do not depend on a sequence's length (not dynamic or LongRoPE), no recirculation."""
+        from ..core.rope import RotaryEmbedding
+        if not caches or self.config.enable_recirculation or any(c.pool is not caches[0].pool for c in caches):
+            return False
+        if not pool_prefill_supported(caches[0].pool, self.embed_tokens.weight):
+            return False
+        return all(m.kind not in ("dynamic", "longrope") for m in self.modules() if isinstance(m, RotaryEmbedding))
+
+    @torch.inference_mode()
+    def prefill_packed(self, chunks: List[List[int]], caches: List[KVCache]) -> torch.Tensor:
+        """Prefill the next chunk of several requests in one forward (speed plan P4.3): chunks[i] continues caches[i]
+        (filled in place). Returns the logits of each chunk's last token [len(chunks), V]. Check can_pack_prefill
+        first."""
+        dev = self.embed_tokens.weight.device
+        if dev.type == "cuda" and not self.__dict__.get("_projections_fused"):
+            self.fuse_projections()
+        lens = [len(x) for x in chunks]
+        for c, n in zip(caches, lens):
+            c.reserve(c.length + n)
+        packed = PackedPrefill(caches, lens, dev)
+        ids = torch.tensor([[t for x in chunks for t in x]], dtype=torch.long, device=dev)
+        logits = self._body(ids, 0, None, None, packed=packed)[0]
+        for c, n in zip(caches, lens):
+            c.length += n
+        return logits
+
+    def _prepare_marlin(self, dtype: torch.dtype) -> None:
+        """Build the Marlin copy (turing.kernels.marlin) of every 4-bit layer a CUDA forward uses: the fused q/k/v and
+        gate/up layers and the unfused rest. QuantLinear would build them on first use, after the KV pool has taken the
+        free memory, where a 7B model's copies may not fit."""
+        from .quant import QuantLinear
+        from ..kernels.marlin import HAS_MARLIN
+        if not HAS_MARLIN or not any(isinstance(m, QuantLinear) for m in self.modules()):
+            return
+        if not self.__dict__.get("_projections_fused"):
+            self.fuse_projections()
+        used, parts = [], set()
+        for owner in self.modules():
+            for key in ("_qkv", "_gate_up"):
+                f = owner.__dict__.get(key)
+                if f is not None:  # (fused layer, its parts, sizes): see fuse_linears
+                    used.append(f[0])
+                    parts.update(id(p) for p in f[1])
+        used += [m for m in self.modules() if isinstance(m, QuantLinear) and id(m) not in parts]
+        for m in used:
+            if isinstance(m, QuantLinear):
+                m._marlin_weights(dtype)
+
+    def fuse_projections(self) -> int:
+        """Fuse every layer's q/k/v and gate/up projections (fuse_linears); returns how many groups were fused."""
+        n = 0
+        for layer in self.layers:
+            a = layer.self_attn
+            n += fuse_linears(a, "_qkv", (a.q_proj, a.k_proj, a.v_proj))
+            m = layer.mlp
+            if isinstance(m, SubspaceMLP) and m.gate_proj is not None:
+                n += fuse_linears(m, "_gate_up", (m.gate_proj, m.up_proj))
+        self.__dict__["_projections_fused"] = True
+        return n
+
     def _forward(self, input_ids, past_key_values, logits_to_keep, lora):
+        if input_ids.is_cuda and not self.__dict__.get("_projections_fused") \
+                and not torch.cuda.is_current_stream_capturing():
+            self.fuse_projections()  # one GEMM per shared input on CUDA, where a launch costs as much as a small GEMM
         batch, seq_len = input_ids.shape
         cache, step = None, None
         if isinstance(past_key_values, list):
@@ -571,7 +775,7 @@ class SubspaceCausalLM(nn.Module):
             cache.length += seq_len
         return logits, returned
 
-    def _body(self, input_ids, start_pos, cache, step, logits_to_keep: int = 0) -> torch.Tensor:
+    def _body(self, input_ids, start_pos, cache, step, logits_to_keep: int = 0, packed=None) -> torch.Tensor:
         """Embedding, layers, norm and head for one forward (what a CUDA graph captures for a decode step)."""
         cfg = self.config
         hidden_states = self.embed_tokens(input_ids)
@@ -582,29 +786,43 @@ class SubspaceCausalLM(nn.Module):
         if cfg.learned_positions:
             if step is not None:  # [B] lengths before this token, on the device
                 pos = step.starts_t.long()[:, None]
+            elif packed is not None:
+                pos = packed.positions[None]
             else:
                 pos = torch.arange(start_pos, start_pos + input_ids.shape[1], device=input_ids.device)[None]
             hidden_states = hidden_states + self.embed_positions(pos + cfg.position_offset)
 
         shallow_state = None
+        # each layer's residual add runs inside the next layer's input norm (or the final norm): pre-norm RMSNorm models
+        defer = (not cfg.enable_recirculation and cfg.pre_norm and not cfg.parallel_residual and not cfg.sandwich_norm
+                 and isinstance(self.norm, RMSNorm) and self.norm.fusable(hidden_states)
+                 and all(isinstance(layer.input_layernorm, RMSNorm) for layer in self.layers))
+        kw = dict(start_pos=start_pos, step=step) if step is not None else dict(packed=packed) if packed is not None \
+            else dict(start_pos=start_pos, cache=cache)
+        pending = None
 
         for i, layer in enumerate(self.layers):
             # Capture shallow state at router boundary
             if self.config.enable_recirculation and i == self.router_layer_idx:
                 shallow_state = hidden_states.clone()
 
-            if step is not None:
-                hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, step=step)
-            else:
-                hidden_states, _, _ = layer(hidden_states, start_pos=start_pos, cache=cache)
+            hidden_states, out, _ = layer(hidden_states, pending=pending, defer=defer, **kw)
+            pending = out if defer else None
 
             # Apply deep-to-shallow recurrence at the penultimate layer if state captured
             if self.config.enable_recirculation and i == len(self.layers) - 2 and shallow_state is not None:
                 hidden_states = self.recirculation(hidden_states, shallow_state)
 
-        if logits_to_keep:
+        if packed is not None:  # each chunk's last token
+            hidden_states = hidden_states[:, packed.last]
+            pending = pending[:, packed.last] if pending is not None else None
+        elif logits_to_keep:
             hidden_states = hidden_states[:, -logits_to_keep:]
-        if self.norm is not None:
+            pending = pending[:, -logits_to_keep:] if pending is not None else None
+        if pending is not None:  # the last layer's residual add, fused with the final norm
+            hidden_states, _ = fused_ops.rms_norm(pending, self.norm.weight, self.norm.eps, self.norm.offset,
+                                                  residual=hidden_states)
+        elif self.norm is not None:
             hidden_states = self.norm(hidden_states)
         if cfg.embed_proj_dim:
             hidden_states = self.project_out(hidden_states)
@@ -674,6 +892,76 @@ class SubspaceCausalLM(nn.Module):
         self._kv_layer_kl = kls
         return cfg.kv_native_layers
 
+    def _kv_calibration_file(self) -> Optional[str]:
+        """Where this model's KV calibration is kept between processes (speed plan P7.2: it was most of a new process's
+        time to first token): ~/.cache/turing/kv_calibration (TURING_CACHE_DIR overrides; "off" disables), one file
+        per model config, weight fingerprint, dtype, device type and KV storage."""
+        import hashlib
+        import json
+        import os
+        root = os.environ.get("TURING_CACHE_DIR", os.path.join(os.path.expanduser("~"), ".cache", "turing"))
+        if root == "off":
+            return None
+        cfg, w = self.config, self.embed_tokens.weight
+        h = hashlib.sha256(json.dumps({k: v for k, v in vars(cfg).items() if k not in ("kv_native_layers",)},
+                                      sort_keys=True, default=str).encode())
+        h.update(f"{w.dtype}|{w.device.type}".encode())
+        a0, a1 = self.layers[0].self_attn, self.layers[-1].self_attn
+        for t in (w[:8], getattr(a0.k_proj, "qweight", None), getattr(a0.k_proj, "weight", None),
+                  getattr(a1.v_proj, "qweight", None), getattr(a1.v_proj, "weight", None)):
+            if t is not None:  # a fingerprint of the weights the calibration depends on, not all of them
+                h.update(t.detach().reshape(-1)[:1 << 16].float().cpu().numpy().tobytes())
+        return os.path.join(root, "kv_calibration", h.hexdigest()[:32] + ".json")
+
+    def _load_kv_calibration(self, smooth: bool, choose: bool) -> bool:
+        import json
+        path = self._kv_calibration_file()
+        try:
+            with open(path) as f:
+                rec = json.load(f)
+        except (TypeError, OSError, ValueError):
+            return False
+        if (smooth and rec.get("k_smooth") is None) or (choose and rec.get("native_layers") is None):
+            return False
+        dtype = self.embed_tokens.weight.dtype
+        if smooth:
+            for a, sc in zip((layer.self_attn for layer in self.layers), rec["k_smooth"]):
+                scale = torch.tensor(sc, device=self.embed_tokens.weight.device)
+                a.k_smooth = scale[None, :, None, :].to(dtype)
+                a.q_smooth = scale.repeat_interleave(a.num_kv_groups, dim=0)[None, :, None, :].to(dtype)
+            self._kv_smoothed = True
+        if choose:
+            self.config.kv_native_layers = tuple(rec["native_layers"])
+            self._kv_native_auto = self.config.kv_cache_dtype
+            self._kv_layer_kl = rec.get("layer_kl")
+        return True
+
+    def _save_kv_calibration(self, smooth: bool, choose: bool) -> None:
+        import json
+        import os
+        path = self._kv_calibration_file()
+        if path is None:
+            return
+        rec = {}
+        try:
+            with open(path) as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            pass
+        attns = [layer.self_attn for layer in self.layers]
+        if smooth and all(a.k_smooth is not None for a in attns):
+            rec["k_smooth"] = [a.k_smooth[0, :, 0, :].float().cpu().tolist() for a in attns]
+        if choose and self.config.kv_native_layers is not None:
+            rec.update(native_layers=list(self.config.kv_native_layers), layer_kl=getattr(self, "_kv_layer_kl", None))
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = f"{path}.{os.getpid()}"
+            with open(tmp, "w") as f:
+                json.dump(rec, f)
+            os.replace(tmp, path)  # atomic: a concurrent process reads the old file or the new one
+        except OSError:
+            pass  # a read-only home: calibrate again next time
+
     def rope_switch_length(self) -> Optional[int]:
         """LongRoPE's original context, or None for other RoPE types. A sequence longer than it uses the long
         frequencies at every position; transformers recomputes the cache when generation crosses it."""
@@ -700,10 +988,16 @@ class SubspaceCausalLM(nn.Module):
                 torch.cuda.empty_cache()
             # int4 only: int8 needs no smoothing (+0.003 nats without it on Qwen2.5-1.5B-Instruct in bf16, +0.017 and
             # 15 GSM8K points lost with it)
-            if cfg.kv_cache_dtype == "int4" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False):
-                self.calibrate_kv_smoothing()
-            if cfg.kv_cache_dtype != "native" and cfg.kv_native_layers is None:
-                self.select_kv_native_layers()
+            smooth = cfg.kv_cache_dtype == "int4" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False)
+            choose = cfg.kv_cache_dtype != "native" and cfg.kv_native_layers is None
+            if (smooth or choose) and not self._load_kv_calibration(smooth, choose):
+                if smooth:
+                    self.calibrate_kv_smoothing()
+                if choose:
+                    self.select_kv_native_layers()
+                self._save_kv_calibration(smooth, choose)
+            if w.device.type == "cuda":
+                self._prepare_marlin(w.dtype)  # before the pool takes the free memory
             pool = KVPool.for_model(cfg, w.dtype, w.device)
             self._kv_pool = pool
         return pool

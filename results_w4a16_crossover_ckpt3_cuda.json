@@ -1,0 +1,549 @@
+{
+  "env": {
+    "torch": "2.9.1+cu129",
+    "gpu": "NVIDIA L4",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35"
+  },
+  "rows": [
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 1,
+      "int4_kernel_us": 11.416799947619438,
+      "int4_kernel_no_split_us": 27.187201380729675,
+      "fp16_cublas_us": 9.779199957847595,
+      "dequant_cublas_us": 27.289599180221558
+    },
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 2,
+      "int4_kernel_us": 11.57120019197464,
+      "int4_kernel_no_split_us": 27.595199644565582,
+      "fp16_cublas_us": 9.113600105047226,
+      "dequant_cublas_us": 27.904000878334045
+    },
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 4,
+      "int4_kernel_us": 12.083200365304947,
+      "int4_kernel_no_split_us": 28.9792001247406,
+      "fp16_cublas_us": 9.676799923181534,
+      "dequant_cublas_us": 28.006398677825928
+    },
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 8,
+      "int4_kernel_us": 13.69519978761673,
+      "int4_kernel_no_split_us": 34.86720025539398,
+      "fp16_cublas_us": 9.779199957847595,
+      "dequant_cublas_us": 27.955201268196106
+    },
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 16,
+      "int4_kernel_us": 18.329599499702454,
+      "int4_kernel_no_split_us": 47.82080054283142,
+      "fp16_cublas_us": 9.932799637317657,
+      "dequant_cublas_us": 28.467199206352234
+    },
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 32,
+      "int4_kernel_us": 26.982399821281433,
+      "int4_kernel_no_split_us": 39.27040100097656,
+      "fp16_cublas_us": 13.312000036239624,
+      "dequant_cublas_us": 33.84240120649338
+    },
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 64,
+      "int4_kernel_us": 56.52480125427246,
+      "int4_kernel_no_split_us": 52.1727979183197,
+      "fp16_cublas_us": 13.823999464511871,
+      "dequant_cublas_us": 35.35360097885132
+    },
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 128,
+      "int4_kernel_us": 95.4367995262146,
+      "int4_kernel_no_split_us": 95.28319835662842,
+      "fp16_cublas_us": 25.34399926662445,
+      "dequant_cublas_us": 47.76960015296936
+    },
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 256,
+      "int4_kernel_us": 185.52320003509521,
+      "int4_kernel_no_split_us": 183.98719429969788,
+      "fp16_cublas_us": 48.153600096702576,
+      "dequant_cublas_us": 72.01279997825623
+    },
+    {
+      "K": 2048,
+      "N": 2048,
+      "M": 512,
+      "int4_kernel_us": 292.4544095993042,
+      "int4_kernel_no_split_us": 293.9903974533081,
+      "fp16_cublas_us": 69.52959895133972,
+      "dequant_cublas_us": 117.6576018333435
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 1,
+      "int4_kernel_us": 31.15519881248474,
+      "int4_kernel_no_split_us": 36.35199964046478,
+      "fp16_cublas_us": 87.55199909210205,
+      "dequant_cublas_us": 157.31200575828552
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 2,
+      "int4_kernel_us": 47.462400794029236,
+      "int4_kernel_no_split_us": 39.83359932899475,
+      "fp16_cublas_us": 25.139200687408447,
+      "dequant_cublas_us": 151.3215959072113
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 4,
+      "int4_kernel_us": 52.22399830818176,
+      "int4_kernel_no_split_us": 44.03199851512909,
+      "fp16_cublas_us": 24.857600033283234,
+      "dequant_cublas_us": 162.8928005695343
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 8,
+      "int4_kernel_us": 70.19519805908203,
+      "int4_kernel_no_split_us": 54.06720042228699,
+      "fp16_cublas_us": 24.883200228214264,
+      "dequant_cublas_us": 162.25279569625854
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 16,
+      "int4_kernel_us": 82.07359910011292,
+      "int4_kernel_no_split_us": 72.29440212249756,
+      "fp16_cublas_us": 28.031998872756958,
+      "dequant_cublas_us": 169.85599994659424
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 32,
+      "int4_kernel_us": 102.06720232963562,
+      "int4_kernel_no_split_us": 94.66879963874817,
+      "fp16_cublas_us": 38.98719996213913,
+      "dequant_cublas_us": 169.06239986419678
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 64,
+      "int4_kernel_us": 188.4928047657013,
+      "int4_kernel_no_split_us": 181.35039806365967,
+      "fp16_cublas_us": 94.2080020904541,
+      "dequant_cublas_us": 237.84959316253662
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 128,
+      "int4_kernel_us": 288.3839964866638,
+      "int4_kernel_no_split_us": 288.30718994140625,
+      "fp16_cublas_us": 77.67040133476257,
+      "dequant_cublas_us": 227.17440128326416
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 256,
+      "int4_kernel_us": 521.8048095703125,
+      "int4_kernel_no_split_us": 506.5471887588501,
+      "fp16_cublas_us": 145.7152009010315,
+      "dequant_cublas_us": 376.473593711853
+    },
+    {
+      "K": 2048,
+      "N": 8192,
+      "M": 512,
+      "int4_kernel_us": 960.6656074523926,
+      "int4_kernel_no_split_us": 970.2144145965576,
+      "fp16_cublas_us": 330.93119859695435,
+      "dequant_cublas_us": 578.6111831665039
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 1,
+      "int4_kernel_us": 30.003198981285095,
+      "int4_kernel_no_split_us": 131.22559785842896,
+      "fp16_cublas_us": 30.41279911994934,
+      "dequant_cublas_us": 156.72320127487183
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 2,
+      "int4_kernel_us": 30.744001269340515,
+      "int4_kernel_no_split_us": 139.31519985198975,
+      "fp16_cublas_us": 33.28000009059906,
+      "dequant_cublas_us": 172.69760370254517
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 4,
+      "int4_kernel_us": 49.07520115375519,
+      "int4_kernel_no_split_us": 146.4319944381714,
+      "fp16_cublas_us": 34.86720025539398,
+      "dequant_cublas_us": 173.20959568023682
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 8,
+      "int4_kernel_us": 65.30560255050659,
+      "int4_kernel_no_split_us": 98.02240133285522,
+      "fp16_cublas_us": 29.542401432991028,
+      "dequant_cublas_us": 173.51679801940918
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 16,
+      "int4_kernel_us": 72.14080095291138,
+      "int4_kernel_no_split_us": 110.28480529785156,
+      "fp16_cublas_us": 32.02559947967529,
+      "dequant_cublas_us": 167.21919775009155
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 32,
+      "int4_kernel_us": 115.60959815979004,
+      "int4_kernel_no_split_us": 168.9848005771637,
+      "fp16_cublas_us": 39.88159894943237,
+      "dequant_cublas_us": 187.92960047721863
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 64,
+      "int4_kernel_us": 226.61041021347046,
+      "int4_kernel_no_split_us": 224.9216079711914,
+      "fp16_cublas_us": 48.076799511909485,
+      "dequant_cublas_us": 194.5088028907776
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 128,
+      "int4_kernel_us": 427.1103858947754,
+      "int4_kernel_no_split_us": 418.9432144165039,
+      "fp16_cublas_us": 77.51680016517639,
+      "dequant_cublas_us": 250.67520141601562
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 256,
+      "int4_kernel_us": 691.0463809967041,
+      "int4_kernel_no_split_us": 718.9247846603394,
+      "fp16_cublas_us": 115.27679562568665,
+      "dequant_cublas_us": 319.20639276504517
+    },
+    {
+      "K": 8192,
+      "N": 2048,
+      "M": 512,
+      "int4_kernel_us": 1207.2192192077637,
+      "int4_kernel_no_split_us": 1202.3544311523438,
+      "fp16_cublas_us": 289.5359992980957,
+      "dequant_cublas_us": 493.2352066040039
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 1,
+      "int4_kernel_us": 29.721599817276,
+      "int4_kernel_no_split_us": 50.227200984954834,
+      "fp16_cublas_us": 32.51200020313263,
+      "dequant_cublas_us": 172.9024052619934
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 2,
+      "int4_kernel_us": 43.57120096683502,
+      "int4_kernel_no_split_us": 54.86080050468445,
+      "fp16_cublas_us": 25.702399015426636,
+      "dequant_cublas_us": 167.57760047912598
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 4,
+      "int4_kernel_us": 51.30239725112915,
+      "int4_kernel_no_split_us": 59.95519757270813,
+      "fp16_cublas_us": 25.36799907684326,
+      "dequant_cublas_us": 169.03679966926575
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 8,
+      "int4_kernel_us": 55.93600273132324,
+      "int4_kernel_no_split_us": 72.80479967594147,
+      "fp16_cublas_us": 24.985599517822266,
+      "dequant_cublas_us": 170.93120217323303
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 16,
+      "int4_kernel_us": 56.4736008644104,
+      "int4_kernel_no_split_us": 92.26239919662476,
+      "fp16_cublas_us": 26.572799682617188,
+      "dequant_cublas_us": 174.61759448051453
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 32,
+      "int4_kernel_us": 124.8255968093872,
+      "int4_kernel_no_split_us": 116.48000478744507,
+      "fp16_cublas_us": 42.13600009679794,
+      "dequant_cublas_us": 170.9824025630951
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 64,
+      "int4_kernel_us": 204.21119928359985,
+      "int4_kernel_no_split_us": 202.7776002883911,
+      "fp16_cublas_us": 48.56320023536682,
+      "dequant_cublas_us": 190.3615951538086
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 128,
+      "int4_kernel_us": 346.6752052307129,
+      "int4_kernel_no_split_us": 344.62718963623047,
+      "fp16_cublas_us": 88.19199800491333,
+      "dequant_cublas_us": 228.07040214538574
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 256,
+      "int4_kernel_us": 584.6015930175781,
+      "int4_kernel_no_split_us": 596.9151973724365,
+      "fp16_cublas_us": 174.87359642982483,
+      "dequant_cublas_us": 377.60000228881836
+    },
+    {
+      "K": 4096,
+      "N": 4096,
+      "M": 512,
+      "int4_kernel_us": 1034.7263813018799,
+      "int4_kernel_no_split_us": 1044.4544315338135,
+      "fp16_cublas_us": 326.32319927215576,
+      "dequant_cublas_us": 534.6047878265381
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 1,
+      "int4_kernel_us": 326.8607974052429,
+      "int4_kernel_no_split_us": 326.7840027809143,
+      "fp16_cublas_us": 440.0383949279785,
+      "dequant_cublas_us": 948.3263969421387
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 2,
+      "int4_kernel_us": 335.9488010406494,
+      "int4_kernel_no_split_us": 339.27680253982544,
+      "fp16_cublas_us": 474.9824047088623,
+      "dequant_cublas_us": 1131.5199851989746
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 4,
+      "int4_kernel_us": 121.49759531021118,
+      "int4_kernel_no_split_us": 126.56639814376831,
+      "fp16_cublas_us": 471.70557975769043,
+      "dequant_cublas_us": 1132.6208114624023
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 8,
+      "int4_kernel_us": 137.3695969581604,
+      "int4_kernel_no_split_us": 139.6224021911621,
+      "fp16_cublas_us": 475.8784055709839,
+      "dequant_cublas_us": 1134.771203994751
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 16,
+      "int4_kernel_us": 171.8775987625122,
+      "int4_kernel_no_split_us": 171.6223955154419,
+      "fp16_cublas_us": 481.20319843292236,
+      "dequant_cublas_us": 1140.2751922607422
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 32,
+      "int4_kernel_us": 342.9376006126404,
+      "int4_kernel_no_split_us": 343.96159648895264,
+      "fp16_cublas_us": 522.9559898376465,
+      "dequant_cublas_us": 1189.2480373382568
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 64,
+      "int4_kernel_us": 454.57921028137207,
+      "int4_kernel_no_split_us": 451.14638805389404,
+      "fp16_cublas_us": 535.4751825332642,
+      "dequant_cublas_us": 1202.3808002471924
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 128,
+      "int4_kernel_us": 876.2880325317383,
+      "int4_kernel_no_split_us": 883.3536148071289,
+      "fp16_cublas_us": 596.940803527832,
+      "dequant_cublas_us": 1216.3840293884277
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 256,
+      "int4_kernel_us": 1715.3535842895508,
+      "int4_kernel_no_split_us": 1744.1791534423828,
+      "fp16_cublas_us": 866.6368007659912,
+      "dequant_cublas_us": 1461.1199855804443
+    },
+    {
+      "K": 4096,
+      "N": 14336,
+      "M": 512,
+      "int4_kernel_us": 3576.8064498901367,
+      "int4_kernel_no_split_us": 3619.76318359375,
+      "fp16_cublas_us": 1351.8847942352295,
+      "dequant_cublas_us": 2003.6352157592773
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 1,
+      "int4_kernel_us": 125.84879994392395,
+      "int4_kernel_no_split_us": 161.7151975631714,
+      "fp16_cublas_us": 453.50399017333984,
+      "dequant_cublas_us": 969.7279930114746
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 2,
+      "int4_kernel_us": 129.5359969139099,
+      "int4_kernel_no_split_us": 165.6063973903656,
+      "fp16_cublas_us": 466.94397926330566,
+      "dequant_cublas_us": 1133.951997756958
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 4,
+      "int4_kernel_us": 137.6255989074707,
+      "int4_kernel_no_split_us": 183.39840173721313,
+      "fp16_cublas_us": 467.6095962524414,
+      "dequant_cublas_us": 1134.7968101501465
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 8,
+      "int4_kernel_us": 159.69280004501343,
+      "int4_kernel_no_split_us": 222.13120460510254,
+      "fp16_cublas_us": 469.0432071685791,
+      "dequant_cublas_us": 1136.4864349365234
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 16,
+      "int4_kernel_us": 200.80640316009521,
+      "int4_kernel_no_split_us": 281.3696026802063,
+      "fp16_cublas_us": 471.5519905090332,
+      "dequant_cublas_us": 1140.9919738769531
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 32,
+      "int4_kernel_us": 392.9856061935425,
+      "int4_kernel_no_split_us": 393.31839084625244,
+      "fp16_cublas_us": 515.7887935638428,
+      "dequant_cublas_us": 1186.9439601898193
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 64,
+      "int4_kernel_us": 721.5104103088379,
+      "int4_kernel_no_split_us": 720.7679986953735,
+      "fp16_cublas_us": 522.9568004608154,
+      "dequant_cublas_us": 1196.236801147461
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 128,
+      "int4_kernel_us": 1205.401611328125,
+      "int4_kernel_no_split_us": 1205.683183670044,
+      "fp16_cublas_us": 603.6992073059082,
+      "dequant_cublas_us": 1240.9343719482422
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 256,
+      "int4_kernel_us": 2054.0671348571777,
+      "int4_kernel_no_split_us": 2078.2336235046387,
+      "fp16_cublas_us": 840.3456211090088,
+      "dequant_cublas_us": 1477.606439590454
+    },
+    {
+      "K": 14336,
+      "N": 4096,
+      "M": 512,
+      "int4_kernel_us": 3878.6815643310547,
+      "int4_kernel_no_split_us": 3891.659164428711,
+      "fp16_cublas_us": 1310.8992099761963,
+      "dequant_cublas_us": 1990.7583236694336
+    }
+  ]
+}

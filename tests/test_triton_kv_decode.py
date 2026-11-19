@@ -22,7 +22,8 @@ def _filled(pool, T, g):
 @pytest.mark.parametrize("H,Hkv,D", [(9, 3, 64), (32, 8, 128)])
 @pytest.mark.parametrize("budget", [None, 0.25])
 @pytest.mark.parametrize("native", [False, True])
-def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, native):
+@pytest.mark.parametrize("qdtype", [torch.float32, torch.float16])  # fp16: tensor-core products in fp16
+def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, native, qdtype):
     from turing.kernels.triton_kv_decode import triton_pool_decode
     if native and kv_cache_dtype == "native":
         pytest.skip("a native pool has no full-precision layers of its own")
@@ -45,7 +46,9 @@ def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, 
             pool.append(0, c, k[b:b + 1], v[b:b + 1])
         sel = pool.select_pages(0, ref, totals, q, budget, min_tokens=0)
     rows = torch.tensor([[c.slot for c in fused], list(lengths)], dtype=torch.int32, device="cuda")
-    out = triton_pool_decode(pool, 0, q.float(), k, v, rows[0], rows[1], sel)  # fp32 query -> fp32 output
+    out = triton_pool_decode(pool, 0, q.to(qdtype), k, v, rows[0], rows[1], sel)  # output in the query's dtype
+    assert out.dtype == qdtype
+    out = out.float()
 
     pool.dtype = torch.float32  # the reference dequantizes in fp32, as the kernel does
     for b, (c, r, T) in enumerate(zip(fused, ref, totals)):
@@ -63,7 +66,7 @@ def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, 
             kr, vr, valid = pool.read_selected(0, r, sel[b], T)
             ref_out = F.scaled_dot_product_attention(q[b:b + 1].float(), kr.float(), vr.float(),
                                                      attn_mask=valid.repeat_interleave(H // Hkv, dim=1), enable_gqa=True)
-        torch.testing.assert_close(out[b:b + 1], ref_out, atol=1e-3, rtol=0)
+        torch.testing.assert_close(out[b:b + 1], ref_out, atol=1e-3, rtol=0 if qdtype == torch.float32 else 1e-2)
     if budget is not None:
         for c, r in zip(fused, ref):
             torch.testing.assert_close(pool.kmin[0, c.pages[-1]], pool.kmin[0, r.pages[-1]], rtol=0, atol=0)
@@ -190,3 +193,26 @@ def test_sdpa_decode_attention_matches_the_kernel():
         caches = [model(p)[1] for p in prompts]
         outs.append(torch.cat([model(nxt[:, t:t + 1], past_key_values=caches)[0] for t in range(3)], 1))
     torch.testing.assert_close(outs[1], outs[0], atol=1e-3, rtol=0)
+
+
+@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
+def test_one_split_writes_the_output_directly_and_matches_the_split_path(kv_cache_dtype):
+    """n_splits = 1 (a large batch) stores attention without the reduce launch; same result as the split path. K and V
+    are passed as non-contiguous views of one fused projection, as the model's fused q/k/v gives them."""
+    from turing.kernels.triton_kv_decode import triton_pool_decode
+    g = torch.Generator(device="cuda").manual_seed(2)
+    H, Hkv, D = 12, 2, 128
+    pool = KVPool(1, Hkv, D, 256, torch.float16, "cuda", kv_cache_dtype)
+    caches = [_filled(pool, T, g) for T in (5, 300, 700)]
+    q = torch.randn(3, H, 1, D, device="cuda", generator=g).half()
+    kv = torch.randn(3, 1, 2 * Hkv * D, device="cuda", generator=g).half()
+    k = kv[..., :Hkv * D].view(3, 1, Hkv, D).transpose(1, 2)
+    v = kv[..., Hkv * D:].view(3, 1, Hkv, D).transpose(1, 2)
+    for c in caches:
+        c.reserve(c.length + 1)
+    twins = [c.clone(share=False) for c in caches]
+    rows = torch.tensor([[c.slot for c in caches], [c.length for c in caches]], dtype=torch.int32, device="cuda")
+    rows2 = torch.tensor([[c.slot for c in twins], [c.length for c in twins]], dtype=torch.int32, device="cuda")
+    split = triton_pool_decode(pool, 0, q, k, v, rows[0], rows[1])
+    one = triton_pool_decode(pool, 0, q, k, v, rows2[0], rows2[1], n_splits=1)
+    torch.testing.assert_close(one.float(), split.float(), atol=1e-3, rtol=0)

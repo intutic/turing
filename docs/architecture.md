@@ -69,9 +69,11 @@ retraining it is lossy: 50% raises next-token NLL by +6.8 to +15.8 nats on SmolL
   directory): attention and dense-MLP projections are quantized (groups of 64); embeddings, the LM head, routers and
   MoE experts stay in the model dtype. On CUDA a fused Triton int4 GEMM (`triton_w4a16.py`) handles up to
   `INT4_MAX_ROWS` (64, from the measured crossover in [benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity))
-  input rows, and dequantization into a shared scratch buffer plus cuBLAS handles more; off CUDA, dequantize then
-  matmul, which saves memory but is slower than dense weights. Measured: under CUDA graphs 4-bit decodes 1.5–1.6× faster than fp16, and GPTQ costs
-  about 5 GSM8K points on Qwen2.5-1.5B-Instruct ([benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity)).
+  input rows, and dequantization into a shared scratch buffer plus cuBLAS handles more; when the optional Marlin
+  extension is built (`TURING_BUILD_MARLIN=1`, `turing/kernels/marlin.py`) it serves 1–1,024 rows from a repacked copy
+  made at load. Off CUDA, dequantize then matmul, which saves memory but is slower than dense weights. Measured: 4-bit
+  decodes 2.1× faster than fp16 at batch 1 (154.8 against 72.6 tok/s), and GPTQ costs about 7 GSM8K points on
+  Qwen2.5-1.5B-Instruct (57.2% → 50.4%) ([benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity)).
 * **Activation sparsity** (`activation_sparsity.py`, `--activation-sparsity`, default 0): TEAL-style, training-free.
   Per-projection magnitude thresholds are calibrated on WikiText-2 so that the chosen share of every attention and MLP
   projection input is zero. It applies only to one-row inputs on CUDA, where `triton_sparse_gemv.py` skips the weight

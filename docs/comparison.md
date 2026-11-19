@@ -14,25 +14,26 @@ output tokens per second, prefill included):
 <!-- table:vs_short -->
 | Model | Engine | B=1 | B=8 | B=32 | B=64 | TTFT, B=1 |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| SmolLM2-1.7B | vLLM | 65 | 324 | 563 | 622 | 0.073 s |
-| SmolLM2-1.7B | Turing | 58 | 271 | 454 | 443 | 0.102 s |
-| SmolLM2-360M | vLLM | 230 | 1,258 | 2,375 | 2,708 | 0.029 s |
-| SmolLM2-360M | Turing | 150 | 855 | 1,555 | 1,781 | 0.175 s |
+| SmolLM2-1.7B | vLLM | 65 | 327 | 567 | 635 | 0.071 s |
+| SmolLM2-1.7B | Turing | 64 | 327 | 585 | 586 | 0.073 s |
+| SmolLM2-360M | vLLM | 231 | 1,264 | 2,391 | 2,752 | 0.029 s |
+| SmolLM2-360M | Turing | 204 | 1,253 | 2,342 | 2,694 | 0.042 s |
 <!-- /table -->
 
 **4 bits, Qwen2.5-1.5B-Instruct, 512-token prompts, 256 new tokens** (`results_4bit_speed_cuda.json`, GSM8K from
 `results_4bit_quality_*_cuda.json`, all three through Turing's evaluator):
 
 <!-- table:vs_4bit -->
-| Setting | Batch 1, tok/s | Batch 8, tok/s | GSM8K (n=500) |
-| :--- | :---: | :---: | :---: |
-| llama.cpp Q4_K_M | 186 | 790 | 52.4% ± 2.2% |
-| vLLM GPTQ-Int4 (Qwen's checkpoint) | 169 | 1,078 | 50.2% ± 2.2% |
-| Turing GPTQ | 87 | 557 | 52.6% ± 2.2% |
-| Turing GPTQ + TEAL 25% | 90 | 531 | 47.2% ± 2.2% |
-| Turing GPTQ + TEAL 40% | 93 | 530 | 43.6% ± 2.2% |
-| vLLM fp16 (reference) | 75 | 533 | — |
-| Turing fp16 (reference) | 65 | 440 | — |
+| Setting | Batch 1, tok/s | Batch 8, tok/s | Batch 64, tok/s | GSM8K (n=500) |
+| :--- | :---: | :---: | :---: | :---: |
+| llama.cpp Q4_K_M | 180 | 752 | 2,157 | 52.4% ± 2.2% |
+| vLLM GPTQ-Int4 (Qwen's checkpoint) | 171 | 1,093 | 3,065 | 50.2% ± 2.2% |
+| Turing GPTQ | 155 | 1,035 | 2,739 | 50.4% ± 2.2% |
+| Turing GPTQ + 4-bit LM head (opt-in) | 197 | 1,266 | 2,961 | 51.8% ± 2.2% |
+| Turing GPTQ + TEAL 25% | 107 | 953 | 2,600 | 46.2% ± 2.2% |
+| Turing GPTQ + TEAL 40% | 112 | 960 | 2,614 | 42.0% ± 2.2% |
+| vLLM fp16 (reference) | 75 | 537 | 2,235 | — |
+| Turing fp16 (reference) | 73 | 530 | 2,152 | — |
 <!-- /table -->
 
 **16K-token prompts at equal KV memory** (Qwen2.5-1.5B-Instruct; seconds per request; each engine's KV capacity in
@@ -42,12 +43,12 @@ because it is wrong on this model.
 <!-- table:longctx -->
 | Engine, KV cache | KV capacity (tokens) | B=16 | B=32 | B=64 | B=128 |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| Turing native | 547,568 | 3.67 | 3.59 | 3.53 | 3.51 |
-| Turing int8 | 993,184 | 3.74 | 3.64 | 3.59 | 3.56 |
-| Turing int4 | 1,304,864 | 3.80 | 3.61 | 3.57 | 3.54 |
-| Turing int4, Quest 25% | 1,135,712 | 4.58 | 4.24 | 3.98 | 3.87 |
-| vLLM auto | 547,856 | 2.37 | 2.37 | 2.53 | 2.60 |
-| vLLM fp8 | 1,069,392 | 1.90 | 1.75 | 1.72 | 1.71 |
+| Turing native | 547,840 | 2.25 | 2.12 | 2.07 | 2.05 |
+| Turing int8 | 993,648 | 2.52 | 2.37 | 2.34 | 2.32 |
+| Turing int4 | 1,305,488 | 3.14 | 3.03 | 2.98 | 2.95 |
+| Turing int4, Quest 25% | 1,136,256 | 3.78 | 3.66 | 3.48 | 3.40 |
+| vLLM auto | 547,856 | 2.26 | 2.27 | 2.43 | 2.51 |
+| vLLM fp8 | 1,068,816 | 1.83 | 1.70 | 1.67 | 1.66 |
 | vLLM fp8, skip layer 0 | 1,032,096 | 1.85 | 1.74 | 1.75 | 1.73 |
 | vLLM int8_per_token_head | 1,062,096 | 4.90 | 4.79 | 4.74 | 4.72 |
 | vLLM int4_per_token_head | 2,060,896 | 4.73 | 4.55 | 4.49 | 4.41 |
@@ -62,11 +63,11 @@ Qwen2.5-1.5B-Instruct in bf16; the same GSM8K, pass-key and WikiText-2 checks fo
 <!-- table:vs_kv -->
 | KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 3.51 |
-| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 3.56 |
-| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 3.54 |
-| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.60 |
-| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.71 |
+| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 2.05 |
+| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 2.32 |
+| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.95 |
+| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
+| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.66 |
 | vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
 | vLLM fp8_per_token_head | — | 0.6% | 0.0% | +2.404 ± 0.364 | — |
 | vLLM int8_per_token_head | — | 41.4% | 100.0% | +0.023 ± 0.007 | 4.72 |
@@ -79,10 +80,13 @@ Qwen2.5-1.5B-Instruct in bf16; the same GSM8K, pass-key and WikiText-2 checks fo
 
 ## Where Turing Engine stands
 
-* **Slower.** vLLM is 1.1–1.5× faster in fp16 and about 2× faster at 4 bits; llama.cpp leads at batch 1 in 4 bits.
-  Turing's time to first token is 1.4–10× vLLM's.
-* **Comparable quality.** Turing's fp16 matches vLLM's on GSM8K (57.2% and 57.4%), and its GPTQ matches llama.cpp's
-  Q4_K_M (52.6% and 52.4%; vLLM's GPTQ checkpoint 50.2%).
+* **Close to vLLM, ahead in a few settings.** In fp16 vLLM is 1.01–1.04× faster on Qwen2.5-1.5B and Turing reaches
+  88–103% of vLLM on SmolLM2. At 4 bits vLLM is 1.06–1.12× faster; with Turing's opt-in 4-bit LM head Turing is 1.15×
+  vLLM at batch 1 and 8 and 1.09× llama.cpp at batch 1 (vLLM 1.04× at batch 64). At 16K-token prompts in fp16 Turing
+  is 1.0–1.22× faster per request; vLLM's fp8 cache with layer 0 kept is 1.3–1.4× faster than Turing's int8.
+  Turing's first token at batch 64 takes up to 2.3× vLLM's (SmolLM2-1.7B); llama.cpp starts fastest.
+* **Comparable quality.** Turing's fp16 matches vLLM's on GSM8K (57.2% and 57.4%), and its GPTQ matches vLLM's GPTQ
+  checkpoint (50.4% and 50.2%; llama.cpp's Q4_K_M 52.4%, all ± 2.2%).
 * **Low-bit KV that stays correct by default.** Turing picks the layers to keep in full precision at startup; vLLM's
   default fp8 and its per-token int4/fp8 caches break this model unless layer 0 is excluded by hand, and its per-token
   int8 cache loses 16 GSM8K points.

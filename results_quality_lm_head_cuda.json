@@ -1,0 +1,174 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "args": {
+    "models": "HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B,Qwen/Qwen2.5-1.5B",
+    "arms": "exact_forward,gptq4,gptq4_head",
+    "context": 2048,
+    "decode": 256,
+    "windows": 16,
+    "device": "cuda",
+    "dtype": null,
+    "out": "results_quality_lm_head_cuda.json"
+  },
+  "text": "WikiText-2 raw test, consecutive windows",
+  "rows": [
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.432362511754036,
+      "se": 0.10879751308952988,
+      "n": 16,
+      "seconds": 2.524860853999826,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "gptq4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.508392818272114,
+      "se": 0.11048000368287149,
+      "n": 16,
+      "seconds": 1.0929186070000014,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "gptq4_head",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.5210629254579544,
+      "se": 0.10936004496347733,
+      "n": 16,
+      "seconds": 1.1302924389997315,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "gptq4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.07603030651807785,
+      "se": 0.007963218054283093,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "arm": "gptq4_head",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.08870041370391846,
+      "se": 0.007567704483997906,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.0581900849938393,
+      "se": 0.10106766346561663,
+      "n": 16,
+      "seconds": 3.2937267590000374,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "gptq4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.0996165722608566,
+      "se": 0.10170890675919672,
+      "n": 16,
+      "seconds": 3.8353544100000363,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "gptq4_head",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.108730658888817,
+      "se": 0.10157503767034289,
+      "n": 16,
+      "seconds": 3.251852427999893,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "gptq4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.041426487267017365,
+      "se": 0.006647685265473803,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "arm": "gptq4_head",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.05054057389497757,
+      "se": 0.006256458216775296,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.135071448981762,
+      "se": 0.10515312145055454,
+      "n": 16,
+      "seconds": 2.689226422000047,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "gptq4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.1716194674372673,
+      "se": 0.10366567542543687,
+      "n": 16,
+      "seconds": 3.369673510999746,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "gptq4_head",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.1786457672715187,
+      "se": 0.1040814313956694,
+      "n": 16,
+      "seconds": 3.16071963100012,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "gptq4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.03654801845550537,
+      "se": 0.004064498430148777,
+      "n": 16,
+      "dtype": "float16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B",
+      "arm": "gptq4_head",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.043574318289756775,
+      "se": 0.005452288567686064,
+      "n": 16,
+      "dtype": "float16"
+    }
+  ]
+}

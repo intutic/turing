@@ -1,0 +1,115 @@
+{
+  "gpu": "NVIDIA L4",
+  "torch": "2.9.1+cu129",
+  "rows": [
+    {
+      "kv_cache_dtype": "native",
+      "start": 0,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 0.4873855000369076,
+      "gather_sdpa_ms": 1.1281864999546087
+    },
+    {
+      "kv_cache_dtype": "native",
+      "start": 6144,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 2.72951549982281,
+      "gather_sdpa_ms": 4.40692450001734
+    },
+    {
+      "kv_cache_dtype": "native",
+      "start": 14336,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 6.191303499690548,
+      "gather_sdpa_ms": 9.235981499841728
+    },
+    {
+      "kv_cache_dtype": "int8",
+      "start": 0,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 0.619091000089611,
+      "gather_sdpa_ms": 1.5318634998493508
+    },
+    {
+      "kv_cache_dtype": "int8",
+      "start": 6144,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 3.5311860001456807,
+      "gather_sdpa_ms": 4.80422800001179
+    },
+    {
+      "kv_cache_dtype": "int8",
+      "start": 14336,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 7.7356244999009505,
+      "gather_sdpa_ms": 9.695447999774842
+    },
+    {
+      "kv_cache_dtype": "int4",
+      "start": 0,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 1.6616035002243734,
+      "gather_sdpa_ms": 1.6960339999059215
+    },
+    {
+      "kv_cache_dtype": "int4",
+      "start": 6144,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 7.1974400000272,
+      "gather_sdpa_ms": 4.462930499812501
+    },
+    {
+      "kv_cache_dtype": "int4",
+      "start": 14336,
+      "chunk": 2048,
+      "heads": [
+        12,
+        2,
+        128
+      ],
+      "turing_ms": 15.265906999957224,
+      "gather_sdpa_ms": 10.070407000057457
+    }
+  ],
+  "note": "milliseconds per call (one layer), median; causal chunk after `start` cached tokens"
+}

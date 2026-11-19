@@ -4,6 +4,7 @@ Supports chunked prefill, speculative interleaving, and Prometheus telemetry.
 """
 
 import asyncio
+import logging
 import uuid
 import statistics
 import time
@@ -22,6 +23,8 @@ from .traffic import (
 )
 from .spec_gate import SpecGateDecision, SpeculationGatePolicy
 from .prefix_cache import PrefixCache
+
+logger = logging.getLogger(__name__)
 
 class RequestRejected(RuntimeError):
     """The engine cannot take this request now. The HTTP layer returns status_code (429 or 503) with Retry-After."""
@@ -87,6 +90,7 @@ class AsyncSequenceRequest:
         self.logits_processor = logits_processor
         self.adapter = adapter
         self.finish_reason: Optional[str] = None
+        self.error: Optional[BaseException] = None  # a scheduler step failed: stream_request raises it
         self.cached_prompt_tokens = 0  # prompt tokens served from the prefix cache
         self.uncacheable = False  # continues a caller's KVCache (prefix_kv): its pages are not keyed by its tokens
         self.needs_pages = False  # admitted while the pool was short: reserves its pages when it reaches the front
@@ -362,6 +366,8 @@ class ContinuousBatchEngine:
             while True:
                 token = await req.output_queue.get()
                 if token is None:
+                    if req.error is not None:
+                        raise RuntimeError(f"request {req.request_id} failed in the engine: {req.error!r}") from req.error
                     break
                 yield token
         finally:
@@ -389,7 +395,16 @@ class ContinuousBatchEngine:
             if not self.running_batch:
                 await asyncio.sleep(0.001)
                 continue
-            self._step_batch()
+            try:
+                self._step_batch()
+            except Exception as e:  # fail this step's requests; a dead loop would leave every caller waiting forever
+                logger.exception("scheduler step failed; finishing %d requests with an error", len(self.running_batch))
+                now = time.time()
+                for req in self.running_batch:
+                    if req.state != RequestState.FINISHED:
+                        req.error, req.uncacheable = e, True  # its cache may be half-written: never index it
+                        self._finish_request(req, now, "error")
+                self.running_batch = []
             await asyncio.sleep(0)
 
     # ------------------------------------------------------------------ one scheduler step
@@ -412,7 +427,7 @@ class ContinuousBatchEngine:
             # Prefill: chunks of the prefilling requests, in priority order, until this step's token budget is spent
             # (compute-bound); a request's chunk is its remaining prompt, capped by what is left of the budget
             prefill = [r for r in self.running_batch if r.state == RequestState.PREFILLING]
-            budget = None
+            budget, work = None, []
             for req in prefill:
                 if budget is None:
                     budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) \
@@ -421,23 +436,40 @@ class ContinuousBatchEngine:
                     break
                 end = min(req.prefill_offset + budget, len(req.prompt_tokens))
                 budget -= end - req.prefill_offset
-                chunk = torch.tensor([req.prompt_tokens[req.prefill_offset:end]], dtype=torch.long, device=self.device)
-                logits, req.past_kv = self._forward(chunk, req.past_kv, [req.adapter], logits_to_keep=1)
+                work.append((req, end))
+            caches = [r.past_kv for r, _ in work]
+            if (len(work) > 1 and self.dist_driver is None and not any(r.adapter for r, _ in work)
+                    and all(isinstance(c, KVCache) for c in caches)
+                    and getattr(self.model, "can_pack_prefill", lambda _: False)(caches)):
+                # every chunk of this step in one forward (one set of GEMMs), attention per request
+                last = self.model.prefill_packed([r.prompt_tokens[r.prefill_offset:e] for r, e in work], caches)
+                done = [(r, e, last[i:i + 1]) for i, (r, e) in enumerate(work)]
+            else:
+                done = []
+                for req, end in work:
+                    chunk = torch.tensor([req.prompt_tokens[req.prefill_offset:end]], dtype=torch.long,
+                                         device=self.device)
+                    logits, req.past_kv = self._forward(chunk, req.past_kv, [req.adapter], logits_to_keep=1)
+                    done.append((req, end, logits[:, -1]))
+            for req, end, last_logits in done:
                 req.prefill_offset = end
                 if end >= len(req.prompt_tokens):
                     req.state = RequestState.DECODING
                     if self.prefix_cache is not None and self.dist_driver is None and not req.uncacheable:
                         self.prefix_cache.insert(req.prompt_tokens, req.past_kv,
                                                  self._prefix_key(req.adapter, req.past_kv.rope_len))
-                    token = self._sample([req], logits[:, -1])[0]
+                    token = self._sample([req], last_logits)[0]
                     now = time.time()  # after the forward and the sample (which syncs), so TTFT includes prefill
                     req.first_token_at = req.last_token_at = now
                     self.recent_ttft.append(now - req.created_at)
                     self._emit(req, token, now)
 
             # Decode: speculative rows one by one, the rest in one batched forward (bandwidth-bound)
+            # a request whose first token came from this step's prefill decodes from the next step: its consumer gets
+            # that token now instead of after a decode forward (one step time of TTFT, P4.1)
+            first = {id(r) for r, e, _ in done if e >= len(r.prompt_tokens)}
             decode = [r for r in self.running_batch if r.state == RequestState.DECODING and r.first_token_at is not None
-                      and r.generated_tokens]
+                      and r.generated_tokens and id(r) not in first]
             crossing = [r for r in decode if self._crosses_rope_switch(r, 1)]
             for r in crossing:
                 self._recompute_long_rope(r)
@@ -533,9 +565,17 @@ class ContinuousBatchEngine:
         return logits if out is None else out
 
     def _sample(self, reqs: List[AsyncSequenceRequest], logits: torch.Tensor) -> List[int]:
-        """One token per row of logits [B, V], each with its request's processor and sampling settings (one host sync)."""
+        """One token per row of logits [B, V], each with its request's processor and sampling settings (one host sync).
+        Greedy rows without a processor share one argmax launch over the batch."""
+        plain = [r.logits_processor is None and r.temperature <= 1e-5 for r in reqs]
+        argmax = logits.argmax(-1) if any(plain) else None
+        if all(plain):
+            return argmax.tolist()
         rows = []
-        for r, row in zip(reqs, logits):
+        for i, (r, row) in enumerate(zip(reqs, logits)):
+            if plain[i]:
+                rows.append(argmax[i])
+                continue
             row = self._processed(r, row)
             p = self._probs(r, row)
             rows.append(row.argmax(-1) if p is None else torch.multinomial(p, 1)[0])

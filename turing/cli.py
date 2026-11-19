@@ -48,7 +48,7 @@ def _load_weights(args, dev):
         method = q.split("-")[-1]
         print(f"[*] Quantizing weights to 4 bits ({method})...")
         calib = calibration_windows(tokenizer, args.calib_windows, 2048) if method == "gptq" else None
-        quantize_model(model, method, calib)
+        quantize_model(model, method, calib, lm_head=getattr(args, "quantize_lm_head", False))
     if sp:
         from .models.activation_sparsity import calibrate_and_apply
         print(f"[*] Calibrating {sp:.0%} activation sparsity on WikiText-2 (16 windows of 512 tokens)...")
@@ -73,7 +73,8 @@ def _eval_engine(args):
 
 def _write_eval(args, res):
     res.update(model=args.model, kv_cache_dtype=args.kv_cache_dtype, kv_page_budget=args.kv_page_budget,
-               quantization=args.quantization, activation_sparsity=args.activation_sparsity, device=args.device,
+               quantization=args.quantization, quantize_lm_head=getattr(args, "quantize_lm_head", False),
+               activation_sparsity=args.activation_sparsity, device=args.device,
                dtype=getattr(args, "dtype", None), kv_smoothing=not getattr(args, "no_kv_smoothing", False),
                batch_size=getattr(args, "batch_size", None))
     print(json.dumps(res, indent=2))
@@ -95,6 +96,7 @@ def main():
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, cpu, mps)")
     serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
+    serve_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
     serve_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     serve_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     serve_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
@@ -132,6 +134,7 @@ def main():
     gen_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     gen_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     gen_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
+    gen_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
     gen_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     gen_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     gen_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
@@ -149,6 +152,7 @@ def main():
     conv_parser.add_argument("--device", type=str, default="auto", help="Device for the per-layer work")
     conv_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows (default 128)")
     conv_parser.add_argument("--calib-tokens", type=int, default=2048, help="Tokens per calibration window (default 2048)")
+    conv_parser.add_argument("--quantize-lm-head", action="store_true", help="the LM head in 4 bits too")
 
     # 5. Eval NIAH
     niah_parser = subparsers.add_parser("eval-niah", help="Pass-key needle-in-a-haystack retrieval through the engine on real weights")
@@ -162,6 +166,7 @@ def main():
     niah_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest page budget (1.0 reads all pages)")
     niah_parser.add_argument("--kv-select-min-tokens", type=int, default=None, help="Quest only from this many tokens (default: the model config's 8192)")
     niah_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load")
+    niah_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
     niah_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows")
     niah_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style input sparsity (0 = off)")
     niah_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight dtype")
@@ -181,6 +186,7 @@ def main():
     acc_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest page budget (1.0 reads all pages)")
     acc_parser.add_argument("--kv-select-min-tokens", type=int, default=None, help="Quest only from this many tokens (default: the model config's 8192)")
     acc_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load")
+    acc_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
     acc_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows")
     acc_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style input sparsity (0 = off)")
     acc_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight dtype")
@@ -203,6 +209,7 @@ def main():
     chat_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
     chat_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     chat_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
+    chat_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
     chat_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     chat_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     chat_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
@@ -389,7 +396,8 @@ def main():
     elif args.command == "convert":
         from .models.converter import convert_checkpoint
         dev = TuringConfig(device=args.device).resolve_device()
-        res = convert_checkpoint(args.model, args.output, args.method, str(dev), args.calib_windows, args.calib_tokens)
+        res = convert_checkpoint(args.model, args.output, args.method, str(dev), args.calib_windows, args.calib_tokens,
+                                 lm_head=args.quantize_lm_head)
         print(json.dumps(res, indent=2))
 
     elif args.command == "eval-niah":

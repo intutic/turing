@@ -59,11 +59,12 @@ if HAS_TRITON:
             tl.store(DZ + row * NG + g, lo.to(tl.float16))
 
     @triton.jit
-    def _pool_append_kernel(KV, PT, SLOTS, STARTS, K, V, KS, KZ, VS, VZ, KMIN, KMAX,
-                            s_which, s_b, s_h, pt_stride,
+    def _pool_append_kernel(K_IN, V_IN, PT, SLOTS, STARTS, K, V, KS, KZ, VS, VZ, KMIN, KMAX,
+                            s_kb, s_kh, s_vb, s_vh, pt_stride,
                             HKV: tl.constexpr, D: tl.constexpr, MODE: tl.constexpr, GROUP: tl.constexpr,
                             TRACK: tl.constexpr):
-        """KV [2, B, Hkv, D]: this step's K (after RoPE) and V of each row, written at position STARTS[b]."""
+        """K_IN, V_IN [B, Hkv, (1,) D] (any batch and head strides): this step's K (after RoPE) and V of each row,
+        written at position STARTS[b]."""
         b = tl.program_id(0)
         h = tl.program_id(1)
         which = tl.program_id(2)
@@ -71,8 +72,8 @@ if HAS_TRITON:
         page = tl.load(PT + tl.load(SLOTS + b).to(tl.int64) * pt_stride + pos // 16).to(tl.int64)
         row = (page * HKV + h) * 16 + pos % 16
         offs = tl.arange(0, D)
-        x = tl.load(KV + which * s_which + b * s_b + h * s_h + offs).to(tl.float32)
         if which == 0:
+            x = tl.load(K_IN + b * s_kb + h * s_kh + offs).to(tl.float32)
             _store_token(K, KS, KZ, row, x, offs, D, MODE, GROUP)
             if TRACK:
                 bo = (page * HKV + h) * D + offs
@@ -80,6 +81,7 @@ if HAS_TRITON:
                 tl.store(KMIN + bo, tl.minimum(tl.load(KMIN + bo).to(tl.float32), xh).to(tl.float16))
                 tl.store(KMAX + bo, tl.maximum(tl.load(KMAX + bo).to(tl.float32), xh).to(tl.float16))
         else:
+            x = tl.load(V_IN + b * s_vb + h * s_vh + offs).to(tl.float32)
             _store_token(V, VS, VZ, row, x, offs, D, MODE, GROUP)
 
     @triton.jit
@@ -103,12 +105,12 @@ if HAS_TRITON:
         return x
 
     @triton.jit
-    def _pool_decode_kernel(Q, PT, SLOTS, STARTS, SEL, K, V, KS, KZ, VS, VZ, ACC, M, L,
+    def _pool_decode_kernel(Q, PT, SLOTS, STARTS, SEL, K, V, KS, KZ, VS, VZ, ACC, M, L, OUT,
                             s_qb, s_qh, pt_stride, s_sel_b, s_sel_h, n_sel, sm_scale, softcap, window,
                             G: tl.constexpr, BLOCK_G: tl.constexpr, D: tl.constexpr, BLOCK_N: tl.constexpr,
                             MODE: tl.constexpr, GROUP: tl.constexpr, HAS_SEL: tl.constexpr,
                             N_SPLITS: tl.constexpr, HKV: tl.constexpr, WINDOW: tl.constexpr,
-                            SOFTCAP: tl.constexpr):
+                            SOFTCAP: tl.constexpr, IEEE: tl.constexpr):
         b = tl.program_id(0)
         h = tl.program_id(1)
         split = tl.program_id(2)
@@ -125,7 +127,6 @@ if HAS_TRITON:
         offs_d = tl.arange(0, D)
         gmask = offs_g < G
         q = tl.load(Q + b * s_qb + (h * G + offs_g)[:, None] * s_qh + offs_d[None, :], mask=gmask[:, None], other=0.0)
-        q = q.to(tl.float32)
         m_i = tl.full([BLOCK_G], -1.0e30, dtype=tl.float32)
         l_i = tl.zeros([BLOCK_G], dtype=tl.float32)
         acc = tl.zeros([BLOCK_G, D], dtype=tl.float32)
@@ -141,7 +142,10 @@ if HAS_TRITON:
             page = tl.load(pt_row + lp, mask=valid, other=0).to(tl.int64)
             row = (page * HKV + h) * 16 + i % 16
             k = _load_rows(K, KS, KZ, row, valid, offs_d, D, MODE, GROUP)
-            s = tl.dot(q, tl.trans(k), input_precision="ieee") * sm_scale
+            if IEEE:  # fp32 queries: IEEE fp32 products; fp16/bf16: tensor cores in that dtype, fp32 accumulation
+                s = tl.dot(q.to(tl.float32), tl.trans(k), input_precision="ieee") * sm_scale
+            else:
+                s = tl.dot(q, tl.trans(k.to(q.dtype))) * sm_scale
             if SOFTCAP:  # Gemma 2: cap * tanh(s / cap)
                 s = softcap * libdevice.tanh(s / softcap)
             s = tl.where(valid[None, :], s, float("-inf"))
@@ -150,12 +154,20 @@ if HAS_TRITON:
             alpha = tl.exp(m_i - m_new)
             l_i = l_i * alpha + tl.sum(p, 1)
             v = _load_rows(V, VS, VZ, row, valid, offs_d, D, MODE, GROUP)
-            acc = acc * alpha[:, None] + tl.dot(p, v, input_precision="ieee")
+            if IEEE:
+                acc = acc * alpha[:, None] + tl.dot(p, v, input_precision="ieee")
+            else:
+                acc = acc * alpha[:, None] + tl.dot(p.to(q.dtype), v.to(q.dtype))
             m_i = m_new
-        out_row = ((b * HKV + h) * N_SPLITS + split) * G + offs_g
-        tl.store(M + out_row, m_i, mask=gmask)
-        tl.store(L + out_row, l_i, mask=gmask)
-        tl.store(ACC + out_row[:, None] * D + offs_d[None, :], acc, mask=gmask[:, None])
+        if N_SPLITS == 1:  # nothing to merge: the output directly, and no reduce launch
+            o = acc / tl.where(l_i > 0, l_i, 1.0)[:, None]
+            tl.store(OUT + ((b * HKV + h) * G + offs_g)[:, None] * D + offs_d[None, :], o.to(OUT.dtype.element_ty),
+                     mask=gmask[:, None])
+        else:
+            out_row = ((b * HKV + h) * N_SPLITS + split) * G + offs_g
+            tl.store(M + out_row, m_i, mask=gmask)
+            tl.store(L + out_row, l_i, mask=gmask)
+            tl.store(ACC + out_row[:, None] * D + offs_d[None, :], acc, mask=gmask[:, None])
 
     @triton.jit
     def _kv_reduce_kernel(ACC, M, L, OUT, G: tl.constexpr, BLOCK_G: tl.constexpr, D: tl.constexpr,
@@ -188,7 +200,8 @@ def pool_decode_supported(pool: KVPool, q: torch.Tensor) -> bool:
 
 def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
                        slots: torch.Tensor, starts: torch.Tensor, sel: Optional[torch.Tensor] = None,
-                       scale: Optional[float] = None, window: int = 0, softcap: float = 0.0) -> torch.Tensor:
+                       scale: Optional[float] = None, window: int = 0, softcap: float = 0.0,
+                       n_splits: Optional[int] = None) -> torch.Tensor:
     """One decode step of B requests in one layer: q [B, H, 1, D], k, v [B, Hkv, 1, D] (K after RoPE), slots and
     starts [B] int32 on the device (page-table rows, lengths before this step), sel [B, Hkv, K] logical pages or
     None. Appends k, v to each row's pages (already reserved) and returns attention [B, H, 1, D]. scale defaults to
@@ -202,28 +215,32 @@ def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tenso
     fields = [kc, vc]
     scales = [ks, kz, vs, vz] if mode else fields * 2
     bounds = [pool.kmin[layer], pool.kmax[layer]] if pool.track_pages else fields
-    kv = torch.stack((k, v)).reshape(2, B, Hkv, D)
+    if k.stride(-1) != 1 or v.stride(-1) != 1:
+        k, v = k.contiguous(), v.contiguous()
     pt = pool.page_table
-    _pool_append_kernel[(B, Hkv, 2)](kv, pt, slots, starts, *fields, *scales, *bounds,
-                                     kv.stride(0), kv.stride(1), kv.stride(2), pt.stride(0),
+    _pool_append_kernel[(B, Hkv, 2)](k, v, pt, slots, starts, *fields, *scales, *bounds,
+                                     k.stride(0), k.stride(1), v.stride(0), v.stride(1), pt.stride(0),
                                      HKV=Hkv, D=D, MODE=mode, GROUP=INT4_GROUP, TRACK=pool.track_pages)
-    n_splits = max(1, min(32, 256 // (B * Hkv)))
+    if n_splits is None:  # one split (no reduce launch) once the batch alone fills the GPU
+        n_splits = max(1, min(32, 256 // (B * Hkv)))
     BLOCK_N = 64 if D <= 64 else 32  # fp32 K and V tiles must fit the L4's 99 KB of shared memory
     BLOCK_G = max(16, triton.next_power_of_2(G))
-    acc = torch.empty(B * Hkv * n_splits * G, D, device=q.device, dtype=torch.float32)
-    m = torch.empty(B * Hkv * n_splits * G, device=q.device, dtype=torch.float32)
+    out = torch.empty(B, H, D, device=q.device, dtype=q.dtype)
+    acc = torch.empty(B * Hkv * n_splits * G if n_splits > 1 else 1, D, device=q.device, dtype=torch.float32)
+    m = torch.empty(acc.shape[0], device=q.device, dtype=torch.float32)
     l = torch.empty_like(m)
     qc = q.reshape(B, H, D)
     sel_t = sel if sel is not None else slots
     _pool_decode_kernel[(B, Hkv, n_splits)](
-        qc, pt, slots, starts, sel_t, *fields, *scales, acc, m, l,
+        qc, pt, slots, starts, sel_t, *fields, *scales, acc, m, l, out,
         qc.stride(0), qc.stride(1), pt.stride(0),
         sel.stride(0) if sel is not None else 0, sel.stride(1) if sel is not None else 0,
         sel.shape[-1] if sel is not None else 0, scale if scale is not None else 1.0 / math.sqrt(D),
         float(softcap), int(window),
         G=G, BLOCK_G=BLOCK_G, D=D, BLOCK_N=BLOCK_N, MODE=mode, GROUP=INT4_GROUP, HAS_SEL=sel is not None,
-        N_SPLITS=n_splits, HKV=Hkv, WINDOW=window > 0, SOFTCAP=softcap > 0, num_stages=2,
+        N_SPLITS=n_splits, HKV=Hkv, WINDOW=window > 0, SOFTCAP=softcap > 0, IEEE=q.dtype == torch.float32,
+        num_stages=2,
     )
-    out = torch.empty(B, H, D, device=q.device, dtype=q.dtype)
-    _kv_reduce_kernel[(B * Hkv,)](acc, m, l, out, G=G, BLOCK_G=BLOCK_G, D=D, N_SPLITS=n_splits)
+    if n_splits > 1:
+        _kv_reduce_kernel[(B * Hkv,)](acc, m, l, out, G=G, BLOCK_G=BLOCK_G, D=D, N_SPLITS=n_splits)
     return out.view(B, H, 1, D)

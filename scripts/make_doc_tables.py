@@ -61,7 +61,8 @@ def t_vs_short():
 
 def t_vs_4bit():
     speed = load("results_4bit_speed_cuda.json")
-    q_t = {(r["quantization"], r["activation_sparsity"]): r for r in load("results_4bit_quality_turing_cuda.json")}
+    q_t = {(r["quantization"], r["activation_sparsity"], bool(r.get("quantize_lm_head"))): r
+           for r in load("results_4bit_quality_turing_cuda.json")}
     q_v = {r["model"]: r for r in load("results_4bit_quality_vllm_cuda.json")}
     q_l = {r["model"]: r for r in load("results_4bit_quality_llamacpp_cuda.json")}
 
@@ -76,17 +77,20 @@ def t_vs_4bit():
         ("vLLM GPTQ-Int4 (Qwen's checkpoint)", lambda x: x["engine"] == "vllm" and x["model"].endswith("GPTQ-Int4"),
          q_v.get("Qwen/Qwen2.5-1.5B-Instruct-GPTQ-Int4", {}).get("gsm8k")),
         ("Turing GPTQ", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
-         and not x.get("activation_sparsity"), q_t.get(("w4a16-gptq", 0.0))),
+         and not x.get("activation_sparsity") and not x.get("quantize_lm_head"), q_t.get(("w4a16-gptq", 0.0, False))),
+        ("Turing GPTQ + 4-bit LM head (opt-in)", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
+         and not x.get("activation_sparsity") and x.get("quantize_lm_head"), q_t.get(("w4a16-gptq", 0.0, True))),
         ("Turing GPTQ + TEAL 25%", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
-         and x.get("activation_sparsity") == 0.25, q_t.get(("w4a16-gptq", 0.25))),
+         and x.get("activation_sparsity") == 0.25, q_t.get(("w4a16-gptq", 0.25, False))),
         ("Turing GPTQ + TEAL 40%", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
-         and x.get("activation_sparsity") == 0.4, q_t.get(("w4a16-gptq", 0.4))),
+         and x.get("activation_sparsity") == 0.4, q_t.get(("w4a16-gptq", 0.4, False))),
         ("vLLM fp16 (reference)", lambda x: x["engine"] == "vllm" and x["model"] == "Qwen/Qwen2.5-1.5B-Instruct", None),
         ("Turing fp16 (reference)", lambda x: x["engine"] == "turing" and x.get("quantization") == "none"
          and not x.get("activation_sparsity"), None),
     ]
-    return table(["Setting", "Batch 1, tok/s", "Batch 8, tok/s", "GSM8K (n=500)"],
-                 [[n, tok(m, 1), tok(m, 8), gsm(q)] for n, m, q in arms])
+    big = any(x["batch"] == 64 for x in speed)  # batch 64 measured from the speed plan's final session on
+    head = ["Setting", "Batch 1, tok/s", "Batch 8, tok/s", *(["Batch 64, tok/s"] if big else []), "GSM8K (n=500)"]
+    return table(head, [[n, tok(m, 1), tok(m, 8), *([tok(m, 64)] if big else []), gsm(q)] for n, m, q in arms])
 
 
 def _turing_kv_quality():
@@ -229,10 +233,12 @@ def t_formats():
 def t_crossover():
     rows = load("results_w4a16_crossover_cuda.json")
     ms = sorted({r["M"] for r in rows})
-    s = {m: [sum(r[k] for r in rows if r["M"] == m) for k in ("int4_kernel_us", "int4_kernel_no_split_us",
-                                                             "dequant_cublas_us", "fp16_cublas_us")] for m in ms}
-    return table(["Rows (M)", "int4 kernel", "int4, no K split", "dequantize + cuBLAS", "fp16 cuBLAS"],
-                 [[m, *[f"{v:,.0f}" for v in s[m]]] for m in ms])
+    keys = ["int4_kernel_us", "int4_kernel_no_split_us", "dequant_cublas_us", "fp16_cublas_us"]
+    names = ["Rows (M)", "int4 kernel", "int4, no K split", "dequantize + cuBLAS", "fp16 cuBLAS"]
+    if all("marlin_us" in r for r in rows):  # the optional Marlin extension was built
+        keys, names = keys + ["marlin_us"], names + ["Marlin (optional)"]
+    s = {m: [sum(r[k] for r in rows if r["M"] == m) for k in keys] for m in ms}
+    return table(names, [[m, *[f"{v:,.0f}" for v in s[m]]] for m in ms])
 
 
 # ---------------------------------------------------------------------------------------------- decode throughput
