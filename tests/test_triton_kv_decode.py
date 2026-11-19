@@ -22,7 +22,8 @@ def _filled(pool, T, g):
 @pytest.mark.parametrize("H,Hkv,D", [(9, 3, 64), (32, 8, 128)])
 @pytest.mark.parametrize("budget", [None, 0.25])
 @pytest.mark.parametrize("native", [False, True])
-def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, native):
+@pytest.mark.parametrize("qdtype", [torch.float32, torch.float16])  # fp16: tensor-core products in fp16
+def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, native, qdtype):
     from turing.kernels.triton_kv_decode import triton_pool_decode
     if native and kv_cache_dtype == "native":
         pytest.skip("a native pool has no full-precision layers of its own")
@@ -45,7 +46,9 @@ def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, 
             pool.append(0, c, k[b:b + 1], v[b:b + 1])
         sel = pool.select_pages(0, ref, totals, q, budget, min_tokens=0)
     rows = torch.tensor([[c.slot for c in fused], list(lengths)], dtype=torch.int32, device="cuda")
-    out = triton_pool_decode(pool, 0, q.float(), k, v, rows[0], rows[1], sel)  # fp32 query -> fp32 output
+    out = triton_pool_decode(pool, 0, q.to(qdtype), k, v, rows[0], rows[1], sel)  # output in the query's dtype
+    assert out.dtype == qdtype
+    out = out.float()
 
     pool.dtype = torch.float32  # the reference dequantizes in fp32, as the kernel does
     for b, (c, r, T) in enumerate(zip(fused, ref, totals)):
@@ -63,7 +66,7 @@ def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, 
             kr, vr, valid = pool.read_selected(0, r, sel[b], T)
             ref_out = F.scaled_dot_product_attention(q[b:b + 1].float(), kr.float(), vr.float(),
                                                      attn_mask=valid.repeat_interleave(H // Hkv, dim=1), enable_gqa=True)
-        torch.testing.assert_close(out[b:b + 1], ref_out, atol=1e-3, rtol=0)
+        torch.testing.assert_close(out[b:b + 1], ref_out, atol=1e-3, rtol=0 if qdtype == torch.float32 else 1e-2)
     if budget is not None:
         for c, r in zip(fused, ref):
             torch.testing.assert_close(pool.kmin[0, c.pages[-1]], pool.kmin[0, r.pages[-1]], rtol=0, atol=0)

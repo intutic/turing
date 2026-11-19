@@ -110,7 +110,7 @@ if HAS_TRITON:
                             G: tl.constexpr, BLOCK_G: tl.constexpr, D: tl.constexpr, BLOCK_N: tl.constexpr,
                             MODE: tl.constexpr, GROUP: tl.constexpr, HAS_SEL: tl.constexpr,
                             N_SPLITS: tl.constexpr, HKV: tl.constexpr, WINDOW: tl.constexpr,
-                            SOFTCAP: tl.constexpr):
+                            SOFTCAP: tl.constexpr, IEEE: tl.constexpr):
         b = tl.program_id(0)
         h = tl.program_id(1)
         split = tl.program_id(2)
@@ -127,7 +127,6 @@ if HAS_TRITON:
         offs_d = tl.arange(0, D)
         gmask = offs_g < G
         q = tl.load(Q + b * s_qb + (h * G + offs_g)[:, None] * s_qh + offs_d[None, :], mask=gmask[:, None], other=0.0)
-        q = q.to(tl.float32)
         m_i = tl.full([BLOCK_G], -1.0e30, dtype=tl.float32)
         l_i = tl.zeros([BLOCK_G], dtype=tl.float32)
         acc = tl.zeros([BLOCK_G, D], dtype=tl.float32)
@@ -143,7 +142,10 @@ if HAS_TRITON:
             page = tl.load(pt_row + lp, mask=valid, other=0).to(tl.int64)
             row = (page * HKV + h) * 16 + i % 16
             k = _load_rows(K, KS, KZ, row, valid, offs_d, D, MODE, GROUP)
-            s = tl.dot(q, tl.trans(k), input_precision="ieee") * sm_scale
+            if IEEE:  # fp32 queries: IEEE fp32 products; fp16/bf16: tensor cores in that dtype, fp32 accumulation
+                s = tl.dot(q.to(tl.float32), tl.trans(k), input_precision="ieee") * sm_scale
+            else:
+                s = tl.dot(q, tl.trans(k.to(q.dtype))) * sm_scale
             if SOFTCAP:  # Gemma 2: cap * tanh(s / cap)
                 s = softcap * libdevice.tanh(s / softcap)
             s = tl.where(valid[None, :], s, float("-inf"))
@@ -152,7 +154,10 @@ if HAS_TRITON:
             alpha = tl.exp(m_i - m_new)
             l_i = l_i * alpha + tl.sum(p, 1)
             v = _load_rows(V, VS, VZ, row, valid, offs_d, D, MODE, GROUP)
-            acc = acc * alpha[:, None] + tl.dot(p, v, input_precision="ieee")
+            if IEEE:
+                acc = acc * alpha[:, None] + tl.dot(p, v, input_precision="ieee")
+            else:
+                acc = acc * alpha[:, None] + tl.dot(p.to(q.dtype), v.to(q.dtype))
             m_i = m_new
         if N_SPLITS == 1:  # nothing to merge: the output directly, and no reduce launch
             o = acc / tl.where(l_i > 0, l_i, 1.0)[:, None]
@@ -233,7 +238,8 @@ def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tenso
         sel.shape[-1] if sel is not None else 0, scale if scale is not None else 1.0 / math.sqrt(D),
         float(softcap), int(window),
         G=G, BLOCK_G=BLOCK_G, D=D, BLOCK_N=BLOCK_N, MODE=mode, GROUP=INT4_GROUP, HAS_SEL=sel is not None,
-        N_SPLITS=n_splits, HKV=Hkv, WINDOW=window > 0, SOFTCAP=softcap > 0, num_stages=2,
+        N_SPLITS=n_splits, HKV=Hkv, WINDOW=window > 0, SOFTCAP=softcap > 0, IEEE=q.dtype == torch.float32,
+        num_stages=2,
     )
     if n_splits > 1:
         _kv_reduce_kernel[(B * Hkv,)](acc, m, l, out, G=G, BLOCK_G=BLOCK_G, D=D, N_SPLITS=n_splits)
