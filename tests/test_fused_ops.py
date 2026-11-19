@@ -65,8 +65,8 @@ def test_rope_matches_apply_rotary_pos_emb(dtype, rot, decode):
     else:
         ang = torch.rand(L, rot, device="cuda") * 100
         cos, sin = ang.cos(), ang.sin()
-    rq, rk = apply_rotary_pos_emb(q.float(), k.float(), cos, sin)  # fp32 reference: the kernel rotates in fp32 too
+    rq, rk = apply_rotary_pos_emb(q, k, cos.to(dtype), sin.to(dtype))  # the kernel rounds as this does, in the dtype
     fq, fk = rope(q, k, cos, sin)
-    rtol = 1.6e-2 if dtype == torch.bfloat16 else 1e-3  # one rounding of the output to the dtype
-    torch.testing.assert_close(fq.float(), rq, atol=1e-3, rtol=rtol)
-    torch.testing.assert_close(fk.float(), rk, atol=1e-3, rtol=rtol)
+    for f, r in ((fq, rq), (fk, rk)):  # within one rounding step of the dtype at the output's magnitude
+        torch.testing.assert_close(f.float(), r.float(), rtol=0,
+                                   atol=torch.finfo(dtype).eps * max(1.0, r.abs().max().item()))
