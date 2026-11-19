@@ -4,6 +4,7 @@ Supports chunked prefill, speculative interleaving, and Prometheus telemetry.
 """
 
 import asyncio
+import logging
 import uuid
 import statistics
 import time
@@ -22,6 +23,8 @@ from .traffic import (
 )
 from .spec_gate import SpecGateDecision, SpeculationGatePolicy
 from .prefix_cache import PrefixCache
+
+logger = logging.getLogger(__name__)
 
 class RequestRejected(RuntimeError):
     """The engine cannot take this request now. The HTTP layer returns status_code (429 or 503) with Retry-After."""
@@ -87,6 +90,7 @@ class AsyncSequenceRequest:
         self.logits_processor = logits_processor
         self.adapter = adapter
         self.finish_reason: Optional[str] = None
+        self.error: Optional[BaseException] = None  # a scheduler step failed: stream_request raises it
         self.cached_prompt_tokens = 0  # prompt tokens served from the prefix cache
         self.uncacheable = False  # continues a caller's KVCache (prefix_kv): its pages are not keyed by its tokens
         self.needs_pages = False  # admitted while the pool was short: reserves its pages when it reaches the front
@@ -362,6 +366,8 @@ class ContinuousBatchEngine:
             while True:
                 token = await req.output_queue.get()
                 if token is None:
+                    if req.error is not None:
+                        raise RuntimeError(f"request {req.request_id} failed in the engine: {req.error!r}") from req.error
                     break
                 yield token
         finally:
@@ -389,7 +395,16 @@ class ContinuousBatchEngine:
             if not self.running_batch:
                 await asyncio.sleep(0.001)
                 continue
-            self._step_batch()
+            try:
+                self._step_batch()
+            except Exception as e:  # fail this step's requests; a dead loop would leave every caller waiting forever
+                logger.exception("scheduler step failed; finishing %d requests with an error", len(self.running_batch))
+                now = time.time()
+                for req in self.running_batch:
+                    if req.state != RequestState.FINISHED:
+                        req.error, req.uncacheable = e, True  # its cache may be half-written: never index it
+                        self._finish_request(req, now, "error")
+                self.running_batch = []
             await asyncio.sleep(0)
 
     # ------------------------------------------------------------------ one scheduler step

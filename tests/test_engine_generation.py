@@ -153,3 +153,29 @@ def test_requests_wait_for_pages_instead_of_failing_when_the_pool_is_full():
                                for _ in range(n)])
     assert all(len(o) == 30 for o in outs) and len({tuple(o) for o in outs}) == 1
     assert engine.kv_pool.used_pages == 0
+
+
+def test_a_failing_step_fails_its_requests_instead_of_hanging_and_the_engine_keeps_serving():
+    engine = _engine(prefix_caching=False)
+    forward, calls = engine._forward, []
+
+    def fail_once(*a, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ValueError("kernel failed")
+        return forward(*a, **kw)
+    engine._forward = fail_once
+
+    async def go():
+        await engine.start()
+        try:
+            req = await engine.add_request(prompt_tokens=PROMPT, max_new_tokens=4, temperature=0.0)
+            with pytest.raises(RuntimeError, match="kernel failed"):
+                await asyncio.wait_for(_collect(engine, req), 30)
+            assert req.finish_reason == "error"
+            ok = await engine.add_request(prompt_tokens=PROMPT, max_new_tokens=4, temperature=0.0)
+            return await asyncio.wait_for(_collect(engine, ok), 30)
+        finally:
+            await engine.stop()
+    assert len(asyncio.run(go())) == 4
+    assert engine.kv_pool.used_pages == 0

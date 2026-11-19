@@ -40,7 +40,7 @@ if HAS_TRITON:
         offs_d = tl.arange(0, D)
         q = tl.load(Q + (h * G + g)[:, None] * s_qh + i[:, None] * s_ql + offs_d[None, :], mask=rmask[:, None],
                     other=0.0)
-        pt_row = PT + slot.to(tl.int64) * pt_stride
+        pt_row = PT + slot * pt_stride  # no .to(): Triton passes an int argument equal to 1 as a constant
         last = start + tl.minimum((pid_m * BLOCK_M + BLOCK_M - 1) // G, L - 1)  # the block's last query position
         lo = 0
         if WINDOW:
