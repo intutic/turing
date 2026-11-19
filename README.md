@@ -24,6 +24,7 @@ configuration measured, and their 4-bit models answer GSM8K about as well (Qwen2
 | llama.cpp Q4_K_M | 186 | 790 | 52.4% ± 2.2% |
 | vLLM GPTQ-Int4 (Qwen's checkpoint) | 169 | 1,078 | 50.2% ± 2.2% |
 | Turing GPTQ | 87 | 557 | 52.6% ± 2.2% |
+| Turing GPTQ + 4-bit LM head (opt-in) | — | — | — |
 | Turing GPTQ + TEAL 25% | 90 | 531 | 47.2% ± 2.2% |
 | Turing GPTQ + TEAL 40% | 93 | 530 | 43.6% ± 2.2% |
 | vLLM fp16 (reference) | 75 | 533 | — |
