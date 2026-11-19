@@ -5,3 +5,5 @@ include README.md
 include pyproject.toml
 include setup.py
 recursive-include turing *.py
+recursive-include csrc/marlin *
+include NOTICE

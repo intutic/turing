@@ -2,9 +2,10 @@
 """
 Where the fused int4 GEMM beats dequantize + cuBLAS fp16, by row count M (decode is M = batch, prefill M = tokens).
 For each layer shape of the model and each M: the Triton W4A16 kernel, cuBLAS on fp16 weights, and QuantLinear's
-large-M path (dequantize into scratch + cuBLAS), and the int4 kernel without its K split. GPU time per call
-from CUDA-graph replays (median of --iters). The crossover sets
-turing.models.quant.INT4_MAX_ROWS. Writes results_w4a16_crossover_cuda.json.
+large-M path (dequantize into scratch + cuBLAS), the int4 kernel without its K split, and Marlin (marlin_us) where
+the optional extension is built (TURING_BUILD_MARLIN=1). GPU time per call from CUDA-graph replays (median of
+--iters). The crossovers set turing.models.quant.INT4_MAX_ROWS and MARLIN_MIN_ROWS / MARLIN_MAX_ROWS. Writes
+results_w4a16_crossover_cuda.json.
 
 python scripts/benchmark_w4a16.py --shapes 2048x2048,2048x8192,8192x2048
 """
@@ -17,6 +18,7 @@ import statistics
 import torch
 import torch.nn.functional as F
 
+from turing.kernels.marlin import marlin_gemm, marlin_pack, marlin_supported
 from turing.kernels.triton_w4a16 import dequantize_cuda, w4a16_gemm, w4a16_gemv
 from turing.models.quant import dequantize, pack, rtn_quantize
 
@@ -71,6 +73,7 @@ def main():
         q, s, z = pack(codes).cuda(), s.cuda(), z.cuda()
         w16 = dequantize(q, s, z, torch.float16)
         scratch = torch.empty_like(w16)
+        mw = marlin_pack(q, s, z, torch.float16) if marlin_supported(N, K, 64, torch.float16, q.device) else None
         for M in map(int, a.rows.split(",")):
             x = torch.randn(M, K, device="cuda", dtype=torch.float16)
             r = dict(K=K, N=N, M=M,
@@ -80,6 +83,8 @@ def main():
                      dequant_cublas_us=timed(lambda: F.linear(x, dequantize_cuda(q, s, z, scratch)), a.iters))
             if M <= 16:  # the few-row GEMV kernel (sets GEMV_MAX_ROWS)
                 r["gemv_us"] = timed(lambda: w4a16_gemv(x, q, s, z), a.iters)
+            if mw is not None:
+                r["marlin_us"] = timed(lambda: marlin_gemm(x, mw), a.iters)
             print(json.dumps(r), flush=True)
             rows.append(r)
     env = dict(torch=torch.__version__, gpu=torch.cuda.get_device_name(0), platform=platform.platform())

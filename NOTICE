@@ -1,0 +1,14 @@
+Turing Engine
+Licensed under the Business Source License 1.1 (see LICENSE), except the third-party code listed below, which keeps
+its own license.
+
+--------------------------------------------------------------------------------
+
+csrc/marlin/ : Marlin mixed-precision (W4A16) GEMM kernel
+  Vendored from vLLM v0.31.0 (https://github.com/vllm-project/vllm): csrc/libtorch_stable/quantization/marlin/ and
+  csrc/core/scalar_type.hpp.
+  Copyright contributors to the vLLM project. Marlin: Copyright (C) 2024 Elias Frantar (IST-DASLab,
+  https://github.com/IST-DASLab/marlin), modified by Neural Magic and the vLLM project.
+  Licensed under the Apache License, Version 2.0 (csrc/marlin/LICENSE). Each file's header says whether Turing Engine
+  modified it and how. turing/kernels/marlin.py ports layout logic from vLLM's
+  vllm/model_executor/layers/quantization/utils/marlin_utils.py (Apache-2.0).

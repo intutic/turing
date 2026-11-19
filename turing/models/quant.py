@@ -13,7 +13,8 @@ outputs of the already-quantized layers before it (the reference algorithm's seq
 
 QuantLinear picks its kernel by the number of rows: on CUDA up to INT4_MAX_ROWS rows (decode) the fused Triton
 W4A16 GEMM reads the packed weights; above it (prefill) the layer is dequantized into a shared scratch buffer and
-multiplied by cuBLAS. Off CUDA it dequantizes and multiplies.
+multiplied by cuBLAS. Off CUDA it dequantizes and multiplies. Where the optional Marlin extension is built
+(turing.kernels.marlin), MARLIN_MIN_ROWS to MARLIN_MAX_ROWS rows go to Marlin first, from a repacked copy of the layer.
 """
 
 import math
@@ -29,6 +30,9 @@ QMAX = 2 ** BITS - 1
 # replays (results_w4a16_crossover_cuda.json, summed over six layer shapes from 2048x2048 to 14336x4096): 1847 against
 # 3000 us at 64 rows, about equal at 128, 6330 against 3812 at 256.
 INT4_MAX_ROWS = 64
+# Rows routed to the Marlin kernel when the optional extension is built (turing.kernels.marlin); M = 1 stays on the
+# Triton GEMV. Starting values, to be set from scripts/benchmark_w4a16.py's marlin_us column.
+MARLIN_MIN_ROWS, MARLIN_MAX_ROWS = 2, 1024
 
 
 def _grid(w: torch.Tensor, qmax: int = QMAX) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -128,6 +132,7 @@ class QuantLinear(nn.Module):
         self.register_buffer("scales", torch.zeros(out_features, in_features // group, dtype=torch.float16, device=device))
         self.register_buffer("zeros", torch.zeros(out_features, in_features // group, dtype=torch.uint8, device=device))
         self.bias = nn.Parameter(torch.zeros(out_features, device=device, dtype=dtype), requires_grad=False) if bias else None
+        self._marlin = {}  # activation dtype -> MarlinWeights or None (unsupported), built on first use
 
     @classmethod
     def from_codes(cls, codes, scales, zeros, bias: Optional[torch.Tensor], group: int = GROUP) -> "QuantLinear":
@@ -144,9 +149,25 @@ class QuantLinear(nn.Module):
     def dequantized(self, dtype: torch.dtype) -> torch.Tensor:
         return dequantize(self.qweight, self.scales, self.zeros, dtype)
 
+    def _marlin_weights(self, dtype: torch.dtype):
+        """Marlin's copy of this layer for `dtype` activations (turing.kernels.marlin), or None where it does not run.
+        Built once; assumes the buffers are not modified afterwards."""
+        if dtype not in self._marlin:
+            if torch.cuda.is_current_stream_capturing():  # the repack cannot run inside a CUDA-graph capture
+                return None
+            from ..kernels.marlin import marlin_pack, marlin_supported
+            ok = marlin_supported(self.out_features, self.in_features, self.group, dtype, self.qweight.device)
+            self._marlin[dtype] = marlin_pack(self.qweight, self.scales, self.zeros, dtype, self.bias) if ok else None
+        return self._marlin[dtype]
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         shape = x.shape
         x2 = x.reshape(-1, self.in_features)
+        if x.is_cuda and MARLIN_MIN_ROWS <= x2.shape[0] <= MARLIN_MAX_ROWS and x.dtype in (torch.float16, torch.bfloat16):
+            from ..kernels.marlin import HAS_MARLIN, marlin_gemm
+            w = self._marlin_weights(x.dtype) if HAS_MARLIN else None
+            if w is not None:
+                return marlin_gemm(x2, w).view(*shape[:-1], self.out_features)
         if x.is_cuda and x2.shape[0] <= INT4_MAX_ROWS and x.dtype in (torch.float16, torch.bfloat16):
             from ..kernels.triton_w4a16 import HAS_TRITON, w4a16_gemm
             if HAS_TRITON:

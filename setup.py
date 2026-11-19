@@ -3,6 +3,7 @@ import platform
 import sys
 import glob
 import platform
+import re
 import sysconfig
 import subprocess
 from setuptools import setup, Extension, find_packages
@@ -73,6 +74,40 @@ if has_liburing():
     define_macros.append(("TURING_HAVE_LIBURING", "1"))
     libraries.append("uring")
 
+def marlin_extension():
+    """vLLM's Marlin W4A16 GEMM (csrc/marlin/, used by turing.kernels.marlin): only with TURING_BUILD_MARLIN=1 and nvcc,
+    so the default install needs no CUDA toolkit. TORCH_CUDA_ARCH_LIST (e.g. "8.9") replaces the default sm_80/86/89."""
+    if os.environ.get("TURING_BUILD_MARLIN") != "1":
+        return None
+    from torch.utils.cpp_extension import CUDA_HOME, CUDAExtension
+    if CUDA_HOME is None:
+        print("[!] TURING_BUILD_MARLIN=1 but no CUDA toolkit (nvcc) was found: not building the Marlin extension")
+        return None
+    out = subprocess.run([os.path.join(CUDA_HOME, "bin", "nvcc"), "--version"], capture_output=True, text=True).stdout
+    release = re.search(r"release (\d+)\.(\d+)", out)
+    nvcc = ["-O3", "-std=c++17", "--threads=3", "-Xcompiler=-fvisibility=hidden",
+            # vLLM drops torch's no-half-operator defines for Marlin (cmake/utils.cmake)
+            "-U__CUDA_NO_HALF_OPERATORS__", "-U__CUDA_NO_HALF_CONVERSIONS__",
+            "-U__CUDA_NO_BFLOAT16_CONVERSIONS__", "-U__CUDA_NO_HALF2_OPERATORS__"]
+    if release and tuple(map(int, release.groups())) >= (12, 8):
+        nvcc.append("-static-global-template-stub=false")  # the selector (marlin.cu) uses kernels other files instantiate
+    if not os.environ.get("TORCH_CUDA_ARCH_LIST"):
+        nvcc += [f"-gencode=arch=compute_{a},code=sm_{a}" for a in (80, 86, 89)]
+    here = os.path.dirname(os.path.abspath(__file__))
+    return CUDAExtension(
+        "turing.turing_marlin",
+        sources=sorted(glob.glob("csrc/marlin/*.cu")),
+        depends=sorted(glob.glob("csrc/marlin/*.h") + glob.glob("csrc/marlin/*.cuh") + glob.glob("csrc/marlin/core/*")),
+        include_dirs=[os.path.join(here, "csrc", "marlin")],
+        extra_compile_args={"cxx": ["-O3", "-std=c++17", "-fvisibility=hidden"], "nvcc": nvcc},
+    )
+
+
+MARLIN = marlin_extension()
+if MARLIN is not None:
+    from torch.utils.cpp_extension import BuildExtension as build_ext  # compiles the .cu sources with nvcc
+
+
 class StripBuildExt(build_ext):
     """
     Custom build_ext command that strips binary debug and function symbol tables
@@ -110,7 +145,7 @@ ext_modules = [
         extra_link_args=extra_link_args,
         language="c++",
     ),
-]
+] + ([MARLIN] if MARLIN is not None else [])
 
 setup(
     name="turing-engine",
