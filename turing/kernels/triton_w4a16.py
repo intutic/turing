@@ -115,10 +115,65 @@ if HAS_TRITON:
                  mask=mask_m[:, None] & mask_n[None, :])
 
 
+if HAS_TRITON:
+    _GEMV_CONFIGS = [triton.Config({"BLOCK_N": bn, "BLOCK_K": bk}, num_warps=w)
+                     for bn in (2, 4, 8) for bk in (256, 512, 1024) for w in (2, 4)]
+
+    @triton.autotune(configs=_GEMV_CONFIGS, key=["M", "N", "K"], **_TUNE_CACHE)
+    @triton.jit
+    def _w4a16_gemv_kernel(X, W, S, Z, B, Y, M, N, K, s_xm, s_xk, s_wn, s_wk, s_sn, s_sg, s_ym,
+                           HAS_BIAS: tl.constexpr, GROUP: tl.constexpr, BLOCK_N: tl.constexpr,
+                           BLOCK_K: tl.constexpr):
+        """Program (n block, row m): BLOCK_N output columns of one row of x, reduced in registers over all of K. No
+        tensor-core tile of which one row would be used, no K split, no fp32 buffer or cast launch."""
+        pid_n = tl.program_id(0)
+        m = tl.program_id(1)
+        offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+        mask_n = offs_n < N
+        offs_b = tl.arange(0, BLOCK_K // 2)
+        acc = tl.zeros((BLOCK_N, BLOCK_K // 2), dtype=tl.float32)
+        for k0 in range(0, K, BLOCK_K):
+            kb = k0 // 2 + offs_b
+            mask_k = kb < K // 2
+            mask = mask_n[:, None] & mask_k[None, :]
+            wb = tl.load(W + offs_n[:, None] * s_wn + kb[None, :] * s_wk, mask=mask, other=0)
+            g = (2 * kb) // GROUP
+            sc = tl.load(S + offs_n[:, None] * s_sn + g[None, :] * s_sg, mask=mask, other=0.0).to(tl.float32)
+            zp = tl.load(Z + offs_n[:, None] * s_sn + g[None, :] * s_sg, mask=mask, other=0).to(tl.float32)
+            xe = tl.load(X + m * s_xm + (2 * kb) * s_xk, mask=mask_k, other=0.0).to(tl.float32)
+            xo = tl.load(X + m * s_xm + (2 * kb + 1) * s_xk, mask=mask_k, other=0.0).to(tl.float32)
+            lo = (wb & 0x0F).to(tl.float32) - zp
+            hi = ((wb >> 4) & 0x0F).to(tl.float32) - zp
+            acc += (lo * xe[None, :] + hi * xo[None, :]) * sc
+        y = tl.sum(acc, 1)
+        if HAS_BIAS:
+            y += tl.load(B + offs_n, mask=mask_n, other=0.0).to(tl.float32)
+        tl.store(Y + m * s_ym + offs_n, y.to(Y.dtype.element_ty), mask=mask_n)
+
+
+GEMV_MAX_ROWS = 4  # w4a16_gemm takes the GEMV kernel up to this many rows (decode at small batch)
+
+
+def w4a16_gemv(x: torch.Tensor, qweight: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor, group: int = 64,
+               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """As w4a16_gemm, one program per (block of output columns, row): for a few rows (decode), where a matrix-multiply
+    tile wastes all but one of its rows. At M = 1 the tiled kernel read Qwen2.5-1.5B's wide layers at about 97 GB/s of
+    the L4's 262 (results_decode_profile_ckpt2_cuda.json)."""
+    M, K = x.shape
+    N = qweight.shape[0]
+    y = torch.empty(M, N, device=x.device, dtype=x.dtype)
+    grid = lambda meta: (triton.cdiv(N, meta["BLOCK_N"]), M)
+    _w4a16_gemv_kernel[grid](x, qweight, scales, zeros, bias if bias is not None else y, y, M, N, K,
+                             x.stride(0), x.stride(1), qweight.stride(0), qweight.stride(1),
+                             scales.stride(0), scales.stride(1), y.stride(0), HAS_BIAS=bias is not None, GROUP=group)
+    return y
+
+
 def w4a16_gemm(x: torch.Tensor, qweight: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor,
                group: int = 64, bias: Optional[torch.Tensor] = None, split: Optional[int] = None) -> torch.Tensor:
     """x [M, K] fp16/bf16, qweight [N, K / 2] uint8, scales [N, K / group] fp16, zeros [N, K / group] uint8, bias [N]
-    or None -> y [M, N] in x's dtype. split: K splits (1 = the direct kernel); None picks by the output's width."""
+    or None -> y [M, N] in x's dtype. split: K splits (1 = the direct kernel); None picks: the GEMV kernel up to
+    GEMV_MAX_ROWS rows, else by the output's width."""
     if not HAS_TRITON:
         raise RuntimeError("Triton is not available")
     M, K = x.shape
@@ -126,6 +181,8 @@ def w4a16_gemm(x: torch.Tensor, qweight: torch.Tensor, scales: torch.Tensor, zer
     if group % 64:
         raise ValueError("the int4 kernel needs a group size that is a multiple of 64")
     from .triton_sparse_gemv import _sm_count, _splits
+    if split is None and M <= GEMV_MAX_ROWS:
+        return w4a16_gemv(x, qweight, scales, zeros, group, bias)
     if split is None:  # direct when 32-column tiles give every SM about 4 programs; else share K across programs
         # (L4, results_w4a16_crossover_ckpt2_cuda.json: at 1 program per SM the direct kernel took 27 us on a 2048x2048
         # layer at M = 1 against split-K's 11)

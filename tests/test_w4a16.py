@@ -225,3 +225,23 @@ def test_kv_calibration_is_kept_between_processes(tmp_path, monkeypatch):
         other.layers[0].self_attn.k_proj.weight.add_(1.0)
     other.kv_pool()
     assert calls  # different weights: calibrated again
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required for the Triton W4A16 kernel")
+@pytest.mark.parametrize("M", [1, 2, 4])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("N,K,group", [(256, 1536, 64), (17920, 1536, 64), (1536, 8960, 64), (1000, 2048, 128)])
+def test_triton_w4a16_gemv_with_bias_matches_reference(M, dtype, N, K, group):
+    """The few-row GEMV kernel (decode) agrees with the dequantized reference, with and without a bias; widths that
+    are not a multiple of its column block and a group of 128 included."""
+    from turing.kernels.triton_w4a16 import w4a16_gemv
+    torch.manual_seed(0)
+    codes, scales, zeros = rtn_quantize(torch.randn(N, K), group=group)
+    q, s, z = pack(codes).cuda(), scales.cuda(), zeros.cuda()
+    x = torch.randn(M, K, device="cuda", dtype=dtype)
+    bias = torch.randn(N, device="cuda", dtype=dtype)
+    ref = x.float() @ dequantize(q, s, z, torch.float32).T  # the group follows from the scales
+    for b, r in ((None, ref), (bias, ref + bias.float())):
+        y = w4a16_gemv(x, q, s, z, group, b)
+        assert y.dtype == dtype and y.shape == (M, N)
+        torch.testing.assert_close(y.float(), r, atol=1e-2 * r.abs().max().item(), rtol=1e-2)

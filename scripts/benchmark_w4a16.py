@@ -17,7 +17,7 @@ import statistics
 import torch
 import torch.nn.functional as F
 
-from turing.kernels.triton_w4a16 import dequantize_cuda, w4a16_gemm
+from turing.kernels.triton_w4a16 import dequantize_cuda, w4a16_gemm, w4a16_gemv
 from turing.models.quant import dequantize, pack, rtn_quantize
 
 
@@ -58,7 +58,7 @@ def no_split(fn):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--shapes", default="2048x2048,2048x8192,8192x2048,4096x4096,4096x14336,14336x4096",
+    ap.add_argument("--shapes", default="1536x2048,1536x1536,1536x17920,8960x1536,1536x151936,2048x2048,2048x8192,8192x2048,4096x4096,4096x14336,14336x4096",
                     help="KxN of y = x W^T (in x out features)")
     ap.add_argument("--rows", default="1,2,4,8,16,32,64,128,256,512")
     ap.add_argument("--iters", type=int, default=50)
@@ -78,6 +78,8 @@ def main():
                      int4_kernel_no_split_us=timed(no_split(lambda: w4a16_gemm(x, q, s, z)), a.iters),
                      fp16_cublas_us=timed(lambda: F.linear(x, w16), a.iters),
                      dequant_cublas_us=timed(lambda: F.linear(x, dequantize_cuda(q, s, z, scratch)), a.iters))
+            if M <= 16:  # the few-row GEMV kernel (sets GEMV_MAX_ROWS)
+                r["gemv_us"] = timed(lambda: w4a16_gemv(x, q, s, z), a.iters)
             print(json.dumps(r), flush=True)
             rows.append(r)
     env = dict(torch=torch.__version__, gpu=torch.cuda.get_device_name(0), platform=platform.platform())
