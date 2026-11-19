@@ -6,7 +6,7 @@ the optional `flashinfer` package imports, for long chunks without a sliding win
 per-layer K and V pages [pages, Hkv, 16, D] are FlashInfer's HND layout, read in place through the page table.
 """
 
-from typing import Optional
+from typing import List, Optional
 import warnings
 
 import torch
@@ -32,29 +32,35 @@ def flashinfer_prefill_supported(pool: KVPool, layer: int, q: torch.Tensor, wind
             and not window and not softcap and pool.dtype == q.dtype and pool.layer_fields(layer, "k")[3] == "native")
 
 
-def flashinfer_prefill(pool: KVPool, layer: int, q: torch.Tensor, slot: int, start: int,
-                       scale: Optional[float] = None) -> torch.Tensor:
-    """As triton_pool_prefill (no window or soft-cap): q [1, H, L, D] at positions start .. start + L - 1 over page-table
-    row `slot` (the chunk's K/V already appended) -> [1, L, H * D]."""
-    _, H, L, D = q.shape
-    total = start + L
-    n_pages = -(-total // 16)
+def flashinfer_prefill(pool: KVPool, layer: int, q: torch.Tensor, slots: List[int], starts: List[int],
+                       lens: List[int], scale: Optional[float] = None) -> torch.Tensor:
+    """As triton_pool_prefill (no window or soft-cap), for one or more requests packed in one row: q [1, H, T, D] holds
+    request i's lens[i] queries at positions starts[i] .. over page-table row slots[i] (its chunk's K/V already
+    appended), T = sum(lens) -> [1, T, H * D]. One plan per forward serves every layer and every request."""
+    _, H, T, D = q.shape
     st = _STATE.get(q.device)
     if st is None:
         ws = torch.empty(128 << 20, dtype=torch.uint8, device=q.device)
         st = _STATE[q.device] = [flashinfer.BatchPrefillWithPagedKVCacheWrapper(ws, "HND"), None, None]
-    key = (id(pool), pool.page_table.data_ptr(), slot, start, L, H, D, scale, q.dtype)
+    key = (id(pool), pool.page_table.data_ptr(), tuple(slots), tuple(starts), tuple(lens), H, D, scale, q.dtype)
     # the plan holds the page indices: plan again at each new forward (a layer no later than the last one served), as
     # a reused slot can hold other pages with the same (start, L)
     if st[1] != key or layer <= st[2]:
-        i32 = dict(dtype=torch.int32, device=q.device)
-        st[0].plan(torch.tensor([0, L], **i32), torch.tensor([0, n_pages], **i32),
-                   pool.page_table[slot, :n_pages].to(torch.int32), torch.tensor([total - (n_pages - 1) * 16], **i32),
+        totals = [s + n for s, n in zip(starts, lens)]
+        pages = [-(-t // 16) for t in totals]
+        qo, kv = [0], [0]
+        for n, p in zip(lens, pages):
+            qo.append(qo[-1] + n)
+            kv.append(kv[-1] + p)
+        i32 = dict(dtype=torch.int32)  # indptrs and last-page lengths on the host: plan reads them there
+        indices = torch.cat([pool.page_table[s, :p] for s, p in zip(slots, pages)]).to(torch.int32)
+        st[0].plan(torch.tensor(qo, **i32), torch.tensor(kv, **i32), indices,
+                   torch.tensor([t - (p - 1) * 16 for t, p in zip(totals, pages)], **i32),
                    H, pool.num_kv_heads, D, 16, causal=True, sm_scale=scale if scale is not None else D ** -0.5,
                    q_data_type=q.dtype, kv_data_type=q.dtype)
         st[1] = key
     st[2] = layer
     kc = pool.layer_fields(layer, "k")[0]
     vc = pool.layer_fields(layer, "v")[0]
-    out = st[0].run(q[0].transpose(0, 1).contiguous(), (kc, vc))  # [L, H, D]
-    return out.reshape(1, L, H * D)
+    out = st[0].run(q[0].transpose(0, 1).contiguous(), (kc, vc))  # [T, H, D]
+    return out.reshape(1, T, H * D)

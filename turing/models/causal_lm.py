@@ -410,7 +410,7 @@ class SubspaceAttention(nn.Module):
         start, total = cache.length, cache.length + seq_len
         pool.append(layer, cache, k, v)
         if seq_len > 1 and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # D10 fallback
-            return flashinfer_prefill(pool, layer, q, cache.slot, start, self.scale)
+            return flashinfer_prefill(pool, layer, q, [cache.slot], [start], [seq_len], self.scale)
         if seq_len > 1 and pool_prefill_preferred(pool, layer, q, start):  # paged prefill kernel: no gather or copies
             return triton_pool_prefill(pool, layer, q, cache.slot, start, self.scale, self.window or 0,
                                        self.softcap or 0.0)
@@ -430,6 +430,12 @@ class SubspaceAttention(nn.Module):
 
     def _attend_packed(self, q, k, v, packed: "PackedPrefill") -> torch.Tensor:
         """Each request's slice of the packed chunk: append its K/V, attend over its pages -> [1, T, H * D]."""
+        pool, layer = packed.pool, self.layer_idx
+        if flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # every request in one call
+            for c, off, n in zip(packed.caches, packed.offsets, packed.lens):
+                pool.append(layer, c, k[:, :, off:off + n], v[:, :, off:off + n])
+            return flashinfer_prefill(pool, layer, q, [c.slot for c in packed.caches], packed.starts, packed.lens,
+                                      self.scale)
         outs = []
         for c, off, n in zip(packed.caches, packed.offsets, packed.lens):  # packed.starts[i] is c.length
             sl = slice(off, off + n)
