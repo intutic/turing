@@ -20,6 +20,7 @@ T="python3 scripts/benchmark_e2e_generation.py --engine turing --model $M $SP"
 step final_sp_turing_fp16 $T
 step final_sp_turing_gptq $T --quantization w4a16-gptq
 step final_sp_turing_gptq_head $T --quantization w4a16-gptq --quantize-lm-head
+step final_sp_turing_gptq_teal25 $T --quantization w4a16-gptq --activation-sparsity 0.25
 step final_sp_turing_gptq_teal40 $T --quantization w4a16-gptq --activation-sparsity 0.4
 step final_sp_vllm_fp16 $VPY scripts/benchmark_e2e_generation.py --engine vllm --model $M $SP
 step final_sp_vllm_gptq $VPY scripts/benchmark_e2e_generation.py --engine vllm --model Qwen/Qwen2.5-1.5B-Instruct-GPTQ-Int4 $SP
@@ -27,9 +28,10 @@ step final_sp_llamacpp python3 scripts/benchmark_llamacpp.py bench --gguf $GGUF 
 GSM="--model $M --samples 500 --device cuda --dtype fp16 --quantization w4a16-gptq --out results_4bit_quality_turing_final_cuda.json"
 step final_gsm_gptq python3 -m turing.cli eval-accuracy $GSM --batch-size 32
 step final_gsm_gptq_head python3 -m turing.cli eval-accuracy $GSM --batch-size 32 --quantize-lm-head
+step final_gsm_gptq_teal25 python3 -m turing.cli eval-accuracy $GSM --batch-size 1 --activation-sparsity 0.25
 step final_gsm_gptq_teal40 python3 -m turing.cli eval-accuracy $GSM --batch-size 1 --activation-sparsity 0.4
 # phase 12: SmolLM2 batch sweep, both engines
-E="--context 512 --new-tokens 256 --batches 1,8,32,64 --warmup-context 512 --out results_e2e_generation_final_cuda.json"
+E="--context 1024 --new-tokens 256 --batches 1,8,32,64 --out results_e2e_generation_final_cuda.json"  # phase 12's settings
 for m in HuggingFaceTB/SmolLM2-360M HuggingFaceTB/SmolLM2-1.7B; do
   step final_e2e_turing_$(basename $m) python3 scripts/benchmark_e2e_generation.py --engine turing --model $m $E
   step final_e2e_vllm_$(basename $m) $VPY scripts/benchmark_e2e_generation.py --engine vllm --model $m $E
