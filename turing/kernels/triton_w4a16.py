@@ -151,7 +151,7 @@ if HAS_TRITON:
         tl.store(Y + m * s_ym + offs_n, y.to(Y.dtype.element_ty), mask=mask_n)
 
 
-GEMV_MAX_ROWS = 4  # w4a16_gemm takes the GEMV kernel up to this many rows (decode at small batch)
+GEMV_MAX_ROWS = 1  # each row re-reads the weights: at 2-4 rows the tiled kernel was 3-5x faster (results_w4a16_crossover_ckpt4_cuda.json)
 
 
 def w4a16_gemv(x: torch.Tensor, qweight: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor, group: int = 64,

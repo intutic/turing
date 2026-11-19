@@ -1,0 +1,212 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "torch": "2.9.1+cu129",
+    "gpu": "NVIDIA L4",
+    "read_bandwidth_gb_s": 262.041831834758
+  },
+  "rows": [
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "setting": "rtn4",
+      "weight_bytes": 1650297856,
+      "context": 512,
+      "compile_s": null,
+      "floor_ms": 6.297841243304496,
+      "graph_step_ms": 8.389075937500934,
+      "eager_step_ms": 40.784126953123945,
+      "kernel_launches_per_step": 375.0625,
+      "device_ms_per_step": 6.730105562499855,
+      "top_kernels": [
+        [
+          "_w4a16_gemv_kernel",
+          112.0,
+          4105.4
+        ],
+        [
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __half, __half, __h",
+          1.0,
+          1826.5
+        ],
+        [
+          "_pool_decode_kernel",
+          28.0,
+          284.1
+        ],
+        [
+          "_kv_reduce_kernel",
+          28.0,
+          212.3
+        ],
+        [
+          "_rms_norm_kernel",
+          57.0,
+          105.7
+        ],
+        [
+          "_rope_kernel",
+          56.0,
+          70.0
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<c10::Half>, ",
+          28.0,
+          37.9
+        ],
+        [
+          "_pool_append_kernel",
+          28.0,
+          36.9
+        ],
+        [
+          "_silu_mul_kernel",
+          28.0,
+          36.3
+        ],
+        [
+          "void at::native::(anonymous namespace)::indexSelectSmallIndex<c10::Half, long, unsigned in",
+          1.0,
+          2.6
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor<float, float, ",
+          2.0,
+          2.5
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::sin_kernel_cuda(at::TensorIt",
+          1.0,
+          2.1
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::cos_kernel_cuda(at::TensorIt",
+          1.0,
+          2.1
+        ],
+        [
+          "void at::native::(anonymous namespace)::CatArrayBatchedCopy_alignedK_contig<at::native::(a",
+          1.0,
+          2.0
+        ],
+        [
+          "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::Tenso",
+          1.0,
+          1.8
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native:",
+          1.0,
+          1.7
+        ],
+        [
+          "Memcpy HtoD (Pageable -> Device)",
+          1.06,
+          0.4
+        ]
+      ],
+      "prefill_s": 0.05309811900008299,
+      "long_context": 16384,
+      "chunk": 2048,
+      "long_prefill_s": 1.631569921999926
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "setting": "rtn4h",
+      "weight_bytes": 1311176704,
+      "context": 512,
+      "compile_s": null,
+      "floor_ms": 5.003692329653763,
+      "graph_step_ms": 7.502021390624947,
+      "eager_step_ms": 42.754219296874396,
+      "kernel_launches_per_step": 375.0,
+      "device_ms_per_step": 5.484572499999926,
+      "top_kernels": [
+        [
+          "_w4a16_gemv_kernel",
+          113.0,
+          4680.6
+        ],
+        [
+          "_pool_decode_kernel",
+          28.0,
+          284.5
+        ],
+        [
+          "_kv_reduce_kernel",
+          28.0,
+          216.5
+        ],
+        [
+          "_rms_norm_kernel",
+          57.0,
+          106.0
+        ],
+        [
+          "_rope_kernel",
+          56.0,
+          70.1
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctor_add<c10::Half>, ",
+          28.0,
+          38.0
+        ],
+        [
+          "_pool_append_kernel",
+          28.0,
+          36.8
+        ],
+        [
+          "_silu_mul_kernel",
+          28.0,
+          36.7
+        ],
+        [
+          "void at::native::(anonymous namespace)::indexSelectSmallIndex<c10::Half, long, unsigned in",
+          1.0,
+          2.7
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::AUnaryFunctor<float, float, ",
+          2.0,
+          2.5
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::cos_kernel_cuda(at::TensorIt",
+          1.0,
+          2.1
+        ],
+        [
+          "void at::native::vectorized_elementwise_kernel<4, at::native::sin_kernel_cuda(at::TensorIt",
+          1.0,
+          2.1
+        ],
+        [
+          "void at::native::(anonymous namespace)::CatArrayBatchedCopy_alignedK_contig<at::native::(a",
+          1.0,
+          2.0
+        ],
+        [
+          "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::Tenso",
+          1.0,
+          2.0
+        ],
+        [
+          "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native:",
+          1.0,
+          1.7
+        ],
+        [
+          "Memcpy HtoD (Pageable -> Device)",
+          1.0,
+          0.4
+        ]
+      ],
+      "prefill_s": 0.051793848999977854,
+      "long_context": 16384,
+      "chunk": 2048,
+      "long_prefill_s": 1.6361823360000471
+    }
+  ],
+  "note": "top_kernels: [name, launches per step, device microseconds per step] from eager steps; graph_step_ms is the serving path"
+}
