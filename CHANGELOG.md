@@ -135,8 +135,13 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
   that opened the August ecosystem issues.
 - `packages.yml` publishes `langchain-turing` and `llama-index-llms-turing` to PyPI from their own tags.
 - Off CUDA the KV pool takes at most what 64 full-length requests need (it always took 4 GiB, which Windows commits
-  up front and MPS takes from shared memory); the `gguf` and `llguidance` test dependencies install only on Python
-  3.10+, where they exist. CI had not run on the v2 branch; these were its failures.
+  up front and MPS takes from shared memory), and the doc-table generator reads and writes UTF-8 (Windows defaulted
+  to cp1252). CI had not run on the v2 branch; these were its failures.
+
+### Breaking
+- **Python 3.10 or newer.** On 3.9 pip resolves transformers 4, and the HF parity tests fail there (MoE expert
+  layouts, RoPE scaling), as do the prefill worker (asyncio) and the distributed tests; `gguf` and `llguidance` have
+  no 3.9 releases, and 3.9 reached end of life in October 2025. Wheels are built for 3.10–3.12.
 
 ## 1.7.0 (2026-11-16, c80e7d2)
 

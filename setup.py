@@ -162,6 +162,6 @@ setup(
             "turing=turing.cli:main",
         ],
     },
-    python_requires=">=3.9",
+    python_requires=">=3.10",
 )
 

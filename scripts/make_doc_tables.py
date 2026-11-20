@@ -18,7 +18,7 @@ PAGES = ["README.md", "packages/kv-layer-guard/README.md",
 
 
 def load(name):
-    d = json.loads((ROOT / name).read_text())
+    d = json.loads((ROOT / name).read_text(encoding="utf-8"))
     return d["rows"] if isinstance(d, dict) and "rows" in d else d
 
 
@@ -138,7 +138,7 @@ def t_validation():
     niah.update({(r["model"], r["kv_cache_dtype"]): r for r in load("results_niah_phi35_longrope_fix_cuda.json")})
     guard = {}
     for f in sorted(ROOT.glob("results_guard_*_cuda.json")):
-        g = json.loads(f.read_text())
+        g = json.loads(f.read_text(encoding="utf-8"))
         guard[g["model"]] = g["kv_cache_dtype_skip_layers"]
 
     def em(r):
@@ -244,7 +244,7 @@ def t_crossover():
 # ---------------------------------------------------------------------------------------------- decode throughput
 
 def _decode(name):
-    d = json.loads((ROOT / name).read_text())
+    d = json.loads((ROOT / name).read_text(encoding="utf-8"))
     rows = d["rows"]
     ctxs = sorted({r["context"] for r in rows})
     bats = sorted({r["batch"] for r in rows})
@@ -306,7 +306,7 @@ def t_cold_start():
 
 
 def t_moe():
-    d = json.loads((ROOT / "results_moe_offload_cuda.json").read_text())
+    d = json.loads((ROOT / "results_moe_offload_cuda.json").read_text(encoding="utf-8"))
     out = []
     for r in d["rows"]:
         hit = r.get("hit_rate_decode")
@@ -408,7 +408,7 @@ def t_xkv():
     out = []
     for f, lam in (("results_xkv_transfer_cuda.json", "0.01"), ("results_xkv_transfer_lambda100_cuda.json", "100"),
                    ("results_xkv_transfer_selfcontrol_cuda.json", "0.01 (self)")):
-        for p in json.loads((ROOT / f).read_text())["pairs"]:
+        for p in json.loads((ROOT / f).read_text(encoding="utf-8"))["pairs"]:
             r = {(x["arm"], x["metric"]): x for x in p["rows"]}
             ret = r[("transfer", "context_benefit_retained")]
             out.append([f"{short(p['sender'])} → {short(p['receiver'])}", lam,
@@ -431,7 +431,7 @@ def t_lineage():
 
 
 def t_kslot():
-    d = json.loads((ROOT / "results_kslot_cuda.json").read_text())
+    d = json.loads((ROOT / "results_kslot_cuda.json").read_text(encoding="utf-8"))
     out = []
     for m in d["models"]:
         for r in m["rows"]:
@@ -466,13 +466,13 @@ def main():
     stale, used = [], set()
     for page in PAGES:
         path = ROOT / page
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         used |= {m.group(2) for m in BLOCK.finditer(text)}
         new = render(text)
         if new != text:
             stale.append(page)
             if not a.check:
-                path.write_text(new)
+                path.write_text(new, encoding="utf-8")
     if a.check and stale:
         sys.exit(f"tables out of date in {stale}: run python scripts/make_doc_tables.py")
     print(("checked" if a.check else "wrote") + f" {len(used)} tables" + (f"; updated {stale}" if stale and not a.check else ""))
