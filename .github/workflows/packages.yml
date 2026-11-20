@@ -15,8 +15,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment:
-      name: pypi-packages
+    environment:  # one per package: PyPI refuses two pending publishers with the same repo, workflow and environment
+      name: ${{ startsWith(github.ref_name, 'llama-index-llms-turing-v') && 'pypi-llama-index' || 'pypi-packages' }}
     permissions:
       id-token: write  # trusted publishing
     steps:
