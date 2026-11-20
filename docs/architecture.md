@@ -95,7 +95,8 @@ The kernels on the serving path run on CUDA only; on MPS and CPU, attention and 
   faster, so that case takes the gather path.
 * **CUDA graphs** (`DecodeGraphs`): whole decode steps are captured per batch bucket and replayed; steps with Quest
   replay graphs captured per batch and page-table-width bucket, with page selection computed on the device. MoE
-  models and steps with LoRA adapters run eagerly.
+  layers on CUDA run as a grouped GEMM with no host sync (`triton_moe.py`), so they are captured too; steps with LoRA
+  adapters run eagerly.
 * **Off CUDA** (MPS, CPU): a decode step appends and reads every row of the batch at once (one gather and one
   attention per layer), bit-identical to the per-request path in the tests.
 

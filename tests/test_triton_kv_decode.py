@@ -99,7 +99,7 @@ def test_model_batched_decode_on_cuda_matches_cpu(arch, kv_cache_dtype):
 
 
 @torch.no_grad()
-@pytest.mark.parametrize("arch,kv_cache_dtype", [c for c in ARCH_CASES if c[0] != "olmoe"])
+@pytest.mark.parametrize("arch,kv_cache_dtype", ARCH_CASES + [("mixtral", "native"), ("qwen2_moe", "int8")])
 def test_cuda_graph_decode_matches_eager(arch, kv_cache_dtype):
     import copy
     from tests.test_hf_parity import _tiny

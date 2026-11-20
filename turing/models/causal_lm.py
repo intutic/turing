@@ -19,6 +19,7 @@ from ..kernels.triton_kv_decode import pool_decode_supported, triton_pool_decode
 from ..kernels import triton_fused_ops as fused_ops
 from ..kernels.triton_kv_prefill import pool_prefill_preferred, pool_prefill_supported, triton_pool_prefill
 from ..kernels.flashinfer_prefill import flashinfer_prefill, flashinfer_prefill_supported
+from ..kernels.triton_moe import fused_moe, fused_moe_supported
 
 
 class RMSNorm(nn.Module):
@@ -197,15 +198,15 @@ class SparseMoE(nn.Module):
         weights, experts = torch.topk(probs, self.top_k, dim=-1)
         if self.norm_topk_prob:
             weights = weights / weights.sum(dim=-1, keepdim=True)
-        out = torch.zeros_like(x)
-        # shortcut: one host sync per layer for the experts hit (fine for prefill and eager decode); MoE models
-        # therefore skip CUDA graphs. A grouped-GEMM kernel over all experts would remove it.
-        hit = torch.unique(experts).tolist()
-        for e in hit:
-            token, slot = torch.where(experts == e)
-            gate, up = F.linear(x[token], self.gate_up[e]).chunk(2, dim=-1)
-            y = F.linear(self.act(gate) * up, self.down[e])
-            out.index_add_(0, token, (y * weights[token, slot, None]).to(out.dtype))
+        if fused_moe_supported(x, self.gate_up, self.act):  # grouped GEMM on the device: no host sync, graph-safe
+            out = fused_moe(x, self.gate_up, self.down, weights, experts)
+        else:  # one host sync per layer for the experts hit
+            out = torch.zeros_like(x)
+            for e in torch.unique(experts).tolist():
+                token, slot = torch.where(experts == e)
+                gate, up = F.linear(x[token], self.gate_up[e]).chunk(2, dim=-1)
+                y = F.linear(self.act(gate) * up, self.down[e])
+                out.index_add_(0, token, (y * weights[token, slot, None]).to(out.dtype))
         if self.shared_expert is not None:
             out = out + torch.sigmoid(self.shared_expert_gate(x)) * self.shared_expert(x)
         return out.view(shape)
@@ -564,7 +565,8 @@ class DecodeGraphs:
         return (cfg.cuda_graphs and pool.device.type == "cuda" and len(caches) <= self.BUCKETS[-1]
                 and not lora and not torch.is_grad_enabled()
                 and (not pool.track_pages or max(c.length for c in caches) + 1 <= self.CONTEXT_BUCKETS[-1] * 16)
-                and cfg.num_experts == 0  # MoE routing picks experts on the host
+                and all(fused_moe_supported(model.embed_tokens.weight, layer.mlp.gate_up, layer.mlp.act)
+                        for layer in model.layers if isinstance(layer.mlp, SparseMoE))  # else routing syncs
                 and cfg.decode_attention == "kernel"  # the SDPA path reads lengths on the host
                 and pool_decode_supported(pool, model.embed_tokens.weight))
 

@@ -1,0 +1,80 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "runtime": "2.9.1+cu129"
+  },
+  "rows": [
+    {
+      "engine": "turing",
+      "model": "allenai/OLMoE-1B-7B-0924-Instruct",
+      "batch": 1,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 15.566,
+      "output_tok_per_s": 16.4,
+      "mean_ttft_s": 0.3273,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 44016,
+      "kv_pool_gib": 5.373,
+      "kv_native_layers": [],
+      "quantization": "none",
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0
+    },
+    {
+      "engine": "turing",
+      "model": "allenai/OLMoE-1B-7B-0924-Instruct",
+      "batch": 8,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 53.328,
+      "output_tok_per_s": 38.4,
+      "mean_ttft_s": 0.6187,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 44016,
+      "kv_pool_gib": 5.373,
+      "kv_native_layers": [],
+      "quantization": "none",
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0
+    },
+    {
+      "engine": "turing",
+      "model": "allenai/OLMoE-1B-7B-0924-Instruct",
+      "batch": 32,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 84.656,
+      "output_tok_per_s": 96.8,
+      "mean_ttft_s": 2.4441,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 44016,
+      "kv_pool_gib": 5.373,
+      "kv_native_layers": [],
+      "quantization": "none",
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0
+    },
+    {
+      "engine": "turing",
+      "model": "allenai/OLMoE-1B-7B-0924-Instruct",
+      "batch": 64,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 144.045,
+      "output_tok_per_s": 113.7,
+      "mean_ttft_s": 14.148,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 44016,
+      "kv_pool_gib": 5.373,
+      "kv_native_layers": [],
+      "quantization": "none",
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0
+    }
+  ]
+}

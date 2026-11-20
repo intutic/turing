@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- Grouped-GEMM MoE kernels (`turing/kernels/triton_moe.py`): on CUDA, `SparseMoE` sorts token-expert pairs by expert
+  on the GPU and runs all experts in two Triton kernels instead of looping over them on the host, so MoE models
+  (Mixtral, Qwen MoE, OLMoE) now decode under CUDA graphs. OLMoE-1B-7B on an L4 decodes 4.2–4.9× faster at batch
+  1–64, with GSM8K unchanged (35.0% against 33.5%, ± 3.4, n = 200).
+
 ### Changed
 - Experimental components moved to `turing.experimental` (`turing/experimental/`, kernels in
   `turing/experimental/kernels/`, the demo in `turing/experimental/demo/`, tests in `tests/experimental/`): every module

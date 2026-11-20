@@ -321,7 +321,29 @@ For comparison, on the same Qwen files vLLM takes 51.7 s cold and 34.2 s warm to
 
 ---
 
-## 7. MoE expert offload
+## 7. MoE decode and expert offload
+
+### Grouped-GEMM decode
+
+OLMoE-1B-7B-Instruct in bf16 on the L4, 512-token prompts, 256 new tokens, output tokens per second at batch size B.
+Before, `SparseMoE` looped over the experts a batch routed to, which needs the expert list on the host each layer and
+so ran without CUDA graphs. Now the token-expert pairs are sorted by expert on the GPU and two Triton kernels
+(`turing/kernels/triton_moe.py`) run every expert's rows at once, so decode steps are captured in CUDA graphs. GSM8K
+is 8-shot exact match on the first 200 test problems through each version (`results_moe_speed_base_cuda.json`,
+`results_moe_speed_cuda.json`, `results_moe_gsm8k_base_cuda.json`, `results_moe_gsm8k_cuda.json`):
+
+<!-- table:moe_decode -->
+| Setting | B=1 | B=8 | B=32 | B=64 | TTFT, B=1 | GSM8K (n=200) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Turing, per-expert loop, no CUDA graph | 16 | 38 | 97 | 114 | 0.327 s | 33.5% ± 3.3 |
+| Turing, grouped GEMM + CUDA graphs | 79 | 189 | 436 | 482 | 0.076 s | 35.0% ± 3.4 |
+| vLLM | 94 | 205 | 490 | 583 | 0.078 s | — |
+<!-- /table -->
+
+The kernels match the per-expert loop at 1e-4 in fp32 (`tests/test_triton_moe.py`). Decode is 4.2–4.9× faster than
+before; vLLM is still 1.08–1.21× faster than Turing at these batch sizes.
+
+### Expert offload
 
 OLMoE-1B-7B (16 MoE layers × 64 experts, top-8) with every routed expert in host memory and a GPU expert cache of
 64–512 experts, against all experts on the GPU (4 WikiText-2 windows, 256-token prompts, 32 teacher-forced decode

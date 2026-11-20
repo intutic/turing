@@ -319,6 +319,21 @@ def t_cold_start():
                   "Load → first token, s"], out)
 
 
+def t_moe_decode():
+    before, after = load("results_moe_speed_base_cuda.json"), load("results_moe_speed_cuda.json")
+    gsm = {k: load(f"results_moe_gsm8k_{k}cuda.json")[-1] for k in ("base_", "")}
+    bats = sorted({r["batch"] for r in after})
+    out = []
+    for label, rows, eng, g in (("Turing, per-expert loop, no CUDA graph", before, "turing", gsm["base_"]),
+                                ("Turing, grouped GEMM + CUDA graphs", after, "turing", gsm[""]),
+                                ("vLLM", after, "vllm", None)):
+        got = {r["batch"]: r for r in rows if r["engine"] == eng}
+        out.append([label, *[f"{got[b]['output_tok_per_s']:,.0f}" if b in got else "—" for b in bats],
+                    f"{got[1]['mean_ttft_s']:.3f} s" if 1 in got else "—",
+                    f"{pct(g['exact_match'])} ± {100 * g['stderr']:.1f}" if g else "—"])
+    return table(["Setting", *[f"B={b}" for b in bats], "TTFT, B=1", f"GSM8K (n={gsm['']['n']})"], out)
+
+
 def t_moe():
     d = json.loads((RESULTS / "results_moe_offload_cuda.json").read_text(encoding="utf-8"))
     out = []

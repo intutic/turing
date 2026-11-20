@@ -63,6 +63,7 @@ python scripts/eval_vllm_quality.py --help        # the same checks for vLLM's c
 | `scripts/benchmark_kv_decode.py` | `results_kv_decode_*.json` | Benchmarks |
 | `scripts/benchmark_w4a16.py` | `results_w4a16_crossover_*.json` | Benchmarks |
 | `scripts/benchmark_cold_start.py` | `results_cold_start_*.json` | Comparison |
+| `scripts/benchmark_e2e_generation.py --model allenai/OLMoE-1B-7B-0924-Instruct --dtype bf16`, `turing eval-accuracy` | `results_moe_speed_*.json`, `results_moe_gsm8k_*.json` | Benchmarks |
 | `scripts/profile_engine_ttft.py` | first-token latency breakdown | — |
 | `scripts/eval_xkv_transfer.py`, `eval_lineage.py`, `eval_kslot.py`, `eval_debate.py` | `results_xkv_transfer_*`, `results_lineage_cuda`, `results_kslot_cuda`, `results_debate_cuda` | Experimental components |
 
