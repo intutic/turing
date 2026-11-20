@@ -34,8 +34,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # linux x86_64, linux aarch64, macOS arm64
-        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-14 ]
+        # linux x86_64, linux aarch64, macOS arm64 (macos-14 is retired)
+        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-15 ]
     steps:
       - uses: actions/checkout@v4
       - uses: pypa/cibuildwheel@v2.23.3
