@@ -4,6 +4,12 @@
 
 ## 1. Installation
 
+=== "pip"
+    ```bash
+    pip install turing-engine                  # Python 3.10–3.12; wheels for Linux x86_64/aarch64 and macOS arm64
+    pip install "turing-engine[structured]"    # optional: JSON schema / tool_choice enforcement (llguidance)
+    ```
+
 === "From source"
     ```bash
     git clone https://github.com/intutic/turing.git
@@ -22,7 +28,8 @@
 === "Docker"
     See [Docker](docker.md): one `deploy/Dockerfile` builds a CPU and a CUDA image.
 
-`turing-engine` is not on PyPI yet. The release workflow publishes wheels and images when a version tag is pushed.
+Elsewhere (Windows, Intel Macs) `pip install turing-engine` builds the C++ extension from the source package, which
+needs a C++20 compiler.
 
 ---
 
@@ -86,7 +93,7 @@ The `api_key` values above are ignored unless the server was started with `--api
 
 ### D. LangChain
 ```python
-from langchain_turing import ChatTuring   # pip install ./packages/langchain-turing (not on PyPI yet)
+from langchain_turing import ChatTuring   # pip install langchain-turing
 
 llm = ChatTuring(model="Qwen/Qwen2.5-7B-Instruct", base_url="http://localhost:8000/v1")
 print(llm.invoke("Explain KV caching in two sentences.").content)

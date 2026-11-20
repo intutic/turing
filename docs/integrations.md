@@ -23,7 +23,7 @@ Use `langchain-openai` against the OpenAI API, or `ChatTuring` from the `langcha
 
 === "Method B: ChatTuring (langchain-turing, with tool calling)"
     ```bash
-    pip install langchain-turing   # not on PyPI yet: pip install ./packages/langchain-turing from a clone
+    pip install langchain-turing
     ```
     ```python
     from langchain_turing import ChatTuring
@@ -66,7 +66,7 @@ is LlamaIndex's `OpenAILike` client with Turing's defaults: chat endpoint, tool 
 `$TURING_API_BASE` (else `http://localhost:8000/v1`).
 
 ```bash
-pip install llama-index-llms-turing   # not on PyPI yet: pip install ./packages/llama-index-llms-turing from a clone
+pip install llama-index-llms-turing
 ```
 
 ```python
@@ -123,8 +123,7 @@ Turing Engine provides production manifests for Kubernetes orchestration:
 * 🚀 **KServe `ServingRuntime`**: [`integrations/kserve/serving_runtime.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/serving_runtime.yaml)
   runs `turing serve --model /mnt/models` on port 8080, so an InferenceService's `storageUri` (`hf://`, `s3://`,
   `gs://`, `pvc://`) is what it serves ([`inferenceservice.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/inferenceservice.yaml)).
-  No official image is published yet: build the CUDA image from `deploy/Dockerfile`, push it to your registry and
-  set it in the runtime. The manifests were checked by hand against KServe's CRD schemas (not in CI); they have not been run on a cluster yet.
+  It uses the published `ghcr.io/intutic/turing:v2.0.0-cuda` image. The manifests were checked by hand against KServe's CRD schemas (not in CI); they have not been run on a cluster yet.
 
 ```yaml
 apiVersion: serving.kserve.io/v1beta1

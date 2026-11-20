@@ -4,6 +4,8 @@
 number in the docs comes from a committed results file.**
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
+[![PyPI: turing-engine](https://img.shields.io/pypi/v/turing-engine.svg)](https://pypi.org/project/turing-engine/)
+[![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
 [![Release: v2.0.0](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
 [![Tests: 1108](https://img.shields.io/badge/Tests-1108-brightgreen.svg)](https://github.com/intutic/turing/actions)
@@ -91,14 +93,19 @@ Qwen2.5-7B (7.6B), SGLang and TensorRT-LLM.
 
 ## Quickstart
 
-### 1. Install from source
+### 1. Install
 ```bash
-git clone https://github.com/intutic/turing.git && cd turing
-pip install -e .                     # builds the C++ extension
-pip install -e ".[structured]"       # optional: JSON-schema and tool_choice enforcement (llguidance)
+pip install turing-engine                  # Python 3.10–3.12
+pip install "turing-engine[structured]"    # optional: JSON-schema and tool_choice enforcement (llguidance)
 ```
-The package is not on PyPI yet; the release workflow (`.github/workflows/release.yml`) publishes wheels and Docker
-images when a version tag is pushed. Docker: [docs/docker.md](docs/docker.md).
+Wheels with the C++ extension are built for Linux x86_64 and aarch64 and macOS arm64; elsewhere (Windows, Intel
+Macs) pip builds it from the source package, which needs a C++20 compiler. From a clone: `pip install -e .`.
+
+Or run the server in Docker ([docs/docker.md](docs/docker.md)):
+```bash
+docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.0.0 --model smollm2
+docker run --rm --gpus all -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.0.0-cuda --model Qwen/Qwen2.5-7B-Instruct --device cuda
+```
 
 ### 2. Chat in the terminal
 ```bash
@@ -225,6 +232,13 @@ client = ollama.Client(host="http://localhost:8000")
 print(client.chat(model="Qwen/Qwen2.5-7B-Instruct", messages=[{"role": "user", "content": "Hello"}])["message"]["content"])
 ```
 
+LangChain and LlamaIndex have their own packages (Apache-2.0, no dependency on the engine):
+```bash
+pip install langchain-turing           # from langchain_turing import ChatTuring  (tools, streaming with usage)
+pip install llama-index-llms-turing    # from llama_index.llms.turing import Turing
+```
+LiteLLM, KServe, Helm and llm-d: [integrations](docs/integrations.md).
+
 ---
 
 ## Documentation
@@ -239,5 +253,6 @@ print(client.chat(model="Qwen/Qwen2.5-7B-Instruct", messages=[{"role": "user", "
 
 Turing Engine is licensed under the **Business Source License 1.1 (BSL 1.1)**.
 * **Free for non-production use**: development, local testing, academic research, personal single-GPU workstations and benchmarking ([`LICENSE`](LICENSE), Additional Use Grant). Production use (multi-GPU clusters, commercial hosting, revenue-generating API traffic) needs a separate commercial license.
-* `packages/kv-layer-guard/` (the KV layer calibration, usable with vLLM) is under the **Apache License 2.0** now.
+* `packages/` is under the **Apache License 2.0** now: `kv-layer-guard` (the KV layer calibration, usable with vLLM),
+  `langchain-turing` and `llama-index-llms-turing`.
 * Converts automatically to **Apache 2.0** on **August 24, 2030** or the fourth anniversary of the first public release (as [`LICENSE`](LICENSE) §3 states).

@@ -31,4 +31,4 @@ def test_kserve_manifest_validity():
     c = data["spec"]["containers"][0]
     assert c["args"][:2] == ["--model", "/mnt/models"]  # where KServe's storage initializer puts storageUri
     assert c["readinessProbe"]["httpGet"]["path"] == "/health"
-    assert not c["image"].startswith("ghcr.io/intutic/")  # no image is published there yet
+    assert c["image"] == "ghcr.io/intutic/turing:v2.0.0-cuda"  # the release workflow's CUDA image

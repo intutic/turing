@@ -5,7 +5,7 @@ LangChain chat model for [Turing Engine](https://github.com/intutic/turing): `Ch
 `langchain-core` and `httpx`, not on Turing Engine itself.
 
 ```bash
-pip install langchain-turing   # not on PyPI yet: pip install ./packages/langchain-turing from a clone of intutic/turing
+pip install langchain-turing
 turing serve --model Qwen/Qwen2.5-1.5B-Instruct --port 8000   # on the machine with the GPU
 ```
 
