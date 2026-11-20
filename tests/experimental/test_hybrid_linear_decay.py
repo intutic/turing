@@ -1,7 +1,5 @@
 import math
-import pytest
 import torch
-import numpy as np
 
 from turing.experimental.hybrid_memory import (
     LearnedDecayRecurrenceState,
@@ -55,38 +53,6 @@ def test_learned_decay_step_recurrence_numerical_parity():
     out_recurrent = torch.stack(out_steps, dim=2)
 
     assert torch.allclose(out_closed, out_recurrent, atol=1e-5, rtol=1e-5)
-
-
-def test_native_learned_decay_step_simd_parity():
-    """Verify C++20 AVX2 SIMD learned_decay_step_fast matches PyTorch calculation."""
-    try:
-        import turing.turing_csrc as turing_csrc
-    except ImportError:
-        pytest.skip("turing_csrc extension not built")
-
-    np.random.seed(42)
-    D = 64
-    q = np.random.randn(D).astype(np.float32)
-    k = np.random.randn(D).astype(np.float32)
-    v = np.random.randn(D).astype(np.float32)
-    state = np.random.randn(D, D).astype(np.float32)
-    b_decay = 0.88
-
-    # Reference calculation in PyTorch
-    q_t = torch.from_numpy(q)
-    k_t = torch.from_numpy(k)
-    v_t = torch.from_numpy(v)
-    state_ref = torch.from_numpy(state.copy())
-
-    state_new_ref = b_decay * state_ref + torch.outer(k_t, v_t)
-    out_ref = (torch.matmul(q_t, state_new_ref) / math.sqrt(D)).numpy()
-
-    # C++ SIMD execution (modifies state in-place)
-    state_simd = state.copy()
-    out_simd = turing_csrc.learned_decay_step_fast(q, k, v, state_simd, b_decay)
-
-    np.testing.assert_allclose(state_simd, state_new_ref.numpy(), rtol=1e-4, atol=1e-4)
-    np.testing.assert_allclose(out_simd, out_ref, rtol=1e-4, atol=1e-4)
 
 
 def test_hybrid_recurrent_attention_prefill_and_step_decode():

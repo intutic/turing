@@ -102,23 +102,3 @@ def test_kda_step_numerical_parity():
     assert not torch.allclose(out, torch.zeros_like(out))
 
 
-def test_kda_step_simd_cpp_binding():
-    """Tests native C++20 AVX2 SIMD kda_step_fast binding."""
-    try:
-        import turing.turing_csrc as turing_csrc
-        import numpy as np
-
-        B, H, D = 1, 2, 16
-        kernel_size = 4
-
-        qkv = np.random.randn(B, 3, H, D).astype(np.float32)
-        conv_state = np.zeros((B, 3, H, D, kernel_size), dtype=np.float32)
-        conv_weight = np.random.randn(3, H, D, kernel_size).astype(np.float32)
-        state = np.zeros((B, H, D, D), dtype=np.float32)
-        gate = np.zeros((B, H, D), dtype=np.float32)
-        beta = np.ones((B, H), dtype=np.float32) * 0.5
-
-        out_cpp = turing_csrc.kda_step_fast(qkv, conv_state, conv_weight, state, gate, beta, 1e-5)
-        assert out_cpp.shape == (B, H, D)
-    except ImportError:
-        pytest.skip("turing_csrc not loaded")

@@ -244,4 +244,4 @@ reports a run on a real model.
 | Older paging | `turing/experimental/paging.py` | Not the serving cache (that is `kv_cache.py`) |
 | Demo agents | `turing/experimental/demo/` (`MultiAgentCoordinator`, `DynamicEnvironmentModel`, `EpistemicUncertaintyGate`) | `turing demo` |
 | Experimental kernels | `turing/experimental/kernels/` | Fused MoE block GEMM, fused multi-LoRA GEMV, fused sampler, fused QKV + RoPE, linear recurrence, k-slot pool, speculative entropy and verification; each with a PyTorch parity test |
-| Other C++ helpers | `csrc/` | e.g. prefix hashing, Sinkhorn scores, routing history, reasoning-tag scanner, JSON scanner, safetensors header parser |
+| Other C++ helpers | `csrc/` | e.g. prefix hashing, routing history, JSON scanner, safetensors header parser |

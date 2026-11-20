@@ -64,7 +64,16 @@ python scripts/eval_vllm_quality.py --help        # the same checks for vLLM's c
 | `scripts/benchmark_w4a16.py` | `results_w4a16_crossover_*.json` | Benchmarks |
 | `scripts/benchmark_cold_start.py` | `results_cold_start_*.json` | Comparison |
 | `scripts/benchmark_e2e_generation.py --model allenai/OLMoE-1B-7B-0924-Instruct --dtype bf16`, `turing eval-accuracy` | `results_moe_speed_*.json`, `results_moe_gsm8k_*.json` | Benchmarks |
+| `scripts/benchmark_moe_offload_olmoe.py` | `results_moe_offload_cuda.json` | Benchmarks |
+| `scripts/benchmark_ingest_ladder_all_tiers.py`, `scripts/benchmark_ring_reader_ab.py` | `results_ingest_ladder*.json`, `results_ring_reader_ab_mps.json` | Benchmarks |
+| `scripts/benchmark_cpp_engine.py` | `results_cpp_engine_*.json` | Benchmarks |
+| `scripts/benchmark_prefill_attention.py` | `results_prefill_attention*_cuda.json` | — |
+| `scripts/profile_decode_step.py` | `results_decode_profile_*.json` (kernel launches and device time per decode step, bandwidth floor) | — |
 | `scripts/profile_engine_ttft.py` | first-token latency breakdown | — |
+| `scripts/benchmark_weight_formats.py` | prints batch-1 decode speed and weight memory per weight format | — |
+| `scripts/benchmark_vectorized_batch_union.py` | prints MoE offload against `SparseMoE` on one layer of a small Mixtral checkpoint | — |
+| `scripts/diag_int4_kv.py`, `scripts/diag_teal.py` | print per-layer int4 KV error and the cost of TEAL per projection | — |
+| `scripts/verify_model_resolutions.py` | checks every model alias against the Hugging Face Hub | — |
 | `scripts/eval_xkv_transfer.py`, `eval_lineage.py`, `eval_kslot.py`, `eval_debate.py` | `results_xkv_transfer_*`, `results_lineage_cuda`, `results_kslot_cuda`, `results_debate_cuda` | Experimental components |
 
 Every script takes `--help`. Scripts write to `benchmarks/results/` by default.

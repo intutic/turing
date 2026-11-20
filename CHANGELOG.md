@@ -26,6 +26,13 @@ All notable changes to this project are documented here. The format follows
   power, unified memory, the persistent GEMV, the async scheduler, and 26 kernels (among them a fused Adam optimizer,
   2-D convolution and Laplacian kernels, latent decode, Vulkan and ROCm helpers). Twelve one-off benchmark scripts that
   only exercised them are removed too. `turing serve` is unchanged.
+- C++ extension (`turing.turing_csrc`): 34 functions and classes that nothing in the package or the standalone engine
+  calls, with 31 headers and their tests. Among them `subspace_quantize`, `TuringPagedAttentionEngine`,
+  `RadixTrieIndex`, `LRUExpertCacheFast`, `LFRUExpertCacheFast`, `NativeReasoningFilter`, `sinkhorn_ot_eviction`,
+  `birkhoff_project`, `fused_adam_step`, the segment-pool and int8 serializer helpers, and the particle-swarm, matrix
+  power, Laplacian and conv kernels. The macOS arm64 extension shrinks from 742 KB to 507 KB.
+- 22 scripts that no document, test or workflow referenced: synthetic benchmark suites, an unused wheel builder and
+  early GPU smoke scripts. The scripts left are listed in `benchmarks/README.md`.
 - Benchmark results moved from the repository root to `benchmarks/results/`, with reproduction commands in
   `benchmarks/README.md`; scripts write there by default.
 - Documentation reorganised into Getting started, User guide, Performance and Internals sections.

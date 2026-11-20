@@ -1,46 +1,9 @@
-import pytest
 import torch
-import numpy as np
 
 from turing.serving.traffic import (
     ComputeCostEstimator,
     AdaptiveComputeBatcher,
 )
-
-
-def test_native_csrc_simd_segment_pool():
-    """Verify native C++20 SIMD segment pooling binding."""
-    try:
-        import turing.turing_csrc as turing_csrc
-    except ImportError:
-        pytest.skip("turing_csrc extension not built")
-
-    np.random.seed(42)
-    hidden_dim = 128
-    lengths = [12, 24, 48]
-    num_seqs = len(lengths)
-    total_tokens = sum(lengths)
-
-    hidden = np.random.randn(total_tokens, hidden_dim).astype(np.float32)
-    cu_seqlens = np.array([0, 12, 36, 84], dtype=np.int32)
-
-    # C++ SIMD mean pool
-    out_simd = turing_csrc.segment_mean_pool_fast(hidden, cu_seqlens)
-    assert out_simd.shape == (num_seqs, hidden_dim)
-
-    # Reference numpy
-    for i in range(num_seqs):
-        st = cu_seqlens[i]
-        en = cu_seqlens[i + 1]
-        ref = hidden[st:en].mean(axis=0)
-        np.testing.assert_allclose(out_simd[i], ref, rtol=1e-4, atol=1e-4)
-
-    # C++ SIMD CLS pool
-    out_cls_simd = turing_csrc.segment_cls_pool_fast(hidden, cu_seqlens)
-    assert out_cls_simd.shape == (num_seqs, hidden_dim)
-    for i in range(num_seqs):
-        st = cu_seqlens[i]
-        np.testing.assert_allclose(out_cls_simd[i], hidden[st], rtol=1e-4, atol=1e-4)
 
 
 def test_compute_cost_estimator_scaling():
