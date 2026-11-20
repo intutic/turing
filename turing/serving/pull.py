@@ -5,7 +5,10 @@ cache `turing serve --model <repo>` loads from) with huggingface_hub, reported a
 
 import asyncio
 import json
+import logging
 from typing import AsyncIterator, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # Other frameworks' copies of the weights: not needed to serve with PyTorch
 _SKIP = ("onnx/", "openvino/", "coreml/", "flax_model", "tf_model", "rust_model", ".h5", ".msgpack", ".ot", ".gguf")
@@ -43,8 +46,9 @@ async def pull_progress(repo: str, revision: Optional[str], files: List[Tuple[st
             yield {"status": f"pulling {name}", "digest": digest, "total": size, "completed": 0}
             await asyncio.to_thread(hf_hub_download, repo, name, revision=revision)
             yield {"status": f"pulling {name}", "digest": digest, "total": size, "completed": size}
-    except Exception as e:  # network, disk or hub errors: Ollama reports them as an error line
-        yield {"error": f"pull {repo}: {e}"}
+    except Exception:  # network, disk or hub errors: Ollama reports an error line; the details go to the server log
+        logger.exception("pull %s: download failed", repo)
+        yield {"error": f"pull {repo}: download failed"}
         return
     yield {"status": "success"}
 

@@ -17,6 +17,17 @@ All notable changes to this project are documented here. The format follows
 - Documentation reorganised into Getting started, User guide, Performance and Internals sections.
 - Package description corrected (it still advertised 70B models on one GPU).
 
+### Fixed
+- Ollama `/api/generate` templates containing `{{` in a prompt, system message or response were refused; only the
+  template's own text is checked now.
+
+### Security
+- Ollama template rendering is linear in the template's length (a crafted template made the old regular expression
+  take seconds, CodeQL `py/polynomial-redos`).
+- `/api/pull`, `/v1/extract`, `/v1/embeddings` and `/api/embed` no longer put exception text in responses; pull
+  errors are logged on the server and the client gets a message naming the repository (CodeQL
+  `py/stack-trace-exposure`).
+
 ## 2.0.0 - 2026-11-20
 
 ### Breaking

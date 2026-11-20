@@ -18,14 +18,6 @@ PROMPT = ("Extract every span of the text that is an entity of one of these type
           "\"label\" and \"text\", or [] if there are none.\n\nText: {text}")
 
 
-class ExtractionError(ValueError):
-    """The model's output is not the JSON asked for. raw_output holds what it generated."""
-
-    def __init__(self, message: str, raw_output: str):
-        super().__init__(message)
-        self.raw_output = raw_output
-
-
 def _items(parsed: Any) -> List[tuple]:
     """(label, text) pairs from [{"label", "text"}, ...] or {label: text or [texts]}."""
     if isinstance(parsed, dict) and all(isinstance(v, (str, list)) for v in parsed.values()):
@@ -37,7 +29,8 @@ def _items(parsed: Any) -> List[tuple]:
 
 async def extract_spans(engine, text: str, labels: List[str], max_tokens: int = 512) -> Dict[str, Any]:
     """Spans {label, text, start, end, score} of text for the given labels, plus the model's raw output and the
-    pairs it named that the text does not contain. score is the geometric-mean probability of the generated tokens
+    pairs it named that the text does not contain. If the output is not the JSON asked for, the result is
+    {"error": True, "raw_output": ...} instead. score is the geometric-mean probability of the generated tokens
     that spell the span (greedy decoding, so each is the model's top choice)."""
     prompt = chat_prompt_ids(engine, PROMPT.format(labels=", ".join(labels), text=text))
     logprobs = []  # log-probability of each generated token (the argmax, under greedy decoding)
@@ -50,7 +43,7 @@ async def extract_spans(engine, text: str, labels: List[str], max_tokens: int = 
     ok, parsed, _ = StructuredOutputParser.extract_json(raw)
     items = _items(parsed) if ok else None
     if items is None:
-        raise ExtractionError("the model's output is not a JSON array of {label, text} objects", raw)
+        return {"error": True, "raw_output": raw}
 
     lps = torch.stack(logprobs[:len(out)]).tolist() if out else []
     ends = [len(engine.decode_tokens(out[:i + 1])) for i in range(len(out))]  # char offset in raw after token i

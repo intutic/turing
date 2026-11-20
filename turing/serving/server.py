@@ -3,6 +3,7 @@ OpenAI-, Anthropic- and Ollama-compatible FastAPI inference server. Every genera
 core in generation.py: chat templates, constrained decoding, reasoning, tool calls, stop strings and real usage.
 """
 
+import logging
 import asyncio
 import hmac
 import json
@@ -35,10 +36,12 @@ from .generation import (GenerationParams, REMOVED_FIELDS, REMOVED_HEADERS, bad_
 from .tools import normalize_tools
 from .kv_events import KVBlockEventPublisher, attach_kv_events
 from .traffic import AdmissionController, LanePolicy, Lane
-from .embeddings import HFEmbedder, HFReranker, llm_embed, llm_yes_scores, shape_embeddings
-from .extract import ExtractionError, extract_spans
+from .embeddings import HFEmbedder, HFReranker, embedding_shape_error, llm_embed, llm_yes_scores, shape_embeddings
+from .extract import extract_spans
 from .pull import ndjson, pull_plan, pull_progress, repo_and_revision
 from .. import __version__
+
+logger = logging.getLogger(__name__)
 
 class EmbeddingRequest(BaseModel):
     input: Union[str, List[str]]
@@ -439,10 +442,9 @@ def create_app(
         mean-pooled final hidden states; L2-normalised, `dimensions` truncates (Matryoshka) and renormalises."""
         inputs = [req.input] if isinstance(req.input, str) else req.input
         vecs, n_tokens, name = _embed(inputs)
-        try:
-            vectors = shape_embeddings(vecs, req.dimensions, req.encoding_format or "float")
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        if (error := embedding_shape_error(vecs.shape[-1], req.dimensions, req.encoding_format or "float")) is not None:
+            raise HTTPException(status_code=400, detail=error)
+        vectors = shape_embeddings(vecs, req.dimensions, req.encoding_format or "float")
         return {
             "object": "list",
             "data": [{"object": "embedding", "embedding": v, "index": i} for i, v in enumerate(vectors)],
@@ -484,12 +486,11 @@ def create_app(
         Output that is not JSON is a 422 error carrying the model's raw output."""
         if not req.text or not req.labels:
             raise HTTPException(status_code=400, detail="text and labels must not be empty")
-        try:
-            r = await extract_spans(engine, req.text, req.labels, max_tokens=req.max_tokens)
-        except ExtractionError as e:
+        r = await extract_spans(engine, req.text, req.labels, max_tokens=req.max_tokens)
+        if r.get("error"):
             return JSONResponse(status_code=422, content={"error": {
-                "message": f"{e}; the served model could not extract spans", "type": "invalid_model_output",
-                "raw_output": e.raw_output}})
+                "message": "the model's output is not a JSON array of {label, text} objects; the served model could "
+                           "not extract spans", "type": "invalid_model_output", "raw_output": r["raw_output"]}})
         spans = [s for s in r["spans"] if req.score_threshold is None or (s["score"] or 0.0) >= req.score_threshold]
         return {
             "model": engine.model_config.name,
@@ -682,10 +683,13 @@ def create_app(
         repo, revision = repo_and_revision(req.model or req.name)
         try:
             files = await asyncio.to_thread(pull_plan, repo, revision)
-        except (RepositoryNotFoundError, RevisionNotFoundError) as e:
-            return JSONResponse(status_code=404, content={"error": f"pull model manifest: {e}"})
-        except Exception as e:  # no network, hub errors
-            return JSONResponse(status_code=500, content={"error": f"pull model manifest: {e}"})
+        except (RepositoryNotFoundError, RevisionNotFoundError):
+            where = f"{repo}@{revision}" if revision else repo
+            return JSONResponse(status_code=404, content={"error": f"pull model manifest: {where} not found"})
+        except Exception:  # no network, hub errors: details go to the server log, not the client
+            logger.exception("pull %s: listing the repository failed", repo)
+            return JSONResponse(status_code=500, content={"error": f"pull model manifest: could not list {repo} "
+                                                                   "on the Hugging Face Hub"})
         progress = pull_progress(repo, revision, files)
         if not req.stream:
             last = {}
@@ -785,10 +789,9 @@ def create_app(
         t0 = time.time_ns()
         inputs = [req.input] if isinstance(req.input, str) else req.input
         vecs, n_tokens, name = _embed(inputs)
-        try:
-            vectors = shape_embeddings(vecs, req.dimensions, "float")
-        except ValueError as e:
-            return JSONResponse(status_code=400, content={"error": str(e)})
+        if (error := embedding_shape_error(vecs.shape[-1], req.dimensions, "float")) is not None:
+            return JSONResponse(status_code=400, content={"error": error})
+        vectors = shape_embeddings(vecs, req.dimensions, "float")
         return {"model": req.model or name, "embeddings": vectors, "total_duration": time.time_ns() - t0,
                 "load_duration": 0, "prompt_eval_count": n_tokens}
 

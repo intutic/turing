@@ -153,6 +153,15 @@ class HFReranker:
         return scores.cpu().tolist(), int(batch["attention_mask"].sum())
 
 
+def embedding_shape_error(width: int, dimensions: Optional[int], encoding_format: str) -> Optional[str]:
+    """Why shape_embeddings would refuse these arguments for vectors of `width` values, or None if it would not."""
+    if dimensions is not None and not 0 < dimensions <= width:
+        return f"dimensions must be between 1 and {width}"
+    if encoding_format not in ("float", "base64"):
+        return "encoding_format must be 'float' or 'base64'"
+    return None
+
+
 def shape_embeddings(vectors: torch.Tensor, dimensions: Optional[int], encoding_format: str) -> list:
     """Matryoshka truncation to `dimensions` (renormalised), then a list of floats or base64 of little-endian float32
     per vector (OpenAI's encoding_format)."""

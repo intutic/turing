@@ -112,23 +112,38 @@ def _model_facts(model_config: ModelConfig, model=None) -> Dict[str, Any]:
             "parameter_size": size}
 
 
-_GO_IF = re.compile(r"\{\{-?\s*if\s+\.(\w+)\s*-?\}\}(.*?)\{\{-?\s*end\s*-?\}\}", re.S)
-_GO_VAR = re.compile(r"\{\{-?\s*\.(\w+)\s*-?\}\}")
+_GO_TAG = re.compile(r"\{\{([^{}]*)\}\}")  # one {{ ... }} tag; the body holds no braces, so matching is linear
+_GO_IF = re.compile(r"if\s+\.(\w+)")
+_GO_VAR = re.compile(r"\.(\w+)")
 
 
 def render_go_template(template: str, values: Dict[str, str]) -> str:
     """The subset of Ollama's Go templates a /api/generate `template` uses: {{ .System }}, {{ .Prompt }},
-    {{ .Response }} and {{ if .X }}...{{ end }} around them. Anything else is refused rather than rendered wrong."""
-    def var(m):
-        if m.group(1) not in values:
-            raise bad_request(f"template variable .{m.group(1)} is not supported (System, Prompt, Response)")
-        return values[m.group(1)]
-
-    out = _GO_IF.sub(lambda m: m.group(2) if values.get(m.group(1)) else "", template)
-    out = _GO_VAR.sub(var, out)
-    if "{{" in out:
-        raise bad_request("template uses Go template constructs beyond .System/.Prompt/.Response and if/end")
-    return out
+    {{ .Response }} and {{ if .X }}...{{ end }} around them (nestable). Anything else is refused rather than rendered
+    wrong. One left-to-right pass over the tags, so time is linear in the template's length."""
+    out, shown, pos = [], [True], 0  # shown: whether each open `if` (and the top level) emits text
+    for m in _GO_TAG.finditer(template):
+        if shown[-1]:
+            out.append(template[pos:m.start()])
+        pos = m.end()
+        body = m.group(1).strip().strip("-").strip()
+        if (cond := _GO_IF.fullmatch(body)) is not None:
+            shown.append(shown[-1] and bool(values.get(cond.group(1))))
+        elif body == "end" and len(shown) > 1:
+            shown.pop()
+        elif (var := _GO_VAR.fullmatch(body)) is not None:
+            if var.group(1) not in values:
+                raise bad_request(f"template variable .{var.group(1)} is not supported (System, Prompt, Response)")
+            if shown[-1]:
+                out.append(values[var.group(1)])
+        else:
+            break
+    else:
+        # every tag closed, and no "{{" left in the template's own text (values may contain braces)
+        if len(shown) == 1 and "{{" not in _GO_TAG.sub("", template):
+            out.append(template[pos:])
+            return "".join(out)
+    raise bad_request("template uses Go template constructs beyond .System/.Prompt/.Response and if/end")
 
 
 def ollama_options(options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
