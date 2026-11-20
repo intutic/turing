@@ -345,3 +345,12 @@ def test_full_precision_layer_selection():
     model.config.kv_cache_dtype = "int8"
     model.kv_pool()
     assert model._kv_native_auto == "int8"
+
+
+def test_pool_off_cuda_is_sized_to_the_model():
+    # a tiny model must not take 4 GiB off CUDA (Windows commits it up front; MPS shares host memory)
+    from turing.models.registry import get_model_config
+    cfg = get_model_config("test-tiny")
+    pool = KVPool.for_model(cfg, torch.float16, "cpu")
+    assert pool.num_pages == 64 * -(-cfg.max_position_embeddings // PAGE)
+    assert pool.k.numel() * pool.k.element_size() < 2 ** 30

@@ -134,6 +134,9 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 - Removed the unused `svd_compression_ratio` estimator argument and `use_svd_compression` lineage flag, and the script
   that opened the August ecosystem issues.
 - `packages.yml` publishes `langchain-turing` and `llama-index-llms-turing` to PyPI from their own tags.
+- Off CUDA the KV pool takes at most what 64 full-length requests need (it always took 4 GiB, which Windows commits
+  up front and MPS takes from shared memory); the `gguf` and `llguidance` test dependencies install only on Python
+  3.10+, where they exist. CI had not run on the v2 branch; these were its failures.
 
 ## 1.7.0 (2026-11-16, c80e7d2)
 

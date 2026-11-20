@@ -122,7 +122,8 @@ class KVPool:
     @classmethod
     def for_model(cls, config, dtype, device) -> "KVPool":
         """Sized from config.kv_pool_gib if set, else config.kv_pool_fraction of the free CUDA memory (counting
-        memory PyTorch has cached but not used), else 4 GiB off CUDA."""
+        memory PyTorch has cached but not used), else off CUDA 4 GiB or what 64 full-length requests need, whichever
+        is less (Windows commits the whole allocation up front, and MPS shares the machine's memory)."""
         device = torch.device(device)
         D, H, L = config.head_dim, config.num_kv_heads, config.num_layers
         native = tuple(getattr(config, "kv_native_layers", None) or ()) if config.kv_cache_dtype != "native" else ()
@@ -137,7 +138,7 @@ class KVPool:
             free, _ = torch.cuda.mem_get_info(device)
             budget = config.kv_pool_fraction * (free + torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device))
         else:
-            budget = 4 * 2 ** 30
+            budget = min(4 * 2 ** 30, 64 * -(-config.max_position_embeddings // PAGE) * page_bytes)
         return cls(L, H, D, max(1, int(budget // page_bytes)), dtype, device, config.kv_cache_dtype, track,
                    native_layers=native)
 
