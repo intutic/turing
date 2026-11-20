@@ -10,14 +10,15 @@ Comparisons with vLLM and llama.cpp are on the [comparison](comparison.md) page.
 ## 1. Summary
 
 * **Turing is close to vLLM and ahead in a few settings** on the L4 (§5, [comparison](comparison.md)): vLLM is
-  1.01–1.04× faster in fp16 and 1.06–1.12× at 4 bits; with the opt-in 4-bit LM head Turing is 1.15× vLLM at batch 1
-  and 8; at 16K-token prompts Turing's fp16 is 1.0–1.22× faster per request, and vLLM's fp8 with layer 0 kept is
+  1.01–1.04× faster in fp16 and 1.06–1.12× at 4 bits; with the opt-in 4-bit LM head Turing is 1.15–1.16× vLLM at
+  batch 1 and 8; at 16K-token prompts Turing's fp16 is 1.0–1.22× faster per request, and vLLM's fp8 with layer 0 kept is
   1.3–1.4× faster than Turing's int8 at equal quality.
 * **Its low-bit KV caches keep quality without settings** (§2): int8 is free, int4 costs about +0.02 nats, and both
   pass every pass-key retrieval to 32K; vLLM's int8/int4 and default fp8 caches lose 16 to 57 GSM8K points on the same
   model unless layer 0 is excluded by hand.
-* **4-bit weights** decode 1.5–1.6× faster than fp16 in Turing under CUDA graphs (§3), with GPTQ costing 5 GSM8K
-  points; TEAL activation sparsity adds 3–7% speed at batch 1 for 5–9 more points, which is rarely worth it.
+* **4-bit weights** decode 1.5–1.6× faster than fp16 in Turing under CUDA graphs (§3), with GPTQ costing about 7 GSM8K
+  points (57.6% → 50.4%). End to end on the L4, TEAL activation sparsity on top of GPTQ was 28–31% slower at batch 1
+  (107–112 against 155 tok/s) and cost 4–8 more points ([comparison](comparison.md)), so it is not worth it there.
 
 ---
 
@@ -27,7 +28,8 @@ Comparisons with vLLM and llama.cpp are on the [comparison](comparison.md) page.
 random tokens: each layer's K and V take the pool's round trip alone, and a layer whose next-token distribution moves
 by more than 0.02 nats (KL divergence) is kept in the model's dtype, at most a quarter of the layers. For int4, key
 channels at 16× or more of their head's median magnitude are also divided by a power of two (and the queries
-multiplied by it), which leaves q·k unchanged bit for bit. Why these rules, from diagnostics on real models:
+multiplied by it), which leaves q·k unchanged bit for bit. Why these rules, from diagnostic runs on real models (their
+numbers below were not saved as results files):
 
 * On Qwen2.5-1.5B, int4 KV cost +1.93 nats, of which +1.77 came from layer 0's keys alone; every other layer cost
   under 0.005 and quantizing every value cost +0.002. Random-token calibration finds that layer (KL 0.13 against a
@@ -65,7 +67,7 @@ multiplied by it), which leaves q·k unchanged bit for bit. Why these rules, fro
 | Turing bf16 (reference) | — | 57.2% | 100.0% | — | 2.05 |
 | Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 2.32 |
 | Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.95 |
-| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
+| vLLM bf16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
 | vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.66 |
 | vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
 | vLLM fp8_per_token_head | — | 0.6% | 0.0% | +2.404 ± 0.364 | — |
@@ -77,7 +79,8 @@ multiplied by it), which leaves q·k unchanged bit for bit. Why these rules, fro
 
 The vLLM caches that collapse do so silently: the server starts and answers. Skipping layer 0 (vLLM's
 `kv_cache_dtype_skip_layers`) repairs fp8 and int4, which is what Turing's calibration does without being told.
-Scope: measured on Qwen2.5 (0.5B, 1.5B, 1.5B-Instruct) and SmolLM2 (360M, 1.7B).
+Scope of the tables above: Qwen2.5-1.5B(-Instruct) and SmolLM2 (360M, 1.7B); the six-model validation below adds
+Qwen2.5-7B, Llama 3.2, Gemma 2, Phi-3.5 and Mistral.
 
 **GSM8K exact match** (Qwen2.5-1.5B-Instruct, first 500 test problems, 8-shot, greedy; `results_gsm8k_final_cuda.json`,
 `results_gsm8k_teal_cuda.json` (200 problems, batch 1, where TEAL applies), `results_gsm8k_diag_cuda.json`):
@@ -126,12 +129,13 @@ the time above 4K: a LongRoPE bug in chunked prefill (each chunk picked its own 
 <!-- /table -->
 
 - The guard keeps layers only where vLLM's default fp8 cache breaks the model: layer 0 of Qwen2.5-1.5B and layers
-  0, 1 and 27 of Qwen2.5-7B (GSM8K 2.2% and 2.4% without it). On the other four it keeps none, and fp8 there costs
-  at most 1.4 points.
+  0, 1 and 27 of Qwen2.5-7B (GSM8K 2.2% and 2.4% without it). On the other four it keeps none; fp8 there costs
+  at most 1.4 points on three of them, and Phi-3.5 loses 5.2 (next point).
 - **Limit:** Phi-3.5-mini loses 5.2 GSM8K points under fp8 (71.8% to 66.6%; each figure has a standard error of
   about 2 points) and the guard does not flag it: its largest per-layer KL is 0.006, under the 0.02 threshold. A loss
   spread thinly over many layers is not what a per-layer check catches.
-- Phi-3.5's vLLM column is from a run started with a 16K maximum length. vLLM then uses LongRoPE's long frequencies
+- Phi-3.5's vLLM column is from a run started with a 16K maximum length (the evaluation script's default: the longest
+  pass-key context + 32; the length is not recorded in that results file). vLLM then uses LongRoPE's long frequencies
   for every request, short ones included: the same evaluation with the maximum length at 4,096 scores 78.8% (n=500,
   `results_quality_vllm_phi35_4k_cuda.json`), against 71.8% at 16K and Turing's 79.8% (int8 KV), which picks the
   frequencies per sequence as transformers does. The fp8 comparison above is unaffected: both of its runs used 16K.
@@ -172,8 +176,8 @@ from Python and shows why that matters for small Triton kernels:
 | Qwen2.5-1.5B | rtn4_teal40 | 114.9 | 13.1 | 1.54 |
 <!-- /table -->
 
-**Where each int4 kernel wins** (microseconds, summed over seven layer shapes from 1536 × 1536 to the 1536 × 151,936
-LM head of Qwen2.5-1.5B, timed as CUDA-graph replays; `results_w4a16_crossover_cuda.json`). The Triton kernel splits K
+**Where each int4 kernel wins** (microseconds, summed over seven layer shapes: five of Qwen2.5-1.5B from 1536 × 1536 to its
+1536 × 151,936 LM head, and two 7B MLP shapes, 4096 × 14,336 and 14,336 × 4096; timed as CUDA-graph replays; `results_w4a16_crossover_cuda.json`). The Triton kernel splits K
 across programs so a narrow layer still fills the GPU, and serves up to `INT4_MAX_ROWS = 64` rows. Marlin (vendored from
 vLLM, built only with `TURING_BUILD_MARLIN=1`) is faster at every row count here, so when it is built `QuantLinear`
 sends it 1–1,024 rows:
@@ -193,7 +197,8 @@ sends it 1–1,024 rows:
 <!-- /table -->
 
 TEAL sparsifies projection inputs only in one-row decode on CUDA, where the input-sparse kernel skips the weight rows
-of zero inputs. Applied to a whole prefill it broke attention-sink tokens (SmolLM2-1.7B: +6.4 nats at 40%), so
+of zero inputs. Applied to a whole prefill it broke attention-sink tokens (SmolLM2-1.7B: +6.4 nats at 40%, a diagnostic run not
+saved as a results file), so
 prefill and batched decode stay dense.
 
 ---
@@ -255,7 +260,7 @@ python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M \
 ## 5. Long context at equal KV memory
 
 Qwen2.5-1.5B-Instruct, batches of 16 to 128 requests, each a 16K-token prompt and 256 new tokens, on one L4. vLLM runs at `gpu_memory_utilization` 0.85 and records the KV memory it took (14.6 GiB); every
-Turing setting gets the same bytes, so capacity differs only by bytes per token. Seconds per request
+Turing setting gets the same bytes (Quest's row ran with 12.7 GiB, less), so capacity differs only by bytes per token. Seconds per request
 (`results_longctx_cuda.json`):
 
 <!-- table:longctx -->
@@ -340,7 +345,7 @@ steps; `results_moe_offload_cuda.json`). "decider" picks copy-to-GPU or run-on-C
 
 ## 8. Storage ingestion
 
-`scripts/benchmark_ingest_ladder_all_tiers.py` reads a 2 GiB file of tensor-sized segments cold (written through
+`scripts/benchmark_ingest_ladder_all_tiers.py` reads a file of tensor-sized segments cold (2 GiB on the Mac, 1 GiB on the L4) (written through
 `F_NOCACHE` on macOS, dropped with `posix_fadvise` on Linux, `mincore` confirms nothing is cached).
 
 **Apple M4 Pro SSD** (`results_ingest_ladder.json`; the machine was shared, so the spread is wide):

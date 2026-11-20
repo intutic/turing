@@ -7,7 +7,7 @@ Fixes #
 
 ## Type of Change
 <!-- Please check all that apply -->
-- [ ] 🚀 New Feature (Subspace pruning, SVD KV compression, routing, etc.)
+- [ ] 🚀 New Feature (kernels, KV cache, serving, etc.)
 - [ ] ⚡ Performance Optimization / Kernel Acceleration
 - [ ] 🐛 Bug Fix
 - [ ] 📖 Documentation / Integration Guides

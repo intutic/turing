@@ -3,7 +3,8 @@
 Find the attention layers a low-bit KV cache breaks, before serving with it.
 
 Some models lose almost everything when their KV cache is stored in fp8, int8 or int4, and the server gives no sign of
-it. On one NVIDIA L4 with vLLM 0.31, Qwen2.5-1.5B-Instruct (bf16) scored:
+it. On one NVIDIA L4 with vLLM 0.31, Qwen2.5-1.5B-Instruct (bf16) scored (`results_quality_vllm_cuda.json`; the
+validation table below is a second run, where fp8 scored 2.2%):
 
 | KV cache | GSM8K (500, 8-shot) | Pass-key retrieval, 2K–32K |
 | :--- | :---: | :---: |

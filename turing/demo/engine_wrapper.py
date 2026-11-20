@@ -43,7 +43,8 @@ class TuringAcceleratedGenerator:
             else:
                 self.device = torch.device("cpu")
         else:
-            self.device = torch.device(device)
+            from ..config import TuringConfig
+            self.device = TuringConfig(device=device).resolve_device()  # maps rocm to HIP's "cuda"
 
         self.hf_token = token or os.environ.get("HF_TOKEN") or huggingface_hub.get_token()
         self.epistemic_gate = EpistemicUncertaintyGate(uncertainty_threshold=2.5)

@@ -12,7 +12,7 @@
 namespace turing {
 
 /**
- * Native C++20 Thread-Safe Spectral Radix-SVD Trie Node & Matcher.
+ * Native C++20 thread-safe radix trie node and prefix matcher.
  */
 struct RadixTrieNode {
     std::vector<int32_t> token_ids;

@@ -1,6 +1,6 @@
 # Turing Engine serving image: `turing serve` on port 8000.
 #   CPU  (linux/amd64, linux/arm64): docker build -f deploy/Dockerfile -t turing:cpu .
-#   CUDA (linux/amd64):              docker build -f deploy/Dockerfile --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu124 -t turing:cuda .
+#   CUDA (linux/amd64):              docker build -f deploy/Dockerfile --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu128 -t turing:cuda .
 # The CUDA build differs only in its PyTorch wheels (which bundle the CUDA runtime); the host needs the
 # NVIDIA driver and Container Toolkit. See docs/docker.md.
 

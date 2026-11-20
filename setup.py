@@ -149,7 +149,7 @@ ext_modules = [
 
 setup(
     name="turing-engine",
-    version="1.7.0",
+    version="2.0.0",
 
     author="Ishan Gupta",
     author_email="support@intutic.ai",

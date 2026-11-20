@@ -2,7 +2,7 @@
 # KServe's storage initializer downloads the InferenceService's storageUri (hf://, s3://, gs://, pvc://) to
 # /mnt/models, and Turing loads the Hugging Face checkpoint from there.
 # Image: no official image is published yet. Build the CUDA image from deploy/Dockerfile
-#   docker build -f deploy/Dockerfile --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu124 -t <registry>/turing:cuda .
+#   docker build -f deploy/Dockerfile --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu128 -t <registry>/turing:cuda .
 # push it, and put its name below.
 apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime

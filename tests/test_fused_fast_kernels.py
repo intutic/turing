@@ -75,6 +75,14 @@ def test_fast_tensor_hash_consistency():
     assert len(h1) == 128 # Standard 512-bit BLAKE2b hex string
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="Triton checksum runs on CUDA")
+def test_vram_checksum_sees_every_bit():
+    # converting floats to int (instead of bitcasting) gave 0.25 and 0.5 the same checksum
+    a = torch.full((1000,), 0.25, device="cuda")
+    assert fused_tensor_checksum_cuda(a) != fused_tensor_checksum_cuda(a * 2)
+    assert fused_tensor_checksum_cuda(a.half()) != fused_tensor_checksum_cuda((a * 2).half())
+
+
 def test_gated_zero_identity_forward_and_fused():
     head = GatedZeroIdentityHead(latent_dim=64, num_kv_heads=4, head_dim=32)
     feat = torch.randn(2, 8, 64)
@@ -109,3 +117,23 @@ def test_quadtree_mrp_cuda_generator():
     assert mask.shape == (21, 21)
     assert parents[0].item() == -1
     assert parents[1].item() == 0
+
+
+def test_quadtree_mrp_matches_the_masked_reference():
+    # the sync-free quadrant pick must equal "first candidate in the quadrant, else the fallback"
+    import torch.nn.functional as F
+    torch.manual_seed(0)
+    for _ in range(20):
+        hidden, w, proj = torch.randn(1, 64), torch.randn(500, 64), torch.randn(2, 64) * 300
+        toks, parents, mask = fused_quadtree_mrp_cuda(hidden, w, proj)
+        top = torch.topk(F.linear(hidden, w).squeeze(0), 64).indices
+        o = F.linear(hidden, proj).squeeze(0)
+        tail = top[1:]
+        dx = (tail % 7).float() - 3.0 - o[0] * 0.01
+        dy = ((tail // 7) % 7).float() - 3.0 - o[1] * 0.01
+        quads = [(dx >= 0) & (dy >= 0), (dx < 0) & (dy >= 0), (dx < 0) & (dy < 0), (dx >= 0) & (dy < 0)]
+        want = [top[0]] + [tail[q][0] if q.any() else top[i + 1] for i, q in enumerate(quads)] + list(top[5:21])
+        assert toks.tolist() == [int(t) for t in want]
+        for i, p in enumerate(parents.tolist()):
+            assert mask[i, i] == 0 and (p == -1 or mask[i, p] == 0)
+        assert int((mask == 0).sum()) == 21 + 20 + 16  # self, the root for depth 1-2, the depth-1 parent for depth 2

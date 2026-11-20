@@ -2,7 +2,7 @@
 
 Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 
-## Unreleased (2.0.0)
+## 2.0.0 (2026-11-20)
 
 ### Added
 - Models: every documented HuggingFace family (16 model types) loads with a parity test against HuggingFace; RoPE
@@ -14,7 +14,7 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 - TEAL-style activation sparsity (`--activation-sparsity`, opt-in) with input-sparse fp16 and int4 GEMV kernels
   (44b29cd).
 - KV cache: low-bit pools keep the layers their format damages in the model dtype, chosen at startup by a per-layer
-  KL calibration on random tokens (Qwen2.5-1.5B: int4 +2.33 → +0.013 nats, pass-key 0% → 100%, GSM8K 2% → 52.8%);
+  KL calibration on random tokens (Qwen2.5-1.5B: int4 +1.93 → +0.013 nats, pass-key 0% → 100%, GSM8K 52.8%);
   int4 also scales outlier key channels (16× the median or more) by powers of two, exact in any dtype; int8 is stored
   unsmoothed (smoothing cost it 16 GSM8K points in bf16). Quest page selection inside CUDA graphs (ddf24ad).
   `decode_attention` kernel|sdpa switch (8675c3d).
@@ -30,8 +30,8 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 - C++ engine: aligned SIMD forward pass with int8 KV, NEON, and a real HTTP server (9ba5199).
 - Client packages (Apache-2.0, no dependency on Turing Engine): `langchain-turing` (`ChatTuring`, moved out of
   `turing.integrations.langchain`, which now re-exports it; streams token usage and tool calls, maps LangChain's
-  `tool_choice="any"`, reports the server's error message; passes LangChain's standard chat-model tests against
-  Qwen2.5-0.5B-Instruct) and `llama-index-llms-turing` (`Turing`, an `OpenAILike` with Turing's defaults). The
+  `tool_choice="any"`, reports the server's error message; passed LangChain's standard chat-model tests against
+  Qwen2.5-0.5B-Instruct on an Apple M4 Pro in 8ecc6f8) and `llama-index-llms-turing` (`Turing`, an `OpenAILike` with Turing's defaults). The
   KServe runtime loads the InferenceService's model from `/mnt/models`, has a `/health` readiness probe and no longer
   names an unpublished image.
 - MoE offload: `HeterogeneousMoERunner` runs the model's own experts from host memory with hot experts cached on the
@@ -77,6 +77,9 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
   never changed anything (`use_svd_kv`, `sparsity_ratio` and their headers now return 400) (1c6416b, 21b61e8).
 - CLI `bench`, `compare`, `transfer-bench`, `moe-bench`, `hybrid-bench`, `spec-bench` and the formula-printing
   benchmarks (1c6416b).
+- The licence-key gate, the multi-model pipeline manager and its placeholder encoders (`--enable-multi-model`),
+  `--memory-mode hybrid`, Matryoshka draft heads in serving (prompt-lookup speculation replaces them), and the tiled
+  fused RMSNorm-SwiGLU kernel.
 - The random-KV "XKV latent deliberation" demo and its fabricated 7.2x speedup; the demo's no-op KV-reuse flags
   (03b59f5, ee0bb3f).
 
@@ -96,7 +99,7 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 
 ### Fixed (c547190)
 - CLI: every `.gguf` path crashed with `UnboundLocalError` (missing module-level `import os`). `chat`, `serve` and
-  `generate` share one weight loader, so GGUF models also get the KV cache flags. `--max-tokens` alias added;
+  `generate` share one weight loader, so GGUF models also get `serve`'s and `generate`'s KV cache flags. `--max-tokens` alias added;
   `--block-size` removed (KV events use the pool's 16-token pages).
 - Speculative decoding: candidates, entropy and argmaxes cross to the host once per draft instead of once per tree
   node. The target's correction token no longer counts as an accepted draft token (a test had asserted 100%
@@ -118,6 +121,19 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 ### Also since 1.7.0
 - Expert-cache eviction fixes, a 1 MiB / queue-depth weight reader and the cold-ingest ladder (57bf57e).
 - Benchmark claims audited; unmeasured numbers removed from the docs and scripts (53ddf5a, 0281443).
+
+### Final re-audit before release
+- Docs: every claim re-checked against the code and results files; the false ones corrected (test count, int8 KV
+  default on CUDA, largest model run, parity coverage, cold-start comparison, bf16 labels, TEAL speed, the C++
+  tokenizer, serving error shapes, the speculation gate) and the Helm and kustomize defaults moved from a 70B model to
+  Qwen2.5-7B-Instruct.
+- The VRAM checksum kernel hashes the tensor's bytes (it converted floats to int, so 0.25 and 0.5 hashed alike).
+- The quadtree draft path no longer synchronizes with the host about 41 times per draft (fixed tree built once per
+  device, quadrant picks with `torch.where`).
+- `turing demo --device rocm` resolves like the other commands.
+- Removed the unused `svd_compression_ratio` estimator argument and `use_svd_compression` lineage flag, and the script
+  that opened the August ecosystem issues.
+- `packages.yml` publishes `langchain-turing` and `llama-index-llms-turing` to PyPI from their own tags.
 
 ## 1.7.0 (2026-11-16, c80e7d2)
 

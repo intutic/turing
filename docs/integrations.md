@@ -6,7 +6,7 @@ Turing Engine integrates with agent frameworks, model routers, and deployment ru
 
 ## 1. LangChain & LangGraph
 
-Turing Engine provides native drop-in support via `langchain-openai` or built-in `ChatTuring`:
+Use `langchain-openai` against the OpenAI API, or `ChatTuring` from the `langchain-turing` package:
 
 === "Method A: Drop-In langchain-openai (Zero Extra Dependencies)"
     ```python
@@ -23,7 +23,7 @@ Turing Engine provides native drop-in support via `langchain-openai` or built-in
 
 === "Method B: ChatTuring (langchain-turing, with tool calling)"
     ```bash
-    pip install langchain-turing
+    pip install langchain-turing   # not on PyPI yet: pip install ./packages/langchain-turing from a clone
     ```
     ```python
     from langchain_turing import ChatTuring
@@ -34,8 +34,8 @@ Turing Engine provides native drop-in support via `langchain-openai` or built-in
     `ChatTuring` is a LangChain `BaseChatModel` in its own package
     ([`packages/langchain-turing`](https://github.com/intutic/turing/tree/master/packages/langchain-turing), depends
     only on `langchain-core` and `httpx`): `invoke`, `stream` (with token usage), `batch`, async, and `bind_tools`
-    (OpenAI-style tool calls returned as `AIMessage.tool_calls`). It passes LangChain's standard chat-model test suite
-    against `turing serve` with Qwen2.5-0.5B-Instruct. `turing.integrations.langchain.ChatTuring` re-exports it.
+    (OpenAI-style tool calls returned as `AIMessage.tool_calls`). It passed LangChain's standard chat-model test suite
+    against `turing serve` with Qwen2.5-0.5B-Instruct on an Apple M4 Pro (8ecc6f8; the run is not committed). `turing.integrations.langchain.ChatTuring` re-exports it.
     Pruning, KV cache format and quantization are chosen when the server starts, not per request.
 
 ---
@@ -66,7 +66,7 @@ is LlamaIndex's `OpenAILike` client with Turing's defaults: chat endpoint, tool 
 `$TURING_API_BASE` (else `http://localhost:8000/v1`).
 
 ```bash
-pip install llama-index-llms-turing
+pip install llama-index-llms-turing   # not on PyPI yet: pip install ./packages/llama-index-llms-turing from a clone
 ```
 
 ```python
@@ -124,7 +124,7 @@ Turing Engine provides production manifests for Kubernetes orchestration:
   runs `turing serve --model /mnt/models` on port 8080, so an InferenceService's `storageUri` (`hf://`, `s3://`,
   `gs://`, `pvc://`) is what it serves ([`inferenceservice.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/inferenceservice.yaml)).
   No official image is published yet: build the CUDA image from `deploy/Dockerfile`, push it to your registry and
-  set it in the runtime. The manifests validate against KServe's CRD schemas; they have not been run on a cluster yet.
+  set it in the runtime. The manifests were checked by hand against KServe's CRD schemas (not in CI); they have not been run on a cluster yet.
 
 ```yaml
 apiVersion: serving.kserve.io/v1beta1

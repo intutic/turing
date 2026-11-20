@@ -27,8 +27,8 @@ import torch.nn.functional as F
 BITS, GROUP = 4, 64
 QMAX = 2 ** BITS - 1
 # Rows at or below which the fused int4 kernel beats dequantize + cuBLAS on CUDA. Measured on an L4 with CUDA-graph
-# replays (results_w4a16_crossover_cuda.json, summed over six layer shapes from 2048x2048 to 14336x4096): 1847 against
-# 3000 us at 64 rows, about equal at 128, 6330 against 3812 at 256.
+# replays (results_w4a16_crossover_cuda.json, summed over seven layer shapes of Qwen2.5-1.5B and 7B): 3776 against
+# 7805 us at 64 rows, 12823 against 9767 at 256.
 INT4_MAX_ROWS = 64
 # Rows routed to the Marlin kernel when the optional extension is built (turing.kernels.marlin). On the L4 it beat the
 # Triton kernels at every row count from 1 to 256 on Qwen2.5-1.5B's shapes (results_w4a16_crossover_ckpt7_cuda.json:

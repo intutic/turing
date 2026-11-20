@@ -28,9 +28,8 @@ if HAS_TRITON:
         offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
         mask = offsets < num_elements
 
-        vals = tl.load(data_ptr + offsets, mask=mask, other=0.0)
-        # Reinterpret float32 as int32 for bitwise mixing
-        raw_bits = vals.to(tl.int32)
+        # the caller passes the tensor's bytes reinterpreted as integers, so every bit pattern counts
+        raw_bits = tl.load(data_ptr + offsets, mask=mask, other=0).to(tl.int32)
         
         # 32-bit mixing constants
         prime = 16777619
@@ -57,7 +56,12 @@ def fused_tensor_checksum_cuda(tensor: torch.Tensor) -> str:
         h.update(tensor.detach().cpu().contiguous().numpy().tobytes())
         return h.hexdigest()
 
-    flat_tensor = tensor.contiguous().view(-1)
+    # bitcast, not convert: converting floats to int mapped 0.25 and 0.5 (and every |x| < 1) to the same value
+    flat_tensor = tensor.contiguous().view(-1).view(torch.uint8)
+    if flat_tensor.numel() % 4 == 0:
+        flat_tensor = flat_tensor.view(torch.int32)
+    elif flat_tensor.numel() % 2 == 0:
+        flat_tensor = flat_tensor.view(torch.int16)
     num_elements = flat_tensor.numel()
     if num_elements == 0:
         return "0000000000000000"

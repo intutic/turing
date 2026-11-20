@@ -66,21 +66,21 @@ retraining it is lossy: 50% raises next-token NLL by +6.8 to +15.8 nats on SmolL
 ## 3. Weights at reduced precision
 
 * **4-bit weights** (`QuantLinear`, `turing/models/quant.py`; `--quantization w4a16-rtn|w4a16-gptq` or a `.tgate4`
-  directory): attention and dense-MLP projections are quantized (groups of 64); embeddings, the LM head, routers and
-  MoE experts stay in the model dtype. On CUDA a fused Triton int4 GEMM (`triton_w4a16.py`) handles up to
-  `INT4_MAX_ROWS` (64, from the measured crossover in [benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity))
+  directory): attention and dense-MLP projections are quantized (groups of 64); embeddings, routers and MoE experts stay in
+  the model dtype, and so does the LM head unless `--quantize-lm-head` is given. On CUDA a fused Triton int4 GEMM (`triton_w4a16.py`) handles up to
+  `INT4_MAX_ROWS` (64; dequantize + cuBLAS wins by 256 rows in the [measured crossover](benchmarks.md#3-4-bit-weights-and-activation-sparsity))
   input rows, and dequantization into a shared scratch buffer plus cuBLAS handles more; when the optional Marlin
   extension is built (`TURING_BUILD_MARLIN=1`, `turing/kernels/marlin.py`) it serves 1–1,024 rows from a repacked copy
   made at load. Off CUDA, dequantize then matmul, which saves memory but is slower than dense weights. Measured: 4-bit
   decodes 2.1× faster than fp16 at batch 1 (154.8 against 72.6 tok/s), and GPTQ costs about 7 GSM8K points on
-  Qwen2.5-1.5B-Instruct (57.2% → 50.4%) ([benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity)).
+  Qwen2.5-1.5B-Instruct (57.2% → 50.4%) ([comparison](comparison.md)).
 * **Activation sparsity** (`activation_sparsity.py`, `--activation-sparsity`, default 0): TEAL-style, training-free.
   Per-projection magnitude thresholds are calibrated on WikiText-2 so that the chosen share of every attention and MLP
   projection input is zero. It applies only to one-row inputs on CUDA, where `triton_sparse_gemv.py` skips the weight
   rows of zero inputs (prefill and batched decode stay dense: they gain no speed, and a sparsified prefill breaks
   attention-sink tokens); it reads a transposed copy of each weight (fp16) or a transposed 4-bit copy (4-bit models),
-  built on first use, so the weights take extra memory. Measured: 3–7% faster than 4-bit alone at batch 1, for 5–9
-  GSM8K points.
+  built on first use, so the weights take extra memory. Measured end to end on an L4: on top of GPTQ it was 28–31% slower at
+  batch 1 (107–112 against 155 tok/s) and cost 4–8 GSM8K points ([comparison](comparison.md)).
 
 ---
 
@@ -167,14 +167,17 @@ llguidance. A model whose weights fail to load raises instead of running random 
 ## 9. Native C++ engine (`turing-cli`)
 
 `csrc/turing_model_cpp.hpp` and `csrc/turing_main.cpp` build a standalone binary (CMake, `-flto
--fvisibility=hidden`) that runs Llama-layout GGUF models (RMSNorm, SwiGLU, RoPE, grouped-query attention) on the CPU:
+-fvisibility=hidden`) that runs Llama-layout GGUF models (RMSNorm, SwiGLU, RoPE, grouped-query attention) on the CPU.
+Its tokenizer is a greedy lookup (whole text, then " word" or word, then single characters; no BPE merges, and a
+character missing from the vocabulary maps to an arbitrary id), so its prompts are not tokenized as llama.cpp or the
+Python engine tokenizes them; the parity tests compare logits from the same token ids:
 
 * Weights, KV cache and per-token scratch are allocated once, 64-byte aligned; gemv, dot, attention, softmax, RMSNorm
   and SiLU have AVX2+FMA and NEON kernels with scalar tails (`csrc/turing_simd.hpp`). Weights are dequantized to fp32.
 * Optional int8 KV cache (per token, fp32 scale and zero per KV head); KV length is the GGUF context length capped by
   `--ctx` (default 4096); EOS, BOS, RoPE base, RMS epsilon and key length come from the GGUF metadata.
 * `turing-cli logits` prints logits as JSON; the tests compare them with `SubspaceCausalLM` loading the same F16 GGUF
-  (fp32 KV max difference 7.7e-5).
+  (within atol 1e-3 with an fp32 KV cache).
 * `turing-cli serve` is a single-threaded HTTP server: `/v1/chat/completions` (GGUF chat template: ChatML, Llama 3,
   Gemma or `[INST]`), `/v1/completions`, `/health`; binds `127.0.0.1` by default.
 * Speed: 125.6 tok/s on one Apple M4 Pro core for a synthetic 8-layer, 1,024-wide model, against 16.9 tok/s for the

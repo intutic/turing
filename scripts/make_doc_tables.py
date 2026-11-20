@@ -118,7 +118,7 @@ def t_vs_kv():
             continue
         kv, skip = r["kv_cache_dtype"], r.get("kv_skip_layers", [])
         dl = (r.get("wikitext_nll") or {}).get("delta_vs_auto")
-        out.append([f"vLLM {'fp16 (reference)' if kv == 'auto' else kv}", f"layer {','.join(skip)} (manual)" if skip else "—",
+        out.append([f"vLLM {'bf16 (reference)' if kv == 'auto' else kv}", f"layer {','.join(skip)} (manual)" if skip else "—",
                     pct(r["gsm8k"]["exact_match"]), pct(r["niah"]["accuracy"]),
                     pm(dl["mean"], dl["se"]) if dl else "—",
                     sreq(lambda x, kv=kv, skip=skip: x["engine"] == "vllm" and x["kv_cache_dtype"] == kv
@@ -355,8 +355,7 @@ def t_ring_ab():
 def _parity(name):
     out = []
     for r in load(name):
-        if "error" in r:
-            out.append([r["model"], r.get("dtype", ""), "error: " + r["error"][:60], "", "", "", ""])
+        if "error" in r:  # a failed load (e.g. a download error), not a parity result
             continue
         floor = f"{r['hf_self_max_abs_diff']:.3f}" if r.get("hf_self_max_abs_diff") is not None else "—"
         out.append([r["model"], r["arch"], r["dtype"], f"{r['max_abs_diff_incremental']:.3g}", floor,

@@ -26,7 +26,7 @@ python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
 # Run quick quiet validation
 python -W error -m pytest -q
 ```
-> **Invariant**: All 705 automated tests MUST pass with 0 warnings on CUDA (on a Mac the CUDA-only ones skip). Any newly introduced warning or test regression must be resolved immediately.
+> **Invariant**: All 1108 automated tests MUST pass with 0 warnings on CUDA (on a Mac the CUDA-only ones skip). Any newly introduced warning or test regression must be resolved immediately.
 
 
 
@@ -36,7 +36,7 @@ python -W error -m pytest -q
 ## 🏗️ Architecture & Codebase Invariants
 
 ### 1. Core Directories & Responsibilities
-- **`csrc/`**: C++20 SIMD headers (AVX2/FMA on x86_64, NEON on arm64; `turing_simd.hpp`), PyBind11 bindings (`pybind_bindings.cpp`), GGUF reader and exact dequantizer (`turing_gguf_cpp.hpp`), `ParallelReader` (`turing_parallel_reader.hpp`, io_uring or `pread`), cuFile loader (`turing_cufile.hpp`), and the standalone engine: BPE tokenizer (`turing_tokenizer_cpp.hpp`), forward pass (`turing_model_cpp.hpp`, Llama-layout GGUF, optional int8 KV), HTTP server (`turing_http_server.hpp`) and `turing-cli` (`turing_main.cpp`). The engine's weights, KV cache and SIMD scratch buffers are 64-byte aligned. Native code must compile with `-fvisibility=hidden` and LTO.
+- **`csrc/`**: C++20 SIMD headers (AVX2/FMA on x86_64, NEON on arm64; `turing_simd.hpp`), PyBind11 bindings (`pybind_bindings.cpp`), GGUF reader and exact dequantizer (`turing_gguf_cpp.hpp`), `ParallelReader` (`turing_parallel_reader.hpp`, io_uring or `pread`), cuFile loader (`turing_cufile.hpp`), and the standalone engine: greedy vocabulary-lookup tokenizer, no BPE merges (`turing_tokenizer_cpp.hpp`), forward pass (`turing_model_cpp.hpp`, Llama-layout GGUF, optional int8 KV), HTTP server (`turing_http_server.hpp`) and `turing-cli` (`turing_main.cpp`). The engine's weights, KV cache and SIMD scratch buffers are 64-byte aligned. Native code must compile with `-fvisibility=hidden` and LTO (the optional vendored Marlin CUDA extension, `TURING_BUILD_MARLIN=1`, is C++17 without LTO).
 - **`turing/core/`**: `kv_cache.py` (serving KV cache: one paged pool per model (`KVPool`), a page table per request (`KVCache`, copy-on-write forks), `native`/`int8`/`int4` storage, Quest page bounds) and `rope.py` (default, linear, dynamic, YaRN, LongRoPE, Llama 3, proportional). Library code outside the serving path, none measured on a model:
   - `cross_model_kv.py`: Closed-form $W^*$ ridge KV transfer with RoPE content decoupling and null-space projection.
   - `hybrid_memory.py`, `hybrid_attention.py`: Linear recurrence with anchor attention ($S_t = b_t S_{t-1} + K_t^T V_t$); needs a model trained with hybrid layers.

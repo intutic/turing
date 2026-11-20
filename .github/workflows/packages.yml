@@ -1,0 +1,34 @@
+name: Client packages
+
+# A tag langchain-turing-v<version> or llama-index-llms-turing-v<version> builds that package from packages/ and
+# publishes it to PyPI (trusted publishing: no stored token). The tag must match the package's pyproject version.
+
+on:
+  push:
+    tags:
+      - 'langchain-turing-v*'
+      - 'llama-index-llms-turing-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-packages
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build the tagged package
+        run: |
+          PKG="${GITHUB_REF_NAME%-v*}"
+          V="${GITHUB_REF_NAME##*-v}"
+          grep -q "^version = \"$V\"" "packages/$PKG/pyproject.toml"
+          python -m pip install --upgrade build
+          python -m build "packages/$PKG" --outdir dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

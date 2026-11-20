@@ -33,21 +33,19 @@ class KVMemoryEstimator:
         num_kv_heads: int,
         head_dim: int,
         dtype_bytes: int = 2,
-        svd_compression_ratio: float = 0.0,
     ) -> int:
         """Estimate the KV cache size in bytes."""
         try:
             from turing.turing_csrc import NativeTrafficManager
             return int(NativeTrafficManager.estimate_kv_bytes(
-                num_prompt_tokens, max_new_tokens, num_layers, num_kv_heads, head_dim, dtype_bytes, svd_compression_ratio
+                num_prompt_tokens, max_new_tokens, num_layers, num_kv_heads, head_dim, dtype_bytes
             ))
         except Exception:
             pass
 
         total_tokens = num_prompt_tokens + max_new_tokens
         bytes_per_token = num_kv_heads * head_dim * num_layers * 2 * dtype_bytes
-        total_bytes = total_tokens * bytes_per_token * (1.0 - svd_compression_ratio)
-        return int(total_bytes)
+        return total_tokens * bytes_per_token
 
     @staticmethod
     def estimate_vram_utilization(active_requests: List[Dict[str, Any]], total_vram_bytes: int) -> float:

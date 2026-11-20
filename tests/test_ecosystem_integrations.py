@@ -7,7 +7,6 @@ from typing import Dict, Any
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from integrations.litellm.turing_engine import TuringEngineConfig
-from scripts.create_ecosystem_tickets import TICKETS, create_tickets
 
 def test_litellm_adapter_config():
     cfg = TuringEngineConfig(
@@ -33,10 +32,3 @@ def test_kserve_manifest_validity():
     assert c["args"][:2] == ["--model", "/mnt/models"]  # where KServe's storage initializer puts storageUri
     assert c["readinessProbe"]["httpGet"]["path"] == "/health"
     assert not c["image"].startswith("ghcr.io/intutic/")  # no image is published there yet
-
-def test_ticket_generator_dry_run(capsys):
-    create_tickets(dry_run=True)
-    captured = capsys.readouterr()
-    assert "TURING ENGINE ECOSYSTEM TICKET GENERATOR" in captured.out
-    assert "DRY RUN" in captured.out
-    assert len(TICKETS) == 8

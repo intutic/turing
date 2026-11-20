@@ -41,7 +41,7 @@ spec:
           command: ["python3", "-m", "turing.cli", "serve"]
           args:
             - "--model"
-            - "meta-llama/Llama-3.1-70B-Instruct"
+            - "Qwen/Qwen2.5-7B-Instruct"
             - "--device"
             - "cuda"
             - "--host"

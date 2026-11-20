@@ -1,6 +1,8 @@
 """
 Triton & PyTorch GPU Fused Quadtree MRP Speculation Kernel.
-Generates 21-node quadtree candidate structures directly on GPU with ZERO .item() synchronization stalls.
+Generates 21-node quadtree candidate structures on the device without host synchronization: the tree shape is fixed,
+so its parent table and mask are built once per device on the host, and quadrant picks use torch.where, not indexing
+by a boolean mask (which syncs to learn the result's size).
 """
 
 from typing import Tuple, List, Optional
@@ -64,10 +66,8 @@ def fused_quadtree_mrp_cuda(
     q3_mask = (dx >= 0) & (dy < 0)
 
     def _first_or_fallback(mask: torch.Tensor, fallback_idx: int) -> torch.Tensor:
-        matched = cands_tail[mask]
-        if matched.numel() > 0:
-            return matched[0]
-        return top_candidates[min(fallback_idx, topk_k - 1)]
+        first = cands_tail[mask.int().argmax()]  # the first match; argmax is 0 when nothing matches
+        return torch.where(mask.any(), first, top_candidates[min(fallback_idx, topk_k - 1)])
 
     # Depth 1 nodes (4 quadrant representatives)
     d1_q0 = _first_or_fallback(q0_mask, 1)
@@ -87,24 +87,25 @@ def fused_quadtree_mrp_cuda(
         *d2_toks
     ])
 
-    parents = torch.tensor([
-        -1,
-        0, 0, 0, 0,
-        1, 1, 1, 1,
-        2, 2, 2, 2,
-        3, 3, 3, 3,
-        4, 4, 4, 4,
-    ], device=hidden.device, dtype=torch.int32)
+    parents, dag_mask = _tree(hidden.device)
+    return token_ids, parents.clone(), dag_mask.clone()  # device copies: no sync, and callers may edit them
 
-    # 5. Build DAG tree mask on GPU
-    # Construct [21, 21] additive mask
-    n = 21
-    dag_mask = torch.full((n, n), float("-inf"), device=hidden.device, dtype=torch.float32)
-    for i in range(n):
-        curr = int(parents[i].item())
-        dag_mask[i, i] = 0.0
-        while curr != -1:
-            dag_mask[i, curr] = 0.0
-            curr = int(parents[curr].item())
 
-    return token_ids, parents, dag_mask
+_PARENTS = [-1, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4]
+_TREES = {}
+
+
+def _tree(device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
+    """The fixed 21-node tree's parent table and additive ancestor mask (0 on self and ancestors, -inf elsewhere),
+    built on the host once per device."""
+    if device not in _TREES:
+        n = len(_PARENTS)
+        mask = torch.full((n, n), float("-inf"), dtype=torch.float32)
+        for i in range(n):
+            mask[i, i] = 0.0
+            curr = _PARENTS[i]
+            while curr != -1:
+                mask[i, curr] = 0.0
+                curr = _PARENTS[curr]
+        _TREES[device] = (torch.tensor(_PARENTS, dtype=torch.int32).to(device), mask.to(device))
+    return _TREES[device]

@@ -48,13 +48,11 @@ public:
         uint32_t num_layers,
         uint32_t num_kv_heads,
         uint32_t head_dim,
-        uint32_t dtype_bytes = 2,
-        double svd_compression_ratio = 0.0
+        uint32_t dtype_bytes = 2
     ) {
         uint64_t total_tokens = static_cast<uint64_t>(num_prompt_tokens) + max_new_tokens;
         uint64_t bytes_per_token = static_cast<uint64_t>(num_kv_heads) * head_dim * num_layers * 2 * dtype_bytes;
-        double raw_bytes = static_cast<double>(total_tokens * bytes_per_token);
-        return static_cast<uint64_t>(raw_bytes * (1.0 - svd_compression_ratio));
+        return total_tokens * bytes_per_token;
     }
 
     /**

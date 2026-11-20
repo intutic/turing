@@ -6,7 +6,7 @@ client with Turing's defaults: chat endpoint, tool calling on, `api_base` from `
 `--api-key`). It does not depend on Turing Engine itself.
 
 ```bash
-pip install llama-index-llms-turing
+pip install llama-index-llms-turing   # not on PyPI yet: pip install ./packages/llama-index-llms-turing from a clone of intutic/turing
 turing serve --model Qwen/Qwen2.5-1.5B-Instruct --port 8000   # on the machine with the GPU
 ```
 

@@ -37,7 +37,7 @@ output tokens per second, prefill included):
 <!-- /table -->
 
 **16K-token prompts at equal KV memory** (Qwen2.5-1.5B-Instruct; seconds per request; each engine's KV capacity in
-tokens; `results_longctx_cuda.json`). Read it with the quality table below: vLLM fp8 without a skipped layer is fast
+tokens; `results_longctx_cuda.json`; Quest's row ran with 12.7 GiB of KV, the others 14.6 GiB). Read it with the quality table below: vLLM fp8 without a skipped layer is fast
 because it is wrong on this model.
 
 <!-- table:longctx -->
@@ -66,7 +66,7 @@ Qwen2.5-1.5B-Instruct in bf16; the same GSM8K, pass-key and WikiText-2 checks fo
 | Turing bf16 (reference) | — | 57.2% | 100.0% | — | 2.05 |
 | Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 2.32 |
 | Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.95 |
-| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
+| vLLM bf16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
 | vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.66 |
 | vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
 | vLLM fp8_per_token_head | — | 0.6% | 0.0% | +2.404 ± 0.364 | — |
@@ -81,17 +81,17 @@ Qwen2.5-1.5B-Instruct in bf16; the same GSM8K, pass-key and WikiText-2 checks fo
 ## Where Turing Engine stands
 
 * **Close to vLLM, ahead in a few settings.** In fp16 vLLM is 1.01–1.04× faster on Qwen2.5-1.5B and Turing reaches
-  88–103% of vLLM on SmolLM2. At 4 bits vLLM is 1.06–1.12× faster; with Turing's opt-in 4-bit LM head Turing is 1.15×
+  88–103% of vLLM on SmolLM2. At 4 bits vLLM is 1.06–1.12× faster; with Turing's opt-in 4-bit LM head Turing is 1.15–1.16×
   vLLM at batch 1 and 8 and 1.09× llama.cpp at batch 1 (vLLM 1.04× at batch 64). At 16K-token prompts in fp16 Turing
   is 1.0–1.22× faster per request; vLLM's fp8 cache with layer 0 kept is 1.3–1.4× faster than Turing's int8.
-  Turing's first token at batch 64 takes up to 2.3× vLLM's (SmolLM2-1.7B); llama.cpp starts fastest.
-* **Comparable quality.** Turing's fp16 matches vLLM's on GSM8K (57.2% and 57.4%), and its GPTQ matches vLLM's GPTQ
+  Turing's first token at batch 64 takes up to 2.3× vLLM's (SmolLM2-1.7B); llama.cpp starts fastest from a cold process.
+* **Comparable quality.** Turing's bf16 matches vLLM's on GSM8K (57.2% and 57.4%), and its GPTQ matches vLLM's GPTQ
   checkpoint (50.4% and 50.2%; llama.cpp's Q4_K_M 52.4%, all ± 2.2%).
 * **Low-bit KV that stays correct by default.** Turing picks the layers to keep in full precision at startup; vLLM's
   default fp8 and its per-token int4/fp8 caches break this model unless layer 0 is excluded by hand, and its per-token
   int8 cache loses 16 GSM8K points.
-* **Not measured:** multi-GPU, SGLang, TensorRT-LLM, models larger than OLMoE-1B-7B, other model families for the KV
-  comparison.
+* **Not measured:** multi-GPU, SGLang, TensorRT-LLM, models larger than Qwen2.5-7B (7.6B), and model families other than the six in the
+  KV-guard validation (benchmarks §2).
 
 ---
 
@@ -137,7 +137,7 @@ Sources:
 
 | If you need… | Use |
 | :--- | :--- |
-| The fastest serving on NVIDIA GPUs, multi-GPU | vLLM, SGLang or TensorRT-LLM (faster than Turing in every measurement above) |
-| A C/C++ server with GGUF as its native format, or the fastest batch-1 4-bit decode measured here | llama.cpp |
+| The fastest serving on NVIDIA GPUs, multi-GPU | vLLM, SGLang or TensorRT-LLM (vLLM was faster in most measurements above; SGLang and TensorRT-LLM were not run) |
+| A C/C++ server with GGUF as its native format, or the fastest batch-1 4-bit decode with default settings measured here | llama.cpp |
 | A desktop runtime that imports GGUF and Safetensors models [11] | Ollama |
 | A small, readable engine to test KV-cache and quantization ideas against real models, with exact HuggingFace logits and measured evals | Turing Engine |

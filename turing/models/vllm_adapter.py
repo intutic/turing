@@ -16,7 +16,6 @@ class VLLMSubspaceQuantWrapper:
         self.model = model
 
     def wrap_model(self):
-        # Hooks active channel bitmasks and SVD KV projection into attention layers
         return self.model
 
 class VLLMCustomModelRunnerHarness:

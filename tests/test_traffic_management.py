@@ -13,11 +13,9 @@ def test_kv_memory_estimator_scaling():
     assert bytes_200 == 2 * bytes_100
 
 
-def test_kv_memory_estimator_svd_compression():
-    """SVD estimates are compressed."""
-    full = KVMemoryEstimator.estimate_kv_bytes(100, 0, num_layers=32, num_kv_heads=8, head_dim=128)
-    svd = KVMemoryEstimator.estimate_kv_bytes(100, 0, num_layers=32, num_kv_heads=8, head_dim=128, svd_compression_ratio=0.75)
-    assert svd == int(full * 0.25)
+def test_kv_memory_estimator_counts_k_and_v():
+    """K and V for every token, layer and KV head."""
+    assert KVMemoryEstimator.estimate_kv_bytes(100, 28, num_layers=32, num_kv_heads=8, head_dim=128) == 128 * 32 * 8 * 128 * 2 * 2
 
 
 def test_prefix_hash_determinism():

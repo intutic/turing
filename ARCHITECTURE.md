@@ -24,10 +24,11 @@ HTTP (server.py: OpenAI /v1, Anthropic /v1/messages, Ollama /api/*)
 | `turing/serving/` | `server.py`, `generation.py`, `engine.py`, `prefix_cache.py`, `traffic.py` (admission, lanes), `spec_gate.py`, `anthropic_api.py`, `ollama_api.py`, `tools.py`, `structured.py` (llguidance), `reasoning.py`, `embeddings.py`, `extract.py`, `pull.py`, `kv_events.py` (llm-d), `distributed.py`, `kv_transfer.py` / `disagg_sidecar.py` (P/D), `accuracy_eval.py` (GSM8K), `niah.py` (pass-key retrieval) |
 | `turing/kernels/` | Triton kernels: `triton_kv_decode.py` (serving decode), `triton_w4a16.py` (int4 GEMM), `triton_sparse_gemv.py` (activation sparsity), and library kernels with CUDA parity tests |
 | `turing/dsl/` | `@chain`, `gen`, `fork`, `join`, `select`, `constrain` on the engine |
-| `turing/integrations/` | LangChain `ChatTuring` (a `BaseChatModel`) |
+| `turing/integrations/` | Re-exports `ChatTuring` from the `langchain-turing` package |
 | `turing/demo/` | `MultiAgentCoordinator`, `DynamicEnvironmentModel`, `EpistemicUncertaintyGate`, `turing demo` |
 | `csrc/` | PyBind11 bindings (`pybind_bindings.cpp`), SIMD kernels (`turing_simd.hpp`, AVX2/NEON), GGUF reader and dequantizer (`turing_gguf_cpp.hpp`), `ParallelReader` (`turing_parallel_reader.hpp`), cuFile loader (`turing_cufile.hpp`), and the standalone engine: `turing_model_cpp.hpp`, `turing_tokenizer_cpp.hpp`, `turing_http_server.hpp`, `turing_main.cpp` (`turing-cli`) |
-| `integrations/` | LiteLLM, LlamaIndex (OpenAILike example), RunPod, Ray Serve, Modal, KServe |
+| `integrations/` | LiteLLM helper and upstream status, RunPod, Ray Serve, Modal, KServe |
+| `packages/` | Separately installable, Apache-2.0: `langchain-turing`, `llama-index-llms-turing`, `kv-layer-guard` |
 | `deploy/` | `Dockerfile` (CPU and CUDA), Helm chart, llm-d manifests |
 | `scripts/` | Benchmarks and evals (`eval_parity.py`, `eval_gguf_parity.py`, `eval_kv_quality.py`, `benchmark_kv_decode.py`, `benchmark_weight_formats.py`, `benchmark_e2e_generation.py`, `benchmark_cpp_engine.py`, …), `launch_distributed.sh`, `l4_session.sh` |
 

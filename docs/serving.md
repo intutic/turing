@@ -57,7 +57,7 @@ selects a LoRA adapter, §8). Run `turing serve --help` for the full list. The f
 | `--enable-kv-events` | off | Publish prefix-cache events for llm-d ([llm-d integration](llmd-integration.md)); also `--kv-events-pub-port` (5556), `--kv-events-replay-port` (5559) |
 
 **Distributed**: `--tensor-parallel`/`--tp`, `--pipeline-parallel`/`--pp`, `--prefill-worker`, `--prefill-server`,
-`--kv-port` (§10).
+`--kv-port` (§11).
 
 ---
 
@@ -74,7 +74,9 @@ selects a LoRA adapter, §8). Run `turing serve --help` for the full list. The f
 | `GET /health` | Liveness, running/waiting counts, KV utilisation (never needs the API key) |
 | `GET /metrics` | Prometheus text; `?format=json` for the engine telemetry as JSON |
 
-Errors come back in the shape of the API the path belongs to (OpenAI, Anthropic or Ollama).
+Admission rejections (429/503, below) come back in the error shape of the API the path belongs to (OpenAI, Anthropic
+or Ollama); other errors, such as request validation (422) and bad inputs to embeddings, rerank and extract (400), use
+FastAPI's `{"detail": ...}`.
 
 ---
 
@@ -161,9 +163,9 @@ Generation responses carry what the server did: `X-Turing-Model`, `X-Turing-Devi
   earlier occurrence of the request's last 3 (else 2, else 1) tokens and verifies them in one forward. Greedy
   requests accept on argmax; sampled requests accept a draft token with its probability and otherwise sample from
   the rest, so the output distribution is that of plain decoding. It is skipped for requests with a logits processor
-  and on the distributed path. The engine can take a `SpeculationGatePolicy` (`turing/serving/spec_gate.py`) that
-  turns drafting off when many requests decode; `turing serve` does not install one, so `--draft-tokens 0` is the way
-  to turn it off. Its speed has not been measured.
+  and on the distributed path. With `--draft-tokens` above 0, `turing serve` installs a `SpeculationGatePolicy`
+  (`turing/serving/spec_gate.py`): it drafts while 2 or fewer requests decode and stops at 4 or more (hysteresis
+  between); `--draft-tokens 0` turns drafting off. Its speed has not been measured.
 
 ---
 
@@ -192,7 +194,7 @@ curl http://localhost:8000/v1/rerank -H "Content-Type: application/json" -d '{
 Both are on by default.
 
 * **Admission** (`AdmissionController`, sized to the KV pool): a request that cannot be admitted gets 503 (pool
-  full or shed) or 429 (queued), with `Retry-After`; a request that can never fit gets 400. Streaming endpoints
+  full, `Retry-After: 1`; shed above the watermark, no `Retry-After`) or 429 (queued, `Retry-After: 2`); a request that can never fit gets 400. Streaming endpoints
   admit before sending the 200.
 * **Lanes** (`LanePolicy`): `interactive`, `batch` and `background`, chosen by `lane` / `X-Turing-Lane` or by the
   request's shape. Waiting requests are ordered by lane, and each lane has its own prefill chunk (512, 256 and 128
@@ -222,7 +224,7 @@ whose targets the loader cannot map is refused.
 `turing_serving_throughput_tok_per_sec`, `turing_total_tokens_generated`, `turing_running_requests`,
 `turing_waiting_queue_depth`, `turing_ttft_avg_ms`, `turing_ttft_p99_ms`, `turing_itl_avg_ms`,
 `turing_num_requests_waiting`, `turing_num_requests_running`, `turing_kv_cache_usage_perc`,
-`turing_cache_config_info` (labels `block_size`, `num_gpu_blocks`), `turing_prefix_cache_hit_rate`,
+`turing_cache_config_info` (labels `block_size`, `num_gpu_blocks`), with prefix caching on `turing_prefix_cache_hit_rate`,
 `turing_prefix_cache_hit_tokens_total`, `turing_prefix_cache_queried_tokens_total`, `turing_prefix_cache_pages`,
 `turing_spec_drafted_tokens_total`, `turing_spec_accepted_tokens_total`, `turing_spec_acceptance_rate`,
 `turing_lane_requests_{waiting,running,admitted_total,finished_total}` (label `lane`), and with admission control

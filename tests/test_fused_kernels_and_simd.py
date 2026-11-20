@@ -58,9 +58,8 @@ def test_native_traffic_manager_estimation_and_admission():
         num_kv_heads=8,
         head_dim=128,
         dtype_bytes=2,
-        svd_compression_ratio=0.75
     )
-    assert est_bytes > 0
+    assert est_bytes == 640 * 32 * 8 * 128 * 2 * 2
 
     # 2. Prefix Hashing
     tokens = [101, 2054, 2003, 1037, 3231, 102]

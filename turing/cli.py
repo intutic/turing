@@ -93,7 +93,7 @@ def main():
     serve_parser.add_argument("--model", type=str, default="smollm2", help="Model identifier (e.g. gpt2, smollm2, Qwen/Qwen2.5-0.5B, or HF repo ID)")
     serve_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
-    serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, cpu, mps)")
+    serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, rocm, cpu, mps)")
     serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
     serve_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")

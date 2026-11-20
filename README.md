@@ -6,7 +6,7 @@ number in the docs comes from a committed results file.**
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
 [![Release: v2.0.0](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 705](https://img.shields.io/badge/Tests-705-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 1108](https://img.shields.io/badge/Tests-1108-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -34,14 +34,15 @@ Mostly no; in a few measured settings, yes. On one NVIDIA L4, same model and pro
   vLLM's throughput, and its first token at batch 64 on SmolLM2-1.7B takes 2.3× as long (6.7 s against 2.9 s).
 * **4 bits, fp16 LM head (default):** vLLM is 1.06–1.12× faster. llama.cpp is 1.17× faster at batch 1; Turing is
   faster than llama.cpp at batch 8 and 64 (1.38× and 1.27×).
-* **4 bits with the opt-in 4-bit LM head** (`--quantize-lm-head`): Turing is 1.15× vLLM at batch 1 and 8 and 1.09×
+* **4 bits with the opt-in 4-bit LM head** (`--quantize-lm-head`): Turing is 1.15–1.16× vLLM at batch 1 and 8 and 1.09×
   llama.cpp at batch 1; vLLM stays 1.04× faster at batch 64. This quantizes one more matrix than vLLM's GPTQ
   checkpoint does; GSM8K 51.8% against vLLM's 50.2% (each ± 2.2%).
 * **16K-token prompts, fp16 KV at equal memory:** Turing is 1.0–1.22× faster per request than vLLM, more at larger
   batches. vLLM's fp8 cache with layer 0 kept in fp16 (the setting that is correct on this model) is 1.3–1.4×
   faster than Turing's int8 at equal quality.
 * **Cold start:** from process start to first token Turing takes 25.4 s from a cold page cache and 10.0 s warm,
-  2.0–3.4× sooner than vLLM (51.7 s, 34.2 s); llama.cpp with its 4-bit GGUF takes 7.1 s and 1.3 s
+  against vLLM's 51.7 s and 34.2 s. vLLM was measured in an earlier session, where Turing's code at the time took
+  27.4 s and 12.1 s (1.9–2.8× sooner); llama.cpp with its 4-bit GGUF takes 7.1 s and 1.3 s
   (`results_cold_start_*_cuda.json`).
 
 Details and every other setting are in the [comparison](docs/comparison.md). For production serving use vLLM, SGLang
@@ -61,7 +62,7 @@ or TensorRT-LLM; on a laptop, llama.cpp or Ollama.
 | Turing bf16 (reference) | — | 57.2% | 100.0% | — | 2.05 |
 | Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 2.32 |
 | Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.95 |
-| vLLM fp16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
+| vLLM bf16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
 | vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.66 |
 | vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
 | vLLM fp8_per_token_head | — | 0.6% | 0.0% | +2.404 ± 0.364 | — |
@@ -71,20 +72,20 @@ or TensorRT-LLM; on a laptop, llama.cpp or Ollama.
 | vLLM turboquant_k8v4 | — | 52.0% | 100.0% | +0.001 ± 0.001 | — |
 <!-- /table -->
 
-  vLLM fp8 with layer 0 skipped *by hand* matches Turing's quality at about half the time per request, which is the
+  vLLM fp8 with layer 0 skipped *by hand* matches Turing's quality at 0.6–0.75× Turing's time per request, which is the
   point: the calibration finds that layer automatically. It is also packaged on its own for vLLM users, under
   Apache-2.0: [`packages/kv-layer-guard`](packages/kv-layer-guard). Validated on six instruct models (Qwen2.5 1.5B
   and 7B, Llama 3.2, Gemma 2, Phi-3.5, Mistral), including one limit it does not catch
   ([benchmarks §2](docs/benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps)).
-* **Measured correctness.** The exact model reproduces HuggingFace's logits on 16 model families in the tests and on
-  real checkpoints ([models & hardware](docs/models_and_hardware.md)); 13 real GGUF files agree with llama.cpp.
+* **Measured correctness.** The exact model reproduces HuggingFace's logits on 16 model families in the tests, 13 of them
+  also on real checkpoints ([models & hardware](docs/models_and_hardware.md)); 13 real GGUF files agree with llama.cpp.
 * **A codebase small enough to change.** Paged KV pool, Triton decode kernels, GPTQ, TEAL sparsity, prefix caching,
   speculative decoding and the OpenAI, Anthropic and Ollama APIs are a few Python modules and kernels, with a
   standalone C++ engine beside them. The eval scripts (`scripts/eval_kv_quality.py`, `turing eval-accuracy`,
   `turing eval-niah`, the Turing-vs-vLLM and llama.cpp benchmarks) run any idea against real models.
 
 **Not measured:** multi-GPU (tensor and pipeline parallelism are tested as CPU processes only), models larger than
-OLMoE-1B-7B, SGLang and TensorRT-LLM.
+Qwen2.5-7B (7.6B), SGLang and TensorRT-LLM.
 
 ---
 
@@ -155,7 +156,7 @@ processes and compare logits with a single process; no multi-GPU (NCCL) run has 
 
 `tests/test_hf_parity.py` checks prefill, chunked prefill, decode and batched decode against HuggingFace
 (atol 1e-3) for 25 configurations of these model types: **llama**, **mistral** (sliding window), **qwen2**,
-**qwen3**, **gemma**, **gemma2** (soft-capping), **gemma3** (local/global RoPE), **phi** (Phi-2), **phi3** (incl.
+**qwen3**, **gemma**, **gemma2** (soft-capping), **gemma3_text** (local/global RoPE), **phi** (Phi-2), **phi3** (incl.
 LongRoPE), **gpt2**, **opt** (incl. post-LN and projected embeddings), **gpt_neox**, **mixtral**, **qwen2_moe**,
 **qwen3_moe** and **olmoe**. RoPE scaling types: default, linear, dynamic, YaRN, LongRoPE, Llama 3 and proportional.
 Any other architecture is refused before download (`hf_loader.FAMILIES`, `ArchitectureRegistry`); weights never fall

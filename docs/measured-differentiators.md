@@ -37,7 +37,7 @@ on top of it, and the result is compared with the receiver reading the context i
 
 ## Multi-turn lineage: naive chaining vs `clean_base`
 
-Two agents (Qwen2.5-0.5B → Qwen2.5-1.5B) exchange translated KV over six turns; a 6-digit pass code opens each context.
+Two agents (Qwen2.5-0.5B → Qwen2.5-1.5B) exchange translated KV over eight turns (turns 1–6 shown); a 6-digit pass code opens each context.
 "naive" adds each turn's translated residual to the receiver's already-modified cache; `clean_base` always recomputes
 it against the receiver's original cache. α scales the injected residual (`scripts/eval_lineage.py`,
 `results_lineage_cuda.json`; WikiText NLL / pass-code recall over 32 contexts):

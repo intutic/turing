@@ -37,7 +37,7 @@ python setup.py build_ext --inplace
 ## 🧪 Testing & Verification
 
 We enforce strict test cleanliness. All pull requests must pass the full test suite with **zero warnings**
-(705 tests; the CUDA-only ones skip elsewhere):
+(1108 tests; the CUDA-only ones skip elsewhere):
 
 ```bash
 # Run the complete test suite with strict warning escalation
@@ -50,8 +50,8 @@ python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
 ### Scripts and git worktrees
 An editable install (`pip install -e .`) puts one checkout's `turing` package on every Python path. A script run
 from another checkout or a git worktree would silently import that package instead of the code next to it, so
-every script in `scripts/` that imports `turing` starts with `import _bootstrap` (it puts its own repo root first
-on `sys.path`). New scripts must do the same.
+scripts in `scripts/` that import `turing` put their own repo root first on `sys.path`, most with `import _bootstrap`
+(a few older ones with `sys.path.insert`). New scripts must start with `import _bootstrap`.
 
 ### Adding New Tests
 - Tests run on real code: no mock objects. Integration tests serve the real app in-process (see the
@@ -86,7 +86,7 @@ on `sys.path`). New scripts must do the same.
 1. **Fork the Repository**: Create a personal fork on GitHub.
 2. **Create a Feature Branch**: `git checkout -b feature/my-new-kernel`
 3. **Implement Your Changes**: Keep commits focused and provide clear, descriptive commit messages.
-4. **Verify Tests**: Run `python -W error -m pytest -v` and ensure all 705 tests pass cleanly (CUDA-only ones skip on a Mac).
+4. **Verify Tests**: Run `python -W error -m pytest -v` and ensure all 1108 tests pass cleanly (CUDA-only ones skip on a Mac).
 5. **Submit PR**: Open a pull request against the `master` branch of `intutic/turing`. Include:
    - A clear summary of the motivation and changes.
    - Any benchmark results or hardware specifications (e.g. tested on NVIDIA L4 or Apple M3 Max).

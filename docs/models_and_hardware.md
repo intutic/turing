@@ -71,10 +71,6 @@ NVIDIA L4, bf16 (`results_parity_cuda.json`):
 | gpt2 | gpt2 | bfloat16 | 4 | 4.000 | 92.2% | -0.0026 |
 | facebook/opt-125m | opt | bfloat16 | 0.188 | 0.312 | 96.9% | -0.0017 |
 | facebook/opt-350m | opt | bfloat16 | 0.312 | 0.375 | 98.4% | -0.0016 |
-| gpt2 | bf16 | error: JSONDecodeError: Expecting value: line 1 column 1 (char 0) |  |  |  |  |
-| facebook/opt-125m | bf16 | error: OSError: It looks like the config file at '/home/ishangupta/ |  |  |  |  |
-| facebook/opt-350m | bf16 | error: OSError: It looks like the config file at '/home/ishangupta/ |  |  |  |  |
-| EleutherAI/pythia-160m | bf16 | error: OSError: It looks like the config file at '/home/ishangupta/ |  |  |  |  |
 | HuggingFaceTB/SmolLM2-135M | llama | bfloat16 | 0.875 | 0.750 | 93.8% | -0.0061 |
 | unsloth/gemma-3-270m | gemma3_text | bfloat16 | 0.672 | 0.594 | 100.0% | -0.0046 |
 | Qwen/Qwen2.5-0.5B | qwen2 | bfloat16 | 1.38 | 0.484 | 100.0% | +0.0151 |
@@ -122,7 +118,7 @@ CPU" is llama.cpp's own difference between its two backends, a scale for the fir
 
 ### Not run
 
-No model larger than OLMoE-1B-7B (7B total parameters) has been run end to end, no `qwen3_moe` checkpoint (the
+No model larger than Qwen2.5-7B (7.6B parameters) has been run end to end, no `qwen3_moe` checkpoint (the
 smallest, Qwen3-30B-A3B, needs about 61 GB in bf16), and no real checkpoint through the tensor- or pipeline-parallel
 path.
 

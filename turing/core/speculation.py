@@ -204,8 +204,7 @@ class QuadtreeMRPSpeculator(nn.Module):
                 tok_tensor, p_tensor, dag_mask = fused_quadtree_mrp_cuda(
                     hidden, self.draft_head.weight, self.spatial_proj.weight, slice_width
                 )
-                tok_list = tok_tensor.tolist()
-                p_list = p_tensor.tolist()
+                tok_list, p_list = torch.stack((tok_tensor, p_tensor.to(tok_tensor.dtype))).tolist()  # one sync
 
                 nodes = []
                 for i, (tok, p) in enumerate(zip(tok_list, p_list)):

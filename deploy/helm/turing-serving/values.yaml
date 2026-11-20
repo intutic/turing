@@ -16,7 +16,7 @@ service:
   port: 8000
 
 model:
-  name: "llama-3.1-70b"
+  name: "Qwen/Qwen2.5-7B-Instruct"  # fits one 24 GB GPU in bf16; 70B does not
   device: "cuda"
   maxBatchSize: 64
 

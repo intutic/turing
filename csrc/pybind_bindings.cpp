@@ -1426,7 +1426,7 @@ PYBIND11_MODULE(turing_csrc, m) {
     py::class_<turing::NativeTrafficManager>(m, "NativeTrafficManager")
         .def(py::init<uint64_t, double, double>(), py::arg("vram_budget_bytes"), py::arg("high_watermark") = 0.90, py::arg("shed_watermark") = 0.95)
         .def_static("estimate_kv_bytes", &turing::NativeTrafficManager::estimate_kv_bytes, 
-                    py::arg("num_prompt_tokens"), py::arg("max_new_tokens"), py::arg("num_layers"), py::arg("num_kv_heads"), py::arg("head_dim"), py::arg("dtype_bytes") = 2, py::arg("svd_compression_ratio") = 0.0)
+                    py::arg("num_prompt_tokens"), py::arg("max_new_tokens"), py::arg("num_layers"), py::arg("num_kv_heads"), py::arg("head_dim"), py::arg("dtype_bytes") = 2)
         .def_static("compute_prefix_hash", &turing::NativeTrafficManager::compute_prefix_hash, py::arg("token_ids"), py::arg("window") = 128)
         .def("admit", &turing::NativeTrafficManager::admit, py::arg("request_id"), py::arg("estimated_bytes"))
         .def("release", &turing::NativeTrafficManager::release, py::arg("request_id"))

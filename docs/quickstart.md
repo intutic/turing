@@ -86,7 +86,7 @@ The `api_key` values above are ignored unless the server was started with `--api
 
 ### D. LangChain
 ```python
-from langchain_turing import ChatTuring   # pip install langchain-turing
+from langchain_turing import ChatTuring   # pip install ./packages/langchain-turing (not on PyPI yet)
 
 llm = ChatTuring(model="Qwen/Qwen2.5-7B-Instruct", base_url="http://localhost:8000/v1")
 print(llm.invoke("Explain KV caching in two sentences.").content)

@@ -1,6 +1,6 @@
 # 🔍 Claims Audit
 
-Every benchmark number in `docs/benchmarks.md` (except §2, §3 and §10, which were rebuilt from measurements in v1.6.0), `README.md`, `docs/index.md`, `docs/comparison.md` and `docs/models_and_hardware.md` was traced to the code that was supposed to produce it, as of commit `f936008`. Doc and script line numbers, and section numbers such as §19, refer to that commit; the storage ingestion ladder (old §19) has since been measured cold and is §4 of the current benchmarks page.
+Every benchmark number in `docs/benchmarks.md` (except §2, §3 and §10, which were rebuilt from measurements in v1.6.0), `README.md`, `docs/index.md`, `docs/comparison.md` and `docs/models_and_hardware.md` was traced to the code that was supposed to produce it, as of commit `f936008`. Doc and script line numbers, and section numbers such as §19, refer to that commit; the storage ingestion ladder (old §19) has since been measured cold and is §8 of the current benchmarks page.
 
 **Classes**
 
@@ -14,7 +14,7 @@ Every benchmark number in `docs/benchmarks.md` (except §2, §3 and §10, which 
 
 **Evidence used.** The scripts themselves; committed results (`results_*.json`, plus `exhaustive_benchmark_results_cuda.json` and `exhaustive_benchmark_results_mps.json`, which hold the recorded stdout of every documented script on an L4 and a Mac). No GPU was used for this audit; short Mac runs are noted where made.
 
-**Outcome.** Of roughly 300 numbers outside §2, §3 and §10, none was measured on a real model with the Turing engine. The only real-model numbers were GPT-2 and SmolLM2 tok/s from HuggingFace `generate`. The page now keeps §2 and §3 (measured on real weights) and three random-weight FFN layer timings that the committed L4 run backs; everything else was removed or relabelled, and every script line that printed a constant or formula was changed to print what it computes.
+**Outcome.** Of roughly 300 numbers outside §2, §3 and §10, none was measured on a real model with the Turing engine. The only real-model numbers were GPT-2 and SmolLM2 tok/s from HuggingFace `generate`. The page now keeps §2 and §3 (measured on real weights) and, at the time, three random-weight FFN layer timings that the committed L4 run backs (removed later); everything else was removed or relabelled, and every script line that printed a constant or formula was changed to print what it computes.
 
 ---
 
@@ -89,7 +89,7 @@ These numbers are what the scripts measured, but not on a model, so they were re
 
 | Claim | Where | Producing script:line | Data | Action |
 | :--- | :--- | :--- | :--- | :--- |
-| §1 Llama-3-8B / 3.1-70B / Qwen-2.5-72B layer 2.24× / 2.32× / 2.41× | §1; comparison | `benchmark_comprehensive_real_gpu.py:209-246` | One random-weight batch-1 FFN layer; cuBLAS on smaller matrices (no Triton); matches `results_gcp_master_benchmark_v4.json` | **Kept**, relabelled as one random-weight layer |
+| §1 Llama-3-8B / 3.1-70B / Qwen-2.5-72B layer 2.24× / 2.32× / 2.41× | §1; comparison | `benchmark_comprehensive_real_gpu.py:209-246` | One random-weight batch-1 FFN layer; cuBLAS on smaller matrices (no Triton); matches `results_gcp_master_benchmark_v4.json` | Kept then, relabelled as one random-weight layer; removed later |
 | §11 LoRA hit 184 µs, cold switch 0.95 ms, 3,094 req/s, 83.4% | §11 | `benchmark_lora_and_speculation.py:40-86` | Random adapters, unseeded 80/20 traffic; hit time includes a LoRA forward | Removed |
 | §11 EAGLE3 draft 0.626 ms | §11 | `benchmark_lora_and_speculation.py:89-144` | Random-init draft head, randn input | Removed |
 | §11 70B cold start 254 ms | §11 | `turing/models/streaming_loader.py:139-166` | `torch.randn` for 3 layers, `torch.empty` for 77; no file I/O | Removed; script labels it synthetic |
@@ -136,7 +136,7 @@ These numbers are what the scripts measured, but not on a model, so they were re
 
 Each script below now prints only what it computes, and labels synthetic inputs:
 
-`benchmark_traffic_and_spec.py`, `benchmark_lineage_strategies.py`, `benchmark_lora_and_speculation.py`, `benchmark_xkv_deliberation.py`, `benchmark_latent_decode.py` (byte count from tensors, honest OOM/skip labels, MPS sync), `benchmark_triple_gateway_and_structured.py`, `benchmark_prefill_decode_duality.py`, `benchmark_fused_kernels_and_simd_v5.py`, `benchmark_fused_kernels_and_simd.py`, `benchmark_sie_pipeline_speedups.py`, `run_gcp_master_validation_and_benchmarks_v8.py`, `benchmark_associative_recall_and_decay.py`, `benchmark_cold_readahead_gcp.py`, `benchmark_comprehensive_real_gpu.py`, `benchmark_fused_layers.py`, and the `turing/serving/niah.py` docstring.
+`benchmark_traffic_and_spec.py`, `benchmark_lineage_strategies.py`, `benchmark_lora_and_speculation.py` (deleted later, f9c3052), `benchmark_xkv_deliberation.py`, `benchmark_latent_decode.py` (byte count from tensors, honest OOM/skip labels, MPS sync), `benchmark_triple_gateway_and_structured.py`, `benchmark_prefill_decode_duality.py`, `benchmark_fused_kernels_and_simd_v5.py`, `benchmark_fused_kernels_and_simd.py`, `benchmark_sie_pipeline_speedups.py` (deleted later, f9c3052), `run_gcp_master_validation_and_benchmarks_v8.py`, `benchmark_associative_recall_and_decay.py`, `benchmark_cold_readahead_gcp.py`, `benchmark_comprehensive_real_gpu.py`, `benchmark_fused_layers.py`, and the `turing/serving/niah.py` docstring.
 
 ## 6. Mac re-runs made for this audit (Apple M4 Pro)
 
@@ -153,9 +153,9 @@ None of these was added to the benchmarks page, because none measures the engine
 
 ## 7. Not done here
 
-* **Ingest ladder** (`scripts/benchmark_ingest_ladder_all_tiers.py`, tiers 3–5 constants, GB/s over the full file): the doc claims are removed. The script fix belongs to the offload-fixes work (expert cache, async reader, synthetic ingest timings) and is made on that branch.
-* **Library bugs found in passing** (they affect what scripts measure, not what the docs now say): `turing/kernels/triton_vram_hash.py:33` converts floats to int instead of bitcasting. Fixed in v2.0 (W0): TTFT and inter-token times are now stamped after the forward pass and sample, percentiles are `null` until there are two samples (never the mean in their place), and the never-launched `triton_sparse_subspace_prefill.py` was deleted.
-* **Other pages that repeated removed numbers**: `docs/architecture.md`, `docs/serving.md` and the top-level `ARCHITECTURE.md` were cleaned in a follow-up commit (numbers removed or pointed at the measured sections, components marked experimental), except the ingest Tier 1–5 bullets in `docs/architecture.md` §19, which the offload-fixes branch rewrites with cold-measured numbers. Scripts not cited by these pages also print unverified claims, for example `benchmark_multi_gpu_mig.py` "partitions" an L4 into MIG slices (the L4 does not support MIG) and `benchmark_extended_matrix.py` computes VRAM as `fp16 × 0.166`.
+* **Ingest ladder** (`scripts/benchmark_ingest_ladder_all_tiers.py`, tiers 3–5 constants, GB/s over the full file): the doc claims are removed. Done later: the script now measures tiers 0–2 cold and reports tiers 3–4 as not measured (benchmarks §8).
+* **Library bugs found in passing** (they affect what scripts measure, not what the docs now say): `turing/kernels/triton_vram_hash.py:33` converted floats to int instead of bitcasting (fixed for 2.0.0: it hashes the tensor's bytes). Fixed in v2.0 (W0): TTFT and inter-token times are now stamped after the forward pass and sample, percentiles are `null` until there are two samples (never the mean in their place), and the never-launched `triton_sparse_subspace_prefill.py` was deleted.
+* **Other pages that repeated removed numbers**: `docs/architecture.md`, `docs/serving.md` and the top-level `ARCHITECTURE.md` were cleaned in a follow-up commit (numbers removed or pointed at the measured sections, components marked experimental), and the ingest Tier 1–5 bullets in `docs/architecture.md` §19 were later replaced by a link to the cold-measured benchmarks §8. Scripts not cited by these pages also print unverified claims, for example `benchmark_multi_gpu_mig.py` "partitions" an L4 into MIG slices (the L4 does not support MIG) and `benchmark_extended_matrix.py` computes VRAM as `fp16 × 0.166`.
 * **GPU re-measurement**: nothing here was re-run on an L4; GPU runs need the owner's approval.
 
 ---
@@ -197,7 +197,7 @@ stay removed; v2.0 adds no performance number without a committed result.
 | `io_uring` reader that used `pread` | io_uring when built with liburing, `pread` threads otherwise; `backend` reports which | `test_parallel_reader_and_gds.py` |
 | GPUDirect loader reporting success without data | cuFile, else pinned copy, else `no_cuda`, reported | `test_parallel_reader_and_gds.py` |
 | C++ server crashing on long prompts; `/v1/chat/completions` without a chat template | 400 past the context; GGUF chat templates; `/v1/completions` | `test_cpp_http_server.py` |
-| LangChain `ChatTuring` returning dicts; LlamaIndex package | `ChatTuring` is a `BaseChatModel`; LlamaIndex through `OpenAILike` | `test_langchain_integration.py`, `test_llamaindex_example.py` |
+| LangChain `ChatTuring` returning dicts; LlamaIndex package | `ChatTuring` is a `BaseChatModel`; LlamaIndex through `OpenAILike` | `test_langchain_integration.py`, `test_llamaindex_integration.py` (the `llama-index-llms-turing` package) |
 | Licence-key gate (`TURING_LICENSE_KEY`) | Removed; commercial use is a signed agreement under `LICENSE` §2 | — |
 | SVD-KV family, `radix_svd`, semantic anchors, hex quantizer, latent SVD claims in the serving story | Deleted (`radix_svd`, `triton_svd_paged`, wire codec, hex quantizer); `triton_latent_decode.py` stays as a library kernel | — |
 | `--memory-mode hybrid` | Removed; `hybrid_memory.py` is library code that needs a model trained with hybrid layers | — |

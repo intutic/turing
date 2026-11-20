@@ -987,7 +987,7 @@ class SubspaceCausalLM(nn.Module):
             if w.device.type == "cuda":
                 torch.cuda.empty_cache()
             # int4 only: int8 needs no smoothing (+0.003 nats without it on Qwen2.5-1.5B-Instruct in bf16, +0.017 and
-            # 15 GSM8K points lost with it)
+            # 16 GSM8K points lost with it)
             smooth = cfg.kv_cache_dtype == "int4" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False)
             choose = cfg.kv_cache_dtype != "native" and cfg.kv_native_layers is None
             if (smooth or choose) and not self._load_kv_calibration(smooth, choose):

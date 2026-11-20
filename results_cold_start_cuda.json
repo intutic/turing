@@ -801,5 +801,6 @@
       "tokens_agree": true
     }
   ],
-  "note": "seconds of wall clock; se = standard error over n runs; cold = model files dropped from the page cache, Python/torch/CUDA libraries cached"
+  "note": "seconds of wall clock; se = standard error over n runs; cold = model files dropped from the page cache, Python/torch/CUDA libraries cached",
+  "merge_note": "The Qwen2.5-1.5B-Instruct rows come from a later rerun of scripts/benchmark_cold_start.py merged into this file; the header's args and env describe the first run (Qwen2.5-1.5B base, turing 1.7.0)."
 }

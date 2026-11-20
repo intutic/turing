@@ -107,9 +107,8 @@ class CacheLineage:
 class CleanBaseLineageBuffer:
     peak_live_caches: ClassVar[int] = 2
     
-    def __init__(self, original_kv: List[torch.Tensor], use_svd_compression: bool = False, initial_token_ids: Optional[List[int]] = None):
+    def __init__(self, original_kv: List[torch.Tensor], initial_token_ids: Optional[List[int]] = None):
         self._original_kv = [t.detach().clone() for t in original_kv]
-        self.use_svd_compression = use_svd_compression
         self._fed_tokens: List[int] = list(initial_token_ids) if initial_token_ids else []
         self._is_tainted: bool = False
         
