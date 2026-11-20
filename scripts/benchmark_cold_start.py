@@ -171,7 +171,7 @@ def main(argv=None):
     ap.add_argument("--calib-tokens", type=int, default=2048)
     ap.add_argument("--engine", default="turing", choices=["turing", "vllm"])
     ap.add_argument("--python", default=sys.executable, help="interpreter of the child process (vLLM's virtualenv)")
-    ap.add_argument("--out", default="results_cold_start_cuda.json")
+    ap.add_argument("--out", default="benchmarks/results/results_cold_start_cuda.json")
     a = ap.parse_args(argv)
     caches = a.caches.split(",")
     if "cold" in caches and not hasattr(os, "posix_fadvise"):

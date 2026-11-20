@@ -58,17 +58,19 @@ extra_javascript:
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
 nav:
-  - Overview: index.md
-  - Technical Comparison: comparison.md
-  - Quickstart: quickstart.md
-  - Models & Hardware: models_and_hardware.md
-  - Serving & API: serving.md
-  - Architecture: architecture.md
-  - Docker: docker.md
-  - Kubernetes & llm-d: llmd-integration.md
-  - Integrations: integrations.md
-  - Benchmarks: benchmarks.md
-  - Research Findings: measured-differentiators.md
-  - Claims Audit: claims-audit.md
-  - Licensing: licensing.md
-
+  - Home: index.md
+  - Getting started:
+      - Quickstart: quickstart.md
+      - Docker: docker.md
+  - User guide:
+      - Serving & API: serving.md
+      - Models & hardware: models_and_hardware.md
+      - Integrations: integrations.md
+      - Kubernetes & llm-d: llmd-integration.md
+  - Performance:
+      - Comparison: comparison.md
+      - Benchmarks: benchmarks.md
+  - Internals:
+      - Architecture: architecture.md
+      - Experimental components: experimental.md
+  - License: licensing.md

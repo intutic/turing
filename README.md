@@ -81,22 +81,22 @@ OpenAI (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`), Anthropic 
   Apache-2.0: [`packages/kv-layer-guard`](packages/kv-layer-guard). Validated on six instruct models (Qwen2.5 1.5B
   and 7B, Llama 3.2, Gemma 2, Phi-3.5, Mistral), including one limit it does not catch
   ([benchmarks §2](docs/benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps)).
-* **Measured correctness.** The exact model reproduces HuggingFace's logits on 16 model families in the tests, 13 of them
+* **Correctness you can check.** The exact model reproduces HuggingFace's logits on 16 model families in the tests, 13 of them
   also on real checkpoints ([models & hardware](docs/models_and_hardware.md)); 13 real GGUF files agree with llama.cpp.
 * **A codebase small enough to change.** Paged KV pool, Triton decode kernels, GPTQ, TEAL sparsity, prefix caching,
   speculative decoding and the OpenAI, Anthropic and Ollama APIs are a few Python modules and kernels, with a
   standalone C++ engine beside them. The eval scripts (`scripts/eval_kv_quality.py`, `turing eval-accuracy`,
   `turing eval-niah`, the Turing-vs-vLLM and llama.cpp benchmarks) run any idea against real models.
 
-**Not measured:** multi-GPU (tensor and pipeline parallelism are tested as CPU processes only), models larger than
-Qwen2.5-7B (7.6B), SGLang and TensorRT-LLM.
+**Limitations:** tensor and pipeline parallelism are tested as CPU processes only, not on multiple GPUs; the largest
+model run end to end is Qwen2.5-7B (7.6B).
 
 ---
 
 ## How it compares
 
-Is it faster than vLLM or llama.cpp? Mostly no; in a few measured settings, yes. On one NVIDIA L4, same model and
-prompts (Qwen2.5-1.5B-Instruct, 512-token prompts, 256 new tokens; `results_4bit_speed_cuda.json`, `results_4bit_quality_*_cuda.json`):
+Is it faster than vLLM or llama.cpp? Mostly no; in a few settings, yes. On one NVIDIA L4, same model and prompts
+(Qwen2.5-1.5B-Instruct, 512-token prompts, 256 new tokens):
 
 <!-- table:vs_4bit -->
 | Setting | Batch 1, tok/s | Batch 8, tok/s | Batch 64, tok/s | GSM8K (n=500) |
@@ -122,11 +122,11 @@ prompts (Qwen2.5-1.5B-Instruct, 512-token prompts, 256 new tokens; `results_4bit
   batches. vLLM's fp8 cache with layer 0 kept in fp16 (the setting that is correct on this model) is 1.3–1.4×
   faster than Turing's int8 at equal quality.
 * **Cold start:** from process start to first token Turing takes 25.4 s from a cold page cache and 10.0 s warm,
-  against vLLM's 51.7 s and 34.2 s. vLLM was measured in an earlier session, where Turing's code at the time took
-  27.4 s and 12.1 s (1.9–2.8× sooner); llama.cpp with its 4-bit GGUF takes 7.1 s and 1.3 s
-  (`results_cold_start_*_cuda.json`).
+  against vLLM's 51.7 s and 34.2 s (vLLM ran in an earlier run, alongside a Turing build that took 27.4 s and
+  12.1 s: 1.9–2.8× sooner); llama.cpp with its 4-bit GGUF takes 7.1 s and 1.3 s.
 
-Details and every other setting are in the [comparison](docs/comparison.md). For production serving use vLLM, SGLang
+Details and every other setting are in the [comparison](docs/comparison.md); the results files and the commands
+that produced them are in [`benchmarks/`](benchmarks/). For production serving use vLLM, SGLang
 or TensorRT-LLM; on a laptop, llama.cpp or Ollama.
 
 ---
@@ -166,7 +166,7 @@ an optional int8 KV cache (`--kv-cache-dtype int8`).
 ./scripts/launch_distributed.sh Qwen/Qwen2.5-7B-Instruct 2 2   # MODEL TP PP, via torchrun; rank 0 serves HTTP
 ```
 Sharded weights and KV pages over `torch.distributed`. The tests run TP 2/4, PP 2 and TP 2 × PP 2 as CPU (gloo)
-processes and compare logits with a single process; no multi-GPU (NCCL) run has been recorded.
+processes and compare logits with a single process; multi-GPU (NCCL) runs are not tested yet.
 
 ---
 
@@ -183,9 +183,9 @@ back to random values. Every family except OPT also loads from GGUF (Mistral and
 
 ## Hardware
 
-Recorded runs exist for an NVIDIA L4 (CUDA, Triton kernels, CUDA graphs), an Apple M4 Pro (MPS) and CPUs. `--device`
-also accepts `rocm` (PyTorch's HIP build) and the auto-detection picks `xpu` or `vulkan` when PyTorch reports them,
-but none of those has been run.
+Tested on NVIDIA GPUs (CUDA, Triton kernels, CUDA graphs; benchmarked on an L4), Apple Silicon (MPS) and x86_64 and
+arm64 CPUs. `--device` also accepts `rocm` (PyTorch's HIP build), and auto-detection picks `xpu` or `vulkan` when
+PyTorch reports them; those backends are untested.
 
 ---
 
@@ -206,8 +206,8 @@ but none of those has been run.
 
 The repository also holds research components outside the serving path: cross-model KV transfer, `clean_base`
 lineage, k-slot pooling, an MoE expert-offload runner, hybrid linear/softmax attention (needs a model trained with it)
-and untrained Matryoshka draft heads. What was measured on real models, including what did not work, is in
-[research findings](docs/measured-differentiators.md).
+and untrained Matryoshka draft heads. What each does, and how it performed on real models, is in
+[experimental components](docs/experimental.md).
 
 ---
 
@@ -255,7 +255,7 @@ LiteLLM, KServe, Helm and llm-d: [integrations](docs/integrations.md).
 ## Documentation
 
 * [Quickstart](https://intutic.github.io/turing/quickstart/) · [Models & hardware](https://intutic.github.io/turing/models_and_hardware/) · [Serving & API](https://intutic.github.io/turing/serving/)
-* [Architecture](https://intutic.github.io/turing/architecture/) · [Benchmarks](https://intutic.github.io/turing/benchmarks/) · [Claims audit](https://intutic.github.io/turing/claims-audit/)
+* [Architecture](https://intutic.github.io/turing/architecture/) · [Benchmarks](https://intutic.github.io/turing/benchmarks/)
 * [Comparison](https://intutic.github.io/turing/comparison/) · [Docker](https://intutic.github.io/turing/docker/) · [Kubernetes & llm-d](https://intutic.github.io/turing/llmd-integration/) · [Integrations](https://intutic.github.io/turing/integrations/) · [Licensing](https://intutic.github.io/turing/licensing/)
 
 ---

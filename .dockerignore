@@ -12,5 +12,5 @@ site
 weights
 docs
 tests
-results_*.json
+benchmarks/
 exhaustive_*.json

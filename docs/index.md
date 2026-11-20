@@ -58,8 +58,8 @@ client, `langchain-turing` or `llama-index-llms-turing`. More in the [quickstart
   13 real GGUF files agree with llama.cpp ([models & hardware](models_and_hardware.md)).
 * **Evals that run any idea against real models**: KV and weight quality (`scripts/eval_kv_quality.py`), GSM8K and
   pass-key retrieval through the engine, and head-to-head benchmarks against vLLM and llama.cpp.
-* **Research components, measured honestly**, including the ones that did not work
-  ([research findings](measured-differentiators.md)).
+* **Experimental components with results on real models**, including the ones that did not work
+  ([experimental components](experimental.md)).
 
 ## What it is not
 
@@ -80,5 +80,5 @@ Ollama.
 | Connect LangChain, LlamaIndex, LiteLLM, KServe or Helm | [Integrations](integrations.md), [Kubernetes & llm-d](llmd-integration.md) |
 | Compare with vLLM and llama.cpp | [Comparison](comparison.md), [Benchmarks](benchmarks.md) |
 | Understand or change the code | [Architecture](architecture.md) |
-| See what was measured and what was removed | [Research findings](measured-differentiators.md), [Claims audit](claims-audit.md) |
+| Try the experimental components | [Experimental components](experimental.md) |
 | Use it commercially | [Licensing](licensing.md) |

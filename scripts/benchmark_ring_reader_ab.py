@@ -38,7 +38,7 @@ def main(argv=None):
     ap.add_argument("--pairs", type=int, default=8)
     ap.add_argument("--size-mib", type=int, default=2048)
     ap.add_argument("--queue-depth", type=int, default=64)
-    ap.add_argument("--out", default="results_ring_reader_ab.json")
+    ap.add_argument("--out", default="benchmarks/results/results_ring_reader_ab.json")
     a = ap.parse_args(argv)
 
     size = a.size_mib << 20

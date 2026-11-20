@@ -96,7 +96,7 @@ def main(argv=None):
     ap.add_argument("--windows", type=int, default=4)
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--no-gpu-baseline", action="store_true")
-    ap.add_argument("--out", default="results_moe_offload_cuda.json")
+    ap.add_argument("--out", default="benchmarks/results/results_moe_offload_cuda.json")
     a = ap.parse_args(argv)
     dev = torch.device(a.device)
 

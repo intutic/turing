@@ -322,7 +322,7 @@ def main():
         "kernel_throughput": kernel_res,
         "device": str(device),
     }
-    with open("results_associative_recall_benchmark.json", "w") as f:
+    with open("benchmarks/results/results_associative_recall_benchmark.json", "w") as f:
         json.dump(out_data, f, indent=2)
 
 

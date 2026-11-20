@@ -132,7 +132,7 @@ def main(argv=None):
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--dir", default=None, help="folder for the scratch file (default: a *.noindex folder in the repo)")
     ap.add_argument("--label", default=None, help="label stored in the results, e.g. the reader build")
-    ap.add_argument("--out", default="results_ingest_ladder.json")
+    ap.add_argument("--out", default="benchmarks/results/results_ingest_ladder.json")
     a = ap.parse_args(argv)
 
     from turing.turing_csrc import NativeAsyncRingReader

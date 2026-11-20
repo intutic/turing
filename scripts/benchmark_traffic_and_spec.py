@@ -38,7 +38,7 @@ def parse_args():
                         help="Ignored: these benchmarks are pure Python and run on the host CPU.")
     parser.add_argument("--concurrency_max", type=int, default=16,
                         help="Maximum active concurrency for spec gating.")
-    parser.add_argument("--json_out", type=str, default="results_traffic_spec.json",
+    parser.add_argument("--json_out", type=str, default="benchmarks/results/results_traffic_spec.json",
                         help="JSON output path.")
     return parser.parse_args()
 

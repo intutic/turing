@@ -64,7 +64,7 @@ def main():
                     help="KxN of y = x W^T (in x out features)")
     ap.add_argument("--rows", default="1,2,4,8,16,32,64,128,256,512")
     ap.add_argument("--iters", type=int, default=50)
-    ap.add_argument("--out", default="results_w4a16_crossover_cuda.json")
+    ap.add_argument("--out", default="benchmarks/results/results_w4a16_crossover_cuda.json")
     a = ap.parse_args()
     rows = []
     for shape in a.shapes.split(","):

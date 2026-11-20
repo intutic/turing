@@ -27,7 +27,7 @@ def main():
     ap.add_argument("--decode-batch", type=int, default=0,
                     help="instead of TTFT: B requests decoding together; per decode step, the synchronized forward "
                          "against the whole step (speed plan P6.2), and the forward's kernels by device time")
-    ap.add_argument("--out", default="results_engine_ttft_cuda.json")
+    ap.add_argument("--out", default="benchmarks/results/results_engine_ttft_cuda.json")
     a = ap.parse_args()
     from turing.config import TuringConfig
     from turing.models.hf_loader import RealHuggingFaceLoader

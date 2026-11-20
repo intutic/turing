@@ -1,15 +1,14 @@
-# Kubernetes Distributed Serving with llm-d
+# Kubernetes with llm-d
 
-This guide explains how to deploy **Turing Engine** in a **Kubernetes** cluster orchestrated by [**llm-d**](https://llm-d.ai) for **prefix-cache aware routing** across replicas.
+This guide deploys Turing Engine on Kubernetes behind [llm-d](https://llm-d.ai), which routes each request to the
+replica that already holds the longest matching prefix in its KV cache.
 
----
-
-## 🎯 Architecture Overview
+## Architecture
 
 ```mermaid
 graph TD
     Client[Inference Client] -->|HTTP /v1/completions| Proxy[llm-d Envoy Proxy]
-    Proxy -->|ext_proc gRPC| EPP[Endpoint Policy Provider EPP]
+    Proxy -->|ext_proc gRPC| EPP[Endpoint Picker EPP]
     
     subgraph Turing Pod Pool
         Turing1[Turing Pod 1<br/>GPU 0]
@@ -23,33 +22,34 @@ graph TD
     Proxy -->|Forward Request| Turing1
 ```
 
-### How Prefix-Cache Aware Routing Works
-1. **Prefix cache**: each Turing Engine pod keeps an automatic prefix cache over its paged KV pool. Every full
-   16-token page of a finished prefill (and of a finished request) is indexed by a chained hash of its tokens, and
-   later requests that start with the same tokens reuse those pages instead of recomputing them.
-2. **KV events**: with `--enable-kv-events`, each pod publishes `BlockStored` (block hashes, parent hash, token ids,
-   block size 16), `BlockRemoved` and `AllBlocksCleared` events on a ZeroMQ PUB socket (port 5556), in vLLM's
-   msgpack KV-event format, on the topic `kv@<POD_IP>:<port>@<model>`. A ROUTER socket (port 5559) replays events
-   from a sequence number for subscribers that reconnect.
-3. **Routing**: llm-d's precise prefix-cache scorer indexes the blocks each pod holds and sends a request to the pod
-   with the longest matching prefix. Tokens for its index come from the render endpoints below.
+### How prefix-cache aware routing works
 
-Prefill/decode disaggregation across pods is not part of this guide (see the serving guide for what the engine
-supports on one node).
+1. **Prefix cache.** Each pod keeps an automatic prefix cache over its paged KV pool. Every full 16-token page of a
+   finished prefill (and of a finished request) is indexed by a chained hash of its tokens. Later requests that start
+   with the same tokens reuse those pages instead of recomputing them.
+2. **KV events.** With `--enable-kv-events`, each pod publishes `BlockStored` (block hashes, parent hash, token ids,
+   block size 16), `BlockRemoved` and `AllBlocksCleared` events on a ZeroMQ PUB socket (port 5556) in vLLM's msgpack
+   KV-event format, on the topic `kv@<POD_IP>:<port>@<model>`. A ROUTER socket (port 5559) replays events from a
+   given sequence number for subscribers that reconnect.
+3. **Routing.** llm-d's precise prefix-cache scorer indexes the blocks each pod holds and sends each request to the
+   pod with the longest matching prefix. It gets the tokens for its index from the
+   [render endpoints](#token-render-endpoints).
 
----
+Prefill/decode disaggregation across pods is outside the scope of this guide; see the serving guide for what the
+engine supports on a single node.
 
-## 🚀 Deployment Guide
+## Deployment
 
 ### Prerequisites
-- Kubernetes cluster v1.28+ with NVIDIA GPU nodes (e.g. Google Cloud GKE with NVIDIA L4 or A100 GPUs)
-- Gateway API Inference Extension (GAIE) v1 CRDs installed:
+
+- Kubernetes v1.28+ with NVIDIA GPU nodes (for example GKE with NVIDIA L4 or A100 GPUs)
+- Gateway API Inference Extension (GAIE) v1 CRDs:
   ```bash
   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/latest/download/manifests.yaml
   ```
 - Helm 3.12+
 
-### Step 1: Install the llm-d Router
+### 1. Install the llm-d router
 
 ```bash
 helm install llm-d-router oci://ghcr.io/llm-d/charts/llm-d-router-standalone \
@@ -57,9 +57,9 @@ helm install llm-d-router oci://ghcr.io/llm-d/charts/llm-d-router-standalone \
   --create-namespace
 ```
 
-### Step 2: Deploy Turing Engine via Helm
+### 2. Deploy Turing Engine with Helm
 
-Deploy Turing Engine with `llmd.enabled=true`:
+Install the chart from `deploy/helm/turing-serving` with `llmd.enabled=true`:
 
 ```bash
 helm install turing-llama deploy/helm/turing-serving/ \
@@ -72,9 +72,9 @@ helm install turing-llama deploy/helm/turing-serving/ \
   --set replicaCount=2
 ```
 
-### Step 3: Register the InferencePool
+### 3. Register the InferencePool
 
-Apply the `InferencePool` to bind the llm-d router to Turing Engine pods:
+The `InferencePool` binds the llm-d router to the Turing Engine pods:
 
 ```yaml
 apiVersion: inference.networking.k8s.io/v1
@@ -96,19 +96,17 @@ spec:
     failureMode: FailOpen
 ```
 
+The same manifest is in the repository:
 
-Apply the manifest:
 ```bash
 kubectl apply -f deploy/llmd/inferencepool.yaml -n llm-d-serving
 ```
 
----
+## Metrics
 
-## 📈 Monitoring & Telemetry
-
-`GET /metrics` returns Prometheus text (JSON with `?format=json`); the Helm chart adds scrape annotations. The
-gauges llm-d's scorers read (the full output also has latency, prefix-cache hit rate, speculation and per-lane
-counters):
+`GET /metrics` returns Prometheus text (JSON with `?format=json`), and the Helm chart adds scrape annotations. These
+are the gauges llm-d's scorers read; the full output also includes latency, prefix-cache hit rate, speculation and
+per-lane counters.
 
 ```
 # HELP turing_num_requests_waiting Number of requests queued in waiting backlog (llm-d TotalQueuedRequests)
@@ -128,12 +126,11 @@ turing_kv_cache_usage_perc 0.125
 turing_cache_config_info{block_size="16",num_gpu_blocks="1024"} 1.0
 ```
 
----
+## Token render endpoints
 
-## 🔧 Token Render Endpoint for EPP
-
-llm-d's `token-producer` data plugin calls `/v1/completions/render` or `/v1/chat/completions/render`; they return
-exactly the token ids the generation endpoints feed the model (the chat template applied for chat):
+llm-d's `token-producer` data plugin calls `/v1/completions/render` or `/v1/chat/completions/render`. Both return
+exactly the token ids the corresponding generation endpoint feeds the model; the chat endpoint applies the chat
+template first.
 
 ```bash
 curl -X POST http://localhost:8000/v1/completions/render \
@@ -141,7 +138,8 @@ curl -X POST http://localhost:8000/v1/completions/render \
   -d '{"prompt": "Hello world!"}'
 ```
 
-Response (SmolLM2's tokenizer):
+Response with SmolLM2's tokenizer:
+
 ```json
 {
   "tokens": [19556, 905, 17],

@@ -1,4 +1,6 @@
-# ⚡ Quickstart
+# Quickstart
+
+Install Turing Engine, chat with a model in the terminal, then serve it over the OpenAI, Anthropic and Ollama APIs.
 
 ---
 
@@ -26,10 +28,13 @@
     ```
 
 === "Docker"
-    See [Docker](docker.md): one `deploy/Dockerfile` builds a CPU and a CUDA image.
+    ```bash
+    docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.0.0 --model HuggingFaceTB/SmolLM2-135M
+    ```
+    The CUDA image is `ghcr.io/intutic/turing:v2.0.0-cuda`. See [Docker](docker.md).
 
-Elsewhere (Windows, Intel Macs) `pip install turing-engine` builds the C++ extension from the source package, which
-needs a C++20 compiler.
+On other platforms (Windows, Intel Macs) `pip install turing-engine` builds the C++ extension from the source package,
+which needs a C++20 compiler.
 
 ---
 
@@ -43,8 +48,8 @@ turing chat --model ./models/qwen2.5-0.5b-instruct-q8_0.gguf    # llama.cpp GGUF
 ```
 
 `--model` takes a HuggingFace repo id, a local checkpoint directory, a `.gguf` file, a `.tgate4` directory written by
-`turing convert`, or a short alias from `ModelResolver.CLI_ALIASES` (`turing/models/resolver.py`). Weights that fail to
-load stop the command; `--mock` runs synthetic weights on purpose.
+`turing convert`, or a short alias from `ModelResolver.CLI_ALIASES` (`turing/models/resolver.py`). If the weights fail
+to load, the command exits with an error; `--mock` runs synthetic weights for testing without a download.
 
 ---
 
@@ -89,7 +94,7 @@ response = client.chat(model="Qwen/Qwen2.5-7B-Instruct", messages=[{"role": "use
 print(response["message"]["content"])
 ```
 
-The `api_key` values above are ignored unless the server was started with `--api-key` (or `TURING_API_KEY`).
+The server ignores `api_key` unless it is started with `--api-key` (or `TURING_API_KEY`).
 
 ### D. LangChain
 ```python
@@ -164,4 +169,4 @@ The binary runs Llama-layout GGUF models on the CPU and serves `/v1/chat/complet
 ```
 
 Rank 0 runs the HTTP server and the engine; the other ranks run the worker loop. This path is tested with CPU
-(gloo) processes; no multi-GPU run has been recorded.
+(gloo) processes; multi-GPU runs have not been validated. See [distributed serving](serving.md#11-distributed-serving).

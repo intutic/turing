@@ -40,7 +40,7 @@ def main():
     ap.add_argument("--binary", action="append", required=True, help="label=path (repeatable)")
     ap.add_argument("--new-tokens", type=int, default=256)
     ap.add_argument("--runs", type=int, default=5)
-    ap.add_argument("--out", default="results_cpp_engine_mps.json")
+    ap.add_argument("--out", default="benchmarks/results/results_cpp_engine_mps.json")
     a = ap.parse_args()
 
     np.random.seed(0)

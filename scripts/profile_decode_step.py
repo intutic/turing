@@ -108,7 +108,7 @@ def main():
     ap.add_argument("--chunk", type=int, default=2048)
     ap.add_argument("--steps", type=int, default=64)
     ap.add_argument("--device", default="cuda")
-    ap.add_argument("--out", default="results_decode_profile_cuda.json")
+    ap.add_argument("--out", default="benchmarks/results/results_decode_profile_cuda.json")
     a = ap.parse_args()
     dev = torch.device(a.device)
     cuda = dev.type == "cuda"

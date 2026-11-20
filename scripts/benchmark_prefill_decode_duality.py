@@ -232,7 +232,7 @@ def benchmark_speculation_concurrency_gating() -> dict:
 def main():
     parser = argparse.ArgumentParser(description="Turing Engine Prefill vs Decode Duality Benchmark")
     parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "mps", "cuda"])
-    parser.add_argument("--output", type=str, default="results_prefill_decode_duality.json")
+    parser.add_argument("--output", type=str, default="benchmarks/results/results_prefill_decode_duality.json")
     args = parser.parse_args()
 
     device = args.device

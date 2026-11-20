@@ -75,7 +75,7 @@ def main():
     ap.add_argument("--max-model-len", type=int, default=None,
                     help="vLLM's max_model_len (default: the longest pass-key context + 32, or 4128); for a LongRoPE "
                          "model (Phi-3) it may decide which frequencies vLLM uses for every request")
-    ap.add_argument("--out", default="results_quality_vllm_cuda.json")
+    ap.add_argument("--out", default="benchmarks/results/results_quality_vllm_cuda.json")
     a = ap.parse_args()
 
     os.environ.setdefault("VLLM_ALLOW_LONG_MAX_MODEL_LEN", "1")  # a 32K needle prompt plus 8 new tokens, as for Turing

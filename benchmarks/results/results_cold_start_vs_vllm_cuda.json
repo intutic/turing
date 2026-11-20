@@ -1,0 +1,224 @@
+{
+  "script": "scripts/benchmark_cold_start.py",
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "python": "3.10.12",
+    "torch": "2.9.1+cu129",
+    "cuda": "12.9",
+    "turing": "1.7.0",
+    "cpus": 16,
+    "gpu": "NVIDIA L4",
+    "host_mem_kib": 65841352
+  },
+  "args": {
+    "models": "Qwen/Qwen2.5-1.5B-Instruct",
+    "formats": "safetensors",
+    "caches": "cold,warm",
+    "runs": 5,
+    "device": "cuda",
+    "dtype": null,
+    "tgate4_root": "~/jflux/build/tgate4",
+    "method": "gptq",
+    "calib_windows": 128,
+    "calib_tokens": 2048,
+    "engine": "vllm",
+    "python": "~/vllm-venv/bin/python",
+    "out": "results_cold_start_vs_vllm_cuda.json"
+  },
+  "conversions": {},
+  "rows": [
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "format": "safetensors",
+      "cache": "cold",
+      "n": 5,
+      "errors": 0,
+      "files": 7,
+      "bytes": 3098955668,
+      "runs": [
+        {
+          "ttft_s": 60.805686473846436,
+          "interpreter_s": 0.04363512992858887,
+          "import_s": 15.261268377304077,
+          "load_s": 45.48058867454529,
+          "first_token_s": 0.020194292068481445,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 49.19303345680237,
+          "interpreter_s": 0.02491450309753418,
+          "import_s": 8.966627597808838,
+          "load_s": 40.18151092529297,
+          "first_token_s": 0.019980430603027344,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 49.225701093673706,
+          "interpreter_s": 0.02469158172607422,
+          "import_s": 9.154664039611816,
+          "load_s": 40.02628827095032,
+          "first_token_s": 0.020057201385498047,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 49.45220494270325,
+          "interpreter_s": 0.024996042251586914,
+          "import_s": 9.03599500656128,
+          "load_s": 40.37128829956055,
+          "first_token_s": 0.019925594329833984,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 50.03583335876465,
+          "interpreter_s": 0.026437759399414062,
+          "import_s": 9.060383081436157,
+          "load_s": 40.92880654335022,
+          "first_token_s": 0.020205974578857422,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 0.0
+        }
+      ],
+      "ttft_s": {
+        "mean": 51.74249186515808,
+        "se": 2.270832093340841
+      },
+      "load_s": {
+        "mean": 41.397696542739865,
+        "se": 1.032067051532268
+      },
+      "import_s": {
+        "mean": 10.295787620544434,
+        "se": 1.2417352846771557
+      },
+      "first_token_s": {
+        "mean": 0.02007269859313965,
+        "se": 5.609842749199558e-05
+      },
+      "interpreter_s": {
+        "mean": 0.028935003280639648,
+        "se": 0.003687929043979582
+      },
+      "resident_before_max": 0.0,
+      "resident_before_min": 0.0,
+      "dtype": "float16",
+      "tokens_agree": true
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "format": "safetensors",
+      "cache": "warm",
+      "n": 5,
+      "errors": 0,
+      "files": 7,
+      "bytes": 3098955668,
+      "runs": [
+        {
+          "ttft_s": 34.26062345504761,
+          "interpreter_s": 0.026205062866210938,
+          "import_s": 8.892390489578247,
+          "load_s": 25.321887254714966,
+          "first_token_s": 0.020140647888183594,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 34.08751058578491,
+          "interpreter_s": 0.025870800018310547,
+          "import_s": 8.911166906356812,
+          "load_s": 25.13059401512146,
+          "first_token_s": 0.019878864288330078,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 34.44166874885559,
+          "interpreter_s": 0.024748802185058594,
+          "import_s": 8.889194965362549,
+          "load_s": 25.50774645805359,
+          "first_token_s": 0.01997852325439453,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 33.92290472984314,
+          "interpreter_s": 0.025371551513671875,
+          "import_s": 8.930143117904663,
+          "load_s": 24.947589874267578,
+          "first_token_s": 0.019800186157226562,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 34.33218455314636,
+          "interpreter_s": 0.025519847869873047,
+          "import_s": 8.913814544677734,
+          "load_s": 25.372685194015503,
+          "first_token_s": 0.020164966583251953,
+          "token": 264,
+          "dtype": "float16",
+          "device": "cuda",
+          "peak_device_bytes": null,
+          "resident_before": 1.0
+        }
+      ],
+      "ttft_s": {
+        "mean": 34.20897841453552,
+        "se": 0.09181076760972484
+      },
+      "load_s": {
+        "mean": 25.256100559234618,
+        "se": 0.09802455307617684
+      },
+      "import_s": {
+        "mean": 8.907342004776002,
+        "se": 0.0075142439771760045
+      },
+      "first_token_s": {
+        "mean": 0.019992637634277343,
+        "se": 7.133914174652861e-05
+      },
+      "interpreter_s": {
+        "mean": 0.025543212890625,
+        "se": 0.00024560747525870116
+      },
+      "resident_before_max": 1.0,
+      "resident_before_min": 1.0,
+      "dtype": "float16",
+      "tokens_agree": true
+    }
+  ],
+  "note": "seconds of wall clock; se = standard error over n runs; cold = model files dropped from the page cache, Python/torch/CUDA libraries cached"
+}

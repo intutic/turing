@@ -1,9 +1,9 @@
-# 🚀 Serving & API Reference
+# Serving and API Reference
 
 `turing serve` runs one model in a continuous-batching engine (`turing/serving/engine.py`) behind a FastAPI app
-(`turing/serving/server.py`). Every generation endpoint, OpenAI, Anthropic and Ollama alike, goes through the same
-core (`turing/serving/generation.py`): chat template, admission, constrained decoding, reasoning, tool calls, stop
-strings and usage.
+(`turing/serving/server.py`). The OpenAI, Anthropic and Ollama endpoints share one generation core
+(`turing/serving/generation.py`) that handles the chat template, admission, constrained decoding, reasoning, tool
+calls, stop strings and usage.
 
 ---
 
@@ -13,8 +13,8 @@ strings and usage.
 turing serve --model Qwen/Qwen2.5-7B-Instruct --host 127.0.0.1 --port 8000 --kv-cache-dtype int8
 ```
 
-The server serves one model; the `model` field of a request is not used to pick weights (only its `:NAME` suffix
-selects a LoRA adapter, §8). Run `turing serve --help` for the full list. The flags by topic:
+Each server serves one model. The request's `model` field does not select weights; only its `:NAME` suffix selects
+a LoRA adapter (§8). The main flags by topic are below; `turing serve --help` lists all of them.
 
 **Model and weights**
 
@@ -25,8 +25,8 @@ selects a LoRA adapter, §8). Run `turing serve --help` for the full list. The f
 | `--dtype` | checkpoint | `bf16`/`fp16`/`fp32`; default: the checkpoint's half type on CUDA, fp32 on CPU and MPS |
 | `--quantization` | `none` | `w4a16-rtn` or `w4a16-gptq`: 4-bit weights at load (GPTQ calibrates on WikiText-2; `turing convert` does it once) |
 | `--calib-windows` | `128` | GPTQ calibration windows of 2,048 tokens |
-| `--activation-sparsity` | `0` | TEAL-style: in batch-1 decode on CUDA, zero this share of every projection's inputs by magnitude and skip their weight rows; prefill and batched decode stay dense. Measured: 3–7% faster than 4-bit weights alone at batch 1, for 5–9 GSM8K points ([benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity)) |
-| `--sparsity` | `0.0` | FFN channel pruning. `0.0` is the exact model; 50% costs +6.8 to +15.8 nats NLL on SmolLM2 ([benchmarks §10](benchmarks.md#10-old-serving-defaults)) |
+| `--activation-sparsity` | `0` | TEAL-style: in batch-1 decode on CUDA, zero this share of every projection's inputs by magnitude and skip their weight rows; prefill and batched decode stay dense. 3–7% faster than 4-bit weights alone at batch 1, at a cost of 5–9 GSM8K points ([benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity)) |
+| `--sparsity` | `0.0` | FFN channel pruning. `0.0` is the exact model; 50% costs +6.8 to +15.8 nats NLL on SmolLM2 ([benchmarks §10](benchmarks.md#10-ffn-channel-pruning)) |
 | `--lora NAME=PATH` | none | Load a PEFT LoRA adapter (repeatable) |
 | `--mock` | off | Synthetic weights, for testing without a download |
 
@@ -34,9 +34,9 @@ selects a LoRA adapter, §8). Run `turing serve --help` for the full list. The f
 
 | Flag | Default | Effect |
 | :--- | :--- | :--- |
-| `--kv-cache-dtype` | `auto` | `native`, `int8` (per token and KV head) or `int4` (per 32 values); `auto` = `int8` on CUDA, `native` elsewhere. Layers the format damages are found at startup and kept in the model dtype; int4 also scales down outlier key channels. Measured quality: [benchmarks §2](benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps) |
+| `--kv-cache-dtype` | `auto` | `native`, `int8` (per token and KV head) or `int4` (per 32 values); `auto` = `int8` on CUDA, `native` elsewhere. Layers the format damages are detected at startup and kept in the model dtype; int4 also scales down outlier key channels. Quality: [benchmarks §2](benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps) |
 | `--no-kv-smoothing` | off | int4 KV: store keys without outlier-channel smoothing |
-| `--kv-page-budget` | `1.0` | Quest: share of 16-token pages each decode step reads, for requests of at least 8,192 tokens. Runs inside CUDA graphs; measured slower than reading every page at every length up to 8K ([benchmarks §4](benchmarks.md#4-decode-throughput-against-huggingface-transformers)), so it is opt-in |
+| `--kv-page-budget` | `1.0` | Quest: share of 16-token pages each decode step reads, for requests of at least 8,192 tokens. Runs inside CUDA graphs. Off by default: it is slower than reading every page at every length up to 8K ([benchmarks §4](benchmarks.md#4-decode-throughput-against-huggingface-transformers)) |
 | `--kv-cache-memory-fraction` | `0.6` | Share of free GPU memory, after the weights, for the paged KV pool |
 | `--max-batch-size` | `64` | Requests running (prefilling or decoding) at once |
 | `--no-cuda-graphs` | off | Run decode steps eagerly instead of replaying captured CUDA graphs |
@@ -74,9 +74,9 @@ selects a LoRA adapter, §8). Run `turing serve --help` for the full list. The f
 | `GET /health` | Liveness, running/waiting counts, KV utilisation (never needs the API key) |
 | `GET /metrics` | Prometheus text; `?format=json` for the engine telemetry as JSON |
 
-Admission rejections (429/503, below) come back in the error shape of the API the path belongs to (OpenAI, Anthropic
-or Ollama); other errors, such as request validation (422) and bad inputs to embeddings, rerank and extract (400), use
-FastAPI's `{"detail": ...}`.
+Admission rejections (429/503, §7) use the error shape of the path's API (OpenAI, Anthropic or Ollama). Other errors,
+such as request validation (422) and bad inputs to embeddings, rerank and extract (400), use FastAPI's
+`{"detail": ...}`.
 
 ---
 
@@ -135,7 +135,7 @@ without llguidance answers 400; there is no prompt-only fallback.
 
 ## 4. Per-request controls and response headers
 
-Body fields or headers:
+Set these per request as a body field or a header:
 
 | Body field | Header | Effect |
 | :--- | :--- | :--- |
@@ -143,11 +143,10 @@ Body fields or headers:
 | `lane` | `X-Turing-Lane` | `interactive`, `batch` or `background` (§7) |
 | `model: "base:NAME"` | `X-Turing-Adapter` | LoRA adapter (§8) |
 
-Removed parameters are refused with 400 and a message naming the load-time flag: body fields `use_svd_kv` and
-`sparsity_ratio`, headers `X-Turing-SVD-KV`, `X-Turing-SVD-Rank` and `X-Turing-Sparsity`. Earlier versions echoed
-them back without changing anything.
+The body fields `use_svd_kv` and `sparsity_ratio` and the headers `X-Turing-SVD-KV`, `X-Turing-SVD-Rank` and
+`X-Turing-Sparsity` are not supported; requests that set them get a 400 naming the load-time flag to use instead.
 
-Generation responses carry what the server did: `X-Turing-Model`, `X-Turing-Device`, `X-Turing-KV-Cache-Dtype`,
+Generation responses report what the server did in these headers: `X-Turing-Model`, `X-Turing-Device`, `X-Turing-KV-Cache-Dtype`,
 `X-Turing-Cached-Tokens`, `X-Turing-Draft-Tokens`, `X-Turing-KV-Utilization`, `X-Turing-Queue-Depth`, and
 `X-Turing-Lane` / `X-Turing-Adapter` when set.
 
@@ -165,7 +164,7 @@ Generation responses carry what the server did: `X-Turing-Model`, `X-Turing-Devi
   the rest, so the output distribution is that of plain decoding. It is skipped for requests with a logits processor
   and on the distributed path. With `--draft-tokens` above 0, `turing serve` installs a `SpeculationGatePolicy`
   (`turing/serving/spec_gate.py`): it drafts while 2 or fewer requests decode and stops at 4 or more (hysteresis
-  between); `--draft-tokens 0` turns drafting off. Its speed has not been measured.
+  between); `--draft-tokens 0` turns drafting off.
 
 ---
 
@@ -194,8 +193,8 @@ curl http://localhost:8000/v1/rerank -H "Content-Type: application/json" -d '{
 Both are on by default.
 
 * **Admission** (`AdmissionController`, sized to the KV pool): a request that cannot be admitted gets 503 (pool
-  full, `Retry-After: 1`; shed above the watermark, no `Retry-After`) or 429 (queued, `Retry-After: 2`); a request that can never fit gets 400. Streaming endpoints
-  admit before sending the 200.
+    full, `Retry-After: 1`; shed above the watermark, no `Retry-After`) or 429 (queued, `Retry-After: 2`). A request
+  that can never fit gets 400. Streaming endpoints admit before sending the 200.
 * **Lanes** (`LanePolicy`): `interactive`, `batch` and `background`, chosen by `lane` / `X-Turing-Lane` or by the
   request's shape. Waiting requests are ordered by lane, and each lane has its own prefill chunk (512, 256 and 128
   tokens). `/metrics` reports waiting, running, admitted and finished requests per lane.
@@ -213,15 +212,15 @@ curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/jso
 PEFT LoRA adapters (Llama-style layouts and Phi-3's fused projections, rsLoRA scaling) wrap the targeted attention
 and MLP projections, dense or 4-bit. All loaded adapters stay resident, and one batched decode step serves base and
 adapter requests together, each row with its own adapter (CUDA graphs are skipped for steps with adapters). The
-prefix cache keys pages by adapter. Logits match PEFT's in the tests (Llama, Qwen2, Phi-3, Gemma 2); an adapter
+prefix cache keys pages by adapter. Logits are tested against PEFT for Llama, Qwen2, Phi-3 and Gemma 2. An adapter
 whose targets the loader cannot map is refused.
 
 ---
 
 ## 9. Metrics
 
-`GET /metrics` returns Prometheus text (format 0.0.4); `?format=json` returns the telemetry as JSON. Metrics:
-`turing_serving_throughput_tok_per_sec`, `turing_total_tokens_generated`, `turing_running_requests`,
+`GET /metrics` returns Prometheus text (format 0.0.4); `?format=json` returns the telemetry as JSON. Exported
+metrics: `turing_serving_throughput_tok_per_sec`, `turing_total_tokens_generated`, `turing_running_requests`,
 `turing_waiting_queue_depth`, `turing_ttft_avg_ms`, `turing_ttft_p99_ms`, `turing_itl_avg_ms`,
 `turing_num_requests_waiting`, `turing_num_requests_running`, `turing_kv_cache_usage_perc`,
 `turing_cache_config_info` (labels `block_size`, `num_gpu_blocks`), with prefix caching on `turing_prefix_cache_hit_rate`,
@@ -253,9 +252,10 @@ streams Ollama progress lines; it does not change the model being served.
 
 Tensor parallelism shards attention heads, MLP and expert widths and the vocabulary across ranks with all-reduces;
 pipeline stages own contiguous layers and their KV pages and pass activations with send/recv, with forward-only 1F1B
-micro-batching. Rank 0 runs the HTTP server and drives the steps; the other ranks run the worker loop. The tests run
-TP 2, TP 4, PP 2 and TP 2 × PP 2 as CPU (gloo) processes and compare logits with one process (atol 1e-4). No NCCL or
-multi-GPU run has been recorded.
+micro-batching. Rank 0 runs the HTTP server and drives the steps; the other ranks run the worker loop.
+
+**Limitation:** the test suite covers TP 2, TP 4, PP 2 and TP 2 × PP 2 as CPU (gloo) processes, comparing logits
+with a single process (atol 1e-4). Multi-GPU (NCCL) runs have not been validated.
 
 **Prefill/decode disaggregation** over TCP:
 
@@ -265,8 +265,8 @@ turing serve --model Qwen/Qwen2.5-0.5B-Instruct --prefill-server prefill-host:56
 ```
 
 The decode server sends each prompt to the prefill worker, which returns the first token and the request's KV pages
-in the pool's storage format (native, int8 or int4 with scales). Greedy output equals a single engine in the tests,
-which run both sides as processes on one CPU host.
+in the pool's storage format (native, int8 or int4 with scales). In the tests, which run both sides as processes on
+one CPU host, greedy output matches a single engine.
 
 ---
 

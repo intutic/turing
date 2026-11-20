@@ -167,8 +167,8 @@ def main():
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     a.batches = [int(b) for b in a.batches.split(",")]
-    a.out = a.out or {"bench": "results_4bit_speed_cuda.json", "gsm8k": "results_4bit_quality_llamacpp_cuda.json",
-                      "coldstart": "results_cold_start_llamacpp_cuda.json"}[a.mode]
+    a.out = a.out or {"bench": "benchmarks/results/results_4bit_speed_cuda.json", "gsm8k": "benchmarks/results/results_4bit_quality_llamacpp_cuda.json",
+                      "coldstart": "benchmarks/results/results_cold_start_llamacpp_cuda.json"}[a.mode]
     {"bench": bench, "gsm8k": gsm8k, "coldstart": coldstart}[a.mode](a)
 
 

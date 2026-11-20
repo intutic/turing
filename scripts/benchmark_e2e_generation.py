@@ -178,7 +178,7 @@ def main():
     ap.add_argument("--calib-windows", type=int, default=32, help="turing GPTQ calibration windows (speed only)")
     ap.add_argument("--quantize-lm-head", action="store_true", help="turing: with --quantization, the LM head too")
     ap.add_argument("--activation-sparsity", type=float, default=0.0, help="turing: TEAL sparsity")
-    ap.add_argument("--out", default="results_e2e_generation_cuda.json")
+    ap.add_argument("--out", default="benchmarks/results/results_e2e_generation_cuda.json")
     a = ap.parse_args()
     if a.engine == "vllm":
         a.dtype = {"fp16": "float16", "bf16": "bfloat16"}.get(a.dtype, a.dtype)

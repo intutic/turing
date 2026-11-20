@@ -515,7 +515,7 @@ def main():
     results.append(benchmark_safetensors_parser())
     results.append(benchmark_traffic_manager())
 
-    out_file = "results_fused_kernels_and_simd_v5.json"
+    out_file = "benchmarks/results/results_fused_kernels_and_simd_v5.json"
     with open(out_file, "w") as f:
         json.dump(results, f, indent=2)
     print("\n" + "=" * 80)

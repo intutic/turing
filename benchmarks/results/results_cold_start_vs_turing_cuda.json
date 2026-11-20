@@ -1,0 +1,224 @@
+{
+  "script": "scripts/benchmark_cold_start.py",
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "python": "3.10.12",
+    "torch": "2.9.1+cu129",
+    "cuda": "12.9",
+    "turing": "1.7.0",
+    "cpus": 16,
+    "gpu": "NVIDIA L4",
+    "host_mem_kib": 65841348
+  },
+  "args": {
+    "models": "Qwen/Qwen2.5-1.5B-Instruct",
+    "formats": "safetensors",
+    "caches": "cold,warm",
+    "runs": 5,
+    "device": "cuda",
+    "dtype": null,
+    "tgate4_root": "~/jflux/build/tgate4",
+    "method": "gptq",
+    "calib_windows": 128,
+    "calib_tokens": 2048,
+    "engine": "turing",
+    "python": "/usr/bin/python3",
+    "out": "results_cold_start_vs_turing_cuda.json"
+  },
+  "conversions": {},
+  "rows": [
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "format": "safetensors",
+      "cache": "cold",
+      "n": 5,
+      "errors": 0,
+      "files": 7,
+      "bytes": 3098955668,
+      "runs": [
+        {
+          "ttft_s": 27.522326469421387,
+          "interpreter_s": 0.026166200637817383,
+          "import_s": 4.385882377624512,
+          "load_s": 17.562499046325684,
+          "first_token_s": 5.547778844833374,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 27.543615102767944,
+          "interpreter_s": 0.027078628540039062,
+          "import_s": 4.390340089797974,
+          "load_s": 17.5311336517334,
+          "first_token_s": 5.595062732696533,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 27.380188703536987,
+          "interpreter_s": 0.025813579559326172,
+          "import_s": 4.324170827865601,
+          "load_s": 17.518311500549316,
+          "first_token_s": 5.511892795562744,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 27.38147211074829,
+          "interpreter_s": 0.02524113655090332,
+          "import_s": 4.344749689102173,
+          "load_s": 17.519336223602295,
+          "first_token_s": 5.49214506149292,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 0.0
+        },
+        {
+          "ttft_s": 27.390793561935425,
+          "interpreter_s": 0.0254666805267334,
+          "import_s": 4.341456651687622,
+          "load_s": 17.522586345672607,
+          "first_token_s": 5.501283884048462,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 0.0
+        }
+      ],
+      "ttft_s": {
+        "mean": 27.44367918968201,
+        "se": 0.036653944847226776
+      },
+      "load_s": {
+        "mean": 17.53077335357666,
+        "se": 0.008245550971626606
+      },
+      "import_s": {
+        "mean": 4.357319927215576,
+        "se": 0.013066487467465884
+      },
+      "first_token_s": {
+        "mean": 5.529632663726806,
+        "se": 0.0188865750827291
+      },
+      "interpreter_s": {
+        "mean": 0.025953245162963868,
+        "se": 0.0003221170657624046
+      },
+      "resident_before_max": 0.0,
+      "resident_before_min": 0.0,
+      "dtype": "torch.bfloat16",
+      "tokens_agree": true
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "format": "safetensors",
+      "cache": "warm",
+      "n": 5,
+      "errors": 0,
+      "files": 7,
+      "bytes": 3098955668,
+      "runs": [
+        {
+          "ttft_s": 12.12400770187378,
+          "interpreter_s": 0.025192975997924805,
+          "import_s": 4.246995449066162,
+          "load_s": 2.4117298126220703,
+          "first_token_s": 5.440089464187622,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 12.091830968856812,
+          "interpreter_s": 0.025322914123535156,
+          "import_s": 4.214998006820679,
+          "load_s": 2.385247230529785,
+          "first_token_s": 5.4662628173828125,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 12.18145227432251,
+          "interpreter_s": 0.024875164031982422,
+          "import_s": 4.217953205108643,
+          "load_s": 2.400139093399048,
+          "first_token_s": 5.538484811782837,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 12.174617528915405,
+          "interpreter_s": 0.02516651153564453,
+          "import_s": 4.227107048034668,
+          "load_s": 2.397026777267456,
+          "first_token_s": 5.525317192077637,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 1.0
+        },
+        {
+          "ttft_s": 12.077901840209961,
+          "interpreter_s": 0.02503657341003418,
+          "import_s": 4.209530353546143,
+          "load_s": 2.4082467555999756,
+          "first_token_s": 5.435088157653809,
+          "token": 264,
+          "dtype": "torch.bfloat16",
+          "device": "cuda",
+          "peak_device_bytes": 15473360384,
+          "resident_before": 1.0
+        }
+      ],
+      "ttft_s": {
+        "mean": 12.129962062835693,
+        "se": 0.021029805101433166
+      },
+      "load_s": {
+        "mean": 2.400477933883667,
+        "se": 0.00464197687155538
+      },
+      "import_s": {
+        "mean": 4.223316812515259,
+        "se": 0.006569174140278125
+      },
+      "first_token_s": {
+        "mean": 5.481048488616944,
+        "se": 0.021525867117487035
+      },
+      "interpreter_s": {
+        "mean": 0.02511882781982422,
+        "se": 7.601339943318593e-05
+      },
+      "resident_before_max": 1.0,
+      "resident_before_min": 1.0,
+      "dtype": "torch.bfloat16",
+      "tokens_agree": true
+    }
+  ],
+  "note": "seconds of wall clock; se = standard error over n runs; cold = model files dropped from the page cache, Python/torch/CUDA libraries cached"
+}

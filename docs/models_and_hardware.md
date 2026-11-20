@@ -1,13 +1,11 @@
-# 🌐 Models & Hardware
+# Models & Hardware
 
----
+## Supported model types
 
-## 1. Supported model types
-
-The HuggingFace loader accepts exactly the model types in `hf_loader.FAMILIES` and refuses every other one before
-downloading (`ArchitectureRegistry` raises for the same set). Each type has a parity test against HuggingFace in
-`tests/test_hf_parity.py` (prefill, chunked prefill, decode, stateless calls and batched decode across requests,
-atol 1e-3, on small randomly initialised models of each configuration):
+The HuggingFace loader accepts the model types in `hf_loader.FAMILIES` and refuses any other type before downloading
+(`ArchitectureRegistry` refuses the same set). Each type has a parity test against HuggingFace in
+`tests/test_hf_parity.py`, run on small randomly initialised models of each configuration: prefill, chunked prefill,
+decode, stateless calls and batched decode across requests, atol 1e-3.
 
 | HF `model_type` | Examples | Configurations tested | GGUF |
 | :--- | :--- | :--- | :---: |
@@ -28,19 +26,23 @@ atol 1e-3, on small randomly initialised models of each configuration):
 | `qwen3_moe` | Qwen3-MoE | | ✅ |
 | `olmoe` | OLMoE | `clip_qkv`, full-projection q/k norms | ✅ |
 
-RoPE scaling types: default, linear, dynamic NTK, YaRN, LongRoPE, Llama 3 and proportional (the last without a
-parity configuration of its own). Weights are written from the checkpoint into a model built on the meta device, and
-any parameter left unwritten is an error, so a model never runs with random weights; `--mock` runs synthetic weights
-on purpose.
+Supported RoPE scaling types are default, linear, dynamic NTK, YaRN, LongRoPE, Llama 3 and proportional (proportional
+has no parity configuration of its own).
 
-### Real checkpoints
+The loader builds the model on the meta device and writes the checkpoint's weights into it. A parameter left
+unwritten is an error, so a model never runs with random weights. `--mock` runs synthetic weights deliberately.
 
-**Against HuggingFace** (`scripts/eval_parity.py`: the first 64 tokens of WikiText-2 test, half prefilled and the rest
-decoded token by token through the cache, against HuggingFace's eager forward). In fp32 the difference is rounding.
-In bf16 the "noise floor" column is HuggingFace against itself (its own cached decode against its full forward), the
-scale for the column before it; ΔNLL is what a user would notice.
+### Parity on real checkpoints
 
-Apple M4 Pro, fp32 (OLMoE and Mistral-7B in bf16 to fit; `results_parity_mps.json`):
+`scripts/eval_parity.py` takes the first 64 tokens of the WikiText-2 test split, prefills half, decodes the rest token
+by token through the cache, and compares the logits with HuggingFace's eager forward.
+
+- In fp32 the difference is rounding.
+- In bf16, the "noise floor" column is HuggingFace against itself (its own cached decode against its full forward)
+  and gives the scale for the column before it.
+- ΔNLL is the difference a user would notice.
+
+Apple M4 Pro, fp32; OLMoE and Mistral-7B in bf16 to fit in memory. Source: `benchmarks/results/results_parity_mps.json`.
 
 <!-- table:parity_mps -->
 | Checkpoint | Type | dtype | max \|Δlogit\| vs HF | HF cached vs full (noise floor) | Top-1 agreement | ΔNLL vs HF |
@@ -63,7 +65,7 @@ Apple M4 Pro, fp32 (OLMoE and Mistral-7B in bf16 to fit; `results_parity_mps.jso
 | mistralai/Mistral-7B-v0.1 | mistral | bfloat16 | 0.5 | — | 95.3% | +0.0002 |
 <!-- /table -->
 
-NVIDIA L4, bf16 (`results_parity_cuda.json`):
+NVIDIA L4, bf16. Source: `benchmarks/results/results_parity_cuda.json`.
 
 <!-- table:parity_cuda -->
 | Checkpoint | Type | dtype | max \|Δlogit\| vs HF | HF cached vs full (noise floor) | Top-1 agreement | ΔNLL vs HF |
@@ -83,8 +85,8 @@ NVIDIA L4, bf16 (`results_parity_cuda.json`):
 | allenai/OLMoE-1B-7B-0924 | olmoe | bfloat16 | 1.89 | 1.262 | 96.9% | +0.0200 |
 <!-- /table -->
 
-MoE checkpoints on the L4 VM's CPU, bf16 (`results_parity_cpu.json`; Qwen1.5-MoE-A2.7B is the smallest real
-`qwen2_moe` checkpoint):
+MoE checkpoints on an x86_64 CPU, bf16. Qwen1.5-MoE-A2.7B is the smallest real `qwen2_moe` checkpoint. Source:
+`benchmarks/results/results_parity_cpu.json`.
 
 <!-- table:parity_cpu -->
 | Checkpoint | Type | dtype | max \|Δlogit\| vs HF | HF cached vs full (noise floor) | Top-1 agreement | ΔNLL vs HF |
@@ -93,10 +95,16 @@ MoE checkpoints on the L4 VM's CPU, bf16 (`results_parity_cpu.json`; Qwen1.5-MoE
 | Qwen/Qwen1.5-MoE-A2.7B | qwen2_moe | bfloat16 | 0.891 | 0.625 | 96.9% | +0.0033 |
 <!-- /table -->
 
-**GGUF, real files against llama.cpp** (`scripts/eval_gguf_parity.py`, `results_gguf_parity_mps.json`): Apple M4 Pro,
-Turing on MPS in fp32 and llama.cpp (llama-cpp-python) on Metal with all layers offloaded, the first 64 tokens of
-WikiText-2 test. NLL is per token; the HF column is the original checkpoint in fp32, not the GGUF. "llama.cpp Metal vs
-CPU" is llama.cpp's own difference between its two backends, a scale for the first column.
+### GGUF parity against llama.cpp
+
+`scripts/eval_gguf_parity.py` compares Turing on MPS in fp32 with llama.cpp (llama-cpp-python) on Metal with all
+layers offloaded, on an Apple M4 Pro, over the first 64 tokens of the WikiText-2 test split.
+
+- NLL is per token. The HF column is the original checkpoint in fp32, not the GGUF.
+- "llama.cpp Metal vs CPU" is llama.cpp's own difference between its two backends and gives the scale for the first
+  column.
+
+Source: `benchmarks/results/results_gguf_parity_mps.json`.
 
 <!-- table:gguf -->
 | Family | GGUF file | Quantized types | max \|Δlogit\| vs llama.cpp | Top-1 agreement | llama.cpp Metal vs CPU max \|Δlogit\| | NLL Turing | NLL llama.cpp | NLL HF fp32 |
@@ -116,26 +124,24 @@ CPU" is llama.cpp's own difference between its two backends, a scale for the fir
 | olmoe | `olmoe-1b-7b-0924-q8_0.gguf` | Q8_0 | 0.961 | 100.0% | 0.973 | 3.195 | 3.198 | 3.200 |
 <!-- /table -->
 
-### Not run
+### Limitations
 
-No model larger than Qwen2.5-7B (7.6B parameters) has been run end to end, no `qwen3_moe` checkpoint (the
-smallest, Qwen3-30B-A3B, needs about 61 GB in bf16), and no real checkpoint through the tensor- or pipeline-parallel
-path.
+- The largest model run end to end is Qwen2.5-7B (7.6B parameters).
+- No `qwen3_moe` checkpoint has been run; the smallest, Qwen3-30B-A3B, needs about 61 GB in bf16.
+- No real checkpoint has been run through the tensor- or pipeline-parallel path.
 
----
+## Memory
 
-## 2. Memory
+- **Weights:** 2 bytes per parameter in fp16/bf16, 4 in fp32 (the default on CPU and MPS).
+- **4-bit weights** (`turing convert` or `--quantization`): attention and dense-MLP projections take half a byte per
+  weight plus an fp16 scale and a uint8 zero per 64 weights. Embeddings, the LM head, routers and MoE experts stay in
+  the model dtype.
+- **KV cache:** the pool takes `--kv-cache-memory-fraction` (default 0.6) of the GPU memory left after the weights.
 
-Weights take 2 bytes per parameter in fp16/bf16 and 4 in fp32 (the default on CPU and MPS). With 4-bit weights
-(`turing convert` or `--quantization`), attention and dense-MLP projections take half a byte per weight plus an fp16
-scale and a uint8 zero per 64 weights; embeddings, the LM head, routers and MoE experts stay in the model dtype. The
-KV pool takes `--kv-cache-memory-fraction` (0.6) of the GPU memory left after the weights. A 7B model in fp16 (about
-15 GB of weights) leaves room for a KV pool on a 24 GB GPU; a 70B model needs about 141 GB in fp16 and does not fit
-on one 24 GB GPU even at 4 bits per projection weight.
+A 7B model in fp16 (about 15 GB of weights) leaves room for a KV pool on a 24 GB GPU. A 70B model needs about 141 GB
+in fp16 and does not fit on one 24 GB GPU, even at 4 bits per projection weight.
 
----
-
-## 3. Model names
+## Model names
 
 ```bash
 turing serve --model Qwen/Qwen2.5-7B-Instruct          # HuggingFace repo id
@@ -145,22 +151,20 @@ turing serve --model ./qwen7b-gptq                      # .tgate4 directory from
 turing chat --model deepseek-r1-1.5b                    # alias
 ```
 
-Aliases (`ModelResolver.CLI_ALIASES` in `turing/models/resolver.py`) are typing shortcuts for repo ids, for example
-`smollm2` → `HuggingFaceTB/SmolLM2-135M`. An alias does not mean the model was tested, and an alias resolving to a
-model type outside the table above is refused at load. `SIZING_PROFILES` (`turing/models/sizing_profiles.py`) holds
-layer geometries for `--mock` synthetic models only.
+Aliases (`ModelResolver.CLI_ALIASES` in `turing/models/resolver.py`) are shortcuts for repo ids, for example
+`smollm2` → `HuggingFaceTB/SmolLM2-135M`. An alias says nothing about whether the model has been tested, and an alias
+that resolves to a model type outside the table above is refused at load. `SIZING_PROFILES`
+(`turing/models/sizing_profiles.py`) holds layer geometries for `--mock` synthetic models only.
 
----
-
-## 4. Hardware
+## Hardware
 
 | Backend | Status |
 | :--- | :--- |
-| NVIDIA CUDA | Measured on an L4: Triton decode kernels, CUDA graphs, int4 GEMM and input-sparse GEMV kernels ([benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity)) |
-| Apple Silicon (MPS) | Measured on an M4 Pro. Attention takes an explicit path, because PyTorch 2.9's MPS SDPA reuses one cached graph per shape with the first call's scale |
+| NVIDIA CUDA | Tested on NVIDIA L4: Triton decode kernels, CUDA graphs, int4 GEMM and input-sparse GEMV kernels ([benchmarks](benchmarks.md#3-4-bit-weights-and-activation-sparsity)) |
+| Apple Silicon (MPS) | Tested on Apple M4 Pro. Attention uses an explicit path because PyTorch 2.9's MPS SDPA reuses one cached graph per shape with the first call's scale |
 | CPU | PyTorch on CPU; the C++ extension and `turing-cli` use AVX2/FMA (x86_64) or NEON (arm64) |
-| AMD ROCm | `--device rocm` uses PyTorch's HIP build (exposed as `cuda`); no recorded run |
-| Intel XPU, Vulkan | Picked by `--device auto` when PyTorch reports them; no recorded run |
+| AMD ROCm | `--device rocm` uses PyTorch's HIP build (exposed as `cuda`); untested |
+| Intel XPU, Vulkan | Selected by `--device auto` when PyTorch reports them; untested |
 
 ```bash
 turing info                      # detected devices and runtime

@@ -1,15 +1,34 @@
-# 🌐 Comparison with vLLM, SGLang, TensorRT-LLM, llama.cpp and Ollama
+# Comparison with vLLM, SGLang, TensorRT-LLM, llama.cpp and Ollama
 
-**Measured on one NVIDIA L4, same model, same prompts, same GPU:** Turing Engine against vLLM 0.31 and llama.cpp
-(CUDA build). SGLang, TensorRT-LLM and Ollama were not run (Ollama serves through llama.cpp). Tables are generated from
-the committed results by `scripts/make_doc_tables.py`.
+**Setup.** One NVIDIA L4 (24 GB) running Turing Engine, vLLM 0.31 and llama.cpp (CUDA build) on the same models,
+prompts and GPU. SGLang, TensorRT-LLM and Ollama were not run (Ollama serves through llama.cpp). The tables are
+generated from the results files in `benchmarks/results/` by `scripts/make_doc_tables.py`; more measurements are on
+the [benchmarks](benchmarks.md) page.
+
+---
+
+## Where Turing Engine stands
+
+* **vLLM is faster in most settings; Turing is ahead in a few.** In fp16 vLLM is 1.01–1.04× faster on Qwen2.5-1.5B,
+  and Turing reaches 88–103% of vLLM on SmolLM2. At 4 bits vLLM is 1.06–1.12× faster; with Turing's opt-in 4-bit LM
+  head Turing is 1.15–1.16× vLLM at batch 1 and 8 and 1.09× llama.cpp at batch 1 (vLLM 1.04× at batch 64). At
+  16K-token prompts in fp16 Turing is 1.0–1.22× faster per request; vLLM's fp8 cache with layer 0 kept is 1.3–1.4×
+  faster than Turing's int8. Turing's first token at batch 64 takes up to 2.3× vLLM's (SmolLM2-1.7B); llama.cpp
+  starts fastest from a cold process.
+* **Comparable quality.** Turing's bf16 matches vLLM's on GSM8K (57.2% and 57.4%), and its GPTQ matches vLLM's GPTQ
+  checkpoint (50.4% and 50.2%; llama.cpp's Q4_K_M 52.4%, all ± 2.2%).
+* **Low-bit KV that stays correct by default.** Turing picks the layers to keep in full precision at startup; vLLM's
+  default fp8 and its per-token int4/fp8 caches break this model unless layer 0 is excluded by hand, and its per-token
+  int8 cache loses 16 GSM8K points.
+* **Not covered:** multi-GPU, SGLang, TensorRT-LLM, models larger than Qwen2.5-7B (7.6B), and model families other
+  than the six in the KV-guard validation ([benchmarks §2](benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps)).
 
 ---
 
 ## Speed
 
-**fp16, 1,024-token prompts, 256 new tokens, all requests submitted at once** (`results_e2e_generation_cuda.json`;
-output tokens per second, prefill included):
+**fp16, 1,024-token prompts, 256 new tokens, all requests submitted at once.** Output tokens per second, prefill
+included (`results_e2e_generation_cuda.json`):
 
 <!-- table:vs_short -->
 | Model | Engine | B=1 | B=8 | B=32 | B=64 | TTFT, B=1 |
@@ -20,8 +39,8 @@ output tokens per second, prefill included):
 | SmolLM2-360M | Turing | 204 | 1,253 | 2,342 | 2,694 | 0.042 s |
 <!-- /table -->
 
-**4 bits, Qwen2.5-1.5B-Instruct, 512-token prompts, 256 new tokens** (`results_4bit_speed_cuda.json`, GSM8K from
-`results_4bit_quality_*_cuda.json`, all three through Turing's evaluator):
+**4 bits, Qwen2.5-1.5B-Instruct, 512-token prompts, 256 new tokens** (`results_4bit_speed_cuda.json`; GSM8K from
+`results_4bit_quality_*_cuda.json`, all three engines scored by Turing's evaluator):
 
 <!-- table:vs_4bit -->
 | Setting | Batch 1, tok/s | Batch 8, tok/s | Batch 64, tok/s | GSM8K (n=500) |
@@ -36,9 +55,9 @@ output tokens per second, prefill included):
 | Turing fp16 (reference) | 73 | 530 | 2,152 | — |
 <!-- /table -->
 
-**16K-token prompts at equal KV memory** (Qwen2.5-1.5B-Instruct; seconds per request; each engine's KV capacity in
-tokens; `results_longctx_cuda.json`; Quest's row ran with 12.7 GiB of KV, the others 14.6 GiB). Read it with the quality table below: vLLM fp8 without a skipped layer is fast
-because it is wrong on this model.
+**16K-token prompts at equal KV memory** (Qwen2.5-1.5B-Instruct; seconds per request and each engine's KV capacity in
+tokens; 14.6 GiB of KV, 12.7 GiB for the Quest row; `results_longctx_cuda.json`). Read it with the quality table
+below: vLLM fp8 without a skipped layer is fast because it is wrong on this model.
 
 <!-- table:longctx -->
 | Engine, KV cache | KV capacity (tokens) | B=16 | B=32 | B=64 | B=128 |
@@ -57,8 +76,9 @@ because it is wrong on this model.
 
 ## Low-bit KV quality
 
-Qwen2.5-1.5B-Instruct in bf16; the same GSM8K, pass-key and WikiText-2 checks for both engines
-(`results_quality_vllm_cuda.json` and Turing's final results):
+Qwen2.5-1.5B-Instruct in bf16, the same GSM8K, pass-key and WikiText-2 checks for both engines
+(`results_quality_vllm_cuda.json`, `results_gsm8k_final_cuda.json`, `results_niah_final_cuda.json`,
+`results_quality_instruct_bf16_cuda.json`):
 
 <!-- table:vs_kv -->
 | KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
@@ -78,28 +98,11 @@ Qwen2.5-1.5B-Instruct in bf16; the same GSM8K, pass-key and WikiText-2 checks fo
 
 ---
 
-## Where Turing Engine stands
-
-* **Close to vLLM, ahead in a few settings.** In fp16 vLLM is 1.01–1.04× faster on Qwen2.5-1.5B and Turing reaches
-  88–103% of vLLM on SmolLM2. At 4 bits vLLM is 1.06–1.12× faster; with Turing's opt-in 4-bit LM head Turing is 1.15–1.16×
-  vLLM at batch 1 and 8 and 1.09× llama.cpp at batch 1 (vLLM 1.04× at batch 64). At 16K-token prompts in fp16 Turing
-  is 1.0–1.22× faster per request; vLLM's fp8 cache with layer 0 kept is 1.3–1.4× faster than Turing's int8.
-  Turing's first token at batch 64 takes up to 2.3× vLLM's (SmolLM2-1.7B); llama.cpp starts fastest from a cold process.
-* **Comparable quality.** Turing's bf16 matches vLLM's on GSM8K (57.2% and 57.4%), and its GPTQ matches vLLM's GPTQ
-  checkpoint (50.4% and 50.2%; llama.cpp's Q4_K_M 52.4%, all ± 2.2%).
-* **Low-bit KV that stays correct by default.** Turing picks the layers to keep in full precision at startup; vLLM's
-  default fp8 and its per-token int4/fp8 caches break this model unless layer 0 is excluded by hand, and its per-token
-  int8 cache loses 16 GSM8K points.
-* **Not measured:** multi-GPU, SGLang, TensorRT-LLM, models larger than Qwen2.5-7B (7.6B), and model families other than the six in the
-  KV-guard validation (benchmarks §2).
-
----
-
 ## Feature check
 
 Each cell for another engine was checked against that project's official documentation on 2026-11-16 (links below
 the table). "not checked" means the documentation page consulted did not settle it; it is not a claim that the
-feature is missing. Turing cells describe the code at this commit.
+feature is missing. Turing cells describe this release.
 
 | Feature | Turing Engine | vLLM | SGLang | TensorRT-LLM | llama.cpp server | Ollama |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |

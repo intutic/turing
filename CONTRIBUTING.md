@@ -4,7 +4,7 @@ Thank you for your interest in contributing to **Turing Engine**! We welcome con
 
 ---
 
-## 🛠️ Development Setup
+## Development Setup
 
 ### 1. Prerequisites
 CI runs the test suite on these; other platforms are untested.
@@ -34,10 +34,9 @@ python setup.py build_ext --inplace
 
 ---
 
-## 🧪 Testing & Verification
+## Testing & Verification
 
-We enforce strict test cleanliness. All pull requests must pass the full test suite with **zero warnings**
-(1108 tests; the CUDA-only ones skip elsewhere):
+Pull requests must pass the full test suite with **zero warnings** (CUDA-only tests skip on other machines):
 
 ```bash
 # Run the complete test suite with strict warning escalation
@@ -53,6 +52,11 @@ from another checkout or a git worktree would silently import that package inste
 scripts in `scripts/` that import `turing` put their own repo root first on `sys.path`, most with `import _bootstrap`
 (a few older ones with `sys.path.insert`). New scripts must start with `import _bootstrap`.
 
+### Benchmarks and documentation numbers
+Benchmark and evaluation scripts in `scripts/` write JSON results to `benchmarks/results/`
+([benchmarks/README.md](benchmarks/README.md)). The tables in the docs are generated from those files; after adding or
+updating a result, run `python scripts/make_doc_tables.py` and commit the results file with the docs change.
+
 ### Adding New Tests
 - Tests run on real code: no mock objects. Integration tests serve the real app in-process (see the
   `turing_server` fixture in `tests/conftest.py`).
@@ -61,7 +65,7 @@ scripts in `scripts/` that import `turing` put their own repo root first on `sys
 
 ---
 
-## 📐 Code Style & Conventions
+## Code Style & Conventions
 
 ### Python
 - We follow standard **PEP 8** guidelines.
@@ -81,19 +85,19 @@ scripts in `scripts/` that import `turing` put their own repo root first on `sys
 
 ---
 
-## 🔄 Pull Request (PR) Workflow
+## Pull Request (PR) Workflow
 
 1. **Fork the Repository**: Create a personal fork on GitHub.
 2. **Create a Feature Branch**: `git checkout -b feature/my-new-kernel`
 3. **Implement Your Changes**: Keep commits focused and provide clear, descriptive commit messages.
-4. **Verify Tests**: Run `python -W error -m pytest -v` and ensure all 1108 tests pass cleanly (CUDA-only ones skip on a Mac).
+4. **Verify Tests**: Run `python -W error -m pytest -v` and make sure everything passes (CUDA-only tests skip on a Mac).
 5. **Submit PR**: Open a pull request against the `master` branch of `intutic/turing`. Include:
    - A clear summary of the motivation and changes.
    - Any benchmark results or hardware specifications (e.g. tested on NVIDIA L4 or Apple M3 Max).
 
 ---
 
-## ✍️ Developer Certificate of Origin (DCO)
+## Developer Certificate of Origin (DCO)
 
 All contributions to Turing Engine must include a **Developer Certificate of Origin (DCO)** sign-off line in the commit message:
 
@@ -104,7 +108,7 @@ Signed-off-by: Your Name <your.email@example.com>
 ### How to Sign Off Commits
 - Use the `-s` flag when committing:
   ```bash
-  git commit -s -m "feat(subspace): optimize INT8 routing projection"
+  git commit -s -m "fix(kv-cache): free pages of cancelled requests"
   ```
 - To sign off your previous commit:
   ```bash
@@ -115,6 +119,6 @@ By adding the sign-off, you certify that your contribution complies with the [De
 
 ---
 
-## 📄 License & Attribution
+## License & Attribution
 
 By contributing to Turing Engine, you agree that your contributions will be licensed under the **Business Source License 1.1 (BSL 1.1)** as specified in [`LICENSE`](LICENSE).

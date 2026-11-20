@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Every numeric table in the docs, generated from the committed results_*.json files. A table lives between
+Every numeric table in the docs, generated from the results files in benchmarks/results/. A table lives between
 `<!-- table:NAME -->` and `<!-- /table -->` in a docs page or the README; the prose around it is written by hand.
 
 python scripts/make_doc_tables.py          # rewrite the tables in place
@@ -13,12 +13,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+RESULTS = ROOT / "benchmarks" / "results"
 PAGES = ["README.md", "packages/kv-layer-guard/README.md",
          *sorted(str(p.relative_to(ROOT)) for p in (ROOT / "docs").glob("*.md"))]
 
 
 def load(name):
-    d = json.loads((ROOT / name).read_text(encoding="utf-8"))
+    d = json.loads((RESULTS / name).read_text(encoding="utf-8"))
     return d["rows"] if isinstance(d, dict) and "rows" in d else d
 
 
@@ -150,7 +151,7 @@ def t_validation():
             if "Phi-3.5" not in r["model"]}
     niah.update({(r["model"], r["kv_cache_dtype"]): r for r in load("results_niah_phi35_longrope_fix_cuda.json")})
     guard = {}
-    for f in sorted(ROOT.glob("results_guard_*_cuda.json")):
+    for f in sorted(RESULTS.glob("results_guard_*_cuda.json")):
         g = json.loads(f.read_text(encoding="utf-8"))
         guard[g["model"]] = g["kv_cache_dtype_skip_layers"]
 
@@ -257,7 +258,7 @@ def t_crossover():
 # ---------------------------------------------------------------------------------------------- decode throughput
 
 def _decode(name):
-    d = json.loads((ROOT / name).read_text(encoding="utf-8"))
+    d = json.loads((RESULTS / name).read_text(encoding="utf-8"))
     rows = d["rows"]
     ctxs = sorted({r["context"] for r in rows})
     bats = sorted({r["batch"] for r in rows})
@@ -319,7 +320,7 @@ def t_cold_start():
 
 
 def t_moe():
-    d = json.loads((ROOT / "results_moe_offload_cuda.json").read_text(encoding="utf-8"))
+    d = json.loads((RESULTS / "results_moe_offload_cuda.json").read_text(encoding="utf-8"))
     out = []
     for r in d["rows"]:
         hit = r.get("hit_rate_decode")
@@ -421,7 +422,7 @@ def t_xkv():
     out = []
     for f, lam in (("results_xkv_transfer_cuda.json", "0.01"), ("results_xkv_transfer_lambda100_cuda.json", "100"),
                    ("results_xkv_transfer_selfcontrol_cuda.json", "0.01 (self)")):
-        for p in json.loads((ROOT / f).read_text(encoding="utf-8"))["pairs"]:
+        for p in json.loads((RESULTS / f).read_text(encoding="utf-8"))["pairs"]:
             r = {(x["arm"], x["metric"]): x for x in p["rows"]}
             ret = r[("transfer", "context_benefit_retained")]
             out.append([f"{short(p['sender'])} → {short(p['receiver'])}", lam,
@@ -444,7 +445,7 @@ def t_lineage():
 
 
 def t_kslot():
-    d = json.loads((ROOT / "results_kslot_cuda.json").read_text(encoding="utf-8"))
+    d = json.loads((RESULTS / "results_kslot_cuda.json").read_text(encoding="utf-8"))
     out = []
     for m in d["models"]:
         for r in m["rows"]:

@@ -26,6 +26,6 @@ python -W error -m pytest -q
 ```
 
 ## Checklist
-- [ ] My code adheres to the architecture invariants in `AGENTS.md` (64-byte alignment, no hallucinated jargon)
+- [ ] My change follows the rules in `AGENTS.md` (parity tests for kernels, no host syncs in GPU hot paths, works on CUDA, MPS and CPU)
 - [ ] I have signed off all commits (`git commit -s`) per Developer Certificate of Origin (DCO)
 - [ ] Relevant documentation in `docs/` has been updated

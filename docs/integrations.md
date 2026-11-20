@@ -1,14 +1,14 @@
-# 🔌 Ecosystem Integrations
+# Integrations
 
-Turing Engine integrates with agent frameworks, model routers, and deployment runtimes.
+Turing Engine serves the OpenAI (`/v1/*`), Anthropic (`/v1/messages`) and Ollama (`/api/*`) protocols, so most
+agent frameworks, model routers and chat frontends connect to it with their existing clients. The examples below
+assume a server started with `turing serve` on `http://localhost:8000`.
 
----
+## LangChain and LangGraph
 
-## 1. LangChain & LangGraph
+Use `ChatOpenAI` from `langchain-openai` against the OpenAI API, or `ChatTuring` from the `langchain-turing` package.
 
-Use `langchain-openai` against the OpenAI API, or `ChatTuring` from the `langchain-turing` package:
-
-=== "Method A: Drop-In langchain-openai (Zero Extra Dependencies)"
+=== "langchain-openai"
     ```python
     from langchain_openai import ChatOpenAI
 
@@ -21,7 +21,7 @@ Use `langchain-openai` against the OpenAI API, or `ChatTuring` from the `langcha
     print(response.content)
     ```
 
-=== "Method B: ChatTuring (langchain-turing, with tool calling)"
+=== "langchain-turing (with tool calling)"
     ```bash
     pip install langchain-turing
     ```
@@ -31,18 +31,20 @@ Use `langchain-openai` against the OpenAI API, or `ChatTuring` from the `langcha
     llm = ChatTuring(model="deepseek-r1-7b", base_url="http://localhost:8000/v1")
     print(llm.invoke("Write a quick C++ SIMD routine:").content)
     ```
-    `ChatTuring` is a LangChain `BaseChatModel` in its own package
-    ([`packages/langchain-turing`](https://github.com/intutic/turing/tree/master/packages/langchain-turing), depends
-    only on `langchain-core` and `httpx`): `invoke`, `stream` (with token usage), `batch`, async, and `bind_tools`
-    (OpenAI-style tool calls returned as `AIMessage.tool_calls`). It passed LangChain's standard chat-model test suite
-    against `turing serve` with Qwen2.5-0.5B-Instruct on an Apple M4 Pro (8ecc6f8; the run is not committed). `turing.integrations.langchain.ChatTuring` re-exports it.
-    Pruning, KV cache format and quantization are chosen when the server starts, not per request.
+    `ChatTuring` is a LangChain `BaseChatModel`
+    ([`packages/langchain-turing`](https://github.com/intutic/turing/tree/master/packages/langchain-turing)) that
+    depends only on `langchain-core` and `httpx`. It supports `invoke`, `stream` (with token usage), `batch`, async,
+    and `bind_tools`; tool calls come back OpenAI-style as `AIMessage.tool_calls`. It passes LangChain's standard
+    chat-model test suite against `turing serve` (Qwen2.5-0.5B-Instruct, Apple M4 Pro).
+    `turing.integrations.langchain.ChatTuring` re-exports it.
 
----
+Pruning, KV cache format and quantization are set when the server starts, not per request.
 
-## 2. LiteLLM Proxy & Router
+## LiteLLM
 
-Configure Turing Engine as a backend in your `litellm` `config.yaml`:
+LiteLLM reaches Turing Engine through its OpenAI-compatible provider: use the `openai/` model prefix and set
+`api_base`. A native `turing` provider is proposed upstream
+([BerriAI/litellm#38181](https://github.com/BerriAI/litellm/pull/38181)) and is not merged yet.
 
 ```yaml
 model_list:
@@ -55,15 +57,14 @@ model_list:
         X-Turing-Draft-Tokens: "4"   # optional: speculative draft tokens per step
 ```
 
-Requests carrying the removed `X-Turing-Sparsity` / `X-Turing-SVD-*` headers get HTTP 400.
+The `X-Turing-Sparsity` and `X-Turing-SVD-*` headers are not supported; requests that send them get HTTP 400.
 
----
+## LlamaIndex
 
-## 3. LlamaIndex RAG & Agents
-
-`llama-index-llms-turing` ([`packages/llama-index-llms-turing`](https://github.com/intutic/turing/tree/master/packages/llama-index-llms-turing))
-is LlamaIndex's `OpenAILike` client with Turing's defaults: chat endpoint, tool calling on, `api_base` from
-`$TURING_API_BASE` (else `http://localhost:8000/v1`).
+`llama-index-llms-turing`
+([`packages/llama-index-llms-turing`](https://github.com/intutic/turing/tree/master/packages/llama-index-llms-turing))
+is LlamaIndex's `OpenAILike` client with Turing's defaults: the chat endpoint, tool calling on, and `api_base` from
+`$TURING_API_BASE` (default `http://localhost:8000/v1`).
 
 ```bash
 pip install llama-index-llms-turing
@@ -77,20 +78,18 @@ response = llm.complete("Summarize the main architectural trade-offs of microser
 print(response.text)
 ```
 
-Set `context_window` to the served model's. `OpenAILike(api_base=..., is_chat_model=True)` from
-`llama-index-llms-openai-like` works the same way without the package.
+Set `context_window` to the served model's context length. Without the package, `OpenAILike(api_base=...,
+is_chat_model=True)` from `llama-index-llms-openai-like` works the same way.
 
----
+## Chat frontends and editors
 
-## 4. Open WebUI, Continue.dev & Ollama Frontends
+Clients that speak the Ollama or OpenAI protocol connect with the settings below, taken from each client's own
+documentation. The protocols are tested; the individual client applications are not.
 
-Turing Engine serves the **Ollama** (`/api/*`) and **OpenAI** (`/v1/*`) protocols; the clients below are configured
-the way their docs describe for those protocols (we test the protocols, not each client application):
-
-=== "Method A: Native Ollama Protocol (Open WebUI / Continue.dev / Raycast / Enchanted)"
-    1. In **Open WebUI**: Go to **Settings ➔ Connections ➔ Ollama API**.
-    2. Set **Ollama Base URL**: `http://localhost:8000`
-    3. Click **Verify Connection** — all loaded models will automatically sync via `/api/tags`.
+=== "Ollama protocol (Open WebUI, Continue.dev, Raycast, Enchanted)"
+    1. In **Open WebUI**, open **Settings ➔ Connections ➔ Ollama API**.
+    2. Set **Ollama Base URL** to `http://localhost:8000`.
+    3. Click **Verify Connection**. The loaded models appear through `/api/tags`.
     4. In **Continue.dev** (`~/.continue/config.json`):
     ```json
     {
@@ -105,25 +104,29 @@ the way their docs describe for those protocols (we test the protocols, not each
     }
     ```
 
-=== "Method B: OpenAI Compatible Protocol (LibreChat / Chatbox / Cursor / Cline)"
-    1. Open your chat UI Settings ➔ OpenAI API.
-    2. Set **Base URL**: `http://localhost:8000/v1`
-    3. Set **API Key**: anything, or the key given to `turing serve --api-key` (keys are not checked unless one is set)
-    4. Models will automatically appear in your model selector dropdown.
+=== "OpenAI protocol (LibreChat, Chatbox, Cursor, Cline)"
+    1. Open the client's OpenAI API settings.
+    2. Set **Base URL** to `http://localhost:8000/v1`.
+    3. Set **API Key** to any value, or to the key passed to `turing serve --api-key` (keys are checked only when one
+       is set).
+    4. The served models appear in the model selector.
 
----
+## Kubernetes
 
-## 5. Kubernetes Deployment (KServe, Helm & llm-d)
+- **[Kubernetes with llm-d](llmd-integration.md):** prefix-cache aware routing across replicas with an
+  `InferencePool`.
+- **[Helm chart](https://github.com/intutic/turing/tree/master/deploy/helm/turing-serving)**
+  (`deploy/helm/turing-serving`): a Deployment with GPU limits, Prometheus scrape annotations (`/metrics` is
+  Prometheus text) and optional llm-d KV events. Defaults: model `Qwen/Qwen2.5-7B-Instruct`, image tag `v2.0.0-cuda`.
+- **[Docker images](docker.md):** `ghcr.io/intutic/turing:v2.0.0` (CPU) and `ghcr.io/intutic/turing:v2.0.0-cuda`.
 
-Turing Engine provides production manifests for Kubernetes orchestration:
+### KServe
 
-* ☸️ **[Full llm-d & Kubernetes Distributed Serving Guide](llmd-integration.md)** — Prefix-cache aware routing, InferencePools, and P/D disaggregation.
-* 📦 **[Turing Serving Helm Chart](https://github.com/intutic/turing/tree/master/deploy/helm/turing-serving)** — deployment with Prometheus scrape annotations (`/metrics` is Prometheus text), GPU limits and optional llm-d KV events.
-* 🐳 **[Docker images](docker.md)** — CPU and CUDA images.
-* 🚀 **KServe `ServingRuntime`**: [`integrations/kserve/serving_runtime.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/serving_runtime.yaml)
-  runs `turing serve --model /mnt/models` on port 8080, so an InferenceService's `storageUri` (`hf://`, `s3://`,
-  `gs://`, `pvc://`) is what it serves ([`inferenceservice.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/inferenceservice.yaml)).
-  It uses the published `ghcr.io/intutic/turing:v2.0.0-cuda` image. The manifests were checked by hand against KServe's CRD schemas (not in CI); they have not been run on a cluster yet.
+[`integrations/kserve/serving_runtime.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/serving_runtime.yaml)
+defines a `ServingRuntime` that runs `turing serve --model /mnt/models` on port 8080 with the
+`ghcr.io/intutic/turing:v2.0.0-cuda` image. KServe downloads the InferenceService's `storageUri` (`hf://`, `s3://`,
+`gs://`, `pvc://`) to `/mnt/models`, so that is the model it serves
+([`inferenceservice.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/inferenceservice.yaml)):
 
 ```yaml
 apiVersion: serving.kserve.io/v1beta1
@@ -138,3 +141,5 @@ spec:
       runtime: turing-runtime
       storageUri: hf://Qwen/Qwen2.5-1.5B-Instruct
 ```
+
+`hf://` storage URIs need KServe 0.15 or later. These manifests have not been run on a real cluster.

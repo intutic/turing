@@ -40,7 +40,7 @@ def main():
     ap.add_argument("--starts", default="0,6144,14336")
     ap.add_argument("--kv", default="native,int8,int4")
     ap.add_argument("--iters", type=int, default=20)
-    ap.add_argument("--out", default="results_prefill_attention_cuda.json")
+    ap.add_argument("--out", default="benchmarks/results/results_prefill_attention_cuda.json")
     a = ap.parse_args()
     H, Hkv, D = map(int, a.heads.split(","))
     from turing.kernels.triton_kv_prefill import triton_pool_prefill

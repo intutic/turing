@@ -32,7 +32,7 @@ from turing.core.lineage import CleanBaseLineageBuffer
 def parse_args():
     parser = argparse.ArgumentParser(description="Next-Gen Encoder/Decoder Benchmark")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cuda", "mps", "cpu"])
-    parser.add_argument("--output", type=str, default="results_nextgen_speedups.json")
+    parser.add_argument("--output", type=str, default="benchmarks/results/results_nextgen_speedups.json")
     return parser.parse_args()
 
 

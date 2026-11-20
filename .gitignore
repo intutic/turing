@@ -67,3 +67,6 @@ venv/
 graphify-out/
 .idea/
 site/
+
+# Local agent notes (machine-specific; not part of the project)
+CLAUDE.md

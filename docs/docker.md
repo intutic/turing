@@ -1,9 +1,6 @@
 # Docker
 
-One Dockerfile, `deploy/Dockerfile`, builds both images. They differ only in the PyTorch wheels: the CUDA image
-installs PyTorch's CUDA 12.8 build, which bundles the CUDA runtime. The container runs `turing serve` on port 8000
-as a non-root user (`turing`); arguments after the image name are passed to `turing serve` (default:
-`--model smollm2`).
+Turing Engine publishes a CPU image and a CUDA image to the GitHub Container Registry.
 
 | Image | Platforms | Built from |
 |---|---|---|
@@ -11,7 +8,11 @@ as a non-root user (`turing`); arguments after the image name are passed to `tur
 | `ghcr.io/intutic/turing:<version>-cuda` | linux/amd64 | PyTorch for CUDA 12.8 |
 
 `<version>` is the release tag, for example `v2.0.0`; `latest` and `latest-cuda` follow the newest release. The
-release workflow (`.github/workflows/release.yml`) publishes them when a version tag is pushed; the first was v2.0.0.
+release workflow (`.github/workflows/release.yml`) publishes both images when a version tag is pushed, starting with
+v2.0.0.
+
+The container runs `turing serve` on port 8000 as a non-root user (`turing`). Arguments after the image name are
+passed to `turing serve` (default: `--model smollm2`).
 
 ## CPU
 
@@ -43,6 +44,9 @@ Every `turing serve` flag works after the image name, for example `--kv-cache-dt
 Run `docker run --rm ghcr.io/intutic/turing:latest --help` for the list.
 
 ## Building locally
+
+One Dockerfile, `deploy/Dockerfile`, builds both images. They differ only in the PyTorch wheels: the CUDA image
+installs PyTorch's CUDA 12.8 build, which bundles the CUDA runtime.
 
 ```bash
 docker build -f deploy/Dockerfile -t turing:cpu .
