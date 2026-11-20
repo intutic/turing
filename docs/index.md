@@ -2,8 +2,9 @@
 
 **An LLM inference server whose int8/int4 KV cache finds the layers low-bit storage would break and keeps them in full
 precision**, with HuggingFace parity tests on 16 model types, 4-bit GPTQ weights, and OpenAI, Anthropic and Ollama
-APIs on one port. It runs on NVIDIA GPUs, Apple Silicon and CPUs, and every benchmark number in these docs comes from a
-committed results file.
+APIs on one port. It runs on NVIDIA GPUs, Apple Silicon and CPUs. With Qwen2.5-1.5B on an NVIDIA L4, its int4 KV cache
+holds 2.4× as many tokens as a 16-bit cache in the same GPU memory, at +0.02 nats, and 4-bit decoding with the opt-in
+4-bit LM head is 1.15–1.16× faster than vLLM at batch sizes 1 and 8.
 
 [![PyPI](https://img.shields.io/pypi/v/turing-engine.svg)](https://pypi.org/project/turing-engine/)
 [![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
