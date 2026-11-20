@@ -3,10 +3,6 @@ import math
 import torch
 import torch.nn.functional as F
 
-from turing.experimental.kernels.triton_paged_decode_gemv import (
-    batched_paged_decode_gemv_cuda,
-    batched_paged_decode_split_k_gemv_cuda
-)
 from turing.experimental.kernels.triton_linear_recurrence_step import (
     fused_linear_recurrence_step_cuda,
     fused_kda_conv_recurrence_step_cuda
@@ -18,49 +14,6 @@ from turing.experimental.paging import (
 from turing.experimental.lineage import (
     CleanBaseLineageBuffer
 )
-
-
-def test_split_k_paged_decode_parity():
-    """Validates Split-K Paged Decode GEMV against reference."""
-    torch.manual_seed(42)
-    B, H, D = 2, 4, 64
-    block_size = 16
-    num_blocks = 32
-    max_blocks = 8
-
-    q = torch.randn(B, H, D)
-    k_pool = torch.randn(num_blocks, block_size, H, D)
-    v_pool = torch.randn(num_blocks, block_size, H, D)
-
-    block_tables = torch.tensor([[0, 1, 2, 3, -1, -1, -1, -1],
-                                 [4, 5, 6, 7,  8, -1, -1, -1]], dtype=torch.int32)
-    seq_lens = torch.tensor([50, 75], dtype=torch.int32)
-
-    # Reference / Standard
-    ref_out = batched_paged_decode_gemv_cuda(q, k_pool, v_pool, block_tables, seq_lens)
-    split_k_out = batched_paged_decode_split_k_gemv_cuda(q, k_pool, v_pool, block_tables, seq_lens, num_splits=2)
-
-    assert torch.allclose(ref_out, split_k_out, atol=1e-4, rtol=1e-4)
-
-
-def test_split_k_paged_decode_multiple_splits():
-    """Validates Split-K with different split counts (2, 4)."""
-    torch.manual_seed(42)
-    B, H, D = 1, 2, 32
-    block_size = 16
-    num_blocks = 16
-
-    q = torch.randn(B, H, D)
-    k_pool = torch.randn(num_blocks, block_size, H, D)
-    v_pool = torch.randn(num_blocks, block_size, H, D)
-
-    block_tables = torch.tensor([[0, 1, 2, 3, 4, 5, 6, 7]], dtype=torch.int32)
-    seq_lens = torch.tensor([120], dtype=torch.int32)
-
-    out_s2 = batched_paged_decode_split_k_gemv_cuda(q, k_pool, v_pool, block_tables, seq_lens, num_splits=2)
-    out_s4 = batched_paged_decode_split_k_gemv_cuda(q, k_pool, v_pool, block_tables, seq_lens, num_splits=4)
-
-    assert torch.allclose(out_s2, out_s4, atol=1e-4, rtol=1e-4)
 
 
 def test_grouped_micro_scale_paged_kv_pool():

@@ -1,6 +1,6 @@
 """
 Automated Unit & Numerical Parity Tests for Fused GPU Kernels & C++20 SIMD Subsystems.
-Verifies triton_spec_verify, triton_fused_kslot_gate, NativeSafetensorsHeaderParser, and NativeTrafficManager.
+Verifies triton_spec_verify, NativeSafetensorsHeaderParser, and NativeTrafficManager.
 """
 
 import json
@@ -14,7 +14,6 @@ from turing.turing_csrc import (
     NativeAsyncRingReader
 )
 from turing.experimental.kernels.triton_spec_verify import fused_speculative_verify_cuda
-from turing.experimental.kernels.triton_fused_kslot_gate import fused_kslot_pooling_and_gating_cuda
 from turing.experimental.speculation import RidgeAssistedTreeSpeculator
 from turing.experimental.kslot_pooling import KSlotCachePooler, GatedZeroIdentityHead
 
@@ -103,24 +102,3 @@ def test_fused_speculative_verify_exact_parity():
     assert accepted_tokens.tolist() == target_preds[:4]
 
 
-def test_fused_kslot_pooling_and_gating_shapes():
-    """Verifies output dimensions of fused k-slot pooling and gating."""
-    B, L, H, N, D = 2, 4, 2, 64, 64
-    k_slots = 4
-    torch.manual_seed(42)
-
-    keys = torch.randn(B, L, H, N, D)
-    values = torch.randn(B, L, H, N, D)
-    queries = torch.randn(L, H, k_slots, D)
-    gate_w = torch.randn(2 * H, H * D)
-    head_k = torch.randn(H * D, H * D)
-    head_v = torch.randn(H * D, H * D)
-
-    pk, pv, dk, dv = fused_kslot_pooling_and_gating_cuda(
-        keys, values, queries, gate_w, head_k, head_v
-    )
-
-    assert pk.shape == (B, L, H, k_slots, D)
-    assert pv.shape == (B, L, H, k_slots, D)
-    assert dk.shape == (B, L, H, k_slots, D)
-    assert dv.shape == (B, L, H, k_slots, D)

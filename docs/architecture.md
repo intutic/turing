@@ -240,8 +240,7 @@ reports a run on a real model.
 | Draft heads | `turing/experimental/speculation.py` (`MatryoshkaDraftHead`, `EntropyConfidenceTreePruner`, …) | Randomly initialised, untrained; serving speculates by prompt lookup |
 | MoE expert offload | `turing/core/heterogeneous_moe.py`, `expert_cache.py`, `expert_prefetch.py` | `HeterogeneousMoERunner` runs a model's own experts from host memory with hot experts in `GPULRUExpertCache` slots; equals `SparseMoE` at atol 1e-5 on tiny Mixtral/OLMoE; not wired into serving |
 | Elastic memory budget | `turing/experimental/elastic_memory.py` | Balances an expert cache against a KV pool |
-| Hyper-connections | `turing/experimental/mhc.py` | Sinkhorn-projected mixing of residual streams; doubly-stochastic property tests only |
 | Older paging | `turing/experimental/paging.py` | Not the serving cache (that is `kv_cache.py`) |
 | Demo agents | `turing/experimental/demo/` (`MultiAgentCoordinator`, `DynamicEnvironmentModel`, `EpistemicUncertaintyGate`) | `turing demo` |
-| Other Triton kernels | `turing/kernels/` | e.g. flash-tree attention, fused MoE block GEMM, linear recurrence, k-slot pool, spec entropy/verify, segment pool |
+| Experimental kernels | `turing/experimental/kernels/` | Fused MoE block GEMM, fused multi-LoRA GEMV, fused sampler, fused QKV + RoPE, linear recurrence, k-slot pool, speculative entropy and verification; each with a PyTorch parity test |
 | Other C++ helpers | `csrc/` | e.g. prefix hashing, Sinkhorn scores, routing history, reasoning-tag scanner, JSON scanner, safetensors header parser |

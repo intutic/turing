@@ -20,8 +20,6 @@ from turing.experimental.speculation import SubspaceEAGLEDraftHead
 from turing.experimental.elastic_memory import ElasticMemoryBudgetManager
 from turing.core.expert_cache import GPULRUExpertCache
 from turing.experimental.paging import StaticPagedKVPool
-from turing.experimental.mhc import ManifoldHyperConnection
-from turing.experimental.router import SubspaceStructuredRouter
 
 try:
     import turing.turing_csrc as turing_csrc
@@ -109,36 +107,6 @@ def test_fused_lora_gemv_parity():
     assert max_diff_fused <= 1e-4, f"Fused LoRA dispatch max diff {max_diff_fused} exceeds tolerance"
 
 
-def test_find_residual_outlier_parity():
-    """Verifies 1-Pass Subspace Residual Outlier Extraction against torch.topk."""
-    torch.manual_seed(42)
-    batch = 8
-    hidden_dim = 1024
-
-    residual = torch.randn(batch, hidden_dim, dtype=torch.float32)
-
-    # Reference torch.topk
-    ref_top_vals, ref_top_indices = torch.topk(torch.abs(residual), k=1, dim=-1)
-    ref_signed_vals = torch.gather(residual, -1, ref_top_indices)
-
-    # Native C++20 SIMD output
-    if HAS_CSRC:
-        r_np = residual.numpy()
-        idx_np, val_np = turing_csrc.find_residual_outlier_cpu(r_np)
-
-        simd_indices = torch.from_numpy(idx_np).view(batch, 1)
-        simd_vals = torch.from_numpy(val_np).view(batch, 1)
-
-        assert torch.equal(ref_top_indices, simd_indices), "Outlier indices do not match"
-        assert torch.allclose(ref_signed_vals, simd_vals, atol=1e-5), "Outlier values do not match"
-
-    # Triton CUDA / Auto-dispatch test
-    from turing.experimental.kernels.triton_residual_outlier import find_residual_outlier_cuda
-    out_idx, out_val = find_residual_outlier_cuda(residual)
-    assert torch.equal(ref_top_indices, out_idx), "Triton outlier indices do not match"
-    assert torch.allclose(ref_signed_vals, out_val, atol=1e-5), "Triton outlier values do not match"
-
-
 def test_native_elastic_budget_controller():
     """Verifies Lock-Free NativeElasticBudgetController state transitions and rebalancing."""
     if not HAS_CSRC:
@@ -170,49 +138,3 @@ def test_native_elastic_budget_controller():
     assert controller.get_rebalance_count() == 1
 
 
-def test_mhc_4stream_simd_parity():
-    """Verifies 4-Stream Birkhoff mHC SIMD mixing parity against PyTorch reference."""
-    torch.manual_seed(42)
-    batch, seq_len, hidden_dim = 2, 4, 128
-    streams = torch.randn(batch, seq_len, 4, hidden_dim, dtype=torch.float32)
-    layer_update = torch.randn(batch, seq_len, hidden_dim, dtype=torch.float32)
-
-    mhc_block = ManifoldHyperConnection(hidden_dim=hidden_dim, num_streams=4)
-
-    # Reference evaluation
-    ref_streams_mixed = mhc_block.res_map(streams)
-    ref_new_streams = mhc_block.post_map(ref_streams_mixed, layer_update)
-
-    if HAS_CSRC:
-        s_np = streams.view(-1, 4, hidden_dim).numpy()
-        lup_np = layer_update.view(-1, hidden_dim).numpy()
-        alpha_np = F.softmax(mhc_block.raw_pre_weights, dim=0).detach().numpy()
-        h_res = mhc_block.get_doubly_stochastic_res_map()
-        h_np = h_res.detach().numpy()
-        beta_np = torch.sigmoid(mhc_block.raw_post_weights).detach().numpy()
-
-        l_in_np, s_out_np = turing_csrc.mhc_4stream_simd_cpu(s_np, lup_np, alpha_np, h_np, beta_np)
-        simd_new_streams = torch.from_numpy(s_out_np).view(batch, seq_len, 4, hidden_dim)
-
-        max_diff = torch.max(torch.abs(ref_new_streams - simd_new_streams)).item()
-        assert max_diff <= 1e-4, f"mHC SIMD max diff {max_diff} exceeds tolerance"
-
-
-def test_fused_subspace_router_dispatch():
-    """Verifies SubspaceStructuredRouter fused dispatch produces valid top-k bitmasks."""
-    torch.manual_seed(42)
-    batch = 4
-    hidden_dim = 128
-    total_tiles = 32
-
-    router = SubspaceStructuredRouter(hidden_dim=hidden_dim, total_tiles=total_tiles, min_tiles=8, max_tiles=16)
-    router.eval()
-
-    h = torch.randn(batch, 16, hidden_dim, dtype=torch.float32)
-    tile_mask, uncertainty = router(h, top_k_override=10)
-
-    assert tile_mask.shape == (batch, total_tiles)
-    assert uncertainty.shape == (batch, 1)
-    # Check that exactly 10 tiles are active per batch item
-    active_per_item = tile_mask.sum(dim=-1)
-    assert torch.all(active_per_item == 10.0), f"Expected 10 active tiles, got {active_per_item}"

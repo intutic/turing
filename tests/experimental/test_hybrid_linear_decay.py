@@ -8,10 +8,6 @@ from turing.experimental.hybrid_memory import (
     HybridRecurrentAttention,
     AssociativeRecallProbe,
 )
-from turing.experimental.kernels.triton_chunked_decay import (
-    fused_chunked_learned_decay_cuda,
-    fused_gated_learned_decay_step_cuda,
-)
 
 
 def test_learned_decay_step_recurrence_numerical_parity():
@@ -91,34 +87,6 @@ def test_native_learned_decay_step_simd_parity():
 
     np.testing.assert_allclose(state_simd, state_new_ref.numpy(), rtol=1e-4, atol=1e-4)
     np.testing.assert_allclose(out_simd, out_ref, rtol=1e-4, atol=1e-4)
-
-
-def test_chunked_learned_decay_parity():
-    """Verify chunked in-SRAM learned decay matches closed-form prefill."""
-    torch.manual_seed(42)
-    B, H, T, D = 1, 2, 64, 32
-    q = torch.randn(B, H, T, D)
-    k = torch.randn(B, H, T, D)
-    v = torch.randn(B, H, T, D)
-    b = torch.sigmoid(torch.randn(B, H, T) + 1.2)
-    log_b = torch.log(b + 1e-8)
-
-    # Chunked prefill with chunk_size=16
-    out_chunked, state_chunked = fused_chunked_learned_decay_cuda(q, k, v, log_b, chunk_size=16)
-
-    # Closed-form reference
-    scale = 1.0 / math.sqrt(D)
-    qc = q * scale
-    cum = torch.cumsum(log_b, dim=-1).unsqueeze(-1)
-    log_D = cum - cum.transpose(-1, -2)
-    causal_mask = torch.triu(torch.ones(T, T, dtype=torch.bool), diagonal=1)
-    log_D = log_D.masked_fill(causal_mask.unsqueeze(0).unsqueeze(0), -1e9)
-    D_weights = torch.exp(log_D)
-
-    scores = torch.matmul(qc, k.transpose(-1, -2)) * D_weights
-    out_ref = torch.matmul(scores, v)
-
-    assert torch.allclose(out_chunked, out_ref, atol=1e-4, rtol=1e-4)
 
 
 def test_hybrid_recurrent_attention_prefill_and_step_decode():

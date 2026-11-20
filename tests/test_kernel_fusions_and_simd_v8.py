@@ -7,9 +7,7 @@ from turing.serving.traffic import AdaptiveComputeBatcher
 from turing.core.expert_cache import RoutingHistoryTracker
 from turing.experimental.kslot_pooling import GatedZeroIdentityHead
 from turing.experimental.kernels.triton_spec_entropy import fused_entropy_argmax_gate_cuda
-from turing.experimental.kernels.triton_matryoshka_gemv import fused_matryoshka_gemv_cuda
 from turing.experimental.kernels.triton_hybrid_anchor_fuse import fused_hybrid_step_anchor_cuda
-from turing.experimental.kernels.triton_subspace_compress import fused_subspace_compress_cuda
 
 
 def test_varlen_pack_simd_parity():
@@ -82,36 +80,6 @@ def test_spec_entropy_argmax_fused_parity():
     assert torch.allclose(entropy, ref_entropy, atol=1e-4)
     assert torch.equal(argmax_idx, ref_argmax)
     assert width.shape == (4,)
-
-
-def test_matryoshka_gemv_fused_parity():
-    """Verifies fused Matryoshka parameter-sliced GEMV matches PyTorch sliced matmul."""
-    torch.manual_seed(42)
-    x = torch.randn(2, 512)
-    weight = torch.randn(1024, 512)
-
-    for slice_k in [64, 128, 256, 512]:
-        ref = torch.matmul(x[:, :slice_k], weight[:, :slice_k].t())
-        out = fused_matryoshka_gemv_cuda(x, weight, slice_k)
-        assert torch.allclose(out, ref, atol=1e-4)
-
-
-def test_subspace_compress_fused_parity():
-    """Verifies fused Subspace INT8 compression matches PyTorch reference."""
-    torch.manual_seed(42)
-    x = torch.randn(4, 128)
-    u_proj = torch.randn(128, 64)
-
-    q_int8, scale = fused_subspace_compress_cuda(x, u_proj)
-
-    # Reference
-    x_sub = torch.matmul(x, u_proj)
-    abs_max = torch.amax(torch.abs(x_sub), dim=-1, keepdim=True).clamp(min=1e-5)
-    ref_scale = abs_max / 127.0
-    ref_q = torch.clamp(torch.round(x_sub / ref_scale), -128, 127).to(torch.int8)
-
-    assert torch.allclose(scale, ref_scale, atol=1e-4)
-    assert torch.equal(q_int8, ref_q)
 
 
 def test_hybrid_anchor_fused_step_parity():

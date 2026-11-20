@@ -12,6 +12,14 @@ All notable changes to this project are documented here. The format follows
   `turing serve` does not import. Imports such as `turing.core.lineage` or `turing.kernels.triton_kslot_pool` become
   `turing.experimental.lineage` and `turing.experimental.kernels.triton_kslot_pool`; `turing.SubspaceStructuredRouter`,
   `turing.DynamicEntropyRouter` and `turing.HierarchicalVirtualPageManager` are now in `turing.experimental`.
+
+### Removed
+- Experimental modules with no model result and no role in inference, with their tests and benchmark scripts:
+  swarm and particle-swarm optimisers, the router and its annealer, hyper-connections (`mhc`), optimal-transport
+  eviction, compressed convolutional attention (`cca`), the attention-pattern cache, the hybrid tensor mesh, matrix
+  power, unified memory, the persistent GEMV, the async scheduler, and 26 kernels (among them a fused Adam optimizer,
+  2-D convolution and Laplacian kernels, latent decode, Vulkan and ROCm helpers). Twelve one-off benchmark scripts that
+  only exercised them are removed too. `turing serve` is unchanged.
 - Benchmark results moved from the repository root to `benchmarks/results/`, with reproduction commands in
   `benchmarks/README.md`; scripts write there by default.
 - Documentation reorganised into Getting started, User guide, Performance and Internals sections.

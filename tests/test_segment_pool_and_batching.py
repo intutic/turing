@@ -2,56 +2,10 @@ import pytest
 import torch
 import numpy as np
 
-from turing.experimental.kernels.triton_segment_pool import (
-    fused_segment_mean_pool_cuda,
-    fused_segment_cls_pool_cuda,
-)
 from turing.serving.traffic import (
     ComputeCostEstimator,
     AdaptiveComputeBatcher,
 )
-
-
-def test_fused_segment_mean_pool_parity():
-    """Verify PyTorch fallback in fused_segment_mean_pool_cuda matches reference mean."""
-    torch.manual_seed(42)
-    hidden_dim = 128
-    lengths = [10, 25, 40, 5, 80]
-    num_seqs = len(lengths)
-    total_tokens = sum(lengths)
-
-    hidden = torch.randn((total_tokens, hidden_dim), dtype=torch.float32)
-    cu_seqlens = torch.tensor([0, 10, 35, 75, 80, 160], dtype=torch.int32)
-
-    # Reference mean computation
-    ref_list = []
-    for i in range(num_seqs):
-        st = cu_seqlens[i].item()
-        en = cu_seqlens[i + 1].item()
-        ref_list.append(hidden[st:en].mean(dim=0))
-    ref_output = torch.stack(ref_list)
-
-    # Fused zero-sync implementation
-    fused_output = fused_segment_mean_pool_cuda(hidden, cu_seqlens, num_seqs)
-
-    assert torch.allclose(ref_output, fused_output, atol=1e-5, rtol=1e-5)
-
-
-def test_fused_segment_cls_pool_parity():
-    """Verify CLS pool extracts exact first token of each segment."""
-    torch.manual_seed(42)
-    hidden_dim = 64
-    lengths = [8, 16, 32]
-    num_seqs = len(lengths)
-    total_tokens = sum(lengths)
-
-    hidden = torch.randn((total_tokens, hidden_dim), dtype=torch.float32)
-    cu_seqlens = torch.tensor([0, 8, 24, 56], dtype=torch.int32)
-
-    cls_output = fused_segment_cls_pool_cuda(hidden, cu_seqlens, num_seqs)
-    for i in range(num_seqs):
-        st = cu_seqlens[i].item()
-        assert torch.allclose(cls_output[i], hidden[st])
 
 
 def test_native_csrc_simd_segment_pool():

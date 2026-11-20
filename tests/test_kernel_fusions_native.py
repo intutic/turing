@@ -88,25 +88,3 @@ def test_triton_chunk_compression_fallback():
     assert v_out.shape == (1, 2, 4, 64)
 
 
-def test_triton_mhc_fuse_fallback():
-    from turing.experimental.kernels.triton_mhc_fuse import mhc_stream_mix_cuda
-    streams = torch.randn(1, 16, 4, 64, dtype=torch.float32)
-    layer_up = torch.randn(1, 16, 64, dtype=torch.float32)
-    res_map = torch.eye(4, dtype=torch.float32)
-    post_w = torch.zeros(4, dtype=torch.float32)
-
-    out = mhc_stream_mix_cuda(streams, layer_up, res_map, post_w)
-    beta = torch.sigmoid(post_w).view(1, 1, 4, 1)
-    out_ref = streams + beta * layer_up.unsqueeze(-2)
-
-    torch.testing.assert_close(out, out_ref, rtol=1e-4, atol=1e-4)
-
-
-def test_triton_cca_fallback():
-    from turing.experimental.kernels.triton_cca import fused_linear_conv1d_causal_cuda
-    x = torch.randn(2, 16, 256, dtype=torch.float32)
-    w_lin = torch.randn(64, 256, dtype=torch.float32)
-    w_conv = torch.randn(64, 1, 3, dtype=torch.float32)
-
-    out = fused_linear_conv1d_causal_cuda(x, w_lin, w_conv)
-    assert out.shape == (2, 16, 64)

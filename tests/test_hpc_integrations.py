@@ -3,9 +3,6 @@ import math
 import torch
 
 from turing.models.mesh_2d import Mesh2DCoordinator, Mesh2DParallelLinear
-from turing.experimental.swarm_opt import AsynchronousSwarmOptimizer
-from turing.experimental.cca_fast import CooperativeSharedConv2D, FastCompressedConvolutionalAttention
-from turing.experimental.kernels.softened_attention import SoftenedAttentionEngine
 
 def test_mesh_2d_coordinator_and_linear():
     coord = Mesh2DCoordinator(rows=2, cols=2, rank=3)
@@ -22,49 +19,6 @@ def test_mesh_2d_coordinator_and_linear():
     out = linear_2d(x)
     assert out.shape == (2, 16, 128)
 
-def test_asynchronous_swarm_optimizer_monotonic_convergence():
-    # Test sphere function optimization: f(x) = sum(x^2), min at x = 0
-    def sphere_obj(pos: torch.Tensor) -> float:
-        return float(torch.sum(pos ** 2).item())
-
-    optimizer = AsynchronousSwarmOptimizer(
-        dim=4,
-        population_size=20,
-        bounds=(-5.0, 5.0),
-        device=torch.device("cpu")
-    )
-
-    best_pos, best_fit, info = optimizer.optimize(sphere_obj, max_iterations=20)
-    assert info["convergence_monotonic"] is True
-    assert best_fit < 1.0
-    assert best_pos.shape == (4,)
-
-def test_cooperative_shared_cca_fast():
-    cca_fast = FastCompressedConvolutionalAttention(
-        hidden_dim=64,
-        compression_ratio=4,
-        kernel_size=3
-    )
-
-    kv_states = torch.randn(2, 16, 64)
-    compressed_out = cca_fast(kv_states)
-    assert compressed_out.shape == (2, 4, 64)
-
-def test_softened_attention_engine():
-    attn = SoftenedAttentionEngine(
-        hidden_dim=64,
-        num_heads=2,
-        head_dim=32,
-        softening_sq=1e-4
-    )
-
-    q = torch.randn(2, 2, 8, 32)
-    k = torch.randn(2, 2, 8, 32)
-    v = torch.randn(2, 2, 8, 32)
-
-    out = attn(q, k, v)
-    assert out.shape == (2, 2, 8, 32)
-    assert not torch.isnan(out).any()
 
 def test_native_csrc_hpc_kernels():
     try:
@@ -104,31 +58,6 @@ def test_native_csrc_hpc_kernels():
     moe_out = turing_csrc.parallel_cpu_moe_gemv(in_acts, exp_w, exp_idx, gate_w)
     assert moe_out.shape == (4, 32)
 
-def test_autonomic_threshold_tuner():
-    from turing.experimental.router import AutonomicThresholdTuner
-
-    tuner = AutonomicThresholdTuner(target_latency_ms=6.5, initial_threshold=0.5, initial_tau=1.0)
-    init_thresh = tuner.current_threshold
-    init_tau = tuner.current_tau
-
-    # Simulate high observed latency -> threshold should adjust
-    for _ in range(5):
-        tuner.update_from_latency_observation(observed_latency_ms=12.0)
-
-    assert tuner.timestep == 5
-    assert 0.1 <= tuner.current_threshold <= 0.9
-    assert 0.2 <= tuner.current_tau <= 2.0
-
-def test_asynch_task_scheduler_csrc():
-    from turing.experimental.asynch_scheduler import AsynchronousWorkerPool
-    import numpy as np
-
-    pool = AsynchronousWorkerPool(num_workers=4)
-    tokens = torch.randn(16, 64)
-    scaled = pool.parallel_scale_tokens(tokens, scale=2.5)
-
-    assert scaled.shape == (16, 64)
-    assert torch.allclose(scaled, tokens * 2.5, atol=1e-5)
 
 def test_halo_exchange_step_csrc():
     coord = Mesh2DCoordinator(rows=2, cols=2, rank=0)
@@ -168,15 +97,3 @@ def test_nbody_belief_recirculate_csrc():
     assert recirc.shape == (4, 32)
     assert not np.isnan(recirc).any()
 
-def test_pso_optimize_hyperparams_csrc():
-    opt_params = AsynchronousSwarmOptimizer.optimize_csrc(
-        num_particles=20,
-        num_dims=4,
-        num_iterations=30,
-        lower_bounds=[-2.0, -2.0, -2.0, -2.0],
-        upper_bounds=[2.0, 2.0, 2.0, 2.0]
-    )
-    assert len(opt_params) == 4
-    # All dimensions should have converged close to 0 (sphere minimum)
-    for p in opt_params:
-        assert abs(p) < 1.0

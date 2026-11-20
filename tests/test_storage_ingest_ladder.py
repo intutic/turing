@@ -10,7 +10,6 @@ import torch
 import numpy as np
 
 from turing.models.ingest import TuringIngestEngine, StorageTier, IngestionResult
-from turing.experimental.kernels.gds_loader import PipelinedLayerLoader
 from turing.turing_csrc import NativeAsyncRingReader, NativeGDSLoader
 
 
@@ -115,10 +114,3 @@ def test_turing_ingest_engine_raw_binary_load(tmp_path):
     assert res.throughput_gb_s > 0.0
 
 
-def test_pipelined_layer_loader_cpu_fallback():
-    """Verifies PipelinedLayerLoader handles CPU gracefully without errors."""
-    loader = PipelinedLayerLoader(device="cpu")
-    assert not loader.is_cuda
-    loader.stage_layer_async(0, lambda: {"w": torch.randn(10, 10)})
-    loader.wait_for_layer(0)
-    loader.synchronize_all()

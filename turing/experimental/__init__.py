@@ -10,19 +10,13 @@ Names are imported on first use (PEP 562), so `import turing.experimental` loads
 import importlib
 
 _EXPORTS = {
-    "router": ["SubspaceStructuredRouter", "DynamicEntropyRouter", "AutonomicThresholdTuner"],
     "paging": ["HierarchicalVirtualPageManager", "PageTier"],
-    "optimal_transport": ["OptimalTransportEviction", "sinkhorn_knopp_eviction"],
     "speculation": ["QuadtreeMRPSpeculator", "build_dag_tree_attention_mask", "EnhancedQuadtreeDraftHead", "MatryoshkaDraftHead"],
-    "attention_cache": ["AttentionPatternCache", "ChunkedLongPrefillEngine"],
     "cross_model_kv": ["RoPEContentDecoupler", "ClosedFormRidgeMapper", "SVDNullSpaceProjector", "CrossModelKVPipeline"],
-    "mhc": ["BirkhoffManifoldProjector", "ManifoldHyperConnection"],
     "hierarchical_compression": ["HCAChunkCompressor", "CSAChunkCompressor", "CrossLayerKVSharingManager"],
-    "cca": ["LayerwiseHeadBudgeter", "CompressedConvolutionalAttention"],
     "hybrid_attention": ["LinearRecurrentAttention", "ChunkContextScorer", "HybridAttentionLayerRouter"],
     "expert_prefetch": ["OneLayerAheadExpertPrefetcher"],
     "elastic_memory": ["ElasticMemoryBudgetManager"],
-    "hybrid_mesh": ["TensorSerializer"],
     "lineage": ["CleanBaseLineageBuffer"],
     "kslot_pooling": ["KSlotCachePooler"],
 }

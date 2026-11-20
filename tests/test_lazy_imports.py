@@ -10,10 +10,10 @@ loaded = sorted(m for m in sys.modules if m.startswith("turing.") or m == "torch
 assert loaded == ["turing.core", "turing.experimental"], loaded
 from turing import SubspaceCausalLM, ModelConfig, chain
 from turing.core import GPULRUExpertCache, HostExpertBank
-from turing.experimental import TensorSerializer
+from turing.experimental import CleanBaseLineageBuffer
 assert "turing.experimental.paging" not in sys.modules and "turing.experimental.speculation" not in sys.modules
 try:
-    turing.core.TensorSerializer  # moved to turing.experimental
+    turing.core.CleanBaseLineageBuffer  # lives to turing.experimental
 except AttributeError:
     pass
 else:
