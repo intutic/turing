@@ -100,7 +100,21 @@ def _turing_kv_quality():
     return g, n, d
 
 
+_VS_KV_HEAD = ["KV cache", "Layers kept in bf16", "GSM8K", "Pass-key 2K–32K", "ΔNLL vs bf16", "s/request (16K, B=128)"]
+
+
 def t_vs_kv():
+    return table(_VS_KV_HEAD, _vs_kv_rows())
+
+
+def t_vs_kv_short():
+    """The README's cut of vs_kv: Turing's three caches against vLLM's reference and its default fp8, with and without
+    the hand-skipped layer."""
+    keep = ("Turing", "vLLM bf16", "vLLM fp8")
+    return table(_VS_KV_HEAD, [r for r in _vs_kv_rows() if r[0].startswith(keep) and r[0] != "vLLM fp8_per_token_head"])
+
+
+def _vs_kv_rows():
     g, n, d = _turing_kv_quality()
     lc = load("results_longctx_cuda.json")
 
@@ -123,8 +137,7 @@ def t_vs_kv():
                     pm(dl["mean"], dl["se"]) if dl else "—",
                     sreq(lambda x, kv=kv, skip=skip: x["engine"] == "vllm" and x["kv_cache_dtype"] == kv
                          and x.get("kv_skip_layers", []) == skip)])
-    return table(["KV cache", "Layers kept in bf16", "GSM8K", "Pass-key 2K–32K", "ΔNLL vs bf16", "s/request (16K, B=128)"],
-                 out)
+    return out
 
 
 def t_validation():
