@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]  # SPDX license string (PEP 639)
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llama-index-llms-turing"
+version = "0.1.0"
+description = "LlamaIndex LLM for a Turing Engine server (turing serve)"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = ["llama-index-core>=0.12", "llama-index-llms-openai-like>=0.3"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.urls]
+Source = "https://github.com/intutic/turing/tree/master/packages/llama-index-llms-turing"
+
+[tool.setuptools]
+packages = ["llama_index.llms.turing"]  # llama_index and llama_index.llms are namespace packages
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

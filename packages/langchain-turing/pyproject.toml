@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]  # SPDX license string (PEP 639)
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langchain-turing"
+version = "0.1.0"
+description = "LangChain chat model for a Turing Engine server (turing serve)"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+dependencies = ["langchain-core>=0.3.15", "httpx>=0.25"]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "langchain-tests>=0.3.15"]
+
+[project.urls]
+Source = "https://github.com/intutic/turing/tree/master/packages/langchain-turing"
+
+[tool.setuptools]
+packages = ["langchain_turing"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

@@ -51,6 +51,7 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install pytest pybind11
           pip install --no-build-isolation -e ".[dev]"
+          pip install -e packages/langchain-turing  # tests/test_langchain_integration.py (it ran on langchain-core before the package split)
 
       - name: Build C++20 AVX2 SIMD Extension
         run: |

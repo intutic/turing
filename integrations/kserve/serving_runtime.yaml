@@ -1,56 +1,40 @@
+# KServe ServingRuntime for Turing Engine: `turing serve` (OpenAI-compatible /v1 API) on port 8080.
+# KServe's storage initializer downloads the InferenceService's storageUri (hf://, s3://, gs://, pvc://) to
+# /mnt/models, and Turing loads the Hugging Face checkpoint from there.
+# Image: no official image is published yet. Build the CUDA image from deploy/Dockerfile
+#   docker build -f deploy/Dockerfile --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu124 -t <registry>/turing:cuda .
+# push it, and put its name below.
 apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime
 metadata:
   name: turing-runtime
-  namespace: default
-  labels:
-    llm-d.ai/engine-type: "turing"
+  annotations:
+    prometheus.kserve.io/port: "8080"
+    prometheus.kserve.io/path: /metrics
 spec:
   supportedModelFormats:
-    - name: turing-subspace
-      version: "1"
-      autoSelect: true
     - name: huggingface
       version: "1"
-      autoSelect: false
+      autoSelect: false  # opt in with `runtime: turing-runtime`; KServe's own Hugging Face runtime keeps the default
   containers:
     - name: kserve-container
-      image: ghcr.io/intutic/turing:v2.0.0-cuda
-
-
-      command: ["python3", "-m", "turing.cli", "serve"]
-
-
-
-
-      args:
-        - "--model"
-        - "$(MODEL_NAME)"
-        - "--port"
-        - "8080"
-        - "--device"
-        - "cuda"
+      image: registry.example.com/turing:cuda
+      command: ["turing", "serve"]
+      args: ["--model", "/mnt/models", "--host", "0.0.0.0", "--port", "8080", "--device", "cuda"]
       ports:
         - containerPort: 8080
-          name: http
           protocol: TCP
-        - containerPort: 5556
-          name: zmq-pub
-          protocol: TCP
-        - containerPort: 5559
-          name: zmq-replay
-          protocol: TCP
-      env:
-        - name: MODEL_NAME
-          value: "llama-3.1-70b"
-        - name: PYTHONHASHSEED
-          value: "0"
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        periodSeconds: 5
+        failureThreshold: 120  # loading the weights can take minutes
       resources:
-        limits:
-          nvidia.com/gpu: "1"
-          memory: "32Gi"
-          cpu: "8"
         requests:
-          nvidia.com/gpu: "1"
-          memory: "24Gi"
           cpu: "4"
+          memory: 16Gi
+          nvidia.com/gpu: "1"
+        limits:
+          memory: 24Gi
+          nvidia.com/gpu: "1"

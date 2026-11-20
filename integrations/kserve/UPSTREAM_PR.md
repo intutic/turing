@@ -1,6 +1,12 @@
-# Upstream PR Template: `kserve/kserve`
+# KServe upstream status
 
-**PR Title**: `feat(servingruntimes): Add Turing Engine high-throughput ServingRuntime`
+kserve/kserve#6074 (adding `turing-runtime` to `config/runtimes/`) was closed as stale on 2026-09-30 without review.
+Do not reopen it until both hold:
 
-## Description
-This PR adds the official `turing-runtime` ServingRuntime manifest to KServe's standard catalog, enabling Kubernetes operators to deploy 70B+ models on single 24GB GPUs (L4 / A10G) with automatic Knative scaling and metrics aggregation.
+1. A Turing CUDA image is published (the PR pointed at `ghcr.io/intutic/turing:v0.1.0-cuda`, which never existed).
+2. `serving_runtime.yaml` and `inferenceservice.yaml` have been applied on a real cluster with KServe and a GPU node,
+   and a `/v1/chat/completions` request through the InferenceService succeeded. Record the KServe and Kubernetes
+   versions in the PR.
+
+The PR's description also claimed cluster validation and 70B models on one GPU; neither was true. A new PR describes
+only what was run.

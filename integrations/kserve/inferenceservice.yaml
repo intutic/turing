@@ -1,12 +1,13 @@
+# An InferenceService on turing-runtime (serving_runtime.yaml). hf:// storage URIs need KServe 0.15 or later;
+# s3://, gs:// and pvc:// work on earlier versions.
 apiVersion: serving.kserve.io/v1beta1
 kind: InferenceService
 metadata:
-  name: turing-llama-70b
-  namespace: default
+  name: qwen25-1-5b-instruct
 spec:
   predictor:
     model:
       modelFormat:
-        name: turing-subspace
+        name: huggingface
       runtime: turing-runtime
-      storageUri: "s3://models/llama-3.1-70b-subspace"
+      storageUri: hf://Qwen/Qwen2.5-1.5B-Instruct

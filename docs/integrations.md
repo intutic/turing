@@ -21,15 +21,22 @@ Turing Engine provides native drop-in support via `langchain-openai` or built-in
     print(response.content)
     ```
 
-=== "Method B: ChatTuring (a LangChain BaseChatModel, with tool calling)"
+=== "Method B: ChatTuring (langchain-turing, with tool calling)"
+    ```bash
+    pip install langchain-turing
+    ```
     ```python
-    from turing.integrations.langchain import ChatTuring  # needs langchain-core
+    from langchain_turing import ChatTuring
 
     llm = ChatTuring(model="deepseek-r1-7b", base_url="http://localhost:8000/v1")
     print(llm.invoke("Write a quick C++ SIMD routine:").content)
     ```
-    `ChatTuring` supports `invoke`, `stream`, `batch` and `bind_tools` (OpenAI-style tool calls returned as
-    `AIMessage.tool_calls`). Pruning, KV cache format and quantization are chosen when the server starts, not per request.
+    `ChatTuring` is a LangChain `BaseChatModel` in its own package
+    ([`packages/langchain-turing`](https://github.com/intutic/turing/tree/master/packages/langchain-turing), depends
+    only on `langchain-core` and `httpx`): `invoke`, `stream` (with token usage), `batch`, async, and `bind_tools`
+    (OpenAI-style tool calls returned as `AIMessage.tool_calls`). It passes LangChain's standard chat-model test suite
+    against `turing serve` with Qwen2.5-0.5B-Instruct. `turing.integrations.langchain.ChatTuring` re-exports it.
+    Pruning, KV cache format and quantization are chosen when the server starts, not per request.
 
 ---
 
@@ -54,22 +61,24 @@ Requests carrying the removed `X-Turing-Sparsity` / `X-Turing-SVD-*` headers get
 
 ## 3. LlamaIndex RAG & Agents
 
-LlamaIndex talks to Turing Engine through its OpenAI-compatible API (`pip install llama-index-llms-openai-like`);
-there is no separate Turing package. A tested example is in
-[`integrations/llamaindex/openai_like_example.py`](https://github.com/intutic/turing/blob/master/integrations/llamaindex/openai_like_example.py).
+`llama-index-llms-turing` ([`packages/llama-index-llms-turing`](https://github.com/intutic/turing/tree/master/packages/llama-index-llms-turing))
+is LlamaIndex's `OpenAILike` client with Turing's defaults: chat endpoint, tool calling on, `api_base` from
+`$TURING_API_BASE` (else `http://localhost:8000/v1`).
+
+```bash
+pip install llama-index-llms-turing
+```
 
 ```python
-from llama_index.llms.openai_like import OpenAILike
+from llama_index.llms.turing import Turing
 
-llm = OpenAILike(
-    model="deepseek-r1-7b",
-    api_base="http://localhost:8000/v1",
-    api_key="turing-local",
-    is_chat_model=True
-)
+llm = Turing(model="deepseek-r1-7b", context_window=32768)
 response = llm.complete("Summarize the main architectural trade-offs of microservices:")
 print(response.text)
 ```
+
+Set `context_window` to the served model's. `OpenAILike(api_base=..., is_chat_model=True)` from
+`llama-index-llms-openai-like` works the same way without the package.
 
 ---
 
@@ -111,39 +120,22 @@ Turing Engine provides production manifests for Kubernetes orchestration:
 * ☸️ **[Full llm-d & Kubernetes Distributed Serving Guide](llmd-integration.md)** — Prefix-cache aware routing, InferencePools, and P/D disaggregation.
 * 📦 **[Turing Serving Helm Chart](https://github.com/intutic/turing/tree/master/deploy/helm/turing-serving)** — deployment with Prometheus scrape annotations (`/metrics` is Prometheus text), GPU limits and optional llm-d KV events.
 * 🐳 **[Docker images](docker.md)** — CPU and CUDA images.
-* 🚀 **KServe `ServingRuntime`**:
+* 🚀 **KServe `ServingRuntime`**: [`integrations/kserve/serving_runtime.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/serving_runtime.yaml)
+  runs `turing serve --model /mnt/models` on port 8080, so an InferenceService's `storageUri` (`hf://`, `s3://`,
+  `gs://`, `pvc://`) is what it serves ([`inferenceservice.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/inferenceservice.yaml)).
+  No official image is published yet: build the CUDA image from `deploy/Dockerfile`, push it to your registry and
+  set it in the runtime. The manifests validate against KServe's CRD schemas; they have not been run on a cluster yet.
 
 ```yaml
-apiVersion: serving.kserve.io/v1alpha1
-kind: ServingRuntime
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
 metadata:
-  name: turing-runtime
-  labels:
-    llm-d.ai/engine-type: "turing"
+  name: qwen25-1-5b-instruct
 spec:
-  supportedModelFormats:
-    - name: turing-subspace
-      version: "1"
-      autoSelect: true
-    - name: huggingface
-      version: "1"
-      autoSelect: false
-  containers:
-    - name: kserve-container
-      image: ghcr.io/intutic/turing:v2.0.0-cuda
-
-
-
-      command: ["python3", "-m", "turing.cli", "serve"]
-      args: ["--model", "$(MODEL_NAME)", "--port", "8080", "--device", "cuda"]
-      resources:
-        limits:
-          nvidia.com/gpu: "1"
-          memory: 32Gi
-          cpu: "8"
-        requests:
-          nvidia.com/gpu: "1"
-          memory: 24Gi
-          cpu: "4"
+  predictor:
+    model:
+      modelFormat:
+        name: huggingface
+      runtime: turing-runtime
+      storageUri: hf://Qwen/Qwen2.5-1.5B-Instruct
 ```
-

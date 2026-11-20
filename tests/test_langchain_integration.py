@@ -1,18 +1,18 @@
 """
-ChatTuring (turing.integrations.langchain) against a live in-process Turing server.
+ChatTuring (the langchain-turing package, packages/langchain-turing) against a live in-process Turing server.
 """
 
 import socket
 
 import pytest
 
-pytest.importorskip("langchain_core")
+pytest.importorskip("langchain_turing")  # pip install -e packages/langchain-turing
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 
-from turing.integrations.langchain import ChatTuring, _chat_result
+from langchain_turing.chat_models import ChatTuring, _chat_result
 from turing.serving.tools import ToolCallingHandler
 
 
@@ -30,6 +30,11 @@ def test_is_a_langchain_chat_model():
     assert isinstance(ChatTuring(), BaseChatModel)
 
 
+def test_turing_integrations_reexports_the_package():
+    from turing.integrations.langchain import ChatTuring as Reexported, ChatTuringEngine
+    assert Reexported is ChatTuring and ChatTuringEngine is ChatTuring
+
+
 def test_invoke(turing_server):
     msg = _llm(turing_server).invoke("Explain KV cache paging:")
     assert isinstance(msg, AIMessage) and isinstance(msg.content, str) and msg.content
@@ -39,9 +44,16 @@ def test_invoke(turing_server):
 
 def test_stream(turing_server):
     chunks = list(_llm(turing_server).stream("Write a haiku:"))
-    assert len(chunks) >= 8  # one chunk per generated token, then the finish chunk
+    assert len(chunks) >= 8  # one chunk per generated token, the finish chunk, then the usage chunk
     assert "".join(c.content for c in chunks)
-    assert [c.response_metadata.get("finish_reason") for c in chunks if c.response_metadata] == ["length"]
+    assert [c.response_metadata.get("finish_reason") for c in chunks if "finish_reason" in c.response_metadata] == ["length"]
+    full = sum(chunks[1:], chunks[0])
+    assert full.usage_metadata["output_tokens"] == 8 and full.response_metadata["model_name"]
+
+
+def test_server_error_message(turing_server):
+    with pytest.raises(Exception, match="n > 1 is not supported"):  # the server's own message, not just "400"
+        _llm(turing_server).invoke("hi", n=2)
 
 
 def test_batch(turing_server):
@@ -66,6 +78,9 @@ def test_bind_tools_sends_openai_tools():
     assert tools[0]["type"] == "function"
     assert tools[0]["function"]["name"] == "get_weather" and "city" in tools[0]["function"]["parameters"]["properties"]
     assert bound.kwargs["tool_choice"] == {"type": "function", "function": {"name": "get_weather"}}
+    for choice, sent in (("any", "required"), (True, "required"), ("auto", "auto"), ("none", "none")):
+        assert ChatTuring().bind_tools([get_weather], tool_choice=choice).kwargs["tool_choice"] == sent  # "any": LangChain's "required"
+    assert "tool_choice" not in ChatTuring().bind_tools([get_weather], tool_choice=False).kwargs
 
 
 def test_tool_calls_from_server_response():

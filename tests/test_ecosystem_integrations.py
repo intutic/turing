@@ -29,7 +29,10 @@ def test_kserve_manifest_validity():
     assert data["apiVersion"] == "serving.kserve.io/v1alpha1"
     assert data["kind"] == "ServingRuntime"
     assert data["metadata"]["name"] == "turing-runtime"
-    assert len(data["spec"]["containers"]) >= 1
+    c = data["spec"]["containers"][0]
+    assert c["args"][:2] == ["--model", "/mnt/models"]  # where KServe's storage initializer puts storageUri
+    assert c["readinessProbe"]["httpGet"]["path"] == "/health"
+    assert not c["image"].startswith("ghcr.io/intutic/")  # no image is published there yet
 
 def test_ticket_generator_dry_run(capsys):
     create_tickets(dry_run=True)

@@ -28,6 +28,12 @@ Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 - Distributed: tensor and pipeline parallelism over torch.distributed and prefill/decode disaggregation over TCP
   (639473d).
 - C++ engine: aligned SIMD forward pass with int8 KV, NEON, and a real HTTP server (9ba5199).
+- Client packages (Apache-2.0, no dependency on Turing Engine): `langchain-turing` (`ChatTuring`, moved out of
+  `turing.integrations.langchain`, which now re-exports it; streams token usage and tool calls, maps LangChain's
+  `tool_choice="any"`, reports the server's error message; passes LangChain's standard chat-model tests against
+  Qwen2.5-0.5B-Instruct) and `llama-index-llms-turing` (`Turing`, an `OpenAILike` with Turing's defaults). The
+  KServe runtime loads the InferenceService's model from `/mnt/models`, has a `/health` readiness probe and no longer
+  names an unpublished image.
 - MoE offload: `HeterogeneousMoERunner` runs the model's own experts from host memory with hot experts cached on the
   GPU (1c6416b).
 - Evaluation: `eval-niah` and `eval-accuracy` (GSM8K) through the engine with serving settings; `eval_parity.py`,
