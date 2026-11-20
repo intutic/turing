@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-W6.1: cross-model KV transfer (turing/core/cross_model_kv.py CrossModelKVPipeline, closed-form ridge W* with RoPE
+W6.1: cross-model KV transfer (turing/experimental/cross_model_kv.py CrossModelKVPipeline, closed-form ridge W* with RoPE
 content decoupling) on real models that share a tokenizer, measured by what the receiver does with the result.
 
 Calibration: n_calib windows of C tokens from WikiText-2 train. Both models prefill each window through the Turing
@@ -33,7 +33,7 @@ import torch.nn.functional as F
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from turing.core.cross_model_kv import CrossModelKVPipeline
+from turing.experimental.cross_model_kv import CrossModelKVPipeline
 from turing.core.kv_cache import KVCache
 from turing.models.hf_loader import RealHuggingFaceLoader
 

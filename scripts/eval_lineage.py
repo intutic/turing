@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-W6.2: multi-turn KV lineage on real models (turing/core/lineage.py): naive chaining vs clean_base.
+W6.2: multi-turn KV lineage on real models (turing/experimental/lineage.py): naive chaining vs clean_base.
 
 Two agents that share a tokenizer, A (sender) and B (receiver, whose cache is tracked). Closed-form ridge maps
 (CrossModelKVPipeline, eval_xkv_transfer.py) are fitted both ways on WikiText-2 train caches. B's turn-0 cache C_0 is
@@ -29,8 +29,8 @@ import torch.nn.functional as F
 
 from eval_xkv_transfer import (cache_from_kv, continuation_nll, env_info, load_model, mean_se, pick_device,
                                prefill_kv, token_windows)
-from turing.core.cross_model_kv import CrossModelKVPipeline
-from turing.core.lineage import CacheLineage, CleanBaseStrategy, NaiveStrategy
+from turing.experimental.cross_model_kv import CrossModelKVPipeline
+from turing.experimental.lineage import CacheLineage, CleanBaseStrategy, NaiveStrategy
 
 QUESTION = "\nQuestion: What is the secret passcode mentioned above? Answer: The secret passcode is"
 

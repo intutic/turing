@@ -23,7 +23,7 @@ from transformers import AutoTokenizer, logging as hf_logging
 hf_logging.set_verbosity_error()
 
 from turing.models.hf_loader import RealHuggingFaceLoader
-from turing.core.cross_model_kv import CrossModelKVPipeline, RoPEContentDecoupler
+from turing.experimental.cross_model_kv import CrossModelKVPipeline, RoPEContentDecoupler
 
 def main():
     device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")

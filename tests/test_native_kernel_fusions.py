@@ -16,12 +16,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from turing.core.speculation import SubspaceEAGLEDraftHead
-from turing.core.elastic_memory import ElasticMemoryBudgetManager
+from turing.experimental.speculation import SubspaceEAGLEDraftHead
+from turing.experimental.elastic_memory import ElasticMemoryBudgetManager
 from turing.core.expert_cache import GPULRUExpertCache
-from turing.core.paging import StaticPagedKVPool
-from turing.core.mhc import ManifoldHyperConnection
-from turing.core.router import SubspaceStructuredRouter
+from turing.experimental.paging import StaticPagedKVPool
+from turing.experimental.mhc import ManifoldHyperConnection
+from turing.experimental.router import SubspaceStructuredRouter
 
 try:
     import turing.turing_csrc as turing_csrc
@@ -64,7 +64,7 @@ def test_dilated_causal_conv1d_parity():
         assert max_diff <= 1e-4, f"Dilated conv SIMD max diff {max_diff} exceeds tolerance"
 
     # Triton CUDA / Auto-dispatch test
-    from turing.kernels.triton_dilated_conv import dilated_causal_conv1d_cuda
+    from turing.experimental.kernels.triton_dilated_conv import dilated_causal_conv1d_cuda
     dispatch_out = dilated_causal_conv1d_cuda(x, conv_layer.weight.squeeze(1), dilation=dilation)
     max_diff_dispatch = torch.max(torch.abs(ref_out - dispatch_out)).item()
     assert max_diff_dispatch <= 1e-4, f"Dilated conv dispatch max diff {max_diff_dispatch} exceeds tolerance"
@@ -103,7 +103,7 @@ def test_fused_lora_gemv_parity():
         assert max_diff <= 1e-4, f"Fused LoRA SIMD max diff {max_diff} exceeds tolerance"
 
     # Fused LoRA Triton / Auto-dispatch test
-    from turing.kernels.triton_fused_lora import fused_lora_gemv_cuda
+    from turing.experimental.kernels.triton_fused_lora import fused_lora_gemv_cuda
     fused_out = fused_lora_gemv_cuda(x, w_base, w_a, w_b, alpha=alpha)
     max_diff_fused = torch.max(torch.abs(ref_out - fused_out)).item()
     assert max_diff_fused <= 1e-4, f"Fused LoRA dispatch max diff {max_diff_fused} exceeds tolerance"
@@ -133,7 +133,7 @@ def test_find_residual_outlier_parity():
         assert torch.allclose(ref_signed_vals, simd_vals, atol=1e-5), "Outlier values do not match"
 
     # Triton CUDA / Auto-dispatch test
-    from turing.kernels.triton_residual_outlier import find_residual_outlier_cuda
+    from turing.experimental.kernels.triton_residual_outlier import find_residual_outlier_cuda
     out_idx, out_val = find_residual_outlier_cuda(residual)
     assert torch.equal(ref_top_indices, out_idx), "Triton outlier indices do not match"
     assert torch.allclose(ref_signed_vals, out_val, atol=1e-5), "Triton outlier values do not match"

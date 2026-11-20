@@ -3,9 +3,9 @@ import math
 import torch
 
 from turing.models.mesh_2d import Mesh2DCoordinator, Mesh2DParallelLinear
-from turing.core.swarm_opt import AsynchronousSwarmOptimizer
-from turing.core.cca_fast import CooperativeSharedConv2D, FastCompressedConvolutionalAttention
-from turing.kernels.softened_attention import SoftenedAttentionEngine
+from turing.experimental.swarm_opt import AsynchronousSwarmOptimizer
+from turing.experimental.cca_fast import CooperativeSharedConv2D, FastCompressedConvolutionalAttention
+from turing.experimental.kernels.softened_attention import SoftenedAttentionEngine
 
 def test_mesh_2d_coordinator_and_linear():
     coord = Mesh2DCoordinator(rows=2, cols=2, rank=3)
@@ -105,7 +105,7 @@ def test_native_csrc_hpc_kernels():
     assert moe_out.shape == (4, 32)
 
 def test_autonomic_threshold_tuner():
-    from turing.core.router import AutonomicThresholdTuner
+    from turing.experimental.router import AutonomicThresholdTuner
 
     tuner = AutonomicThresholdTuner(target_latency_ms=6.5, initial_threshold=0.5, initial_tau=1.0)
     init_thresh = tuner.current_threshold
@@ -120,7 +120,7 @@ def test_autonomic_threshold_tuner():
     assert 0.2 <= tuner.current_tau <= 2.0
 
 def test_asynch_task_scheduler_csrc():
-    from turing.core.asynch_scheduler import AsynchronousWorkerPool
+    from turing.experimental.asynch_scheduler import AsynchronousWorkerPool
     import numpy as np
 
     pool = AsynchronousWorkerPool(num_workers=4)
@@ -158,7 +158,7 @@ def test_cooperative_conv2d_shared_csrc():
     assert not np.isnan(out).any()
 
 def test_nbody_belief_recirculate_csrc():
-    from turing.demo.agent_system import MultiAgentCoordinator
+    from turing.experimental.demo.agent_system import MultiAgentCoordinator
     import numpy as np
 
     states = np.random.randn(4, 32).astype(np.float32)

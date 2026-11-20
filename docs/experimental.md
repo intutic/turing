@@ -1,6 +1,7 @@
 # Experimental components
 
-These modules live in the repository but are not used by `turing serve`. This page describes what each one does
+These modules live in the `turing.experimental` package (`turing/experimental/`) and are not used by `turing serve`;
+their APIs may change in any release. This page describes what each one does
 and how it performed on real models, on an NVIDIA L4 (fp32 for the cross-model maps). Several did not work, and
 those results are reported alongside the others. The tables are generated from the committed results in
 `benchmarks/results/` by `scripts/make_doc_tables.py`. The full list of experimental modules is in
@@ -10,7 +11,7 @@ those results are reported alongside the others. The tables are generated from t
 
 ## Cross-model KV transfer
 
-`turing/core/cross_model_kv.py` maps one model's KV cache into another model's KV space with a closed-form ridge
+`turing/experimental/cross_model_kv.py` maps one model's KV cache into another model's KV space with a closed-form ridge
 map ($W^*$). A sender model prefills a context; `CrossModelKVPipeline` (8 source layers per target layer, RoPE
 stripped before the map and re-applied after) maps its cache into the receiver's KV space, and the receiver scores a
 64-token continuation on top of it. The result is compared with the receiver reading the context itself (benefit 1)
@@ -40,7 +41,7 @@ Source: `scripts/eval_xkv_transfer.py`, `benchmarks/results/results_xkv_transfer
 
 ## Multi-turn lineage: naive chaining vs `clean_base`
 
-`turing/core/lineage.py` (`CleanBaseLineageBuffer`) controls how translated KV accumulates over a multi-turn
+`turing/experimental/lineage.py` (`CleanBaseLineageBuffer`) controls how translated KV accumulates over a multi-turn
 exchange. Two agents (Qwen2.5-0.5B →
 Qwen2.5-1.5B) exchange translated KV over eight turns (turns 1–6 shown); a 6-digit pass code opens each context.
 "naive" adds each turn's translated residual to the receiver's already-modified cache; `clean_base` always
@@ -67,7 +68,7 @@ Source: `scripts/eval_lineage.py`, `benchmarks/results/results_lineage_cuda.json
 
 ## k-slot pooling against low-bit KV and against dropping old tokens
 
-`KSlotCachePooler` (`turing/core/kslot_pooling.py`) pools the cache into k slots per layer and KV head. It is
+`KSlotCachePooler` (`turing/experimental/kslot_pooling.py`) pools the cache into k slots per layer and KV head. It is
 compared at matched cache bytes on SmolLM2 (512 context + 64 continuation tokens, 64 windows) with int8 and int4 KV
 storage and with `last_m`, which keeps only the newest m tokens; `kslot_k` is the pooler with k slots.
 
@@ -107,7 +108,7 @@ Source: `scripts/eval_kslot.py`, `benchmarks/results/results_kslot_cuda.json`.
 
 ## Multi-agent debate on GSM8K
 
-Multi-agent deliberation, the setting of the demo agents in `turing/demo/`, measured with a real instruct model on
+Multi-agent deliberation, the setting of the demo agents in `turing/experimental/demo/`, measured with a real instruct model on
 the engine: Qwen2.5-1.5B-Instruct on 100 GSM8K test problems, comparing one answer, a majority vote of three agents
 and a three-agent debate (each agent revises after reading the others' answers as text).
 

@@ -11,8 +11,8 @@ import argparse
 import time
 import torch
 import torch.nn.functional as F
-from turing.kernels.triton_latent_decode import triton_latent_flash_decode
-from turing.core.hybrid_attention import LinearRecurrentAttention, ChunkContextScorer, HybridAttentionLayerRouter
+from turing.experimental.kernels.triton_latent_decode import triton_latent_flash_decode
+from turing.experimental.hybrid_attention import LinearRecurrentAttention, ChunkContextScorer, HybridAttentionLayerRouter
 
 try:
     import turing.turing_csrc as turing_csrc

@@ -204,7 +204,7 @@ PyTorch reports them; those backends are untested.
 | Distributed | Tensor and pipeline parallelism (torchrun); prefill/decode disaggregation over TCP (`--prefill-worker`, `--prefill-server`) |
 | Evals | `turing eval-accuracy` (GSM8K exact match) and `turing eval-niah` (pass-key retrieval), through the engine on real weights |
 
-The repository also holds research components outside the serving path: cross-model KV transfer, `clean_base`
+The `turing.experimental` package holds research components outside the serving path: cross-model KV transfer, `clean_base`
 lineage, k-slot pooling, an MoE expert-offload runner, hybrid linear/softmax attention (needs a model trained with it)
 and untrained Matryoshka draft heads. What each does, and how it performed on real models, is in
 [experimental components](docs/experimental.md).

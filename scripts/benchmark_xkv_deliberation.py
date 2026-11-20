@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 from turing.config import ModelConfig
-from turing.core.cross_model_kv import XKVLatentAgentBridge
-from turing.demo.epistemic_gate import AuditableSemanticInspector
+from turing.experimental.cross_model_kv import XKVLatentAgentBridge
+from turing.experimental.demo.epistemic_gate import AuditableSemanticInspector
 
 def run_xkv_deliberation_benchmark(device: str = "auto", num_runs: int = 50):
     if device == "auto":

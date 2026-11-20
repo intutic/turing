@@ -10,17 +10,17 @@ import time
 import uvicorn
 import torch
 
-from .config import TuringConfig
-from .models.registry import get_model_config, MODEL_REGISTRY
-from .models.causal_lm import SubspaceCausalLM
-from .core.kv_cache import resolve_kv_cache_dtype
-from .serving.engine import ContinuousBatchEngine
-from .serving.spec_gate import SpeculationGatePolicy
-from .serving.server import create_app
+from turing.config import TuringConfig
+from turing.models.registry import get_model_config, MODEL_REGISTRY
+from turing.models.causal_lm import SubspaceCausalLM
+from turing.core.kv_cache import resolve_kv_cache_dtype
+from turing.serving.engine import ContinuousBatchEngine
+from turing.serving.spec_gate import SpeculationGatePolicy
+from turing.serving.server import create_app
 
 def _load_hf_or_exit(args, dev):
     """Real HuggingFace weights, or stop: random weights served for a mistyped name would only produce gibberish."""
-    from .models.hf_loader import RealHuggingFaceLoader
+    from turing.models.hf_loader import RealHuggingFaceLoader
     try:
         return RealHuggingFaceLoader.load_hf_model_into_turing(hf_model_id=args.model, sparsity_ratio=args.sparsity,
                                                               device=str(dev), dtype=getattr(args, "dtype", None))
@@ -30,14 +30,14 @@ def _load_hf_or_exit(args, dev):
 def _load_weights(args, dev):
     """Real weights from a .tgate4 directory or file, a local .gguf file, or HuggingFace, with --quantization and the
     KV cache flags applied when the command has them."""
-    from .models.quant import TGATE4_FILE, load_quantized, quantize_model, calibration_windows
+    from turing.models.quant import TGATE4_FILE, load_quantized, quantize_model, calibration_windows
     if args.model.endswith(".tgate4") or os.path.isfile(os.path.join(args.model, TGATE4_FILE)):
         print(f"[*] Loading 4-bit .tgate4 weights from '{args.model}'...")
         model, tokenizer = load_quantized(args.model, device=str(dev), dtype=getattr(args, "dtype", None))
         if tokenizer is None:
             raise SystemExit(f"[!] '{args.model}' has no tokenizer files next to its model.tgate4")
     elif args.model.endswith(".gguf") and os.path.isfile(args.model):
-        from .models.gguf_loader import GGUFModelLoader
+        from turing.models.gguf_loader import GGUFModelLoader
         print(f"[*] Loading native GGUF weights from '{args.model}'...")
         model, tokenizer = GGUFModelLoader(args.model).load(sparsity_ratio=args.sparsity, device=str(dev))
     else:
@@ -50,7 +50,7 @@ def _load_weights(args, dev):
         calib = calibration_windows(tokenizer, args.calib_windows, 2048) if method == "gptq" else None
         quantize_model(model, method, calib, lm_head=getattr(args, "quantize_lm_head", False))
     if sp:
-        from .models.activation_sparsity import calibrate_and_apply
+        from turing.models.activation_sparsity import calibrate_and_apply
         print(f"[*] Calibrating {sp:.0%} activation sparsity on WikiText-2 (16 windows of 512 tokens)...")
         calibrate_and_apply(model, calibration_windows(tokenizer, 16, 512), sp)
     cfg = model.config
@@ -228,11 +228,11 @@ def main():
         sys.exit(0)
 
     if args.command == "demo":
-        from .demo.interactive_demo import run_demo
+        from turing.experimental.demo.interactive_demo import run_demo
         run_demo(model_name=args.model, device=args.device, sparsity=args.sparsity, prompt=args.prompt)
 
     elif args.command == "eval-accuracy":
-        from .serving.accuracy_eval import GSM8KEvaluator, load_gsm8k
+        from turing.serving.accuracy_eval import GSM8KEvaluator, load_gsm8k
         engine = _eval_engine(args)
         problems = load_gsm8k("test")[:args.samples]
         shots = load_gsm8k("train")[:args.shots]
@@ -309,7 +309,7 @@ def main():
         pp_size = getattr(args, "pipeline_parallel", 1)
         dist_driver = None
         if tp_size > 1 or pp_size > 1 or int(os.getenv("WORLD_SIZE", "1")) > 1:
-            from .serving.distributed import DistributedInferenceDriver, DistributedConfig
+            from turing.serving.distributed import DistributedInferenceDriver, DistributedConfig
             if tp_size * pp_size != int(os.getenv("WORLD_SIZE", "1")):
                 raise SystemExit(f"[!] --tp {tp_size} x --pp {pp_size} must equal WORLD_SIZE "
                                  f"{os.getenv('WORLD_SIZE', '1')}: launch with scripts/launch_distributed.sh (torchrun)")
@@ -326,7 +326,7 @@ def main():
             print(f"[+] Initialized DistributedInferenceDriver (TP: {tp_size}, PP: {pp_size})")
 
         for spec in args.lora:
-            from .models.adapters import load_lora_adapter
+            from turing.models.adapters import load_lora_adapter
             name, _, path = spec.partition("=")
             if not path or model_inst is None:
                 raise SystemExit(f"[!] --lora takes NAME=PATH and real weights, got '{spec}'")
@@ -340,7 +340,7 @@ def main():
                                                        int(args.prefill_server.rsplit(":", 1)[1]))
                                        if args.prefill_server else None)
         if args.prefill_worker:  # prefill/decode disaggregation: serve prefills to decode servers over TCP
-            from .serving.disagg_sidecar import PrefillWorker
+            from turing.serving.disagg_sidecar import PrefillWorker
             worker = PrefillWorker(engine, args.host, args.kv_port)
             print(f"[*] Prefill worker on {args.host}:{worker.port} (decode servers call add_remote_prefilled_request)")
             worker.serve_forever()
@@ -348,7 +348,7 @@ def main():
 
         kv_pub = None
         if getattr(args, "enable_kv_events", False) or os.getenv("ENABLE_KV_EVENTS", "0").lower() in ("1", "true", "yes"):
-            from .serving.kv_events import KVBlockEventPublisher
+            from turing.serving.kv_events import KVBlockEventPublisher
             pod_ip = os.getenv("POD_IP", args.host if args.host != "0.0.0.0" else "127.0.0.1")
             pod_port = args.port
             pub_port = getattr(args, "kv_events_pub_port", 5556)
@@ -394,19 +394,19 @@ def main():
         print(f"\n[+] Generated Output:\n{out_text}\n")
 
     elif args.command == "convert":
-        from .models.converter import convert_checkpoint
+        from turing.models.converter import convert_checkpoint
         dev = TuringConfig(device=args.device).resolve_device()
         res = convert_checkpoint(args.model, args.output, args.method, str(dev), args.calib_windows, args.calib_tokens,
                                  lm_head=args.quantize_lm_head)
         print(json.dumps(res, indent=2))
 
     elif args.command == "eval-niah":
-        from .serving.niah import LongContextNIAHEvaluator
+        from turing.serving.niah import LongContextNIAHEvaluator
         engine = _eval_engine(args)
         _write_eval(args, LongContextNIAHEvaluator(engine).evaluate_retrieval(args.context_len, args.depths))
 
     elif args.command == "bench-bw":
-        from .core.heterogeneous_moe import BandwidthAdaptiveDecider
+        from turing.core.heterogeneous_moe import BandwidthAdaptiveDecider
         jcfg = TuringConfig(device=args.device)
         dev = jcfg.resolve_device()
         print(f"[*] Calibrating Live Hardware Interconnect & Compute on {dev}...")

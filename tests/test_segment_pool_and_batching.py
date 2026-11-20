@@ -2,7 +2,7 @@ import pytest
 import torch
 import numpy as np
 
-from turing.kernels.triton_segment_pool import (
+from turing.experimental.kernels.triton_segment_pool import (
     fused_segment_mean_pool_cuda,
     fused_segment_cls_pool_cuda,
 )

@@ -18,8 +18,8 @@ from turing.turing_csrc import (
     NativeSafetensorsHeaderParser,
     NativeTrafficManager
 )
-from turing.kernels.triton_spec_verify import fused_speculative_verify_cuda
-from turing.kernels.triton_fused_kslot_gate import fused_kslot_pooling_and_gating_cuda
+from turing.experimental.kernels.triton_spec_verify import fused_speculative_verify_cuda
+from turing.experimental.kernels.triton_fused_kslot_gate import fused_kslot_pooling_and_gating_cuda
 
 def benchmark_speculative_verify():
     print("\n[1/4] Benchmarking In-VRAM Speculative Candidate Verification...")

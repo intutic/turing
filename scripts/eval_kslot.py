@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-W6.3: k-slot cache pooling (turing/core/kslot_pooling.py KSlotCachePooler) against int8 / int4 KV and against
+W6.3: k-slot cache pooling (turing/experimental/kslot_pooling.py KSlotCachePooler) against int8 / int4 KV and against
 dropping the oldest tokens, at matched cache bytes, by next-token NLL of a WikiText-2 continuation.
 
 Each window: C context tokens, then D continuation tokens; every arm scores the same D - 1 next-token predictions
@@ -26,8 +26,8 @@ import torch
 
 from eval_xkv_transfer import (cache_from_kv, continuation_nll, env_info, load_model, mean_se, pick_device,
                                prefill_kv, token_windows)
-from turing.core.cross_model_kv import RoPEContentDecoupler
-from turing.core.kslot_pooling import KSlotCachePooler
+from turing.experimental.cross_model_kv import RoPEContentDecoupler
+from turing.experimental.kslot_pooling import KSlotCachePooler
 from turing.core.kv_cache import KVCache, kv_bytes_per_token
 
 

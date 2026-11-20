@@ -19,7 +19,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from turing.models.registry import get_model_config, MODEL_REGISTRY
-from turing.kernels.sinkhorn_ot_cuda import sinkhorn_ot_eviction_cuda
+from turing.experimental.kernels.sinkhorn_ot_cuda import sinkhorn_ot_eviction_cuda
 
 def clean_gpu_memory():
     gc.collect()

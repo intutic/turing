@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from turing.config import ModelConfig
 from turing.models.causal_lm import RMSNorm, SubspaceMLP, SubspaceDecoderLayer
-from turing.kernels.triton_fused_qkv_rope import dispatch_fused_qkv_rope
+from turing.experimental.kernels.triton_fused_qkv_rope import dispatch_fused_qkv_rope
 
 
 def test_decoder_layer_with_fused_ffn():

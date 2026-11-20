@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from turing.kernels.shannon_entropy_cuda import fused_shannon_entropy_cuda
-from turing.demo.epistemic_gate import EpistemicUncertaintyGate
+from turing.experimental.demo.epistemic_gate import EpistemicUncertaintyGate
 
 
 def test_shannon_entropy_numerical_parity():

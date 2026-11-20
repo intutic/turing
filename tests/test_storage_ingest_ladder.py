@@ -10,7 +10,7 @@ import torch
 import numpy as np
 
 from turing.models.ingest import TuringIngestEngine, StorageTier, IngestionResult
-from turing.kernels.gds_loader import PipelinedLayerLoader
+from turing.experimental.kernels.gds_loader import PipelinedLayerLoader
 from turing.turing_csrc import NativeAsyncRingReader, NativeGDSLoader
 
 

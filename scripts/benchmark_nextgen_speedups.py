@@ -17,16 +17,16 @@ import argparse
 import torch
 import torch.nn.functional as F
 
-from turing.kernels.triton_paged_decode_gemv import (
+from turing.experimental.kernels.triton_paged_decode_gemv import (
     batched_paged_decode_gemv_cuda,
     batched_paged_decode_split_k_gemv_cuda
 )
-from turing.kernels.triton_linear_recurrence_step import (
+from turing.experimental.kernels.triton_linear_recurrence_step import (
     fused_linear_recurrence_step_cuda,
     fused_kda_conv_recurrence_step_cuda
 )
-from turing.core.paging import GroupedMicroScalePagedKVPool
-from turing.core.lineage import CleanBaseLineageBuffer
+from turing.experimental.paging import GroupedMicroScalePagedKVPool
+from turing.experimental.lineage import CleanBaseLineageBuffer
 
 
 def parse_args():

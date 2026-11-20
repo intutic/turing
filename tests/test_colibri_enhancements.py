@@ -6,7 +6,7 @@ import torch.nn.functional as F
 
 from turing.config import ModelConfig
 from turing.core.expert_cache import GPULRUExpertCache, RoutingHistoryTracker
-from turing.core.expert_prefetch import OneLayerAheadExpertPrefetcher
+from turing.experimental.expert_prefetch import OneLayerAheadExpertPrefetcher
 
 
 def test_routing_history_tracker_basic():

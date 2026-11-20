@@ -15,14 +15,14 @@ except ImportError:
 
 from turing.serving.traffic import PrefixHashRouter
 from turing.serving.spec_gate import SpecExactParityVerifier, ParityReport
-from turing.core.lineage import _hash_kv_tensors
-from turing.kernels.triton_vram_hash import fused_tensor_checksum_cuda, compute_fast_tensor_hash
-from turing.kernels.triton_gated_zero_identity import fused_gated_zero_identity_cuda
-from turing.kernels.triton_chunk_filter import fused_chunk_context_filter_cuda
-from turing.kernels.triton_quadtree_mrp import fused_quadtree_mrp_cuda
-from turing.core.speculation import QuadtreeMRPSpeculator, MatryoshkaDraftHead
-from turing.core.kslot_pooling import GatedZeroIdentityHead
-from turing.core.hybrid_attention import ChunkContextScorer
+from turing.experimental.lineage import _hash_kv_tensors
+from turing.experimental.kernels.triton_vram_hash import fused_tensor_checksum_cuda, compute_fast_tensor_hash
+from turing.experimental.kernels.triton_gated_zero_identity import fused_gated_zero_identity_cuda
+from turing.experimental.kernels.triton_chunk_filter import fused_chunk_context_filter_cuda
+from turing.experimental.kernels.triton_quadtree_mrp import fused_quadtree_mrp_cuda
+from turing.experimental.speculation import QuadtreeMRPSpeculator, MatryoshkaDraftHead
+from turing.experimental.kslot_pooling import GatedZeroIdentityHead
+from turing.experimental.hybrid_attention import ChunkContextScorer
 
 
 def test_prefix_router_fast_hash_parity():

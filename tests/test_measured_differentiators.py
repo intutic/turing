@@ -9,7 +9,7 @@ import torch
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
 
 from turing.config import ModelConfig
-from turing.core.cross_model_kv import CrossModelKVPipeline, RoPEContentDecoupler
+from turing.experimental.cross_model_kv import CrossModelKVPipeline, RoPEContentDecoupler
 
 
 def test_rope_4d_matches_per_slice():

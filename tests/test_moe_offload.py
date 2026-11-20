@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from turing.core.expert_cache import GPULRUExpertCache
-from turing.core.expert_prefetch import OneLayerAheadExpertPrefetcher
+from turing.experimental.expert_prefetch import OneLayerAheadExpertPrefetcher
 from turing.core.heterogeneous_moe import BandwidthAdaptiveDecider, HeterogeneousMoERunner, HostExpertBank
 from turing.models.hf_loader import RealHuggingFaceLoader
 from tests.test_hf_parity import _tiny

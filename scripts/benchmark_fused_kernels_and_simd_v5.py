@@ -34,11 +34,11 @@ except ImportError:
         HAS_CSRC = False
         turing_csrc = None
 
-from turing.kernels.triton_fused_moe_block_gemm import fused_moe_block_gemm_cuda
-from turing.kernels.triton_paged_decode_gemv import batched_paged_decode_gemv_cuda
-from turing.kernels.triton_linear_recurrence_step import fused_linear_recurrence_step_cuda
-from turing.kernels.triton_kslot_pool import fused_kslot_pool_cuda
-from turing.kernels.triton_spec_verify import fused_speculative_verify_cuda
+from turing.experimental.kernels.triton_fused_moe_block_gemm import fused_moe_block_gemm_cuda
+from turing.experimental.kernels.triton_paged_decode_gemv import batched_paged_decode_gemv_cuda
+from turing.experimental.kernels.triton_linear_recurrence_step import fused_linear_recurrence_step_cuda
+from turing.experimental.kernels.triton_kslot_pool import fused_kslot_pool_cuda
+from turing.experimental.kernels.triton_spec_verify import fused_speculative_verify_cuda
 
 
 def benchmark_moe_block_gemm():

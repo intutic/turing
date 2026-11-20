@@ -43,7 +43,7 @@ Pull requests must pass the full test suite with **zero warnings** (CUDA-only te
 python -W error -m pytest -v
 
 # Run a specific test module
-python -W error -m pytest tests/test_cross_model_kv_transfer.py -v
+python -W error -m pytest tests/test_kv_cache.py -v
 ```
 
 ### Scripts and git worktrees

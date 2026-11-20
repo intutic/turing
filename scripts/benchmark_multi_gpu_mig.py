@@ -26,7 +26,7 @@ from turing.config import TuringConfig
 from turing.models.registry import get_model_config
 from turing.models.causal_lm import SubspaceCausalLM
 from turing.models.tensor_parallel import ColumnParallelLinear, RowParallelLinear
-from turing.core.speculation import SubspaceEAGLEDraftHead, RidgeAssistedTreeSpeculator
+from turing.experimental.speculation import SubspaceEAGLEDraftHead, RidgeAssistedTreeSpeculator
 
 def run_multi_model_benchmarks(device_name: str = "cuda") -> Dict[str, Any]:
     device = torch.device(device_name)

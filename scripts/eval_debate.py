@@ -10,7 +10,7 @@ Arms, on the same problems (a fixed-seed sample of the GSM8K main test split):
   debate   the same three agents, round 2 (Du et al. 2023): each sees its own round-1 solution and the other two
            agents' solutions as text and gives an updated answer; majority vote of the round-2 answers
 A KV-exchange arm (agents reading each other's KV through a W* transfer) is not run: MultiAgentCoordinator
-(turing/demo/agent_system.py) does not pass KV between agents (its XKV demo feeds torch.randn KV through an untrained
+(turing/experimental/demo/agent_system.py) does not pass KV between agents (its XKV demo feeds torch.randn KV through an untrained
 bridge and drops the result before generating), so there is nothing end to end to measure; see the results JSON.
 Reported: exact-match accuracy (final number) with a binomial SE, the paired difference vs single with its SE,
 per-agent accuracy per round, tokens generated, wall time (shared machine: context only).

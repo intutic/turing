@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Changed
+- Experimental components moved to `turing.experimental` (`turing/experimental/`, kernels in
+  `turing/experimental/kernels/`, the demo in `turing/experimental/demo/`, tests in `tests/experimental/`): every module
+  `turing serve` does not import. Imports such as `turing.core.lineage` or `turing.kernels.triton_kslot_pool` become
+  `turing.experimental.lineage` and `turing.experimental.kernels.triton_kslot_pool`; `turing.SubspaceStructuredRouter`,
+  `turing.DynamicEntropyRouter` and `turing.HierarchicalVirtualPageManager` are now in `turing.experimental`.
 - Benchmark results moved from the repository root to `benchmarks/results/`, with reproduction commands in
   `benchmarks/README.md`; scripts write there by default.
 - Documentation reorganised into Getting started, User guide, Performance and Internals sections.

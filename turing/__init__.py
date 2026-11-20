@@ -1,5 +1,5 @@
 """
-Turing Engine: Edge-to-Cloud Distributed Subspace LLM Inference Runtime.
+Turing Engine: an LLM inference server with a calibrated int8/int4 KV cache and OpenAI, Anthropic and Ollama APIs.
 """
 
 __version__ = "2.0.0"
@@ -13,8 +13,6 @@ import importlib
 _EXPORTS = {
     ".config": ["ModelConfig", "TuringConfig"],
     ".core.subspace": ["SubspaceRecirculation"],
-    ".core.router": ["SubspaceStructuredRouter", "DynamicEntropyRouter"],
-    ".core.paging": ["HierarchicalVirtualPageManager"],
     ".models.causal_lm": ["SubspaceCausalLM"],
     ".models.registry": ["MODEL_REGISTRY", "get_model_config"],
     ".dsl": ["chain", "gen", "fork", "join", "select", "constrain"],

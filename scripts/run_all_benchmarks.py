@@ -17,9 +17,9 @@ import torch
 # Ensure repo root is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from turing.core.matrix_pow import LogarithmicRecurrenceEngine
-from turing.core.swarm_objectives import evaluate_objective
-from turing.core.router_annealer import compute_exponential_decay
+from turing.experimental.matrix_pow import LogarithmicRecurrenceEngine
+from turing.experimental.swarm_objectives import evaluate_objective
+from turing.experimental.router_annealer import compute_exponential_decay
 
 def run_all_frontier_benchmarks():
     if torch.cuda.is_available():

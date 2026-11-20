@@ -21,7 +21,8 @@ cached.
 | :--- | :--- |
 | `turing/serving/` | HTTP server (OpenAI, Anthropic, Ollama APIs), generation core, continuous-batching engine, prefix cache, admission control |
 | `turing/models/` | `SubspaceCausalLM` (the model, 16 HF model types), HF and GGUF loaders, 4-bit quantization, LoRA, tensor/pipeline parallelism |
-| `turing/core/` | Paged KV cache (`kv_cache.py`), RoPE variants; experimental components outside the serving path |
+| `turing/core/` | Paged KV cache (`kv_cache.py`), RoPE variants, MoE expert offload |
+| `turing/experimental/` | Research components `turing serve` does not use, with their kernels and the `turing demo` agents; no API stability |
 | `turing/kernels/` | Triton kernels: paged decode/prefill, int4 GEMM, sparse GEMV, and their dispatch wrappers |
 | `turing/dsl/` | `@chain`, `gen`, `fork`, `join`, `select`, `constrain` |
 | `csrc/` | C++20 extension (SIMD, GGUF reader, file loaders) and the standalone `turing-cli` engine |

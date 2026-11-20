@@ -11,11 +11,11 @@ import numpy as np
 
 from turing.serving.traffic import AdaptiveComputeBatcher
 from turing.core.expert_cache import RoutingHistoryTracker
-from turing.core.kslot_pooling import GatedZeroIdentityHead
-from turing.kernels.triton_spec_entropy import fused_entropy_argmax_gate_cuda
-from turing.kernels.triton_matryoshka_gemv import fused_matryoshka_gemv_cuda
-from turing.kernels.triton_hybrid_anchor_fuse import fused_hybrid_step_anchor_cuda
-from turing.kernels.triton_subspace_compress import fused_subspace_compress_cuda
+from turing.experimental.kslot_pooling import GatedZeroIdentityHead
+from turing.experimental.kernels.triton_spec_entropy import fused_entropy_argmax_gate_cuda
+from turing.experimental.kernels.triton_matryoshka_gemv import fused_matryoshka_gemv_cuda
+from turing.experimental.kernels.triton_hybrid_anchor_fuse import fused_hybrid_step_anchor_cuda
+from turing.experimental.kernels.triton_subspace_compress import fused_subspace_compress_cuda
 
 def benchmark_varlen_pack_simd():
     print("=" * 80)

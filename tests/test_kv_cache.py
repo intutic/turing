@@ -204,7 +204,7 @@ def test_engine_reserves_pages_at_admission_frees_them_at_finish_and_rejects_wha
 
 
 def test_elastic_manager_drives_the_serving_pool():
-    from turing.core.elastic_memory import ElasticMemoryBudgetManager
+    from turing.experimental.elastic_memory import ElasticMemoryBudgetManager
     from turing.core.expert_cache import GPULRUExpertCache
     experts = GPULRUExpertCache(num_slots=32, hidden_dim=256, active_subspace_dim=128, device=torch.device("cpu"),
                                 dtype=torch.float32)

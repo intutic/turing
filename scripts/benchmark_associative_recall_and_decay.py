@@ -15,12 +15,12 @@ import torch.nn.functional as F
 import numpy as np
 from typing import Dict, Any, List, Tuple
 
-from turing.core.hybrid_memory import (
+from turing.experimental.hybrid_memory import (
     LearnedDecayRecurrenceState,
     HybridRecurrentAttention,
     AssociativeRecallProbe,
 )
-from turing.kernels.triton_chunked_decay import (
+from turing.experimental.kernels.triton_chunked_decay import (
     fused_chunked_learned_decay_cuda,
     fused_gated_learned_decay_step_cuda,
 )

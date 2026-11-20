@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from turing.config import ModelConfig
 from turing.models.registry import get_model_config
-from turing.kernels.sinkhorn_ot_cuda import sinkhorn_ot_eviction_cuda
+from turing.experimental.kernels.sinkhorn_ot_cuda import sinkhorn_ot_eviction_cuda
 
 def run_live_gpu_benchmark():
     assert torch.cuda.is_available(), "CUDA must be available for live GPU benchmarking!"

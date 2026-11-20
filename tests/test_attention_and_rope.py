@@ -1,8 +1,8 @@
 import pytest
 import torch
-from turing.core.attention_cache import AttentionPatternCache, ChunkedLongPrefillEngine
+from turing.experimental.attention_cache import AttentionPatternCache, ChunkedLongPrefillEngine
 from turing.core.rope import RotaryEmbedding
-from turing.core.optimal_transport import sinkhorn_knopp_eviction, OptimalTransportEviction
+from turing.experimental.optimal_transport import sinkhorn_knopp_eviction, OptimalTransportEviction
 
 def test_attention_pattern_cache():
     apc = AttentionPatternCache(block_size=16, local_window=32, global_anchors=8)

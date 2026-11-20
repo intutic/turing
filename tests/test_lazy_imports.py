@@ -1,21 +1,23 @@
-"""`import turing` and `import turing.core` load no submodule (and so not torch); names still resolve on use."""
+"""`import turing`, `turing.core` and `turing.experimental` load no submodule (and so not torch); names still resolve on
+use."""
 
 import subprocess
 import sys
 
 CHECK = """
-import sys, turing, turing.core
+import sys, turing, turing.core, turing.experimental
 loaded = sorted(m for m in sys.modules if m.startswith("turing.") or m == "torch")
-assert loaded == ["turing.core"], loaded
+assert loaded == ["turing.core", "turing.experimental"], loaded
 from turing import SubspaceCausalLM, ModelConfig, chain
-from turing.core import GPULRUExpertCache, HostExpertBank, TensorSerializer
-assert "turing.core.paging" not in sys.modules and "turing.core.speculation" not in sys.modules
+from turing.core import GPULRUExpertCache, HostExpertBank
+from turing.experimental import TensorSerializer
+assert "turing.experimental.paging" not in sys.modules and "turing.experimental.speculation" not in sys.modules
 try:
-    turing.core.SpectralRadixSVDForest
+    turing.core.TensorSerializer  # moved to turing.experimental
 except AttributeError:
     pass
 else:
-    raise AssertionError("deleted name still exported")
+    raise AssertionError("experimental name still exported from turing.core")
 """
 
 

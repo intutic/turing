@@ -227,21 +227,21 @@ Python engine tokenizes them; the parity tests compare logits from the same toke
 
 ## 10. Experimental components
 
-These modules are experimental, not used by `turing serve`. They have unit tests (some with parity tests against
+These modules live in `turing.experimental` and are not used by `turing serve`. They have unit tests (some with parity tests against
 PyTorch references) and at most micro-benchmarks on random data, unless [experimental components](experimental.md)
 reports a run on a real model.
 
 | Component | Module | Note |
 | :--- | :--- | :--- |
-| Cross-model KV transfer | `turing/core/cross_model_kv.py` | Closed-form ridge map ($W^*$) between two models' KV with RoPE decoupling; results in [experimental components](experimental.md#cross-model-kv-transfer) |
-| `clean_base` lineage | `turing/core/lineage.py` (`CleanBaseLineageBuffer`, `CacheLineage`) | Recomputes each turn's residual against the frozen original cache instead of chaining |
-| k-slot pooling | `turing/core/kslot_pooling.py` (`KSlotCachePooler`, `GatedZeroIdentityHead`) | Untrained modules |
-| Hybrid recurrent attention | `turing/core/hybrid_memory.py`, `hybrid_attention.py` | Needs a model trained with hybrid layers; none is loaded by this engine |
-| Draft heads | `turing/core/speculation.py` (`MatryoshkaDraftHead`, `EntropyConfidenceTreePruner`, …) | Randomly initialised, untrained; serving speculates by prompt lookup |
+| Cross-model KV transfer | `turing/experimental/cross_model_kv.py` | Closed-form ridge map ($W^*$) between two models' KV with RoPE decoupling; results in [experimental components](experimental.md#cross-model-kv-transfer) |
+| `clean_base` lineage | `turing/experimental/lineage.py` (`CleanBaseLineageBuffer`, `CacheLineage`) | Recomputes each turn's residual against the frozen original cache instead of chaining |
+| k-slot pooling | `turing/experimental/kslot_pooling.py` (`KSlotCachePooler`, `GatedZeroIdentityHead`) | Untrained modules |
+| Hybrid recurrent attention | `turing/experimental/hybrid_memory.py`, `hybrid_attention.py` | Needs a model trained with hybrid layers; none is loaded by this engine |
+| Draft heads | `turing/experimental/speculation.py` (`MatryoshkaDraftHead`, `EntropyConfidenceTreePruner`, …) | Randomly initialised, untrained; serving speculates by prompt lookup |
 | MoE expert offload | `turing/core/heterogeneous_moe.py`, `expert_cache.py`, `expert_prefetch.py` | `HeterogeneousMoERunner` runs a model's own experts from host memory with hot experts in `GPULRUExpertCache` slots; equals `SparseMoE` at atol 1e-5 on tiny Mixtral/OLMoE; not wired into serving |
-| Elastic memory budget | `turing/core/elastic_memory.py` | Balances an expert cache against a KV pool |
-| Hyper-connections | `turing/core/mhc.py` | Sinkhorn-projected mixing of residual streams; doubly-stochastic property tests only |
-| Older paging | `turing/core/paging.py` | Not the serving cache (that is `kv_cache.py`) |
-| Demo agents | `turing/demo/` (`MultiAgentCoordinator`, `DynamicEnvironmentModel`, `EpistemicUncertaintyGate`) | `turing demo` |
+| Elastic memory budget | `turing/experimental/elastic_memory.py` | Balances an expert cache against a KV pool |
+| Hyper-connections | `turing/experimental/mhc.py` | Sinkhorn-projected mixing of residual streams; doubly-stochastic property tests only |
+| Older paging | `turing/experimental/paging.py` | Not the serving cache (that is `kv_cache.py`) |
+| Demo agents | `turing/experimental/demo/` (`MultiAgentCoordinator`, `DynamicEnvironmentModel`, `EpistemicUncertaintyGate`) | `turing demo` |
 | Other Triton kernels | `turing/kernels/` | e.g. flash-tree attention, fused MoE block GEMM, linear recurrence, k-slot pool, spec entropy/verify, segment pool |
 | Other C++ helpers | `csrc/` | e.g. prefix hashing, Sinkhorn scores, routing history, reasoning-tag scanner, JSON scanner, safetensors header parser |

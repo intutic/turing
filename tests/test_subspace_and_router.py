@@ -1,7 +1,7 @@
 import pytest
 import torch
 from turing.core.subspace import SubspaceRecirculation
-from turing.core.router import SubspaceStructuredRouter, DAREOActivationReuse
+from turing.experimental.router import SubspaceStructuredRouter, DAREOActivationReuse
 
 def test_subspace_recirculation():
     hidden_dim = 256

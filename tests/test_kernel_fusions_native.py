@@ -68,7 +68,7 @@ def test_ridge_forward_native_parity():
 
 
 def test_triton_matryoshka_fallback():
-    from turing.kernels.triton_matryoshka_spec import matryoshka_sliced_gemv_triton
+    from turing.experimental.kernels.triton_matryoshka_spec import matryoshka_sliced_gemv_triton
     x = torch.randn(2, 4, 1024, dtype=torch.float32)
     w = torch.randn(512, 1024, dtype=torch.float32)
 
@@ -78,8 +78,8 @@ def test_triton_matryoshka_fallback():
 
 
 def test_triton_chunk_compression_fallback():
-    from turing.kernels.triton_chunk_compression import hca_chunk_pool_cuda
-    from turing.core.hierarchical_compression import HCAChunkCompressor
+    from turing.experimental.kernels.triton_chunk_compression import hca_chunk_pool_cuda
+    from turing.experimental.hierarchical_compression import HCAChunkCompressor
     k = torch.randn(1, 256, 4, 64, dtype=torch.float32)
     v = torch.randn(1, 256, 4, 64, dtype=torch.float32)
 
@@ -89,7 +89,7 @@ def test_triton_chunk_compression_fallback():
 
 
 def test_triton_mhc_fuse_fallback():
-    from turing.kernels.triton_mhc_fuse import mhc_stream_mix_cuda
+    from turing.experimental.kernels.triton_mhc_fuse import mhc_stream_mix_cuda
     streams = torch.randn(1, 16, 4, 64, dtype=torch.float32)
     layer_up = torch.randn(1, 16, 64, dtype=torch.float32)
     res_map = torch.eye(4, dtype=torch.float32)
@@ -103,7 +103,7 @@ def test_triton_mhc_fuse_fallback():
 
 
 def test_triton_cca_fallback():
-    from turing.kernels.triton_cca import fused_linear_conv1d_causal_cuda
+    from turing.experimental.kernels.triton_cca import fused_linear_conv1d_causal_cuda
     x = torch.randn(2, 16, 256, dtype=torch.float32)
     w_lin = torch.randn(64, 256, dtype=torch.float32)
     w_conv = torch.randn(64, 1, 3, dtype=torch.float32)

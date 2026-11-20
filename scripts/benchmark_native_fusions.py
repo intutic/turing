@@ -40,7 +40,7 @@ def benchmark_matryoshka_spec(device: torch.device):
     print(f"[*] 1. MATRYOSHKA SLICED SPECULATION DRAFT HEAD ({device.type.upper()})")
     print("=" * 80)
 
-    from turing.core.speculation import MatryoshkaDraftHead, QuadtreeMRPSpeculator
+    from turing.experimental.speculation import MatryoshkaDraftHead, QuadtreeMRPSpeculator
 
     hidden_dim = 8192
     vocab_size = 32000
@@ -82,8 +82,8 @@ def benchmark_hca_chunk_pool(device: torch.device):
     print(f"[*] 4. FUSED HIERARCHICAL ATTENTION CHUNK POOLING ({device.type.upper()})")
     print("=" * 80)
 
-    from turing.core.hierarchical_compression import HCAChunkCompressor
-    from turing.kernels.triton_chunk_compression import hca_chunk_pool_cuda
+    from turing.experimental.hierarchical_compression import HCAChunkCompressor
+    from turing.experimental.kernels.triton_chunk_compression import hca_chunk_pool_cuda
 
     seq_len = 32768
     num_heads = 8
@@ -118,7 +118,7 @@ def benchmark_mhc_hyperconnections(device: torch.device):
     print(f"[*] 5. FUSED MANIFOLD-CONSTRAINED HYPER-CONNECTIONS ({device.type.upper()})")
     print("=" * 80)
 
-    from turing.core.mhc import ManifoldHyperConnection
+    from turing.experimental.mhc import ManifoldHyperConnection
 
     hidden_dim = 4096
     num_streams = 4
@@ -152,7 +152,7 @@ def benchmark_linear_recurrence(device: torch.device):
     print(f"[*] 6. 3:1 LINEAR RECURRENT ATTENTION STEP & PREFILL ({device.type.upper()})")
     print("=" * 80)
 
-    from turing.core.hybrid_attention import LinearRecurrentAttention
+    from turing.experimental.hybrid_attention import LinearRecurrentAttention
 
     hidden_dim = 2048
     num_heads = 16
@@ -230,7 +230,7 @@ def benchmark_fused_shannon_entropy(device: torch.device):
     print(f"[*] 9. FUSED SHANNON ENTROPY & EPISTEMIC UNCERTAINTY ({device.type.upper()})")
     print("=" * 80)
 
-    from turing.demo.epistemic_gate import EpistemicUncertaintyGate
+    from turing.experimental.demo.epistemic_gate import EpistemicUncertaintyGate
 
     gate = EpistemicUncertaintyGate(uncertainty_threshold=2.5)
     logits = torch.randn(1, 32000, device=device, dtype=torch.float32)
@@ -256,7 +256,7 @@ def benchmark_dilated_causal_conv(device: torch.device):
     print(f"[*] 11. DFLASH 1D DILATED DEPTHWISE CAUSAL CONVOLUTION ({device.type.upper()})")
     print("=" * 80)
 
-    from turing.kernels.triton_dilated_conv import dilated_causal_conv1d_cuda
+    from turing.experimental.kernels.triton_dilated_conv import dilated_causal_conv1d_cuda
 
     batch, seq_len, channels = 4, 64, 64
     kernel_size = 3
@@ -311,7 +311,7 @@ def benchmark_fused_lora(device: torch.device):
     print(f"[*] 12. FUSED BASE GEMV + MULTI-TENANT LORA CONTRACTION ({device.type.upper()})")
     print("=" * 80)
 
-    from turing.kernels.triton_fused_lora import fused_lora_gemv_cuda
+    from turing.experimental.kernels.triton_fused_lora import fused_lora_gemv_cuda
 
     batch = 64
     in_dim = 8192
@@ -359,7 +359,7 @@ def benchmark_residual_outlier(device: torch.device):
     print(f"[*] 13. 1-PASS SUBSPACE RESIDUAL OUTLIER EXTRACTION ({device.type.upper()})")
     print("=" * 80)
 
-    from turing.kernels.triton_residual_outlier import find_residual_outlier_cuda
+    from turing.experimental.kernels.triton_residual_outlier import find_residual_outlier_cuda
 
     batch = 128
     hidden_dim = 8192
@@ -402,7 +402,7 @@ def benchmark_fused_router(device: torch.device):
     print(f"[*] 14. IN-SRAM FUSED SUBSPACE STRUCTURED ROUTER ({device.type.upper()})")
     print("=" * 80)
 
-    from turing.core.router import SubspaceStructuredRouter
+    from turing.experimental.router import SubspaceStructuredRouter
 
     batch = 64
     seq_len = 16

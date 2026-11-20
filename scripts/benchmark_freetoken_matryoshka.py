@@ -18,11 +18,11 @@ sys.path.insert(0, str(ROOT_DIR))
 import torch
 import torch.nn.functional as F
 
-from turing.core.speculation import MatryoshkaDraftHead, QuadtreeMRPSpeculator
+from turing.experimental.speculation import MatryoshkaDraftHead, QuadtreeMRPSpeculator
 
 from turing.core.expert_cache import GPULRUExpertCache
-from turing.core.paging import StaticPagedKVPool
-from turing.core.elastic_memory import ElasticMemoryBudgetManager
+from turing.experimental.paging import StaticPagedKVPool
+from turing.experimental.elastic_memory import ElasticMemoryBudgetManager
 from turing.core.heterogeneous_moe import BandwidthAdaptiveDecider
 
 

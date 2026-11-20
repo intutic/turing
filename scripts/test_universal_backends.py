@@ -13,8 +13,8 @@ from turing.config import TuringConfig
 from turing.kernels.dispatch import get_hardware_backend_info
 from turing.models.causal_lm import SubspaceMLP
 from turing.config import ModelConfig
-from turing.kernels.rocm_heuristics import get_rocm_arch_info
-from turing.kernels.vulkan_runtime import get_vulkan_runtime
+from turing.experimental.kernels.rocm_heuristics import get_rocm_arch_info
+from turing.experimental.kernels.vulkan_runtime import get_vulkan_runtime
 
 def main():
     print("=" * 90)

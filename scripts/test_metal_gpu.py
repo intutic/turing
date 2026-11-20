@@ -16,8 +16,8 @@ import torch.nn.functional as F
 
 from turing.config import ModelConfig
 from turing.models.causal_lm import SubspaceCausalLM
-from turing.core.cross_model_kv import RoPEContentDecoupler, ClosedFormRidgeMapper
-from turing.core.mhc import BirkhoffManifoldProjector
+from turing.experimental.cross_model_kv import RoPEContentDecoupler, ClosedFormRidgeMapper
+from turing.experimental.mhc import BirkhoffManifoldProjector
 from turing.core.heterogeneous_moe import BandwidthAdaptiveDecider
 
 def main():

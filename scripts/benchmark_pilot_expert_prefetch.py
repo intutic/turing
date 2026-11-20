@@ -17,7 +17,7 @@ import torch.nn.functional as F
 import numpy as np
 
 from turing.core.expert_cache import GPULRUExpertCache
-from turing.core.expert_prefetch import OneLayerAheadExpertPrefetcher
+from turing.experimental.expert_prefetch import OneLayerAheadExpertPrefetcher
 
 def benchmark_pilot_prefetch(device_str="cpu"):
     device = torch.device(device_str)

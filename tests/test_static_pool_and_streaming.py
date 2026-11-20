@@ -1,7 +1,7 @@
 import pytest
 import os
 import torch
-from turing.core.paging import StaticPagedKVPool
+from turing.experimental.paging import StaticPagedKVPool
 from turing.models.streaming_loader import StreamingHFSubspaceLoader
 
 def test_static_paged_kv_pool_allocation_and_free():

@@ -2,8 +2,8 @@ import pytest
 import torch
 
 from turing.core.expert_cache import GPULRUExpertCache
-from turing.core.paging import StaticPagedKVPool
-from turing.core.elastic_memory import ElasticMemoryBudgetManager
+from turing.experimental.paging import StaticPagedKVPool
+from turing.experimental.elastic_memory import ElasticMemoryBudgetManager
 
 
 def test_elastic_memory_budget_manager_rebalance():
