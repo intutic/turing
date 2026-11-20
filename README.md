@@ -1,7 +1,9 @@
 # ⚡ Turing Engine
 
-**A small, readable LLM inference server for testing KV-cache and quantization ideas against real models, where every
-number in the docs comes from a committed results file.**
+**An LLM inference server whose int8/int4 KV cache finds the layers low-bit storage would break and keeps them in full
+precision**, with HuggingFace parity tests on 16 model types, 4-bit GPTQ weights, and OpenAI, Anthropic and Ollama
+APIs on one port. It runs on NVIDIA GPUs, Apple Silicon and CPUs, and every benchmark number in these docs comes from a
+committed results file.
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
 [![PyPI: turing-engine](https://img.shields.io/pypi/v/turing-engine.svg)](https://pypi.org/project/turing-engine/)
@@ -12,9 +14,9 @@ number in the docs comes from a committed results file.**
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
-An inference and serving runtime for NVIDIA GPUs, Apple Silicon Macs and CPUs. It loads HuggingFace checkpoints,
-llama.cpp GGUF files and its own 4-bit `.tgate4` directories, matches HuggingFace's logits with a native KV cache, and
-serves OpenAI, Anthropic and Ollama APIs from one process.
+It loads HuggingFace checkpoints, llama.cpp GGUF files and its own 4-bit `.tgate4` directories, and matches
+HuggingFace's logits when the KV cache is kept in the model's dtype. It is built for trying KV-cache and quantization
+changes against real models, not for production serving ([how it compares](#how-it-compares)).
 
 [Get started](#get-started) · [What it is good for](#what-it-is-good-for) · [How it compares](#how-it-compares) ·
 [More ways to run it](#more-ways-to-run-it) · [Models](#models) · [Features](#features) · [Documentation](#documentation)

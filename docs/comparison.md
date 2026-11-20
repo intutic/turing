@@ -140,4 +140,4 @@ Sources:
 | The fastest serving on NVIDIA GPUs, multi-GPU | vLLM, SGLang or TensorRT-LLM (vLLM was faster in most measurements above; SGLang and TensorRT-LLM were not run) |
 | A C/C++ server with GGUF as its native format, or the fastest batch-1 4-bit decode with default settings measured here | llama.cpp |
 | A desktop runtime that imports GGUF and Safetensors models [11] | Ollama |
-| A small, readable engine to test KV-cache and quantization ideas against real models, with exact HuggingFace logits and measured evals | Turing Engine |
+| A low-bit KV cache that protects the layers it would break, HuggingFace-parity-tested models, and GSM8K, pass-key and NLL evals for trying KV-cache and quantization changes on real models | Turing Engine |

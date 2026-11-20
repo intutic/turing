@@ -1,7 +1,9 @@
 # Turing Engine
 
-**A small, readable LLM inference server for testing KV-cache and quantization ideas against real models, where every
-number in the docs comes from a committed results file.**
+**An LLM inference server whose int8/int4 KV cache finds the layers low-bit storage would break and keeps them in full
+precision**, with HuggingFace parity tests on 16 model types, 4-bit GPTQ weights, and OpenAI, Anthropic and Ollama
+APIs on one port. It runs on NVIDIA GPUs, Apple Silicon and CPUs, and every benchmark number in these docs comes from a
+committed results file.
 
 [![PyPI](https://img.shields.io/pypi/v/turing-engine.svg)](https://pypi.org/project/turing-engine/)
 [![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
@@ -15,9 +17,8 @@ number in the docs comes from a committed results file.**
 
 ## What it is
 
-An inference and serving runtime for NVIDIA GPUs, Apple Silicon Macs and CPUs. It loads HuggingFace checkpoints,
-llama.cpp GGUF files and its own 4-bit `.tgate4` directories, reproduces the HuggingFace model's logits with a native
-KV cache, and serves OpenAI, Anthropic and Ollama APIs from one process. The KV cache defaults to int8 on CUDA (+0.003
+It loads HuggingFace checkpoints, llama.cpp GGUF files and its own 4-bit `.tgate4` directories, and reproduces the
+HuggingFace model's logits when the KV cache is kept in the model's dtype. The KV cache defaults to int8 on CUDA (+0.003
 nats on Qwen2.5-1.5B) and to the model's dtype elsewhere; every other lossy option (int4 KV, Quest page selection,
 4-bit weights, activation sparsity) is opt-in.
 

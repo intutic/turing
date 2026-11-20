@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "turing-engine"
 version = "2.0.0"
 
-description = "Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Runtime for 70B+ LLMs on single consumer GPUs"
+description = "LLM inference server with an int8/int4 KV cache that keeps the layers low-bit storage would break in full precision, HuggingFace parity tests on 16 model types, and OpenAI, Anthropic and Ollama APIs on one port"
 
 
 

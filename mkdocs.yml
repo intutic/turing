@@ -1,5 +1,5 @@
 site_name: Turing Engine
-site_description: Inference server with HuggingFace-exact logits, a paged int8/int4 KV cache and OpenAI, Anthropic and Ollama APIs
+site_description: LLM inference server with an int8/int4 KV cache that keeps the layers low-bit storage would break in full precision, HuggingFace parity tests on 16 model types, and OpenAI, Anthropic and Ollama APIs on one port
 site_author: Ishan Gupta
 site_url: https://intutic.github.io/turing/
 repo_url: https://github.com/intutic/turing

@@ -153,7 +153,7 @@ setup(
 
     author="Ishan Gupta",
     author_email="support@intutic.ai",
-    description="Turing Engine: Subspace-Compressed High-Performance LLM Inference & Serving Runtime",
+    description="LLM inference server with an int8/int4 KV cache that keeps the layers low-bit storage would break in full precision, HuggingFace parity tests on 16 model types, and OpenAI, Anthropic and Ollama APIs on one port",
     packages=find_packages(include=["turing", "turing.*"]),  # not the repo's scripts/ or integrations/
     ext_modules=ext_modules,
     cmdclass={"build_ext": StripBuildExt},
