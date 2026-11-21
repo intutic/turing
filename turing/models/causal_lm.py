@@ -15,11 +15,14 @@ import torch.nn.functional as F
 from ..config import ModelConfig
 from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
 from ..core.kv_cache import INT4_GROUP, KVCache, KVPool, _dequantize, _quantize
-from ..kernels.triton_kv_decode import pool_decode_supported, triton_pool_decode
+from ..kernels.triton_kv_decode import (pool_append_supported, pool_decode_supported, triton_pool_append,
+                                        triton_pool_decode)
 from ..kernels import triton_fused_ops as fused_ops
 from ..kernels.triton_kv_prefill import pool_prefill_preferred, pool_prefill_supported, triton_pool_prefill
 from ..kernels.flashinfer_prefill import flashinfer_prefill, flashinfer_prefill_supported
-from ..kernels.triton_moe import fused_moe, fused_moe_supported
+from ..kernels.triton_moe import HAS_TRITON as HAS_MOE_KERNELS
+from ..kernels.triton_moe import (GEMM_MIN_ROWS, fused_moe, fused_moe_supported, fused_moe_w4,
+                                  fused_moe_w4_supported, gated_add, gemm_moe, moe_route)
 
 
 class RMSNorm(nn.Module):
@@ -174,7 +177,9 @@ class SubspaceMLP(nn.Module):
 class SparseMoE(nn.Module):
     """Top-k routed experts as in HuggingFace's Mixtral / Qwen2-MoE / Qwen3-MoE / OLMoE blocks: softmax over every
     expert in fp32, top-k, optional renormalisation, each chosen expert's gated MLP weighted by its probability, plus
-    Qwen2-MoE's sigmoid-gated shared expert. Expert weights are stacked: gate_up [E, 2F, H], down [E, H, F]."""
+    Qwen2-MoE's sigmoid-gated shared expert. Expert weights are stacked: gate_up [E, 2F, H], down [E, H, F]. After
+    pack_experts they are packed 4-bit buffers instead (turing.models.quant) and gate_up and down are None. After
+    offload only some experts are on the device (see offload)."""
 
     def __init__(self, config: ModelConfig):
         super().__init__()
@@ -190,26 +195,190 @@ class SparseMoE(nn.Module):
         if config.shared_expert_ffn_dim:
             self.shared_expert = SubspaceMLP(config, config.shared_expert_ffn_dim)
             self.shared_expert_gate = nn.Linear(H, 1, bias=False)
+        self._host = None  # offload: every expert's arrays in host memory, by name
+        self._marlin = None  # use_marlin: (activation dtype, the experts in Marlin's layout)
+
+    def route(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """(fp32 weights, expert ids), each [T, top_k], for x [T, H]."""
+        logits = self.router(x)
+        if logits.is_cuda and HAS_MOE_KERNELS and logits.dtype in (torch.float16, torch.bfloat16):
+            return moe_route(logits, self.top_k, self.norm_topk_prob)  # one kernel for the six below
+        probs = F.softmax(logits.float(), dim=-1)
+        weights, experts = torch.topk(probs, self.top_k, dim=-1)
+        if self.norm_topk_prob:
+            weights = weights / weights.sum(dim=-1, keepdim=True)
+        return weights, experts
+
+    def pack_experts(self, gate_up, down, group: int) -> None:
+        """Keep the experts as packed 4-bit weights: gate_up and down are (packed codes, scales, zeros) with a
+        leading expert dimension, as turing.models.quant produces them. The fp weights are dropped."""
+        self.gate_up = self.down = None
+        for name, (q, scales, zeros) in (("gate_up", gate_up), ("down", down)):
+            for suffix, t in (("_q", q), ("_scales", scales), ("_zeros", zeros)):
+                self.register_buffer(name + suffix, t)
+        self.group = group
+
+    def use_marlin(self, dtype: torch.dtype) -> bool:
+        """Serve packed experts with the vendored Marlin MoE kernel (turing.kernels.marlin_moe) where it is built and
+        the shapes fit: the experts are converted to Marlin's layout for activations of `dtype`, and the packed
+        buffers move to host memory, so the device holds each expert once (they still save and convert from there).
+        Not for offloaded experts, whose slots the Triton kernels read."""
+        from ..kernels.marlin_moe import marlin_moe_pack, marlin_moe_supported
+        if self.gate_up is not None or self._host is not None or self._marlin is not None:
+            return self._marlin is not None
+        q = self.gate_up_q
+        if not marlin_moe_supported(q.shape[2] * 2, self.down_q.shape[2] * 2, self.group, dtype, q.device):
+            return False
+        self._marlin = (dtype, marlin_moe_pack((q, self.gate_up_scales, self.gate_up_zeros),
+                                               (self.down_q, self.down_scales, self.down_zeros), dtype))
+        for name in self._arrays():
+            self._buffers[name] = self._buffers[name].cpu()
+        return True
+
+    def _arrays(self) -> Tuple[str, ...]:
+        """Names of the arrays that hold the experts (leading dimension: expert, or slot after offload)."""
+        if self.gate_up is not None:
+            return ("gate_up", "down")
+        return tuple(w + part for w in ("gate_up", "down") for part in ("_q", "_scales", "_zeros"))
+
+    def offload(self, slots: int) -> None:
+        """Keep `slots` of this layer's experts on its device; all of them stay in host memory (pinned where CUDA is
+        available) and one is copied into a slot when a decode step routes to it, replacing the expert used least
+        recently. The device arrays keep their names with `slots` as their leading dimension; slot_of maps an expert
+        to its slot (-1: on the host only). A decode step then syncs with the host once per layer, so it is not
+        captured in a CUDA graph. Prefill-sized inputs, and a step that routes to more experts than there are slots,
+        stream the missing experts through the device without changing which ones are resident."""
+        if self._host is not None:
+            raise ValueError("this layer's experts are already offloaded")
+        if self._marlin is not None:
+            raise ValueError("offload before the experts are converted for the Marlin kernel (use_marlin)")
+        if not 0 < slots < self.num_experts:
+            raise ValueError(f"expert slots must be between 1 and {self.num_experts - 1}, got {slots}")
+        pin, host = torch.cuda.is_available(), {}
+        for name in self._arrays():
+            t = getattr(self, name).detach()
+            host[name] = t.cpu().pin_memory() if pin else t.cpu()
+            first = host[name][:slots].to(t.device).clone()
+            if name in self._parameters:
+                self._parameters[name] = nn.Parameter(first, requires_grad=False)
+            else:
+                self._buffers[name] = first
+        dev = self.router.weight.device
+        self.register_buffer("slot_of", torch.cat([torch.arange(slots), torch.full((self.num_experts - slots,), -1)])
+                             .to(dev), persistent=False)
+        self._host, self.num_slots = host, slots
+        self._expert_slot = list(range(slots)) + [-1] * (self.num_experts - slots)  # host-side copy of slot_of
+        self._slot_expert, self._slot_used, self._tick = list(range(slots)), [0] * slots, 0
+        self.offload_hits = self.offload_misses = self.offload_streamed = 0
+
+    def _ensure(self, needed: List[int]) -> None:
+        """Bring the experts in `needed` (at most num_slots of them) onto the device, each replacing the resident
+        expert used least recently among those this step does not need."""
+        self._tick += 1
+        missing = []
+        for e in needed:
+            slot = self._expert_slot[e]
+            if slot < 0:
+                missing.append(e)
+            else:
+                self._slot_used[slot] = self._tick
+        self.offload_hits += len(needed) - len(missing)
+        self.offload_misses += len(missing)
+        for e in missing:
+            slot = min((i for i in range(self.num_slots) if self._slot_used[i] != self._tick),
+                       key=self._slot_used.__getitem__)
+            for name, host in self._host.items():
+                getattr(self, name)[slot].copy_(host[e], non_blocking=True)
+            old = self._slot_expert[slot]
+            self._expert_slot[old], self._expert_slot[e] = -1, slot
+            self._slot_expert[slot], self._slot_used[slot] = e, self._tick
+            self.slot_of[old], self.slot_of[e] = -1, slot
+
+    def expert_weights(self, e: int, dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Expert e's (gate_up [2F, H], down [H, F]) in dtype, dequantized when the experts are packed. An offloaded
+        expert that is not resident is copied to the device for this call only."""
+        if self._host is None:
+            parts = {name: getattr(self, name)[e] for name in self._arrays()}
+        elif self._expert_slot[e] >= 0:
+            parts = {name: getattr(self, name)[self._expert_slot[e]] for name in self._host}
+        else:
+            self.offload_streamed += 1
+            dev = self.router.weight.device
+            parts = {name: host[e].to(dev, non_blocking=True) for name, host in self._host.items()}
+        if "gate_up" in parts:
+            return parts["gate_up"].to(dtype), parts["down"].to(dtype)
+        from .quant import dequantize
+        dev = self.router.weight.device  # after use_marlin the packed buffers are in host memory
+        return (dequantize(parts["gate_up_q"], parts["gate_up_scales"], parts["gate_up_zeros"], dtype).to(dev),
+                dequantize(parts["down_q"], parts["down_scales"], parts["down_zeros"], dtype).to(dev))
+
+    def _grouped(self, x: torch.Tensor) -> bool:
+        """The grouped Triton kernels serve inputs like x on this device."""
+        if self.gate_up is None:
+            return fused_moe_w4_supported(x, self.gate_up_q, self.act, self.group)
+        return fused_moe_supported(x, self.gate_up, self.act)
+
+    def _marlin_for(self, x: torch.Tensor):
+        """The Marlin copy of the experts if it serves inputs like x (use_marlin), else None."""
+        return self._marlin[1] if self._marlin is not None and x.is_cuda and x.dtype == self._marlin[0] else None
+
+    def graph_safe(self, x: torch.Tensor) -> bool:
+        """The forward for inputs like x makes no host sync (a decode step with this layer can go in a CUDA graph)."""
+        return self._host is None and (self._marlin_for(x) is not None or self._grouped(x))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         shape = x.shape
         x = x.reshape(-1, shape[-1])
-        probs = F.softmax(self.router(x).float(), dim=-1)
-        weights, experts = torch.topk(probs, self.top_k, dim=-1)
-        if self.norm_topk_prob:
-            weights = weights / weights.sum(dim=-1, keepdim=True)
-        if fused_moe_supported(x, self.gate_up, self.act):  # grouped GEMM on the device: no host sync, graph-safe
-            out = fused_moe(x, self.gate_up, self.down, weights, experts)
-        else:  # one host sync per layer for the experts hit
-            out = torch.zeros_like(x)
-            for e in torch.unique(experts).tolist():
-                token, slot = torch.where(experts == e)
-                gate, up = F.linear(x[token], self.gate_up[e]).chunk(2, dim=-1)
-                y = F.linear(self.act(gate) * up, self.down[e])
-                out.index_add_(0, token, (y * weights[token, slot, None]).to(out.dtype))
+        weights, experts = self.route(x)
+        marlin = self._marlin_for(x)
+        if marlin is not None:  # every input size: decode steps and prefill chunks
+            from ..kernels.marlin_moe import marlin_moe
+            out = marlin_moe(x, marlin, weights, experts, self.act)
+            if self.shared_expert is not None:
+                out = gated_add(out, self.shared_expert_gate(x), self.shared_expert(x))
+            return out.view(shape)
+        if self._marlin is not None:
+            raise RuntimeError(f"this layer's experts were converted for {self._marlin[0]} activations on CUDA "
+                               f"(SparseMoE.use_marlin); got {x.dtype} on {x.device}")
+        # the grouped kernels, up to GEMM_MIN_ROWS rows per expert (a large prefill chunk): then cuBLAS per expert
+        ids, grouped = experts, experts.numel() < GEMM_MIN_ROWS * self.num_experts and self._grouped(x)
+        if grouped and self._host is not None:  # offloaded: this step's experts onto the device (one host sync)
+            needed = torch.unique(experts).tolist()
+            grouped = len(needed) <= self.num_slots
+            if grouped:
+                self._ensure(needed)
+                ids = self.slot_of[experts]
+        if not grouped:
+            out = gemm_moe(x, weights, experts, self.num_experts, lambda e: self.expert_weights(e, x.dtype), self.act)
+        elif self.gate_up is None:
+            out = fused_moe_w4(x, (self.gate_up_q, self.gate_up_scales, self.gate_up_zeros),
+                               (self.down_q, self.down_scales, self.down_zeros), weights, ids, self.group)
+        else:  # no host sync unless offloaded, so a decode step with this layer can go in a CUDA graph
+            out = fused_moe(x, self.gate_up, self.down, weights, ids)
         if self.shared_expert is not None:
-            out = out + torch.sigmoid(self.shared_expert_gate(x)) * self.shared_expert(x)
+            out = gated_add(out, self.shared_expert_gate(x), self.shared_expert(x))
         return out.view(shape)
+
+
+def append_chunk(pool: KVPool, layer: int, cache: KVCache, k: torch.Tensor, v: torch.Tensor) -> None:
+    """KVPool.append; a chunk for a low-bit layer on CUDA is quantized by the append kernel."""
+    if k.shape[2] > 1 and pool_append_supported(pool, layer):
+        triton_pool_append(pool, layer, cache, k, v)
+    else:
+        pool.append(layer, cache, k, v)
+
+
+def row_starts(caches: List[KVCache]) -> List[int]:
+    """The position each row of a decode step writes: a cache's length, and for a cache listed several times the
+    positions after it, in order. Listing a request's cache k + 1 times with its last token and k drafted tokens
+    verifies the drafts inside an ordinary decode step: every row's key and value are appended before any row
+    reads, and each row reads only up to its own position."""
+    seen, starts = {}, []
+    for c in caches:
+        n = seen.get(id(c), 0)
+        starts.append(c.length + n)
+        seen[id(c)] = n + 1
+    return starts
 
 
 class DecodeStep:
@@ -225,8 +394,8 @@ class DecodeStep:
         self.quest_width: Optional[int] = None  # in a CUDA graph: the context bucket's page-table width for Quest
 
     @classmethod
-    def of(cls, caches: List[KVCache], device) -> "DecodeStep":
-        starts = [c.length for c in caches]
+    def of(cls, caches: List[KVCache], device, starts: Optional[List[int]] = None) -> "DecodeStep":
+        starts = row_starts(caches) if starts is None else starts
         rows = torch.tensor([[c.slot for c in caches], starts], dtype=torch.int32).to(device)
         return cls(caches[0].pool, rows[0], rows[1], caches, starts)
 
@@ -242,21 +411,29 @@ class PackedPrefill:
     MLPs run once over every chunk; attention appends and attends per request through the paged prefill kernel. Built
     by SubspaceCausalLM.prefill_packed; positions [T] give RoPE (shared by every layer) and learned positions."""
 
-    def __init__(self, caches: List[KVCache], lens: List[int], device):
+    def __init__(self, caches: List[KVCache], lens: List[int], device, riders: int = 0):
         self.pool, self.caches, self.lens = caches[0].pool, caches, lens
-        self.starts = [c.length for c in caches]
+        self.starts = row_starts(caches)  # a rider's cache listed again: its drafts, at the positions after it
         self.offsets = [sum(lens[:i]) for i in range(len(lens))]
         self.positions = torch.cat([torch.arange(s, s + n) for s, n in zip(self.starts, lens)]).to(device)
         self.last = torch.tensor([o + n - 1 for o, n in zip(self.offsets, lens)], device=device)
-        self.top = max(s + n for s, n in zip(self.starts, lens))
         self._freqs = {}
+        # the last `riders` chunks are decode rows (one token each): the decode kernel appends and attends for them
+        self.riders = riders
+        if riders:
+            rows = torch.tensor([[c.slot for c in caches[-riders:]], self.starts[-riders:]], dtype=torch.int32)
+            self.rider_slots, self.rider_starts = rows.to(device)
+            # splits as a decode step of the next graph size up: no kernel build of its own for each row count
+            size = next((b for b in DecodeGraphs.BUCKETS if b >= riders), riders)
+            self.rider_splits = max(1, min(32, 256 // (size * self.pool.num_kv_heads)))
 
     def freqs(self, rope) -> Tuple[torch.Tensor, torch.Tensor]:
-        """cos, sin [T, R] at each token's position (frequencies that do not depend on the sequence length)."""
+        """cos, sin [T, R] at each token's position (frequencies that do not depend on the sequence length), computed
+        from the positions as a decode step does: a table up to the longest sequence would be built, and cached,
+        again for every length a riding request reaches (32 MiB each at 16K tokens)."""
         key = (rope.dim, rope.base_theta, rope.params)
         if key not in self._freqs:
-            cos, sin = rope.compute_freqs(self.top, device=self.positions.device)
-            self._freqs[key] = (cos[self.positions], sin[self.positions])
+            self._freqs[key] = rope.compute_freqs_device(self.positions)
         return self._freqs[key]
 
 
@@ -409,7 +586,15 @@ class SubspaceAttention(nn.Module):
         batch, _, seq_len, _ = q.shape
         pool, layer, cfg = cache.pool, self.layer_idx, self.config
         start, total = cache.length, cache.length + seq_len
-        pool.append(layer, cache, k, v)
+        append_chunk(pool, layer, cache, k, v)
+        if (start == 0 and 1 < seq_len <= 2048 and self.window is None and self.softcap is None
+                and pool.layer_fields(layer, "k")[3] == "native"):
+            # no cached prefix, and the layer stores what the chunk just computed: plain causal attention over its
+            # own keys and values. One call instead of a paged kernel's plan and wrapper, which cost the host 3 ms
+            # of a 512-token prompt's first token on an L4 for the same device time (measured up to 2,048 tokens,
+            # the engine's chunk; longer ones keep the paged kernels, whose memory does not grow with the square).
+            out = self._attend(q, k, v, None, causal=True)
+            return out.transpose(1, 2).reshape(batch, seq_len, self.num_heads * self.head_dim)
         if seq_len > 1 and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # D10 fallback
             return flashinfer_prefill(pool, layer, q, [cache.slot], [start], [seq_len], self.scale)
         if seq_len > 1 and pool_prefill_preferred(pool, layer, q, start):  # paged prefill kernel: no gather or copies
@@ -430,18 +615,30 @@ class SubspaceAttention(nn.Module):
         return out.transpose(1, 2).reshape(batch, seq_len, self.num_heads * self.head_dim)
 
     def _attend_packed(self, q, k, v, packed: "PackedPrefill") -> torch.Tensor:
-        """Each request's slice of the packed chunk: append its K/V, attend over its pages -> [1, T, H * D]."""
-        pool, layer = packed.pool, self.layer_idx
-        if flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # every request in one call
-            for c, off, n in zip(packed.caches, packed.offsets, packed.lens):
-                pool.append(layer, c, k[:, :, off:off + n], v[:, :, off:off + n])
-            return flashinfer_prefill(pool, layer, q, [c.slot for c in packed.caches], packed.starts, packed.lens,
-                                      self.scale)
+        """Each request's slice of the packed chunk: append its K/V, attend over its pages -> [1, T, H * D]. The
+        decode rows at the end (packed.riders) take the decode kernel, as in a step of their own."""
+        pool, layer, R = packed.pool, self.layer_idx, packed.riders
+        n = len(packed.caches) - R
+        caches, offsets, lens, starts = packed.caches[:n], packed.offsets[:n], packed.lens[:n], packed.starts[:n]
         outs = []
-        for c, off, n in zip(packed.caches, packed.offsets, packed.lens):  # packed.starts[i] is c.length
-            sl = slice(off, off + n)
-            outs.append(self._attend_one(q[:, :, sl], k[:, :, sl], v[:, :, sl], c))
-        return torch.cat(outs, dim=1)
+        if R:
+            T = q.shape[2] - R
+            qr, kr, vr = (x[0, :, T:].transpose(0, 1)[:, :, None] for x in (q, k, v))  # [R, heads, 1, D]
+            rode = triton_pool_decode(pool, layer, qr, kr, vr, packed.rider_slots, packed.rider_starts,
+                                      scale=self.scale, window=self.window or 0, softcap=self.softcap or 0.0,
+                                      n_splits=packed.rider_splits)
+            q, k, v = q[:, :, :T], k[:, :, :T], v[:, :, :T]
+        if n and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # every request in one call
+            for c, off, m in zip(caches, offsets, lens):
+                append_chunk(pool, layer, c, k[:, :, off:off + m], v[:, :, off:off + m])
+            outs.append(flashinfer_prefill(pool, layer, q, [c.slot for c in caches], starts, lens, self.scale))
+        else:
+            for c, off, m in zip(caches, offsets, lens):  # starts[i] is c.length
+                sl = slice(off, off + m)
+                outs.append(self._attend_one(q[:, :, sl], k[:, :, sl], v[:, :, sl], c))
+        if R:
+            outs.append(rode.transpose(1, 2).reshape(1, R, self.num_heads * self.head_dim))
+        return outs[0] if len(outs) == 1 else torch.cat(outs, dim=1)
 
     def _decode_step(self, q, k, v, step: "DecodeStep") -> torch.Tensor:
         """One decode token per request: [B, H, 1, D] -> [B, 1, H * D]. On CUDA three fused launches serve every
@@ -550,22 +747,26 @@ class DecodeGraphs:
     replayed, so a step costs a few copies instead of every kernel launch. Rebuilt when the pool or its page table
     is replaced. With Quest (kv_page_budget < 1), steps whose longest row has reached kv_select_min_tokens use graphs
     captured per context bucket (page-table width), whose page selection runs on the device with static shapes. Not
-    used for LoRA steps, MoE models, or off CUDA."""
+    used for LoRA steps, MoE layers that would sync with the host (SparseMoE.graph_safe), or off CUDA."""
 
-    BUCKETS = (1, 2, 4, 8, 16, 32, 64, 128)
+    # a step is padded to its bucket, and a padding row costs what a row costs (all but its KV read): steps of 1.5x
+    # between the powers of two keep that under a third of the rows
+    BUCKETS = (1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 96, 128)
     CONTEXT_BUCKETS = tuple(2 ** i for i in range(9, 14))  # page-table widths for Quest graphs: 8K .. 128K tokens
 
     def __init__(self):
         # holds no reference to its model (the model passes itself in): no model <-> graphs cycle, so a dropped model
         # frees its KV pool at once, and a deep-copied model gets graphs of its own
-        self.graphs = {}  # (batch bucket, Quest width or None) -> (key, graph, ids, rows, logits)
+        self.graphs = {}  # (batch bucket, Quest width) -> (key, graph, ids, rows, logits, host rows, turn, aux)
 
-    def eligible(self, model: "SubspaceCausalLM", caches: List[KVCache], lora: bool) -> bool:
+    def eligible(self, model: "SubspaceCausalLM", caches: List[KVCache], lora: bool,
+                 starts: Optional[List[int]] = None) -> bool:
         cfg, pool = model.config, caches[0].pool
+        longest = max(starts if starts is not None else [c.length for c in caches]) + 1
         return (cfg.cuda_graphs and pool.device.type == "cuda" and len(caches) <= self.BUCKETS[-1]
                 and not lora and not torch.is_grad_enabled()
-                and (not pool.track_pages or max(c.length for c in caches) + 1 <= self.CONTEXT_BUCKETS[-1] * 16)
-                and all(fused_moe_supported(model.embed_tokens.weight, layer.mlp.gate_up, layer.mlp.act)
+                and (not pool.track_pages or longest <= self.CONTEXT_BUCKETS[-1] * 16)
+                and all(layer.mlp.graph_safe(model.embed_tokens.weight)
                         for layer in model.layers if isinstance(layer.mlp, SparseMoE))  # else routing syncs
                 and cfg.decode_attention == "kernel"  # the SDPA path reads lengths on the host
                 and pool_decode_supported(pool, model.embed_tokens.weight))
@@ -574,24 +775,40 @@ class DecodeGraphs:
     # state are created by the first capture, and an in-place update across modes (inference tensor touched outside
     # inference mode) fails mid-capture and leaves the generator unusable.
     @torch.inference_mode()
-    def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, caches: List[KVCache]) -> torch.Tensor:
+    def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, caches: List[KVCache],
+            starts: Optional[List[int]] = None) -> torch.Tensor:
         B, pool, cfg = len(caches), caches[0].pool, model.config
         bucket = next(b for b in self.BUCKETS if b >= B)
         width = None
-        longest = max(c.length for c in caches) + 1
+        starts = row_starts(caches) if starts is None else starts
+        longest = max(starts) + 1
         if pool.track_pages and cfg.kv_page_budget < 1.0 and longest >= cfg.kv_select_min_tokens:
             width = next(w for w in self.CONTEXT_BUCKETS if w * 16 >= longest)
-        key = (id(pool), pool.page_table.data_ptr())
+        key = (id(pool), pool.page_table.data_ptr(), model.aux_layers)
         entry = self.graphs.get((bucket, width))
         if entry is None or entry[0] != key:
             entry = self._capture(model, bucket, pool, key, width)
-        _, graph, ids, rows, logits = entry
+        _, graph, ids, rows, logits, pinned, turn, aux = entry
         scratch = pool.scratch_slot()
-        host = torch.tensor([[c.slot for c in caches] + [scratch] * (bucket - B),
-                             [c.length for c in caches] + [0] * (bucket - B)], dtype=torch.int32)
-        rows.copy_(host)
+        # The step's rows go through pinned memory without waiting, so a caller that keeps its tokens on the device
+        # can queue this step while the previous one runs (the engine's overlapped decode). Two buffers in turn; a
+        # buffer is written again only once the copy that last read it has run, which is already the case unless the
+        # caller queued the two steps since without reading any result.
+        slot = pinned[turn[0]]
+        turn[0] ^= 1
+        host = slot[0]
+        if slot[1] is None:
+            slot[1] = torch.cuda.Event()
+        else:
+            slot[1].synchronize()
+        host.copy_(torch.tensor([[c.slot for c in caches] + [scratch] * (bucket - B),
+                                 starts + [0] * (bucket - B)], dtype=torch.int32))
+        rows.copy_(host, non_blocking=True)
+        slot[1].record()
         ids[:B].copy_(input_ids)
         graph.replay()
+        if aux is not None:
+            model.last_aux = aux[:B].clone()
         return logits[:B].clone()  # the next replay overwrites the static output
 
     @torch.inference_mode()
@@ -614,7 +831,10 @@ class DecodeGraphs:
         step._freqs, step.quest_plan = {}, None
         with torch.cuda.graph(graph):
             logits = model._body(ids, rows[1], None, step)
-        self.graphs[(bucket, width)] = (key, graph, ids, rows, logits)
+        # [buffer, the CUDA event after the last copy out of it]
+        pinned = [[torch.empty(2, bucket, dtype=torch.int32, pin_memory=True), None] for _ in range(2)]
+        aux = model.last_aux if model.aux_layers else None  # the captured step's tapped states: a static output too
+        self.graphs[(bucket, width)] = (key, graph, ids, rows, logits, pinned, [0], aux)
         return self.graphs[(bucket, width)]
 
 
@@ -641,6 +861,10 @@ class SubspaceCausalLM(nn.Module):
         self.norm = make_norm(config, config.hidden_dim) if config.final_norm else None
         self.lm_head = nn.Linear(emb_dim, config.vocab_size, bias=config.lm_head_bias)
         self._graphs = DecodeGraphs()
+        # EAGLE-3 drafting (turing.models.eagle3): with aux_layers set, a forward leaves the residual stream after
+        # those layers in last_aux [B, T, len(aux_layers) * H] (T = 1 for a decode step)
+        self.aux_layers: Optional[Tuple[int, ...]] = None
+        self.last_aux: Optional[torch.Tensor] = None
 
         # Optional deep-to-shallow recirculation (off by default: it changes the model's output). Its SVD basis is
         # only built when enabled.
@@ -655,7 +879,7 @@ class SubspaceCausalLM(nn.Module):
         past_key_values: Optional[Union[KVCache, List[KVCache]]] = None,
         start_pos: int = 0,
         adapters: Optional[List[Optional[str]]] = None,
-        logits_to_keep: int = 0
+        logits_to_keep: int = 0,
     ) -> Tuple[torch.Tensor, Union[KVCache, List[KVCache]]]:
         """past_key_values: None or a KVCache (filled in place and returned), or a list of KVCache, one per row of a
         [B, 1] decode step (batched decode across requests, returned as given). start_pos is taken from the cache.
@@ -671,6 +895,29 @@ class SubspaceCausalLM(nn.Module):
             if lora:
                 set_active_adapters(self, None)
 
+    def offload_experts(self, slots: int) -> int:
+        """Keep `slots` experts per MoE layer on the device and the rest in host memory (SparseMoE.offload), for a
+        model whose experts do not all fit on the GPU: call it before moving the model there. Returns the number of
+        layers offloaded."""
+        moes = [layer.mlp for layer in self.layers if isinstance(layer.mlp, SparseMoE)]
+        if not moes:
+            raise ValueError("expert offload needs a model with MoE layers")
+        for moe in moes:
+            moe.offload(slots)
+        self._graphs.graphs.clear()
+        return len(moes)
+
+    def expert_offload_stats(self) -> Optional[dict]:
+        """Decode-step expert uses served from the device (hits) or copied in first (misses), and experts streamed
+        for prefill-sized inputs, summed over the offloaded layers; None when nothing is offloaded."""
+        moes = [layer.mlp for layer in self.layers if isinstance(layer.mlp, SparseMoE) and layer.mlp._host is not None]
+        if not moes:
+            return None
+        hits, misses = sum(m.offload_hits for m in moes), sum(m.offload_misses for m in moes)
+        return {"slots_per_layer": moes[0].num_slots, "experts_per_layer": moes[0].num_experts, "hits": hits,
+                "misses": misses, "hit_rate": round(hits / (hits + misses), 4) if hits + misses else None,
+                "streamed": sum(m.offload_streamed for m in moes)}
+
     def can_pack_prefill(self, caches: List[KVCache]) -> bool:
         """Whether prefill_packed serves these caches: one CUDA pool the paged prefill kernel reads, RoPE whose
         frequencies do not depend on a sequence's length (not dynamic or LongRoPE), no recirculation."""
@@ -681,18 +928,27 @@ class SubspaceCausalLM(nn.Module):
             return False
         return all(m.kind not in ("dynamic", "longrope") for m in self.modules() if isinstance(m, RotaryEmbedding))
 
+    def can_ride_prefill(self, caches: List[KVCache]) -> bool:
+        """Whether decoding requests can take their next token in prefill_packed (its `riders`): the paged decode
+        kernel serves their attention there as in a decode step. Not with Quest page selection, which a decode step
+        plans per row."""
+        return (not caches[0].pool.track_pages and self.config.decode_attention != "sdpa"
+                and self.can_pack_prefill(caches))
+
     @torch.inference_mode()
-    def prefill_packed(self, chunks: List[List[int]], caches: List[KVCache]) -> torch.Tensor:
+    def prefill_packed(self, chunks: List[List[int]], caches: List[KVCache], riders: int = 0) -> torch.Tensor:
         """Prefill the next chunk of several requests in one forward (speed plan P4.3): chunks[i] continues caches[i]
         (filled in place). Returns the logits of each chunk's last token [len(chunks), V]. Check can_pack_prefill
-        first."""
+        first. The last `riders` chunks are decode rows, one token each (check can_ride_prefill): the same pass over
+        the weights gives requests that are already decoding their next token. As in a decode step, a cache listed
+        k + 1 times there verifies k drafts (row_starts); the caller then sets its length to what it accepted."""
         dev = self.embed_tokens.weight.device
         if dev.type == "cuda" and not self.__dict__.get("_projections_fused"):
             self.fuse_projections()
         lens = [len(x) for x in chunks]
-        for c, n in zip(caches, lens):
-            c.reserve(c.length + n)
-        packed = PackedPrefill(caches, lens, dev)
+        for c, s, n in zip(caches, row_starts(caches), lens):
+            c.reserve(s + n)
+        packed = PackedPrefill(caches, lens, dev, riders)
         ids = torch.tensor([[t for x in chunks for t in x]], dtype=torch.long, device=dev)
         logits = self._body(ids, 0, None, None, packed=packed)[0]
         for c, n in zip(caches, lens):
@@ -705,6 +961,11 @@ class SubspaceCausalLM(nn.Module):
         free memory, where a 7B model's copies may not fit."""
         from .quant import QuantLinear
         from ..kernels.marlin import HAS_MARLIN
+        from ..kernels.marlin_moe import HAS_MARLIN_MOE
+        if HAS_MARLIN_MOE:  # packed MoE experts: Marlin's layout on the device, the packed buffers to host memory
+            for m in self.modules():
+                if isinstance(m, SparseMoE):
+                    m.use_marlin(dtype)
         if not HAS_MARLIN or not any(isinstance(m, QuantLinear) for m in self.modules()):
             return
         if not self.__dict__.get("_projections_fused"):
@@ -755,14 +1016,18 @@ class SubspaceCausalLM(nn.Module):
                 step = [cache]  # a single decode token on CUDA takes the fused path too
         returned = past_key_values if cache is None else cache  # the list of caches, or the cache
         if step is not None:
-            for c in step:
-                c.reserve(c.length + 1)
-            if self._graphs.eligible(self, step, lora):
-                logits = self._graphs.run(self, input_ids, step)
+            starts = row_starts(step)  # a cache listed more than once: consecutive positions (verify_in_step)
+            if step[0].pool.track_pages and len({id(c) for c in step}) < len(step):
+                # rows on one page would race on its Quest bounds
+                raise ValueError("several rows of one request in a decode step are not supported with Quest page tracking")
+            for c, s in zip(step, starts):
+                c.reserve(s + 1)
+            if self._graphs.eligible(self, step, lora, starts):
+                logits = self._graphs.run(self, input_ids, step, starts)
                 for c in step:
                     c.length += 1
                 return logits, returned
-            step = DecodeStep.of(step, input_ids.device)
+            step = DecodeStep.of(step, input_ids.device, starts)
             start_pos = step.starts
         elif cache is not None:
             cache.reserve(cache.length + seq_len)
@@ -802,6 +1067,7 @@ class SubspaceCausalLM(nn.Module):
         kw = dict(start_pos=start_pos, step=step) if step is not None else dict(packed=packed) if packed is not None \
             else dict(start_pos=start_pos, cache=cache)
         pending = None
+        aux = []
 
         for i, layer in enumerate(self.layers):
             # Capture shallow state at router boundary
@@ -810,11 +1076,15 @@ class SubspaceCausalLM(nn.Module):
 
             hidden_states, out, _ = layer(hidden_states, pending=pending, defer=defer, **kw)
             pending = out if defer else None
+            if self.aux_layers and i + 1 in self.aux_layers:
+                aux.append(hidden_states + pending if pending is not None else hidden_states)
 
             # Apply deep-to-shallow recurrence at the penultimate layer if state captured
             if self.config.enable_recirculation and i == len(self.layers) - 2 and shallow_state is not None:
                 hidden_states = self.recirculation(hidden_states, shallow_state)
 
+        if aux:
+            self.last_aux = torch.cat(aux, dim=-1)
         if packed is not None:  # each chunk's last token
             hidden_states = hidden_states[:, packed.last]
             pending = pending[:, packed.last] if pending is not None else None
@@ -983,7 +1253,9 @@ class SubspaceCausalLM(nn.Module):
                 or pool.kv_cache_dtype != cfg.kv_cache_dtype or pool.track_pages != (cfg.kv_page_budget < 1.0)
                 or (cfg.kv_cache_dtype != "native" and (cfg.kv_native_layers is None
                                                         or pool.native_layers != tuple(cfg.kv_native_layers)))):
-            self._kv_pool = None  # drop ours (and graphs captured on it) first, so its memory can back the new pool
+            # drop ours (and graphs captured on it) first, so its memory can back the new pool; the local name too,
+            # or the old pool outlives the calibration below and the new pool is sized from what it leaves
+            self._kv_pool = pool = None
             self._graphs.graphs.clear()
             gc.collect()
             if w.device.type == "cuda":

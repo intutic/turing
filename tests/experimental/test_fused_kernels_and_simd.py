@@ -1,11 +1,10 @@
 """
 Automated Unit & Numerical Parity Tests for Fused GPU Kernels & C++20 SIMD Subsystems.
-Verifies triton_spec_verify, NativeSafetensorsHeaderParser, and NativeTrafficManager.
+Verifies NativeSafetensorsHeaderParser and NativeTrafficManager.
 """
 
 import json
 import pytest
-import torch
 import numpy as np
 
 from turing.turing_csrc import (
@@ -13,8 +12,6 @@ from turing.turing_csrc import (
     NativeTrafficManager,
     NativeAsyncRingReader
 )
-from turing.experimental.kernels.triton_spec_verify import fused_speculative_verify_cuda
-from turing.experimental.speculation import RidgeAssistedTreeSpeculator
 from turing.experimental.kslot_pooling import KSlotCachePooler, GatedZeroIdentityHead
 
 
@@ -83,22 +80,5 @@ def test_native_traffic_manager_estimation_and_admission():
 
     tm.release("req_1")
     assert tm.utilization < 0.5
-
-
-def test_fused_speculative_verify_exact_parity():
-    """Verifies fused_speculative_verify_cuda parity with RidgeAssistedTreeSpeculator."""
-    K = 6
-    vocab_size = 100
-    torch.manual_seed(42)
-
-    target_logits = torch.randn(K, vocab_size)
-    target_preds = torch.argmax(target_logits, dim=-1).tolist()
-
-    # Case A: Perfect match on first 3 tokens, mismatch on 4th
-    draft_tokens = target_preds[:3] + [999] + target_preds[4:]
-    accepted_tokens, num_accepted = fused_speculative_verify_cuda(draft_tokens, target_logits, temperature=0.0)
-
-    assert num_accepted == 4 # 3 matched + 1 corrected target token
-    assert accepted_tokens.tolist() == target_preds[:4]
 
 

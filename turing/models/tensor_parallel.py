@@ -104,6 +104,9 @@ def _shard_mlp(mlp: SubspaceMLP, rank: int, world: int, group, reduce: bool) -> 
 
 
 def _shard_moe(moe: SparseMoE, rank: int, world: int, group) -> None:
+    if moe.gate_up is None or moe._host is not None:
+        raise ValueError("tensor parallelism needs every fp expert on the device; this model's experts are packed in "
+                         "4 bits or offloaded")
     ffn = moe.down.shape[2]
     lo, hi = _split(ffn, rank, world, "the expert intermediate size")
     gate_up = moe.gate_up.data  # [E, 2F, H]: gate rows then up rows

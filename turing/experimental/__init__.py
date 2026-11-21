@@ -11,7 +11,6 @@ import importlib
 
 _EXPORTS = {
     "paging": ["HierarchicalVirtualPageManager", "PageTier"],
-    "speculation": ["QuadtreeMRPSpeculator", "build_dag_tree_attention_mask", "EnhancedQuadtreeDraftHead", "MatryoshkaDraftHead"],
     "cross_model_kv": ["RoPEContentDecoupler", "ClosedFormRidgeMapper", "SVDNullSpaceProjector", "CrossModelKVPipeline"],
     "hierarchical_compression": ["HCAChunkCompressor", "CSAChunkCompressor", "CrossLayerKVSharingManager"],
     "hybrid_attention": ["LinearRecurrentAttention", "ChunkContextScorer", "HybridAttentionLayerRouter"],

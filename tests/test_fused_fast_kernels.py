@@ -20,7 +20,6 @@ from turing.experimental.kernels.triton_vram_hash import fused_tensor_checksum_c
 from turing.experimental.kernels.triton_gated_zero_identity import fused_gated_zero_identity_cuda
 from turing.experimental.kernels.triton_chunk_filter import fused_chunk_context_filter_cuda
 from turing.experimental.kernels.triton_quadtree_mrp import fused_quadtree_mrp_cuda
-from turing.experimental.speculation import QuadtreeMRPSpeculator, MatryoshkaDraftHead
 from turing.experimental.kslot_pooling import GatedZeroIdentityHead
 from turing.experimental.hybrid_attention import ChunkContextScorer
 

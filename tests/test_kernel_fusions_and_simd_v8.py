@@ -6,7 +6,6 @@ import numpy as np
 from turing.serving.traffic import AdaptiveComputeBatcher
 from turing.core.expert_cache import RoutingHistoryTracker
 from turing.experimental.kslot_pooling import GatedZeroIdentityHead
-from turing.experimental.kernels.triton_spec_entropy import fused_entropy_argmax_gate_cuda
 from turing.experimental.kernels.triton_hybrid_anchor_fuse import fused_hybrid_step_anchor_cuda
 
 
@@ -61,25 +60,6 @@ def test_gated_zero_identity_simd_parity():
     dk, dv = head(features)
     assert torch.allclose(dk, torch.zeros_like(dk), atol=1e-7)
     assert torch.allclose(dv, torch.zeros_like(dv), atol=1e-7)
-
-
-def test_spec_entropy_argmax_fused_parity():
-    """Verifies fused speculative Shannon entropy and argmax matches PyTorch reference."""
-    torch.manual_seed(42)
-    logits = torch.randn(4, 1024)
-
-    # Reference
-    probs = torch.softmax(logits.float(), dim=-1)
-    log_probs = torch.log_softmax(logits.float(), dim=-1)
-    ref_entropy = -(probs * log_probs).sum(dim=-1)
-    ref_argmax = torch.argmax(logits, dim=-1)
-
-    # Fused
-    entropy, argmax_idx, width = fused_entropy_argmax_gate_cuda(logits, low_thresh=0.4, high_thresh=1.2)
-
-    assert torch.allclose(entropy, ref_entropy, atol=1e-4)
-    assert torch.equal(argmax_idx, ref_argmax)
-    assert width.shape == (4,)
 
 
 def test_hybrid_anchor_fused_step_parity():

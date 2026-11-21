@@ -123,6 +123,27 @@ def test_cuda_graph_decode_matches_eager(arch, kv_cache_dtype):
     assert outs[0][1] == outs[1][1] == [9, 18, 35]
 
 
+@torch.no_grad()
+def test_ten_requests_decode_in_the_twelve_row_graph():
+    import copy
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    base = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
+    base.config.kv_pool_gib = 0.05
+    g = torch.Generator().manual_seed(7)
+    prompts = [torch.randint(0, 128, (1, 3 + 2 * i), generator=g).cuda() for i in range(10)]
+    nxt = torch.randint(0, 128, (10, 3), generator=g).cuda()
+    outs = []
+    for graphs in (False, True):
+        model = copy.deepcopy(base).cuda()
+        model.config.cuda_graphs = graphs
+        caches = [model(p)[1] for p in prompts]
+        outs.append([model(nxt[:, t:t + 1], past_key_values=caches)[0] for t in range(3)])
+        assert list(model._graphs.graphs) == ([(12, None)] if graphs else [])
+    for eager, graphed in zip(*outs):
+        torch.testing.assert_close(graphed, eager, atol=1e-4, rtol=0)
+
+
 @pytest.mark.parametrize("window,softcap,scale", [(6, 0.0, None), (0, 5.0, 24 ** -0.5), (40, 5.0, 0.1)])
 def test_fused_decode_window_softcap_and_scale_match_reference(window, softcap, scale):
     from turing.kernels.triton_kv_decode import triton_pool_decode
@@ -172,6 +193,33 @@ def test_quest_cuda_graph_decode_matches_eager_quest(kv_cache_dtype):
         caches = [model(p)[1] for p in prompts]
         outs.append([model(nxt[:, t:t + 1], past_key_values=caches)[0] for t in range(5)])
         assert any(w is not None for _, w in model._graphs.graphs) == graphs
+    for eager, graphed in zip(*outs):
+        torch.testing.assert_close(graphed, eager, atol=1e-3, rtol=0)
+
+
+@torch.no_grad()
+def test_cuda_graph_decode_steps_queued_behind_other_gpu_work_match_eager():
+    """A caller may queue step after step before the GPU has run the first one (here it is kept busy first). Each step
+    must still decode the rows it was called with: they travel through two pinned buffers that are reused."""
+    import copy
+    from tests.test_hf_parity import _tiny_llama
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    base = RealHuggingFaceLoader.convert_hf_model(_tiny_llama(), sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
+    base.config.kv_cache_dtype, base.config.kv_pool_gib = "native", 0.05
+    g = torch.Generator().manual_seed(7)
+    prompts = [torch.randint(0, 128, (1, n), generator=g).cuda() for n in (20, 70, 120)]
+    nxt = torch.randint(0, 128, (3, 9), generator=g).cuda()
+    outs = []
+    for graphs in (False, True):
+        model = copy.deepcopy(base).cuda()
+        model.config.cuda_graphs = graphs
+        caches = [model(p)[1] for p in prompts]
+        first = model(nxt[:, :1], past_key_values=caches)[0]  # captures the graph
+        busy = torch.eye(4096, device="cuda")
+        for _ in range(30):  # about half a second of work queued ahead of the steps below
+            busy = busy @ busy
+        outs.append([first] + [model(nxt[:, t:t + 1], past_key_values=caches)[0] for t in range(1, 9)])
+        assert bool(model._graphs.graphs) == graphs
     for eager, graphed in zip(*outs):
         torch.testing.assert_close(graphed, eager, atol=1e-3, rtol=0)
 

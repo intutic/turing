@@ -179,9 +179,9 @@ class LanePolicy:
     def __init__(
         self,
         slo_target_p99_ms: float = 50.0,
-        interactive_prefill_chunk: int = 512,
-        batch_prefill_chunk: int = 256,
-        background_prefill_chunk: int = 128
+        interactive_prefill_chunk: int = 2048,
+        batch_prefill_chunk: int = 1024,
+        background_prefill_chunk: int = 512
     ) -> None:
         self.slo_target_p99_ms = slo_target_p99_ms
         self.interactive_prefill_chunk = interactive_prefill_chunk

@@ -3,27 +3,6 @@ import torch
 import numpy as np
 
 
-def test_dag_tree_mask_csrc():
-    try:
-        from turing import turing_csrc
-    except ImportError:
-        pytest.skip("turing_csrc not compiled")
-
-    # Tree: 0 (root) -> 1 -> 2, 0 -> 3
-    parents = np.array([-1, 0, 1, 0], dtype=np.int32)
-    mask = turing_csrc.build_dag_tree_mask(parents)
-
-    assert mask.shape == (4, 4)
-    assert mask[0, 0] == 0.0
-    assert mask[0, 1] == -np.inf
-    assert mask[2, 0] == 0.0
-    assert mask[2, 1] == 0.0
-    assert mask[2, 2] == 0.0
-    assert mask[2, 3] == -np.inf
-    assert mask[3, 0] == 0.0
-    assert mask[3, 3] == 0.0
-
-
 def test_hierarchical_hca_chunk_pool_csrc():
     try:
         from turing import turing_csrc

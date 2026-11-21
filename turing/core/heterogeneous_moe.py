@@ -137,6 +137,9 @@ class HostExpertBank:
             if isinstance(mlp, SparseMoE):
                 if mlp.shared_expert is not None:
                     raise NotImplementedError("HostExpertBank does not offload Qwen2-MoE shared experts")
+                if mlp.gate_up is None or mlp._host is not None:
+                    raise ValueError("HostExpertBank needs every fp expert in the model; this model's experts are "
+                                     "packed in 4 bits or already offloaded (SparseMoE.offload)")
                 layers[i] = (mlp.router.weight, mlp.gate_up, mlp.down)
         if not layers:
             raise ValueError("the model has no SparseMoE layers")

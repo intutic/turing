@@ -16,7 +16,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from turing.experimental.speculation import SubspaceEAGLEDraftHead
 from turing.experimental.elastic_memory import ElasticMemoryBudgetManager
 from turing.core.expert_cache import GPULRUExpertCache
 from turing.experimental.paging import StaticPagedKVPool

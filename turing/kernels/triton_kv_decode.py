@@ -25,7 +25,7 @@ try:
 except ImportError:
     HAS_TRITON = False
 
-__all__ = ["pool_decode_supported", "triton_pool_decode"]
+__all__ = ["pool_decode_supported", "triton_pool_decode", "pool_dequant_supported", "triton_pool_dequant"]
 
 _MODES = {"native": 0, "int8": 1, "int4": 2}
 _ELEM = {}  # torch dtype of a native pool -> Triton element type
@@ -190,12 +190,69 @@ if HAS_TRITON:
         tl.store(OUT + (bh * G + offs_g)[:, None] * D + offs_d[None, :], (num / den[:, None]).to(OUT.dtype.element_ty),
                  mask=gmask[:, None])
 
+    @triton.jit
+    def _pool_dequant_kernel(PHYS, X, XS, XZ, OUT, HKV: tl.constexpr, D: tl.constexpr, MODE: tl.constexpr,
+                             GROUP: tl.constexpr):
+        """Page PHYS[p], KV head h of a low-bit field -> OUT[p, h] ([16, D] in OUT's type)."""
+        p = tl.program_id(0)
+        h = tl.program_id(1)
+        slots = tl.arange(0, 16)
+        offs = tl.arange(0, D)
+        row = (tl.load(PHYS + p).to(tl.int64) * HKV + h) * 16 + slots
+        x = _load_rows(X, XS, XZ, row, slots >= 0, offs, D, MODE, GROUP)
+        tl.store(OUT + ((p * HKV + h) * 16 + slots)[:, None] * D + offs[None, :], x.to(OUT.dtype.element_ty))
 
 def pool_decode_supported(pool: KVPool, q: torch.Tensor) -> bool:
     """CUDA, a power-of-2 head_dim of at least 16, and a native pool dtype Triton can store."""
     D = pool.head_dim
     return (HAS_TRITON and q.is_cuda and D >= 16 and D & (D - 1) == 0
             and ((pool.kv_cache_dtype != "native" and not pool.native_layers) or pool.dtype in _ELEM))
+
+
+def pool_dequant_supported(pool: KVPool) -> bool:
+    D = pool.head_dim
+    return HAS_TRITON and pool.device.type == "cuda" and D >= 16 and D & (D - 1) == 0 and pool.dtype in _ELEM
+
+
+def triton_pool_dequant(pool: KVPool, layer: int, which: str, phys: torch.Tensor) -> torch.Tensor:
+    """Pages phys [P] (physical page ids, int32 on the device) of a layer's low-bit K or V ("k" / "v") in the model
+    dtype: [P, Hkv, 16, D], one launch (the reference, KVPool._decode_field, is a chain of elementwise passes over
+    fp32 temporaries: about 1 ms a layer for a 14K-token prefix on an L4, a tenth of a 2,048-token prefill chunk)."""
+    codes, scale, zero, storage = pool.layer_fields(layer, which)
+    P, Hkv, D = phys.shape[0], pool.num_kv_heads, pool.head_dim
+    out = torch.empty(P, Hkv, 16, D, device=phys.device, dtype=pool.dtype)
+    _pool_dequant_kernel[(P, Hkv)](phys, codes, scale, zero, out, HKV=Hkv, D=D, MODE=_MODES[storage],
+                                   GROUP=INT4_GROUP)
+    return out
+
+
+# (added below the kernels: Triton's compile cache keys a kernel by its line number too)
+__all__ += ["pool_append_supported", "triton_pool_append"]
+
+
+def pool_append_supported(pool: KVPool, layer: int) -> bool:
+    """triton_pool_append serves this layer: low-bit storage on CUDA, no Quest bounds (the kernel updates a page's
+    min/max from one program per token, which only a decode step's one token per page makes safe). A layer in the
+    model dtype keeps KVPool.append: the kernel was no faster for it (one 512-token prompt on an L4)."""
+    return pool_dequant_supported(pool) and not pool.track_pages and pool.layer_fields(layer, "k")[3] != "native"
+
+
+def triton_pool_append(pool: KVPool, layer: int, cache, k: torch.Tensor, v: torch.Tensor) -> None:
+    """KVPool.append for a prefill chunk in a low-bit layer: k, v [1, Hkv, L, D] (K after RoPE) at positions
+    cache.length .. + L - 1 (pages reserved), quantized by the decode step's append kernel with one program per
+    token, head and field instead of the reference's passes over fp32 temporaries."""
+    Hkv, D, L = pool.num_kv_heads, pool.head_dim, k.shape[2]
+    kc, ks, kz, storage = pool.layer_fields(layer, "k")
+    vc, vs, vz, _ = pool.layer_fields(layer, "v")
+    kt, vt = k[0].transpose(0, 1), v[0].transpose(0, 1)  # [L, Hkv, D] views
+    if kt.stride(-1) != 1 or vt.stride(-1) != 1:
+        kt, vt = kt.contiguous(), vt.contiguous()
+    slots = torch.full((L,), cache.slot, dtype=torch.int32, device=k.device)
+    starts = torch.arange(cache.length, cache.length + L, dtype=torch.int32, device=k.device)
+    pt = pool.page_table
+    _pool_append_kernel[(L, Hkv, 2)](kt, vt, pt, slots, starts, kc, vc, ks, kz, vs, vz, kc, vc,
+                                     kt.stride(0), kt.stride(1), vt.stride(0), vt.stride(1), pt.stride(0),
+                                     HKV=Hkv, D=D, MODE=_MODES[storage], GROUP=INT4_GROUP, TRACK=False)
 
 
 def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,

@@ -75,7 +75,8 @@ if has_liburing():
     libraries.append("uring")
 
 def marlin_extension():
-    """vLLM's Marlin W4A16 GEMM (csrc/marlin/, used by turing.kernels.marlin): only with TURING_BUILD_MARLIN=1 and nvcc,
+    """vLLM's Marlin W4A16 GEMMs (csrc/marlin/ and csrc/marlin_moe/, used by turing.kernels.marlin and
+    turing.kernels.marlin_moe), as a list of extensions: only with TURING_BUILD_MARLIN=1 and nvcc,
     so the default install needs no CUDA toolkit. TORCH_CUDA_ARCH_LIST (e.g. "8.9") replaces the default sm_80/86/89."""
     if os.environ.get("TURING_BUILD_MARLIN") != "1":
         return None
@@ -94,13 +95,18 @@ def marlin_extension():
     if not os.environ.get("TORCH_CUDA_ARCH_LIST"):
         nvcc += [f"-gencode=arch=compute_{a},code=sm_{a}" for a in (80, 86, 89)]
     here = os.path.dirname(os.path.abspath(__file__))
-    return CUDAExtension(
-        "turing.turing_marlin",
-        sources=sorted(glob.glob("csrc/marlin/*.cu")),
-        depends=sorted(glob.glob("csrc/marlin/*.h") + glob.glob("csrc/marlin/*.cuh") + glob.glob("csrc/marlin/core/*")),
-        include_dirs=[os.path.join(here, "csrc", "marlin")],
-        extra_compile_args={"cxx": ["-O3", "-std=c++17", "-fvisibility=hidden"], "nvcc": nvcc},
-    )
+    shared = sorted(glob.glob("csrc/marlin/*.h") + glob.glob("csrc/marlin/*.cuh") + glob.glob("csrc/marlin/core/*"))
+    args = {"cxx": ["-O3", "-std=c++17", "-fvisibility=hidden"], "nvcc": nvcc}
+    return [
+        CUDAExtension("turing.turing_marlin", sources=sorted(glob.glob("csrc/marlin/*.cu")), depends=shared,
+                      include_dirs=[os.path.join(here, "csrc", "marlin")], extra_compile_args=args),
+        # the MoE kernels (csrc/marlin_moe/, used by turing.kernels.marlin_moe): their own template over the same
+        # shared headers, which csrc/marlin/ holds
+        CUDAExtension("turing.turing_marlin_moe", sources=sorted(glob.glob("csrc/marlin_moe/*.cu")),
+                      depends=shared + sorted(glob.glob("csrc/marlin_moe/*.h")),
+                      include_dirs=[os.path.join(here, "csrc", "marlin_moe"), os.path.join(here, "csrc", "marlin")],
+                      extra_compile_args=args),
+    ]
 
 
 MARLIN = marlin_extension()
@@ -145,7 +151,7 @@ ext_modules = [
         extra_link_args=extra_link_args,
         language="c++",
     ),
-] + ([MARLIN] if MARLIN is not None else [])
+] + (MARLIN or [])
 
 setup(
     name="turing-engine",

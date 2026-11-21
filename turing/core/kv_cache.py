@@ -19,7 +19,7 @@ The methods here are the reference path (any device). On CUDA, `turing/kernels/t
 writes the same layout with fused kernels.
 """
 
-from typing import Sequence, List, Tuple
+from typing import Optional, Sequence, List, Tuple
 import math
 import torch
 
@@ -113,17 +113,31 @@ class KVPool:
         else:
             self.kmin = self.kmax = None
         self.table_width = -(-max_tokens_per_request // PAGE)
-        self.page_table = torch.zeros((8, self.table_width), dtype=torch.int32, device=device)
+        # 256 request rows from the start (4 bytes per page of a request each): growing the table moves it, and every
+        # decode graph captured before that is captured again (0.1 s each, results in a stall after the first burst)
+        self.page_table = torch.zeros((256, self.table_width), dtype=torch.int32, device=device)
         self._free_pages = list(range(P - 1, -1, -1))  # a stack: pop() hands out low page ids first
         self._refs = [0] * P
         self.page_limit = P  # pages that may be in use at once (lowered by ElasticMemoryBudgetManager)
-        self._free_slots = list(range(7, -1, -1))
+        self._free_slots = list(range(255, -1, -1))
+
+    @staticmethod
+    def cuda_budget(free: float, total: float, fraction: Optional[float] = None) -> float:
+        """Bytes of `free` CUDA memory for the pool: `fraction` of it when given (ModelConfig's default is 0.6, which
+        leaves room for another model in the process), else all but a reserve for what steps allocate besides the
+        pool (prefill activations, attention workspaces, CUDA graphs, adapters loaded later): a tenth of the device's
+        memory, at least 1.5 GiB, and never more than half of what is free. That is `turing serve`'s default, where
+        one model owns the GPU: on an L4 the memory in use outside the weights and the pool peaked at 0.4-1.2 GiB
+        across the benchmark sessions, and 60% of the free memory left 4-7 GiB of its 22.5 unused."""
+        if fraction is not None:
+            return fraction * free
+        return free - min(max(0.1 * total, 1.5 * 2 ** 30), free / 2)
 
     @classmethod
     def for_model(cls, config, dtype, device) -> "KVPool":
-        """Sized from config.kv_pool_gib if set, else config.kv_pool_fraction of the free CUDA memory (counting
-        memory PyTorch has cached but not used), else off CUDA 4 GiB or what 64 full-length requests need, whichever
-        is less (Windows commits the whole allocation up front, and MPS shares the machine's memory)."""
+        """Sized from config.kv_pool_gib if set, else from the free CUDA memory (cuda_budget; counting memory PyTorch
+        has cached but not used), else off CUDA 4 GiB or what 64 full-length requests need, whichever is less
+        (Windows commits the whole allocation up front, and MPS shares the machine's memory)."""
         device = torch.device(device)
         D, H, L = config.head_dim, config.num_kv_heads, config.num_layers
         native = tuple(getattr(config, "kv_native_layers", None) or ()) if config.kv_cache_dtype != "native" else ()
@@ -135,8 +149,9 @@ class KVPool:
         if config.kv_pool_gib:
             budget = config.kv_pool_gib * 2 ** 30
         elif device.type == "cuda":
-            free, _ = torch.cuda.mem_get_info(device)
-            budget = config.kv_pool_fraction * (free + torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device))
+            free, total = torch.cuda.mem_get_info(device)
+            free += torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
+            budget = cls.cuda_budget(free, total, config.kv_pool_fraction)
         else:
             budget = min(4 * 2 ** 30, 64 * -(-config.max_position_embeddings // PAGE) * page_bytes)
         return cls(L, H, D, max(1, int(budget // page_bytes)), dtype, device, config.kv_cache_dtype, track,
@@ -191,6 +206,11 @@ class KVPool:
     def used_pages(self) -> int:
         return self.num_pages - len(self._free_pages)
 
+    @property
+    def free_pages(self) -> int:
+        """Pages alloc_pages can still hand out."""
+        return max(0, min(len(self._free_pages), self.page_limit - self.used_pages))
+
     def adjust_active_capacity(self, new_max_pages: int) -> int:
         """Cap the pages in use at once (no reallocation; pages already in use stay valid)."""
         self.page_limit = max(1, min(new_max_pages, self.num_pages))
@@ -205,8 +225,8 @@ class KVPool:
                 "utilization_pct": round(used / self.page_limit * 100.0, 2)}
 
     def alloc_pages(self, n: int) -> List[int]:
-        if n > min(len(self._free_pages), self.page_limit - self.used_pages):
-            raise KVPoolExhausted(f"KV pool has {max(0, self.page_limit - self.used_pages)} free pages of "
+        if n > self.free_pages:
+            raise KVPoolExhausted(f"KV pool has {self.free_pages} free pages of "
                                   f"{self.page_limit}, {n} needed")
         pages = [self._free_pages.pop() for _ in range(n)]
         for p in pages:
@@ -257,9 +277,13 @@ class KVPool:
         """k, v [1, Hkv, L, D] (K after RoPE) at positions cache.length .. + L - 1 of one request; the caller has
         reserved the pages and advances cache.length after the last layer."""
         L = k.shape[2]
-        pos = torch.arange(cache.length, cache.length + L, device=self.device)
-        phys = self.page_table[cache.slot, pos // PAGE].long()
-        slot = pos % PAGE
+        idx = cache._append_idx
+        if idx is None or idx[0] != (cache.length, L):
+            # each token's page and slot: the same in every layer of a forward (a request's pages never move), and
+            # computing them took 9% of the host's time in a 512-token prefill
+            pos = torch.arange(cache.length, cache.length + L, device=self.device)
+            idx = cache._append_idx = ((cache.length, L), self.page_table[cache.slot, pos // PAGE].long(), pos % PAGE)
+        _, phys, slot = idx
         for which, x in (("k", k), ("v", v)):
             self._store(layer, which, phys, slot, x[0].transpose(0, 1))  # [L, Hkv, D]
         if self.track_pages:
@@ -398,6 +422,7 @@ class KVCache:
         self.pages: List[int] = []
         self.length = 0
         self.rope_len = 0  # the length that picks length-dependent RoPE frequencies in prefill (its prompt's length)
+        self._append_idx = None  # KVPool.append's page and slot of each token of the chunk being appended
 
     def __len__(self) -> int:
         return self.pool.num_layers
@@ -410,7 +435,11 @@ class KVCache:
         if len(self.pages) + need > self.pool.table_width:
             raise KVPoolExhausted(f"a request may hold at most {self.pool.table_width * PAGE} tokens")
         new = self.pool.alloc_pages(need)
-        self.pool.page_table[self.slot, len(self.pages):len(self.pages) + need] = torch.tensor(new, dtype=torch.int32)
+        ids = torch.tensor(new, dtype=torch.int32)
+        row = self.pool.page_table[self.slot, len(self.pages):len(self.pages) + need]
+        # on CUDA through pinned memory without waiting: a plain copy waits for every kernel queued before it, which
+        # is the decode step the engine launched ahead
+        row.copy_(ids.pin_memory(), non_blocking=True) if row.is_cuda else row.copy_(ids)
         self.pages += new
 
     def clone(self, share: bool = True) -> "KVCache":

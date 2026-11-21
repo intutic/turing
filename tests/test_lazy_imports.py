@@ -11,7 +11,7 @@ assert loaded == ["turing.core", "turing.experimental"], loaded
 from turing import SubspaceCausalLM, ModelConfig, chain
 from turing.core import GPULRUExpertCache, HostExpertBank
 from turing.experimental import CleanBaseLineageBuffer
-assert "turing.experimental.paging" not in sys.modules and "turing.experimental.speculation" not in sys.modules
+assert "turing.experimental.paging" not in sys.modules and "turing.experimental.hybrid_attention" not in sys.modules
 try:
     turing.core.CleanBaseLineageBuffer  # lives to turing.experimental
 except AttributeError:

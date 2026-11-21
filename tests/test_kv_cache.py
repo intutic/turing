@@ -114,6 +114,19 @@ def test_fork_shares_full_pages_and_isolates_writes():
     assert pool.num_free_pages == pool.num_pages
 
 
+def test_page_table_takes_more_requests_than_its_first_rows_and_keeps_their_pages():
+    pool = KVPool(1, 1, 16, 4, torch.float32, "cpu", max_tokens_per_request=64)
+    first = KVCache(pool)
+    first.reserve(20)  # two pages
+    rows = pool.page_table.shape[0]
+    others = [KVCache(pool) for _ in range(rows)]  # one more request than the table had rows
+    assert pool.page_table.shape[0] == 2 * rows and len({c.slot for c in others + [first]}) == rows + 1
+    assert pool.page_table[first.slot, :2].tolist() == first.pages
+    for c in others + [first]:
+        c.free()
+    assert pool.used_pages == 0
+
+
 def test_independent_copy_and_exhaustion():
     k, v = _kv(32)
     pool = _pool(pages=4)
@@ -184,7 +197,7 @@ def test_kv_bytes_per_token_matches_what_a_page_holds(kv_cache_dtype):
     assert c.nbytes() == 48 * kv_bytes_per_token(2, 3, 64, kv_cache_dtype, native_bytes=4)
 
 
-def test_engine_reserves_pages_at_admission_frees_them_at_finish_and_rejects_what_cannot_fit():
+def test_engine_reserves_the_prompts_pages_at_admission_frees_them_at_finish_and_rejects_what_cannot_fit():
     import asyncio
     import dataclasses
     import time
@@ -194,8 +207,8 @@ def test_engine_reserves_pages_at_admission_frees_them_at_finish_and_rejects_wha
     cfg = dataclasses.replace(get_model_config("test-tiny"), kv_pool_gib=0.002)  # the registry's object is shared
     engine = ContinuousBatchEngine(cfg, TuringConfig(device="cpu", max_batch_size=4))
     pool = engine.kv_pool
-    req = asyncio.run(engine.add_request(prompt_tokens=list(range(20)), max_new_tokens=12))
-    assert pool.used_pages == 2 and req.past_kv.length == 0  # 32 tokens -> 2 pages, held before prefill
+    req = asyncio.run(engine.add_request(prompt_tokens=list(range(20)), max_new_tokens=100))
+    assert pool.used_pages == 2 and req.past_kv.length == 0  # the prompt's 20 tokens -> 2 pages, held before prefill
     engine._finish_request(req, time.time())
     assert pool.used_pages == 0 and req.past_kv is None
     with pytest.raises(RuntimeError, match="rejected"):
@@ -354,3 +367,30 @@ def test_pool_off_cuda_is_sized_to_the_model():
     pool = KVPool.for_model(cfg, torch.float16, "cpu")
     assert pool.num_pages == 64 * -(-cfg.max_position_embeddings // PAGE)
     assert pool.k.numel() * pool.k.element_size() < 2 ** 30
+
+
+def test_cuda_budget_leaves_a_reserve_or_takes_the_share_asked_for():
+    G = 2 ** 30
+    assert KVPool.cuda_budget(18 * G, 22.5 * G) == pytest.approx(15.75 * G)  # a tenth of the device
+    assert KVPool.cuda_budget(6 * G, 8 * G) == pytest.approx(4.5 * G)  # at least 1.5 GiB
+    assert KVPool.cuda_budget(2 * G, 22.5 * G) == pytest.approx(1 * G)  # never more than half of what is free
+    assert KVPool.cuda_budget(18 * G, 22.5 * G, 0.6) == pytest.approx(10.8 * G)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="device memory is counted on CUDA")
+def test_a_replaced_pool_is_freed_before_the_new_one_is_sized():
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny_llama(), device="cuda")
+    model.config.kv_pool_gib = 0.25
+    model.kv_pool()
+    held = torch.cuda.memory_allocated()
+    seen = []
+
+    def choose(*a, **kw):
+        seen.append(torch.cuda.memory_allocated())
+        model.config.kv_native_layers = ()
+    model.select_kv_native_layers = choose
+    model._load_kv_calibration = lambda *a: False  # calibrate here, not from a file of an earlier run
+    model._save_kv_calibration = lambda *a: None
+    model.config.kv_cache_dtype = "int8"
+    model.kv_pool()
+    assert seen and seen[0] < held - 0.2 * 2 ** 30  # the fp16 pool was gone while the int8 pool's layers were chosen

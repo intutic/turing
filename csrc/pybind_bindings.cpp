@@ -1,12 +1,10 @@
 #include "turing_simd.hpp"
-#include "turing_dag_tree_mask.hpp"
 #include "turing_hierarchical.hpp"
 #include "turing_halo_exchange.hpp"
 #include "turing_nbody_recirculator.hpp"
 #include "turing_rope.hpp"
 #include "turing_paged_memory.hpp"
 #include "turing_shannon_entropy.hpp"
-#include "turing_matryoshka_quadtree.hpp"
 #include "turing_ridge_solver.hpp"
 #include "turing_linear_recurrence.hpp"
 #include "turing_fast_hash.hpp"
@@ -34,25 +32,6 @@
 #include <pybind11/stl.h>
 
 namespace py = pybind11;
-
-// Pillar 2: DAG Tree Attention Mask Engine
-py::array_t<float> build_dag_tree_mask_py(
-    py::array_t<int32_t, py::array::c_style> parent_indices_arr
-) {
-    py::buffer_info buf = parent_indices_arr.request();
-    int num_nodes = static_cast<int>(buf.size);
-
-    auto result = py::array_t<float>({num_nodes, num_nodes});
-    py::buffer_info res_buf = result.request();
-
-    turing::build_dag_tree_mask_cpp(
-        static_cast<const int32_t*>(buf.ptr),
-        static_cast<float*>(res_buf.ptr),
-        num_nodes
-    );
-
-    return result;
-}
 
 // Pillar 4: Hierarchical Sequence-Chunk Pooling (HCA & CSA)
 py::array_t<float> hca_chunk_pool_py(
@@ -202,10 +181,6 @@ py::array_t<float> compute_shannon_entropy_py(py::array_t<float, py::array::c_st
 PYBIND11_MODULE(turing_csrc, m) {
     m.doc() = "Turing Engine C++20 SIMD and Memory-Mapped Acceleration Extension";
 
-    m.def("build_dag_tree_mask", &build_dag_tree_mask_py,
-          "Construct Additive DAG Tree Attention Mask in C++20",
-          py::arg("parent_indices_arr"));
-
     m.def("hca_chunk_pool", &hca_chunk_pool_py,
           "Execute Native Hierarchical Sequence-Chunk Pooling (HCA/CSA)",
           py::arg("input_arr"), py::arg("chunk_size") = 128);
@@ -235,41 +210,6 @@ PYBIND11_MODULE(turing_csrc, m) {
         .def("allocate_prompt", &turing::HierarchicalBitmapAllocator::allocate_prompt, py::arg("prompt_len"))
         .def("free_block", &turing::HierarchicalBitmapAllocator::free_block, py::arg("tier"), py::arg("block_id"))
         .def("get_num_free", &turing::HierarchicalBitmapAllocator::get_num_free, py::arg("tier"));
-
-    // Matryoshka Sliced GEMV & Quadtree Candidate Generator
-    m.def("generate_matryoshka_quadtree", [](
-        py::array_t<float, py::array::c_style> hidden_state_arr,
-        py::array_t<float, py::array::c_style> draft_weight_arr,
-        py::array_t<float, py::array::c_style> spatial_proj_arr,
-        int slice_width
-    ) {
-        py::buffer_info h_buf = hidden_state_arr.request();
-        py::buffer_info w_buf = draft_weight_arr.request();
-        py::buffer_info s_buf = spatial_proj_arr.request();
-
-        int hidden_dim = static_cast<int>(h_buf.shape[0]);
-        int vocab_size = static_cast<int>(w_buf.shape[0]);
-
-        auto res = turing::generate_matryoshka_quadtree_cpp(
-            static_cast<const float*>(h_buf.ptr),
-            static_cast<const float*>(w_buf.ptr),
-            static_cast<const float*>(s_buf.ptr),
-            hidden_dim,
-            vocab_size,
-            slice_width
-        );
-
-        size_t num_nodes = res.token_ids.size();
-        auto tok_arr = py::array_t<int32_t>(static_cast<py::ssize_t>(num_nodes));
-        auto parent_arr = py::array_t<int32_t>(static_cast<py::ssize_t>(num_nodes));
-        auto mask_arr = py::array_t<float>({static_cast<py::ssize_t>(num_nodes), static_cast<py::ssize_t>(num_nodes)});
-
-        std::memcpy(tok_arr.request().ptr, res.token_ids.data(), num_nodes * sizeof(int32_t));
-        std::memcpy(parent_arr.request().ptr, res.parent_indices.data(), num_nodes * sizeof(int32_t));
-        std::memcpy(mask_arr.request().ptr, res.dag_mask.data(), res.dag_mask.size() * sizeof(float));
-
-        return py::make_tuple(tok_arr, parent_arr, mask_arr);
-    }, "Native C++20 Matryoshka Sliced GEMV & Quadtree Generator");
 
     // Fused Ridge Forward
     m.def("fused_ridge_forward", [](

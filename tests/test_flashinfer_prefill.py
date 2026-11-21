@@ -20,13 +20,14 @@ def _filled(pool, start, L, g):
     return cache
 
 
+@pytest.mark.parametrize("storage", ["native", "int8", "int4"])  # quantized layers: through temporary native pages
 @pytest.mark.parametrize("H,Hkv,D", [(12, 2, 128), (8, 8, 64)])
 @pytest.mark.parametrize("start,L", [(0, 50), (37, 70), (300, 600)])  # off page boundaries; a cached prefix
-def test_flashinfer_prefill_matches_gather_and_sdpa(H, Hkv, D, start, L):
+def test_flashinfer_prefill_matches_gather_and_sdpa(H, Hkv, D, start, L, storage):
     from tests.test_triton_kv_prefill import _reference
     from turing.kernels.flashinfer_prefill import flashinfer_prefill
     g = torch.Generator(device="cuda").manual_seed(0)
-    pool = KVPool(1, Hkv, D, 128, torch.float16, "cuda", "native")
+    pool = KVPool(1, Hkv, D, 128, torch.float16, "cuda", storage)
     cache = _filled(pool, start, L, g)
     q = torch.randn(1, H, L, D, device="cuda", generator=g).half()
     out = flashinfer_prefill(pool, 0, q, [cache.slot], [start], [L], D ** -0.5)
@@ -54,12 +55,13 @@ def test_a_reused_slot_with_other_pages_is_planned_again():
                                atol=1e-3, rtol=1e-2)
 
 
-def test_packed_requests_share_one_call():
+@pytest.mark.parametrize("storage", ["native", "int8"])
+def test_packed_requests_share_one_call(storage):
     """Several requests' chunks in one row (one cached prefix among them), one plan: each slice matches its reference."""
     from tests.test_triton_kv_prefill import _reference
     from turing.kernels.flashinfer_prefill import flashinfer_prefill
     g = torch.Generator(device="cuda").manual_seed(0)
-    pool = KVPool(1, 2, 128, 256, torch.float16, "cuda", "native")
+    pool = KVPool(1, 2, 128, 256, torch.float16, "cuda", storage)
     spec = [(0, 600), (37, 70), (0, 17), (300, 513)]
     caches = [_filled(pool, s, n, g) for s, n in spec]
     q = torch.randn(1, 12, sum(n for _, n in spec), 128, device="cuda", generator=g).half()
@@ -69,3 +71,26 @@ def test_packed_requests_share_one_call():
         ref = _reference(pool, 0, c, q[:, :, off:off + n], s, n, 128 ** -0.5, 0, 0.0)
         torch.testing.assert_close(out[:, off:off + n].float(), ref, atol=1e-3, rtol=1e-2)
         off += n
+
+
+
+@pytest.mark.parametrize("storage", ["int8", "int4"])
+@pytest.mark.parametrize("Hkv,D", [(2, 128), (8, 64)])
+def test_pool_dequant_kernel_matches_the_reference(storage, Hkv, D):
+    """triton_pool_dequant (the temporary pages a low-bit layer hands FlashInfer) against KVPool._decode_field."""
+    from turing.kernels.triton_kv_decode import pool_dequant_supported, triton_pool_dequant
+    g = torch.Generator(device="cuda").manual_seed(1)
+    pool = KVPool(2, Hkv, D, 64, torch.float16, "cuda", storage, native_layers=(1,))
+    assert pool_dequant_supported(pool)
+    spec = ((0, 70), (37, 300))
+    caches = [_filled(pool, s, n, g) for s, n in spec]
+    phys = torch.cat([pool.page_table[c.slot, :len(c.pages)] for c in caches]).to(torch.int32)
+    # the slots after a request's last token were never written (the pool's memory is uninitialized)
+    written = torch.cat([torch.arange(len(c.pages) * 16, device="cuda") < s + n
+                         for c, (s, n) in zip(caches, spec)]).view(-1, 16)
+    for which in ("k", "v"):
+        out = triton_pool_dequant(pool, 0, which, phys)
+        ref = pool._decode_field(0, phys.long(), which).unflatten(1, (-1, 16)).transpose(0, 1)
+        assert out.shape == ref.shape == (phys.numel(), Hkv, 16, D) and out.dtype == torch.float16
+        torch.testing.assert_close(out.transpose(1, 2)[written].float(), ref.transpose(1, 2)[written].float(),
+                                   atol=1e-3, rtol=1e-3)

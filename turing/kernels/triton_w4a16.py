@@ -117,7 +117,7 @@ if HAS_TRITON:
 
 if HAS_TRITON:
     _GEMV_CONFIGS = [triton.Config({"BLOCK_N": bn, "BLOCK_K": bk}, num_warps=w)
-                     for bn in (2, 4, 8) for bk in (256, 512, 1024) for w in (2, 4)]
+                     for bn in (2, 4, 8, 16) for bk in (256, 512, 1024) for w in (2, 4, 8) if bn * bk <= 8192]
 
     @triton.autotune(configs=_GEMV_CONFIGS, key=["M", "N", "K"], **_TUNE_CACHE)
     @triton.jit
@@ -125,27 +125,31 @@ if HAS_TRITON:
                            HAS_BIAS: tl.constexpr, GROUP: tl.constexpr, BLOCK_N: tl.constexpr,
                            BLOCK_K: tl.constexpr):
         """Program (n block, row m): BLOCK_N output columns of one row of x, reduced in registers over all of K. No
-        tensor-core tile of which one row would be used, no K split, no fp32 buffer or cast launch."""
+        tensor-core tile of which one row would be used, no K split, no fp32 buffer or cast launch. A step covers
+        BLOCK_K / GROUP whole quantization groups ([rows, groups, bytes of a group]): each weight row gives
+        BLOCK_K / 2 contiguous bytes and one scale and zero per group."""
         pid_n = tl.program_id(0)
         m = tl.program_id(1)
         offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
         mask_n = offs_n < N
-        offs_b = tl.arange(0, BLOCK_K // 2)
-        acc = tl.zeros((BLOCK_N, BLOCK_K // 2), dtype=tl.float32)
+        offs_g = tl.arange(0, BLOCK_K // GROUP)
+        offs_b = tl.arange(0, GROUP // 2)
+        acc = tl.zeros((BLOCK_N, BLOCK_K // GROUP, GROUP // 2), dtype=tl.float32)
         for k0 in range(0, K, BLOCK_K):
-            kb = k0 // 2 + offs_b
+            g = k0 // GROUP + offs_g
+            kb = g[:, None] * (GROUP // 2) + offs_b[None, :]
             mask_k = kb < K // 2
-            mask = mask_n[:, None] & mask_k[None, :]
-            wb = tl.load(W + offs_n[:, None] * s_wn + kb[None, :] * s_wk, mask=mask, other=0)
-            g = (2 * kb) // GROUP
-            sc = tl.load(S + offs_n[:, None] * s_sn + g[None, :] * s_sg, mask=mask, other=0.0).to(tl.float32)
-            zp = tl.load(Z + offs_n[:, None] * s_sn + g[None, :] * s_sg, mask=mask, other=0).to(tl.float32)
+            wb = tl.load(W + offs_n[:, None, None] * s_wn + kb[None, :, :] * s_wk,
+                         mask=mask_n[:, None, None] & mask_k[None, :, :], other=0)
+            mask_g = mask_n[:, None] & (g < K // GROUP)[None, :]
+            sc = tl.load(S + offs_n[:, None] * s_sn + g[None, :] * s_sg, mask=mask_g, other=0.0).to(tl.float32)
+            zp = tl.load(Z + offs_n[:, None] * s_sn + g[None, :] * s_sg, mask=mask_g, other=0).to(tl.float32)
             xe = tl.load(X + m * s_xm + (2 * kb) * s_xk, mask=mask_k, other=0.0).to(tl.float32)
             xo = tl.load(X + m * s_xm + (2 * kb + 1) * s_xk, mask=mask_k, other=0.0).to(tl.float32)
-            lo = (wb & 0x0F).to(tl.float32) - zp
-            hi = ((wb >> 4) & 0x0F).to(tl.float32) - zp
-            acc += (lo * xe[None, :] + hi * xo[None, :]) * sc
-        y = tl.sum(acc, 1)
+            lo = (wb & 0x0F).to(tl.float32) - zp[:, :, None]
+            hi = ((wb >> 4) & 0x0F).to(tl.float32) - zp[:, :, None]
+            acc += (lo * xe[None, :, :] + hi * xo[None, :, :]) * sc[:, :, None]
+        y = tl.sum(tl.sum(acc, 2), 1)
         if HAS_BIAS:
             y += tl.load(B + offs_n, mask=mask_n, other=0.0).to(tl.float32)
         tl.store(Y + m * s_ym + offs_n, y.to(Y.dtype.element_ty), mask=mask_n)

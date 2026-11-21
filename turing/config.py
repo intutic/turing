@@ -63,8 +63,8 @@ class ModelConfig:
     kv_page_budget: float = 1.0        # Quest: share of 16-token pages a decode step reads; 1.0 reads all
     kv_select_min_tokens: int = 8192   # Quest only from this length: on an L4 it beats reading every page only at
                                        # batch >= 64 and >= 8K tokens (results_quest_threshold_cuda_smollm2_360m.json)
-    kv_pool_gib: Optional[float] = None  # KV pool size; None = kv_pool_fraction of free CUDA memory (off CUDA: 4 GiB or 64 full-length requests, if less)
-    kv_pool_fraction: float = 0.6      # share of free CUDA memory the KV pool takes when kv_pool_gib is unset
+    kv_pool_gib: Optional[float] = None  # KV pool size; None = from the free CUDA memory (off CUDA: 4 GiB or 64 full-length requests, if less)
+    kv_pool_fraction: Optional[float] = 0.6  # share of free CUDA memory for the pool when kv_pool_gib is unset; None (turing serve's default) = all but a reserve (KVPool.cuda_budget)
     cuda_graphs: bool = True           # replay decode steps as CUDA graphs (CUDA only; see DecodeGraphs)
     decode_attention: str = "kernel"   # CUDA decode: "kernel" (fused paged Triton) or "sdpa" (gather pages, then SDPA)
     kv_smoothing: bool = True          # int4 KV: outlier key channels scaled down (SubspaceCausalLM.calibrate_kv_smoothing)

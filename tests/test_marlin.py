@@ -107,7 +107,7 @@ def test_marlin_supported_shapes():
 
 @needs_marlin
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("M", [1, 2, 8, 64])
+@pytest.mark.parametrize("M", [1, 2, 8, 64, 2048])
 def test_quant_linear_marlin_path_matches_triton(dtype, M):
     """QuantLinear routes MARLIN_MIN_ROWS..MARLIN_MAX_ROWS rows to Marlin; it agrees with the Triton int4 GEMM, and a
     fused q/k/v QuantLinear (fuse_linears) gets its own Marlin copy."""

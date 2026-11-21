@@ -19,38 +19,6 @@ except ImportError:
 
 
 @pytest.mark.skipif(not HAS_CSRC, reason="Requires native C++ turing_csrc extension")
-def test_matryoshka_quadtree_native_parity():
-    hidden_dim = 1024
-    vocab_size = 4096
-    slice_width = 512
-
-    torch.manual_seed(42)
-    hidden = torch.randn(hidden_dim, dtype=torch.float32)
-    weight = torch.randn(vocab_size, hidden_dim, dtype=torch.float32)
-    spatial_proj = torch.randn(2, hidden_dim, dtype=torch.float32)
-
-    h_np = hidden.numpy()
-    w_np = weight.numpy()
-    s_np = spatial_proj.numpy()
-
-    tok_arr, parent_arr, mask_arr = turing_csrc.generate_matryoshka_quadtree(h_np, w_np, s_np, slice_width)
-
-    assert len(tok_arr) == 21
-    assert len(parent_arr) == 21
-    assert mask_arr.shape == (21, 21)
-    assert parent_arr[0] == -1
-    for p in parent_arr[1:5]:
-        assert p == 0
-    for p in parent_arr[5:]:
-        assert 1 <= p <= 4
-
-    # Verify DAG mask causality: root attends only to itself
-    assert mask_arr[0, 0] == 0.0
-    for j in range(1, 21):
-        assert mask_arr[0, j] == float("-inf")
-
-
-@pytest.mark.skipif(not HAS_CSRC, reason="Requires native C++ turing_csrc extension")
 def test_ridge_forward_native_parity():
     n_tokens = 8
     in_dim = 512

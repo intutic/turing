@@ -6,4 +6,5 @@ include pyproject.toml
 include setup.py
 recursive-include turing *.py
 recursive-include csrc/marlin *
+recursive-include csrc/marlin_moe *
 include NOTICE

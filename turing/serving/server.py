@@ -388,6 +388,9 @@ def create_app(
                llmd["num_requests_running"])
         metric("turing_kv_cache_usage_perc", "gauge",
                "Fraction of KV cache memory pool in use (llm-d KVCacheUtilization)", llmd["kv_cache_usage_perc"])
+        metric("turing_kv_preemptions_total", "counter",
+               "Requests preempted because the KV pool ran out while they decoded (their cache is recomputed)",
+               telem["preemptions"])
         metric("turing_cache_config_info", "gauge", "KV cache configuration info (llm-d BlockSize and NumGPUBlocks)",
                1.0, f'{{block_size="{llmd["block_size"]}",num_gpu_blocks="{llmd["num_gpu_blocks"]}"}}')
         pc = telem.get("prefix_cache")

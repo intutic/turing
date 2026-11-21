@@ -18,30 +18,38 @@ from turing.serving.engine import ContinuousBatchEngine
 from turing.serving.spec_gate import SpeculationGatePolicy
 from turing.serving.server import create_app
 
-def _load_hf_or_exit(args, dev):
+def _load_hf_or_exit(args, dev, dtype=None):
     """Real HuggingFace weights, or stop: random weights served for a mistyped name would only produce gibberish."""
     from turing.models.hf_loader import RealHuggingFaceLoader
     try:
         return RealHuggingFaceLoader.load_hf_model_into_turing(hf_model_id=args.model, sparsity_ratio=args.sparsity,
-                                                              device=str(dev), dtype=getattr(args, "dtype", None))
+                                                              device=str(dev),
+                                                              dtype=dtype or getattr(args, "dtype", None))
     except Exception as e:
         raise SystemExit(f"[!] Could not load weights for '{args.model}': {e}\n    Pass --mock to run on synthetic weights.")
 
 def _load_weights(args, dev):
     """Real weights from a .tgate4 directory or file, a local .gguf file, or HuggingFace, with --quantization and the
     KV cache flags applied when the command has them."""
+    from turing.models.hf_loader import resolve_dtype
     from turing.models.quant import TGATE4_FILE, load_quantized, quantize_model, calibration_windows
+    # --moe-expert-slots: the experts must never all be on the GPU, so the weights are loaded in host memory, in the
+    # dtype they will have on the device, and only the resident experts move there with the rest of the model
+    slots = getattr(args, "moe_expert_slots", None)
+    load_dev = torch.device("cpu") if slots else dev
+    dtype = getattr(args, "dtype", None)
     if args.model.endswith(".tgate4") or os.path.isfile(os.path.join(args.model, TGATE4_FILE)):
         print(f"[*] Loading 4-bit .tgate4 weights from '{args.model}'...")
-        model, tokenizer = load_quantized(args.model, device=str(dev), dtype=getattr(args, "dtype", None))
+        model, tokenizer = load_quantized(args.model, device=str(load_dev),
+                                          dtype=resolve_dtype(dtype, dev) if slots else dtype)
         if tokenizer is None:
             raise SystemExit(f"[!] '{args.model}' has no tokenizer files next to its model.tgate4")
     elif args.model.endswith(".gguf") and os.path.isfile(args.model):
         from turing.models.gguf_loader import GGUFModelLoader
         print(f"[*] Loading native GGUF weights from '{args.model}'...")
-        model, tokenizer = GGUFModelLoader(args.model).load(sparsity_ratio=args.sparsity, device=str(dev))
+        model, tokenizer = GGUFModelLoader(args.model).load(sparsity_ratio=args.sparsity, device=str(load_dev))
     else:
-        model, tokenizer = _load_hf_or_exit(args, dev)
+        model, tokenizer = _load_hf_or_exit(args, load_dev, dtype or ("bf16" if slots and dev.type == "cuda" else None))
     sp = getattr(args, "activation_sparsity", 0.0)
     q = getattr(args, "quantization", "none")
     if q != "none" and model.config.quantization is None:
@@ -53,6 +61,10 @@ def _load_weights(args, dev):
         from turing.models.activation_sparsity import calibrate_and_apply
         print(f"[*] Calibrating {sp:.0%} activation sparsity on WikiText-2 (16 windows of 512 tokens)...")
         calibrate_and_apply(model, calibration_windows(tokenizer, 16, 512), sp)
+    if slots:
+        layers = model.offload_experts(slots)
+        print(f"[*] Expert offload: {slots} experts per layer on the device, the rest of {layers} MoE layers' "
+              f"experts in host memory")
     cfg = model.config
     if hasattr(args, "kv_cache_dtype"):
         cfg.kv_cache_dtype, cfg.kv_page_budget = resolve_kv_cache_dtype(args.kv_cache_dtype, dev), args.kv_page_budget
@@ -71,9 +83,14 @@ def _eval_engine(args):
                                  prefix_caching=False)
 
 
-def _write_eval(args, res):
+def _write_eval(args, res, model=None):
+    # as the model runs: a converted (.tgate4) model carries its own quantization, whatever the flags say
+    quant = getattr(getattr(model, "config", None), "quantization", None) or args.quantization
     res.update(model=args.model, kv_cache_dtype=args.kv_cache_dtype, kv_page_budget=args.kv_page_budget,
-               quantization=args.quantization, quantize_lm_head=getattr(args, "quantize_lm_head", False),
+               quantization=quant,
+               quantize_lm_head=type(getattr(model, "lm_head", None)).__name__ == "QuantLinear" if model is not None
+               else args.quantization != "none" and getattr(args, "quantize_lm_head", False),
+               moe_expert_slots=getattr(args, "moe_expert_slots", None),
                activation_sparsity=args.activation_sparsity, device=args.device,
                dtype=getattr(args, "dtype", None), kv_smoothing=not getattr(args, "no_kv_smoothing", False),
                batch_size=getattr(args, "batch_size", None))
@@ -96,7 +113,8 @@ def main():
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, rocm, cpu, mps)")
     serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
-    serve_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
+    serve_parser.add_argument("--quantize-lm-head", action=argparse.BooleanOptionalAction, default=True, help="with --quantization, the LM head in 4 bits too (the largest single read per token); --no-quantize-lm-head keeps it in the model dtype")
+    serve_parser.add_argument("--moe-expert-slots", type=int, default=None, help="MoE models that do not fit the GPU: experts kept on it per layer; the others stay in host memory and are copied in when a token is routed to them")
     serve_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     serve_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     serve_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
@@ -104,11 +122,12 @@ def main():
     serve_parser.add_argument("--no-kv-smoothing", action="store_true", help="int4 KV: store keys without outlier-channel smoothing")
     serve_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
     serve_parser.add_argument("--no-cuda-graphs", action="store_true", help="Run decode steps eagerly instead of replaying CUDA graphs")
-    serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=0.6, help="Share of free GPU memory (after the weights) for the paged KV pool (default: 0.6)")
+    serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=None, help="Share of free GPU memory (after the weights) for the paged KV pool (default: all of it but a reserve of a tenth of the GPU's memory, at least 1.5 GiB)")
     serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
     serve_parser.add_argument("--embedding-model", type=str, default=None, help="HF embedding model (e.g. BAAI/bge-small-en-v1.5) for /v1/embeddings; default: the served model's mean-pooled hidden states")
     serve_parser.add_argument("--rerank-model", type=str, default=None, help="HF cross-encoder (e.g. cross-encoder/ms-marco-MiniLM-L-6-v2) for /v1/rerank; default: the served model's yes/no likelihood")
-    serve_parser.add_argument("--draft-tokens", type=int, default=4, help="Prompt-lookup speculative draft tokens per step while few requests decode (0 = off)")
+    serve_parser.add_argument("--draft-tokens", type=int, default=8, help="Speculative draft tokens per request and step (0 = off): from prompt lookup, or from --draft-head")
+    serve_parser.add_argument("--draft-head", type=str, default=None, help="EAGLE-3 draft head for this model (a Hugging Face repository or a directory with config.json and its weights): it drafts instead of prompt lookup")
     serve_parser.add_argument("--api-key", type=str, default=os.getenv("TURING_API_KEY"), help="Require this key (Authorization: Bearer or x-api-key) on every endpoint but /health (default: $TURING_API_KEY; off when unset)")
     serve_parser.add_argument("--no-admission-control", action="store_true", help="Do not reject requests the KV pool cannot hold soon (429/503)")
     serve_parser.add_argument("--no-lanes", action="store_true", help="Disable the interactive/batch/background QoS lanes")
@@ -134,7 +153,8 @@ def main():
     gen_parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature")
     gen_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     gen_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
-    gen_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
+    gen_parser.add_argument("--quantize-lm-head", action=argparse.BooleanOptionalAction, default=True, help="with --quantization, the LM head in 4 bits too (the largest single read per token); --no-quantize-lm-head keeps it in the model dtype")
+    gen_parser.add_argument("--moe-expert-slots", type=int, default=None, help="MoE models that do not fit the GPU: experts kept on it per layer; the others stay in host memory and are copied in when a token is routed to them")
     gen_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     gen_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     gen_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
@@ -152,7 +172,7 @@ def main():
     conv_parser.add_argument("--device", type=str, default="auto", help="Device for the per-layer work")
     conv_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows (default 128)")
     conv_parser.add_argument("--calib-tokens", type=int, default=2048, help="Tokens per calibration window (default 2048)")
-    conv_parser.add_argument("--quantize-lm-head", action="store_true", help="the LM head in 4 bits too")
+    conv_parser.add_argument("--quantize-lm-head", action=argparse.BooleanOptionalAction, default=True, help="the LM head in 4 bits too; --no-quantize-lm-head keeps it in the model dtype")
 
     # 5. Eval NIAH
     niah_parser = subparsers.add_parser("eval-niah", help="Pass-key needle-in-a-haystack retrieval through the engine on real weights")
@@ -166,7 +186,8 @@ def main():
     niah_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest page budget (1.0 reads all pages)")
     niah_parser.add_argument("--kv-select-min-tokens", type=int, default=None, help="Quest only from this many tokens (default: the model config's 8192)")
     niah_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load")
-    niah_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
+    niah_parser.add_argument("--quantize-lm-head", action=argparse.BooleanOptionalAction, default=True, help="with --quantization, the LM head in 4 bits too (the largest single read per token); --no-quantize-lm-head keeps it in the model dtype")
+    niah_parser.add_argument("--moe-expert-slots", type=int, default=None, help="MoE models that do not fit the GPU: experts kept on it per layer; the others stay in host memory and are copied in when a token is routed to them")
     niah_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows")
     niah_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style input sparsity (0 = off)")
     niah_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight dtype")
@@ -186,15 +207,18 @@ def main():
     acc_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest page budget (1.0 reads all pages)")
     acc_parser.add_argument("--kv-select-min-tokens", type=int, default=None, help="Quest only from this many tokens (default: the model config's 8192)")
     acc_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load")
-    acc_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
+    acc_parser.add_argument("--quantize-lm-head", action=argparse.BooleanOptionalAction, default=True, help="with --quantization, the LM head in 4 bits too (the largest single read per token); --no-quantize-lm-head keeps it in the model dtype")
+    acc_parser.add_argument("--moe-expert-slots", type=int, default=None, help="MoE models that do not fit the GPU: experts kept on it per layer; the others stay in host memory and are copied in when a token is routed to them")
     acc_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows")
     acc_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style input sparsity (0 = off)")
     acc_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight dtype")
     acc_parser.add_argument("--out", type=str, default=None, help="Append the result to this JSON file (a list of runs)")
 
     # 9. PCIe vs Host DRAM Bandwidth Calibration
-    bw_parser = subparsers.add_parser("bench-bw", help="Calibrate live PCIe vs Host DRAM memory & SIMD bandwidth")
+    bw_parser = subparsers.add_parser("bench-bw", aliases=["doctor"], help="Measure this machine: copy and read bandwidth, matmul rates, and a model's batch-1 decode floor")
     bw_parser.add_argument("--device", type=str, default="auto", help="Hardware device")
+    bw_parser.add_argument("--model", type=str, default=None, help="HF repo id: print the least time a batch-1 decode step can take for its weights as stored")
+    bw_parser.add_argument("--tune", action="store_true", help="CUDA: measure the kernel crossovers on this GPU and keep them (~/.cache/turing/tuning.json) for later runs")
 
     # 12. Interactive Subspace Inference Demo
     demo_parser = subparsers.add_parser("demo", help="Run interactive Turing Engine subspace inference demo")
@@ -209,7 +233,8 @@ def main():
     chat_parser.add_argument("--device", type=str, default="auto", help="Compute device (auto, cuda, mps, cpu)")
     chat_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     chat_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
-    chat_parser.add_argument("--quantize-lm-head", action="store_true", help="with --quantization, the LM head in 4 bits too (the largest single read per token)")
+    chat_parser.add_argument("--quantize-lm-head", action=argparse.BooleanOptionalAction, default=True, help="with --quantization, the LM head in 4 bits too (the largest single read per token); --no-quantize-lm-head keeps it in the model dtype")
+    chat_parser.add_argument("--moe-expert-slots", type=int, default=None, help="MoE models that do not fit the GPU: experts kept on it per layer; the others stay in host memory and are copied in when a token is routed to them")
     chat_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows of 2048 tokens (default 128)")
     chat_parser.add_argument("--dtype", type=str, default=None, choices=["bf16", "fp16", "fp32"], help="Weight and activation dtype (default: the checkpoint's bf16/fp16 on CUDA, fp32 on CPU and MPS)")
     chat_parser.add_argument("--sparsity", type=float, default=0.0, help="Subspace channel sparsity ratio; 0 serves the exact model, pruning costs quality (default: 0.0)")
@@ -236,7 +261,8 @@ def main():
         engine = _eval_engine(args)
         problems = load_gsm8k("test")[:args.samples]
         shots = load_gsm8k("train")[:args.shots]
-        _write_eval(args, GSM8KEvaluator(engine).evaluate(problems, shots, args.max_new_tokens, args.batch_size))
+        _write_eval(args, GSM8KEvaluator(engine).evaluate(problems, shots, args.max_new_tokens, args.batch_size),
+                    engine.model)
 
     elif args.command == "chat":
         jcfg = TuringConfig(device=args.device)
@@ -332,7 +358,15 @@ def main():
                 raise SystemExit(f"[!] --lora takes NAME=PATH and real weights, got '{spec}'")
             load_lora_adapter(model_inst, name, path)
             print(f"[+] Loaded LoRA adapter '{name}' from {path}")
+        draft_head = None
+        if args.draft_head:
+            if model_inst is None:
+                raise SystemExit("[!] --draft-head needs real weights")
+            from turing.models.eagle3 import load_eagle3
+            draft_head = load_eagle3(args.draft_head, cfg.hidden_dim, cfg.num_layers)
+            print(f"[+] Loaded EAGLE-3 draft head from {args.draft_head} (reads layers {draft_head.aux_layers})")
         engine = ContinuousBatchEngine(cfg, jcfg, model=model_inst, tokenizer=tokenizer_inst, dist_driver=dist_driver,
+                                       draft_head=draft_head,
                                        prefix_caching=not args.no_prefix_caching and dist_driver is None
                                        and not args.prefill_worker, draft_tokens=args.draft_tokens,
                                        spec_gate=SpeculationGatePolicy() if args.draft_tokens else None,
@@ -403,10 +437,12 @@ def main():
     elif args.command == "eval-niah":
         from turing.serving.niah import LongContextNIAHEvaluator
         engine = _eval_engine(args)
-        _write_eval(args, LongContextNIAHEvaluator(engine).evaluate_retrieval(args.context_len, args.depths))
+        _write_eval(args, LongContextNIAHEvaluator(engine).evaluate_retrieval(args.context_len, args.depths),
+                    engine.model)
 
-    elif args.command == "bench-bw":
+    elif args.command in ("bench-bw", "doctor"):
         from turing.core.heterogeneous_moe import BandwidthAdaptiveDecider
+        from turing.core import probe
         jcfg = TuringConfig(device=args.device)
         dev = jcfg.resolve_device()
         print(f"[*] Calibrating Live Hardware Interconnect & Compute on {dev}...")
@@ -415,6 +451,26 @@ def main():
         print(f"    Measured PCIe / Interconnect Bandwidth : {decider.pcie_bandwidth_gb_s:.2f} GB/s")
         print(f"    Measured Host CPU SIMD Throughput      : {decider.cpu_throughput_gflops:.2f} GFLOPs")
         print(f"    Measured GPU Matrix Throughput         : {decider.gpu_throughput_gflops:.2f} GFLOPs")
+        accel = dev.type in ("cuda", "mps")
+        bw = probe.read_bandwidth_gb_s(dev, 2 if accel else 0.5)
+        print(f"    Measured Device Read Bandwidth         : {bw:.1f} GB/s (bounds batch-1 decode)")
+        for name, dt in (("fp16", torch.float16), ("bf16", torch.bfloat16)) if dev.type == "cuda" else (("fp32", torch.float32),):
+            print(f"    Measured Matmul Rate, {name}             : {probe.matmul_tflops(dev, dt, 4096 if accel else 1024):.2f} TFLOP/s (bounds prefill)")
+        if args.model:
+            from huggingface_hub import HfApi
+            files = HfApi().model_info(args.model, files_metadata=True).siblings
+            nbytes = sum(f.size or 0 for f in files if f.rfilename.endswith(".safetensors"))
+            if not nbytes:
+                raise SystemExit(f"[!] '{args.model}' lists no .safetensors weights")
+            floor = probe.decode_floor_ms(nbytes, bw)
+            print(f"    {args.model}: {nbytes / 1e9:.2f} GB of weights as stored -> at least {floor:.1f} ms per "
+                  f"batch-1 decode step here (at most {1e3 / floor:.0f} tokens/s without speculation)")
+        if args.tune:
+            if dev.type != "cuda":
+                raise SystemExit("[!] --tune measures CUDA kernels")
+            values = probe.tune_int4_max_rows(dev)
+            print(f"    int4 GEMM against dequantize + cuBLAS, microseconds by rows: {values['int4_crossover_us']}")
+            print(f"[+] int4_max_rows = {values['int4_max_rows']} kept in {probe.save_tuning(values)}")
 
     elif args.command == "info":
         jcfg = TuringConfig(device=args.device)
