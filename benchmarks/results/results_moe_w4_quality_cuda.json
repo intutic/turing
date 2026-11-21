@@ -1,0 +1,73 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "args": {
+    "models": "allenai/OLMoE-1B-7B-0924-Instruct",
+    "arms": "exact_forward,rtn4,gptq4",
+    "context": 2048,
+    "decode": 256,
+    "windows": 8,
+    "device": "cuda",
+    "dtype": "bf16",
+    "out": "benchmarks/results/results_moe_w4_quality_cuda.json"
+  },
+  "text": "WikiText-2 raw test, consecutive windows",
+  "note": "L4 session of 2026-11-21 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "rows": [
+    {
+      "model": "allenai/OLMoE-1B-7B-0924-Instruct",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.143402487039566,
+      "se": 0.08003152473597674,
+      "n": 8,
+      "seconds": 4.783918991999997,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "allenai/OLMoE-1B-7B-0924-Instruct",
+      "arm": "rtn4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.202900230884552,
+      "se": 0.08194417650629952,
+      "n": 8,
+      "seconds": 3.4848209669999903,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "allenai/OLMoE-1B-7B-0924-Instruct",
+      "arm": "gptq4",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.1621104180812836,
+      "se": 0.08678204822330117,
+      "n": 8,
+      "seconds": 3.419879906999995,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "allenai/OLMoE-1B-7B-0924-Instruct",
+      "arm": "rtn4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.05949774384498596,
+      "se": 0.012370142665308339,
+      "n": 8,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "allenai/OLMoE-1B-7B-0924-Instruct",
+      "arm": "gptq4",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.01870793104171753,
+      "se": 0.008077271259624928,
+      "n": 8,
+      "dtype": "bfloat16"
+    }
+  ]
+}

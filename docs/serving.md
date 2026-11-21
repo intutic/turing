@@ -24,6 +24,7 @@ a LoRA adapter (§8). The main flags by topic are below; `turing serve --help` l
 | `--device` | `auto` | `auto` picks CUDA, then XPU, then MPS, then Vulkan, then CPU; `rocm` needs PyTorch's HIP build |
 | `--dtype` | checkpoint | `bf16`/`fp16`/`fp32`; default: the checkpoint's half type on CUDA, fp32 on CPU and MPS |
 | `--quantization` | `none` | `w4a16-rtn` or `w4a16-gptq`: 4-bit weights at load (GPTQ calibrates on WikiText-2; `turing convert` does it once) |
+| `--no-quantize-lm-head` | off | With `--quantization`, keep the LM head in the model dtype (it is quantized to 4 bits by default) |
 | `--calib-windows` | `128` | GPTQ calibration windows of 2,048 tokens |
 | `--activation-sparsity` | `0` | TEAL-style: in batch-1 decode on CUDA, zero this share of every projection's inputs by magnitude and skip their weight rows; prefill and batched decode stay dense. 3–7% faster than 4-bit weights alone at batch 1, at a cost of 5–9 GSM8K points ([benchmarks §3](benchmarks.md#3-4-bit-weights-and-activation-sparsity)) |
 | `--sparsity` | `0.0` | FFN channel pruning. `0.0` is the exact model; 50% costs +6.8 to +15.8 nats NLL on SmolLM2 ([benchmarks §10](benchmarks.md#10-ffn-channel-pruning)) |
@@ -37,11 +38,13 @@ a LoRA adapter (§8). The main flags by topic are below; `turing serve --help` l
 | `--kv-cache-dtype` | `auto` | `native`, `int8` (per token and KV head) or `int4` (per 32 values); `auto` = `int8` on CUDA, `native` elsewhere. Layers the format damages are detected at startup and kept in the model dtype; int4 also scales down outlier key channels. Quality: [benchmarks §2](benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps) |
 | `--no-kv-smoothing` | off | int4 KV: store keys without outlier-channel smoothing |
 | `--kv-page-budget` | `1.0` | Quest: share of 16-token pages each decode step reads, for requests of at least 8,192 tokens. Runs inside CUDA graphs. Off by default: it is slower than reading every page at every length up to 8K ([benchmarks §4](benchmarks.md#4-decode-throughput-against-huggingface-transformers)) |
-| `--kv-cache-memory-fraction` | `0.6` | Share of free GPU memory, after the weights, for the paged KV pool |
+| `--kv-cache-memory-fraction` | all but a reserve | Share of free GPU memory, after the weights, for the paged KV pool. Unset, the pool takes all of it but a tenth of the GPU's memory (at least 1.5 GiB, at most half of what is free) |
 | `--max-batch-size` | `64` | Requests running (prefilling or decoding) at once |
 | `--no-cuda-graphs` | off | Run decode steps eagerly instead of replaying captured CUDA graphs |
 | `--no-prefix-caching` | off | Disable automatic prefix caching |
-| `--draft-tokens` | `4` | Prompt-lookup speculative draft tokens per step (`0` = off) |
+| `--draft-tokens` | `8` | Speculative draft tokens per step, from prompt lookup or from `--draft-head` (`0` = off). A request stops drafting while its drafts do not pay for the rows they add to the decode step ([§5](#5-prefix-caching-and-speculative-decoding)) |
+| `--draft-head` | none | An EAGLE-3 draft head for the served model (a Hugging Face repository or a directory with `config.json` and its weights); it drafts instead of prompt lookup |
+| `--moe-expert-slots` | all | MoE models that do not fit the GPU: experts kept on it per layer. The others stay in host memory and are copied in when a token is routed to them ([§5a](#5a-moe-expert-offload)) |
 
 **API behaviour**
 
@@ -159,12 +162,48 @@ Generation responses report what the server did in these headers: `X-Turing-Mode
   prefills only the rest; unused cached pages are evicted least-recently-used when the pool runs short. It is off
   on the tensor/pipeline-parallel path and on a prefill worker.
 * **Speculative decoding by prompt lookup** (no draft model): the engine drafts the tokens that followed the latest
-  earlier occurrence of the request's last 3 (else 2, else 1) tokens and verifies them in one forward. Greedy
-  requests accept on argmax; sampled requests accept a draft token with its probability and otherwise sample from
-  the rest, so the output distribution is that of plain decoding. It is skipped for requests with a logits processor
-  and on the distributed path. With `--draft-tokens` above 0, `turing serve` installs a `SpeculationGatePolicy`
-  (`turing/serving/spec_gate.py`): it drafts while 2 or fewer requests decode and stops at 4 or more (hysteresis
-  between); `--draft-tokens 0` turns drafting off.
+  earlier occurrence of the request's last 3 (else 2, else 1) tokens. The request's last token and its drafts go
+  into the batched decode step as consecutive rows on its cache, so one step verifies the drafts of every request
+  next to the plain rows of the others. Greedy requests accept on argmax; sampled requests accept a draft token with
+  its probability and otherwise sample from the rest, so the output distribution is that of plain decoding. A
+  greedy output can still differ from an undrafted run where two tokens' logits tie within fp16 rounding, as it can
+  between any two batch sizes: 7 of 60 chat requests and 0 of 60 rewrite requests in
+  `results_spec_divergence_cuda.json`, each at a token whose two candidates were the model's top two and at most
+  0.03 apart. It is skipped for requests with a logits processor and on the distributed path; `--draft-tokens 0`
+  turns drafting off.
+  With Quest page selection or LongRoPE, drafts are verified in a forward per request instead, and for those
+  `turing serve` installs a `SpeculationGatePolicy` (`turing/serving/spec_gate.py`): it drafts while 2 or fewer
+  requests decode and stops at 4 or more (hysteresis between).
+* **Drafting only while it pays.** Draft rows make a step longer. The engine times decode steps per batch size (the
+  decode graph's row bucket) and keeps a moving average, over about 16 steps, of the tokens each request gets per
+  step with drafts; after 16 such steps, a request whose average is no more than the step's time over a plain
+  step's time for the same requests decodes plainly for the next 64 tokens, then tries again. (Accepted drafts come
+  in runs: a shorter average rested chat requests through a third of their steps although drafting doubled their
+  speed.) A request for which no draft is found eight steps in a row rests the same way. Draft rows are capped so
+  that a step fits the largest decode graph (128 rows).
+* **EAGLE-3 draft head** (`--draft-head`, `turing/models/eagle3.py`): a published one-layer head that predicts the
+  served model's next tokens from its hidden states after three layers. It drafts a chain of up to `--draft-tokens`
+  tokens after every target forward, verified by the same rule, so outputs keep the target's distribution. The
+  head's layers run once per draft position over the rows of every drafting request; on CUDA its keys and values
+  live in a paged pool of their own and each head step is a replay of a CUDA graph. Each draft costs a forward of
+  the head whether or not the target gets to it, so a request's chain is as long as its drafts are likely to be
+  reached: with a share p of its recently checked drafts accepted, it drafts while p to the power of the draft's
+  place in the chain is at least 0.15. Heads in the
+  EAGLE authors' layout and in the speculators library's are loaded; variants with more than one layer or extra
+  norms are refused. No draft tree, and no head is trained here.
+
+## 5a. MoE expert offload
+
+`--moe-expert-slots N` serves an MoE model whose experts do not all fit on the GPU. Every expert stays in host memory
+(pinned), `N` per layer are on the GPU, and when a decode step routes a token to an expert that is not there it is
+copied into the slot used least recently. The grouped MoE kernels read the slots, so a resident expert runs as fast
+as without offload. It works with experts in the model dtype and with 4-bit experts (`turing convert`), which are
+copied packed. The weights are loaded into host memory first, so the whole model never has to fit on the GPU.
+
+Limits: an offloaded model's decode steps are not captured in CUDA graphs (each layer asks the host which experts
+it needs), and a step that routes to more experts of a layer than there are slots, as large batches and prefill do,
+streams the missing experts through the GPU each time. It suits one or two concurrent requests. The engine's
+telemetry (`get_telemetry`) reports hits, misses and experts streamed under `moe_offload`.
 
 ---
 
@@ -192,12 +231,20 @@ curl http://localhost:8000/v1/rerank -H "Content-Type: application/json" -d '{
 
 Both are on by default.
 
-* **Admission** (`AdmissionController`, sized to the KV pool): a request that cannot be admitted gets 503 (pool
-    full, `Retry-After: 1`; shed above the watermark, no `Retry-After`) or 429 (queued, `Retry-After: 2`). A request
-  that can never fit gets 400. Streaming endpoints admit before sending the 200.
+* **Admission** (`AdmissionController`, sized to the KV pool): the prompts of the admitted requests may fill 90% of
+  the pool; a request beyond that gets 429 (`Retry-After: 2`), beyond 95% 503 (shed, no `Retry-After`), and 503 with
+  `Retry-After: 1` when too many requests already wait for pages. A request whose prompt plus `max_tokens` can never
+  fit gets 400. Streaming endpoints admit before sending the 200.
+* **KV pages on demand.** A request holds the pages of its prompt when it is admitted and takes the pages of its
+  output as it decodes, 32 tokens at a time, so a large `max_tokens` does not keep other requests out. If the pool
+  runs out while requests decode, the newest request of the least urgent lane gives its pages back, waits at the
+  head of the queue and has its cache recomputed from its prompt and the tokens it already produced (recompute
+  preemption, as in vLLM): its stream pauses and then continues where it stopped. `/metrics` counts these as
+  `turing_kv_preemptions_total`. A request that continues a caller's KV cache (`fork`, a remote prefill) reserves
+  everything up front and is never preempted.
 * **Lanes** (`LanePolicy`): `interactive`, `batch` and `background`, chosen by `lane` / `X-Turing-Lane` or by the
-  request's shape. Waiting requests are ordered by lane, and each lane has its own prefill chunk (512, 256 and 128
-  tokens). `/metrics` reports waiting, running, admitted and finished requests per lane.
+  request's shape. Waiting requests are ordered by lane, and each lane has its own prefill budget per scheduler step (2,048, 1,024
+  and 512 prompt tokens, over all waiting requests). `/metrics` reports waiting, running, admitted and finished requests per lane.
 
 ---
 

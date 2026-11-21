@@ -7,12 +7,79 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- 4-bit MoE experts: `--quantization` and `turing convert` now pack the stacked experts of an MoE layer too (GPTQ with
+  each expert's own Gram matrices), read by int4 variants of the grouped MoE kernels. `.tgate4` files written before
+  still load with their experts in the model dtype.
+- Marlin kernel for 4-bit MoE experts (`turing/kernels/marlin_moe.py`, `csrc/marlin_moe/`, vendored from vLLM
+  v0.31.0 like the dense one and built by the same `TURING_BUILD_MARLIN=1`). With it a layer keeps its experts on
+  the GPU in Marlin's layout only (the packed buffers move to host memory) and runs every input size through it.
+  Qwen1.5-MoE-A2.7B in 4 bits on an L4 (LM head in fp16) goes from 98 / 259 / 446 / 506 tok/s at batch 1 / 8 / 32 /
+  64 with the Triton kernels to 107 / 338 / 604 / 797, and its first token at batch 64 from 4.7 s to 2.0 s; with
+  the default 4-bit LM head it runs at 133 / 367 / 630 / 819 (vLLM on Qwen's GPTQ-Int4 checkpoint: 114 / 350 /
+  621 / 817).
+- `--moe-expert-slots N`: MoE expert offload in the serving path. `N` experts per layer stay on the GPU, the rest in
+  host memory, copied in on demand; works with experts in the model dtype and in 4 bits.
+- `--draft-head`: speculative decoding with a published EAGLE-3 draft head (`turing/models/eagle3.py`). The head
+  runs once per draft position for all drafting requests, and a request's chain is as long as its drafts are
+  likely to be reached by the target. Qwen3-8B on an L4 with chains of up to 5: 48.0 / 83.8 / 141.1 tok/s on code
+  prompts at 1 / 2 / 4 requests (16 and 28 without drafts at 1 and 2; vLLM with the same head 50.8 / 88.8 / 144.5).
+- Overlapped decode on CUDA: the next decode step is launched before the host has read the current step's tokens.
+- `turing bench-bw` (also `turing doctor`) reports the device's read bandwidth and matmul rates and, with `--model`,
+  the least time a batch-1 decode step can take; `--tune` measures the int4 kernel crossover on the GPU present.
 - Grouped-GEMM MoE kernels (`turing/kernels/triton_moe.py`): on CUDA, `SparseMoE` sorts token-expert pairs by expert
   on the GPU and runs all experts in two Triton kernels instead of looping over them on the host, so MoE models
-  (Mixtral, Qwen MoE, OLMoE) now decode under CUDA graphs. OLMoE-1B-7B on an L4 decodes 4.2–4.9× faster at batch
+  (Mixtral, Qwen MoE, OLMoE) now decode under CUDA graphs. OLMoE-1B-7B on an L4 decodes 4.9–6.4× faster at batch
   1–64, with GSM8K unchanged (35.0% against 33.5%, ± 3.4, n = 200).
 
 ### Changed
+- KV pages on demand: a request reserves the pages of its prompt at admission and takes the pages of its output as it
+  decodes, instead of reserving prompt plus `max_tokens` up front, so a large `max_tokens` no longer limits how many
+  requests run at once. When the pool runs out mid-decode the newest request is preempted and its cache recomputed
+  later (its stream pauses, then continues where it stopped). Admission control now budgets prompts, not prompt plus
+  `max_tokens`.
+- With `--quantization`, the LM head is quantized to 4 bits too (it was opt-in with `--quantize-lm-head`);
+  `--no-quantize-lm-head` keeps it in the model dtype. `.tgate4` files keep the head they were written with.
+- Speculative drafts are verified as rows of the batched decode step, for every request in one step, instead of in a
+  forward per request; the concurrency gate (`SpeculationGatePolicy`) now applies only where that is not possible
+  (Quest page selection, LongRoPE).
+- Speculative decoding stops for a request while its drafts do not pay for the rows they add, measured from the
+  engine's own step times over about 16 steps; prompt lookup uses an incremental n-gram index instead of scanning the sequence each step.
+- `--draft-tokens` defaults to 8 (it was 4): over code, rewrite and chat prompts at 1, 2 and 8 requests on an L4,
+  8 drafts gave 2.5x the plain rate (geometric mean) against 2.2x with 4, and at least 1.27x in every case.
+- The prefill budget per scheduler step is 2,048 prompt tokens (1,024 and 512 for the batch and background lanes); it
+  was 512 (256, 128).
+- With the Marlin extension built, 4-bit linear layers use it up to 4,096 rows (it was 1,024): prefill chunks of
+  2,048 tokens went through dequantize + cuBLAS, which Marlin beats by 23% at that size on an L4.
+- Prefill into int8 and int4 KV layers quantizes the chunk in the append kernel and dequantizes the cached prefix
+  for FlashInfer in one launch per field; a 16K-token prompt prefills at 11.2K (int8) and 11.1K (int4) tokens/s on
+  an L4, from 10.6K and 10.5K (fp16 KV: 11.3K).
+- A prefill writes each layer's keys and values with page indices computed once per forward instead of once per
+  layer, a chunk with no cached prefix attends through plain causal SDPA instead of a paged kernel, and an idle
+  scheduler starts on a new request at once instead of at its next 1 ms poll. One 512-token prompt on
+  Qwen2.5-1.5B on an L4: first token after 36 ms instead of 44.
+- Replacing a model's KV pool (another `kv_cache_dtype` in the same process) frees the old pool before the new one
+  is sized; it used to stay allocated until then, so the new pool got only what was left.
+- `turing serve` gives the KV pool all free GPU memory after the weights but a reserve (a tenth of the GPU's
+  memory, at least 1.5 GiB, at most half of what is free) instead of 60% of it, which left 4-7 GiB of an L4 unused.
+  `--kv-cache-memory-fraction` still sets a share, and a model loaded through the library keeps 60%
+  (`ModelConfig.kv_pool_fraction`).
+- A scheduler step that prefills no longer runs a second forward for the requests that are decoding: they ride in
+  the packed prefill forward as rows of one token (`SubspaceCausalLM.prefill_packed(..., riders=N)`, attention through
+  the paged decode kernel), as vLLM schedules a step, and their drafts are verified there too. Engines with a
+  draft head or Quest page selection decode as before.
+- MoE layers run inputs of 1,024 or more rows per expert as one cuBLAS GEMM pair per expert; the grouped kernels use
+  32-row blocks and 64 x 128 tiles, and skip the sort for a single token.
+- MoE layers on CUDA launch about twenty fewer small kernels each: routing (softmax, top-k, normalisation) is one
+  kernel instead of six, token-expert pairs are grouped by expert in three kernels instead of about fourteen
+  PyTorch operations, the sum over a token's experts is one, and a single token's pair table is built once.
+- Decode graphs for 12, 24, 48 and 96 rows too: a step is padded to the next graph size, and with powers of two
+  only, 40 requests paid for 64 rows.
+- The 4-bit MoE kernels and the dense batch-1 4-bit kernel read 256 columns of each weight row per step (whole
+  quantization groups, 128 contiguous bytes) instead of 64; one token's experts run in a kernel without a
+  tensor-core tile. On an L4 the expert kernels take 17-33% less time per layer
+  (`results_moe_kernel_w4_qwen_cuda.json`, `results_moe_kernel_w4_olmoe_cuda.json`).
+- Layers of an int8 or int4 KV cache take FlashInfer's prefill attention when it is installed, through temporary
+  dequantized pages.
 - Experimental components moved to `turing.experimental` (`turing/experimental/`, kernels in
   `turing/experimental/kernels/`, the demo in `turing/experimental/demo/`, tests in `tests/experimental/`): every module
   `turing serve` does not import. Imports such as `turing.core.lineage` or `turing.kernels.triton_kslot_pool` become
@@ -20,6 +87,8 @@ All notable changes to this project are documented here. The format follows
   `turing.DynamicEntropyRouter` and `turing.HierarchicalVirtualPageManager` are now in `turing.experimental`.
 
 ### Removed
+- The untrained draft heads (`turing.experimental.speculation`: Matryoshka and quadtree heads, tree pruner), their two
+  Triton kernels and C++ helpers.
 - Experimental modules with no model result and no role in inference, with their tests and benchmark scripts:
   swarm and particle-swarm optimisers, the router and its annealer, hyper-connections (`mhc`), optimal-transport
   eviction, compressed convolutional attention (`cca`), the attention-pattern cache, the hybrid tensor mesh, matrix
@@ -39,6 +108,12 @@ All notable changes to this project are documented here. The format follows
 - Package description corrected (it still advertised 70B models on one GPU).
 
 ### Fixed
+- Overlapped decode waited for the step in flight before launching the next one: the next step's rows were selected
+  with an index built on the host, which PyTorch copies to the GPU with a blocking copy, and a request's new KV pages
+  were written to the page table the same way. The GPU idled for the host's launch time every step. The index is
+  gone when every request continues, and page-table rows go through pinned memory without waiting.
+- The KV pool's page table starts with 256 request rows instead of 8. Each time it grew, every decode graph captured
+  before was captured again (about 0.1 s each), so the first requests after a burst stalled once.
 - Ollama `/api/generate` templates containing `{{` in a prompt, system message or response were refused; only the
   template's own text is checked now.
 

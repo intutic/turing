@@ -41,22 +41,35 @@ def run_turing(a, batches):
     from turing.config import TuringConfig
     from turing.models.hf_loader import RealHuggingFaceLoader
     from turing.serving.engine import ContinuousBatchEngine
-    tok = AutoTokenizer.from_pretrained(a.model)
-    model, _ = RealHuggingFaceLoader.load_hf_model_into_turing(a.model, device="cuda", dtype=a.dtype)
-    if a.quantization != "none":  # as turing serve --quantization: GPTQ calibrated on WikiText-2 train windows
+    from turing.models.quant import TGATE4_FILE, load_quantized
+    load_dev = "cpu" if a.moe_expert_slots else "cuda"  # offload: weights to host memory first (see turing.cli)
+    if os.path.isfile(os.path.join(a.model, TGATE4_FILE)):  # a directory written by `turing convert`
+        model, tok = load_quantized(a.model, device=load_dev, dtype=a.dtype)
+        a.quantization, a.model = model.config.quantization, os.path.basename(os.path.normpath(a.model))
+        a.quantize_lm_head = type(model.lm_head).__name__ == "QuantLinear"  # as the file was converted
+    else:
+        tok = AutoTokenizer.from_pretrained(a.model)
+        model, _ = RealHuggingFaceLoader.load_hf_model_into_turing(a.model, device=load_dev, dtype=a.dtype)
+    # as turing serve --quantization: GPTQ calibrated on WikiText-2 train windows
+    if a.quantization != "none" and model.config.quantization is None:
         from turing.models.quant import calibration_windows, quantize_model
         method = a.quantization.split("-")[-1]
         quantize_model(model, method, calibration_windows(tok, a.calib_windows, 2048) if method == "gptq" else None,
                        lm_head=a.quantize_lm_head)
+    if a.moe_expert_slots:
+        model.offload_experts(a.moe_expert_slots)
     if a.activation_sparsity:  # as --activation-sparsity: applies to one-row decode on CUDA (batch 1)
         from turing.models.activation_sparsity import calibrate_and_apply
         from turing.models.quant import calibration_windows
         calibrate_and_apply(model, calibration_windows(tok, 16, 512), a.activation_sparsity)
     model.config.kv_cache_dtype, model.config.kv_page_budget = a.kv_cache_dtype, a.kv_page_budget
+    model.config.kv_pool_fraction = None  # as turing serve: all free memory but a reserve
     if a.kv_pool_gib:
         model.config.kv_pool_gib = a.kv_pool_gib
     engine = ContinuousBatchEngine(model.config, TuringConfig(device="cuda", max_batch_size=max(batches)), model=model,
-                                   tokenizer=tok, prefix_caching=False, draft_tokens=0, prefill_chunk_size=2048)
+                                   tokenizer=tok, prefix_caching=False, draft_tokens=0,
+                                   prefill_chunk_size=a.prefill_chunk)
+    engine.ride_prefill = not a.no_ride_prefill
     rows = []
 
     async def batch(ps):
@@ -81,6 +94,7 @@ def run_turing(a, batches):
             for B in batches:  # warm-up at this batch size: CUDA graph capture
                 await batch(prompts(tok, B, a.warmup_context or a.context, seed=99))
             for B in batches:
+                preempted = engine.preemptions
                 secs, n, ttft = await batch(prompts(tok, B, a.context))
                 pool = engine.kv_pool
                 rows.append(dict(engine="turing", model=a.model, batch=B, context=a.context, new_tokens=a.new_tokens,
@@ -89,6 +103,15 @@ def run_turing(a, batches):
                                  kv_page_budget=a.kv_page_budget, kv_capacity_tokens=pool.num_pages * pool.page_size,
                                  kv_pool_gib=round(pool.num_pages * pool.page_bytes() / 2 ** 30, 3),
                                  kv_native_layers=list(pool.native_layers), quantization=a.quantization,
+                                 # peak device memory of this process: weights, the KV pool and everything else
+                                 gpu_peak_gib=round(torch.cuda.max_memory_allocated() / 2 ** 30, 3)
+                                 if pool.device.type == "cuda" else None,
+                                 prefill_chunk=a.prefill_chunk, ride_prefill=engine.ride_prefill,
+                                 moe_expert_slots=a.moe_expert_slots,
+                                 moe_offload=model.expert_offload_stats(),
+                                 preemptions=engine.preemptions - preempted,  # requests whose cache was recomputed
+                                 # the engine's own moving average of a whole decode step, by row bucket
+                                 engine_step_ms={str(k): round(v * 1e3, 3) for k, v in engine._step_s.items() if v},
                                  quantize_lm_head=a.quantize_lm_head, activation_sparsity=a.activation_sparsity))
                 print(json.dumps(rows[-1]), flush=True)
         finally:
@@ -174,6 +197,12 @@ def main():
     ap.add_argument("--vllm-kv-cache-dtype", default=None, help="vllm: any kv_cache_dtype (int8_per_token_head, ...)")
     ap.add_argument("--kv-skip-layers", default="", help="vllm: layers kept out of the quantized cache, e.g. 0")
     ap.add_argument("--warmup-context", type=int, default=None, help="prompt length of the warm-up batches")
+    ap.add_argument("--moe-expert-slots", type=int, default=None,
+                    help="turing: MoE experts kept on the GPU per layer; the rest in host memory")
+    ap.add_argument("--prefill-chunk", type=int, default=2048,
+                    help="turing: prompt tokens prefilled per scheduler step, over all waiting requests")
+    ap.add_argument("--no-ride-prefill", action="store_true",
+                    help="turing: decode steps of their own while prompts are prefilled (the engine before riders)")
     ap.add_argument("--quantization", default="none", choices=["none", "w4a16-gptq", "w4a16-rtn"], help="turing")
     ap.add_argument("--calib-windows", type=int, default=32, help="turing GPTQ calibration windows (speed only)")
     ap.add_argument("--quantize-lm-head", action="store_true", help="turing: with --quantization, the LM head too")
@@ -200,6 +229,8 @@ def main():
                                    and r.get("kv_cache_dtype") == kvname and r.get("kv_skip_layers", []) == skipped
                                    and r.get("kv_page_budget", 1.0) == (a.kv_page_budget if a.engine == "turing" else 1.0)
                                    and r.get("quantization", "none") == (a.quantization if a.engine == "turing" else "none")
+                                   and r.get("prefill_chunk", 2048) == (a.prefill_chunk if a.engine == "turing" else 2048)
+                                   and r.get("moe_expert_slots") == (a.moe_expert_slots if a.engine == "turing" else None)
                                    and r.get("quantize_lm_head", False) == (a.quantize_lm_head and a.engine == "turing")
                                    and r.get("activation_sparsity", 0.0) == (a.activation_sparsity
                                                                               if a.engine == "turing" else 0.0))]

@@ -1,0 +1,85 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "torch": "2.9.1+cu129",
+    "gpu": "NVIDIA L4",
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "dtype": "fp16",
+    "draft_tokens": 4,
+    "requests": 60,
+    "new_tokens": 256
+  },
+  "note": "L4 session of 2026-11-21 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "rows": [
+    {
+      "workload": "chat",
+      "request": 2,
+      "first_difference": 105,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.03125,
+      "top2_gap": 0.03125,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 5,
+      "first_difference": 154,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 12,
+      "first_difference": 14,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 14,
+      "first_difference": 147,
+      "plain_tokens": 238,
+      "drafted_tokens": 237,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 28,
+      "first_difference": 195,
+      "plain_tokens": 223,
+      "drafted_tokens": 250,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 43,
+      "first_difference": 14,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 57,
+      "first_difference": 200,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    }
+  ]
+}

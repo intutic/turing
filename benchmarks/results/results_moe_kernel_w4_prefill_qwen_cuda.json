@@ -1,0 +1,93 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "torch": "2.9.1+cu129",
+    "gpu": "NVIDIA L4",
+    "read_bandwidth_gb_s": 262.2839146641064,
+    "dtype": "bf16",
+    "experts": 60,
+    "top_k": 4,
+    "hidden": 2048,
+    "ffn": 1408,
+    "expert_bytes": 4730880,
+    "layers": 16,
+    "weights": "4-bit"
+  },
+  "note": "L4 session of 2026-11-21 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "rows": [
+    {
+      "tokens": 512,
+      "pairs": 2048,
+      "experts_hit": 60,
+      "loop_eager_ms": 16.4667,
+      "gemm_eager_ms": 10.0132,
+      "block_m": 64,
+      "block_n": 64,
+      "block_k": 64,
+      "num_warps": 4,
+      "ms": 5.5193,
+      "read_gb_per_s": 51.4,
+      "max_abs_diff_vs_loop": 0.01171875
+    },
+    {
+      "tokens": 512,
+      "pairs": 2048,
+      "experts_hit": 60,
+      "loop_eager_ms": 16.4667,
+      "gemm_eager_ms": 10.0132,
+      "block_m": 64,
+      "block_n": 64,
+      "block_k": 256,
+      "num_warps": 4,
+      "ms": 11.2894,
+      "read_gb_per_s": 25.1,
+      "max_abs_diff_vs_loop": 0.01171875
+    },
+    {
+      "tokens": 512,
+      "pairs": 2048,
+      "experts_hit": 60,
+      "loop_eager_ms": 16.4667,
+      "gemm_eager_ms": 10.0132,
+      "default": true,
+      "ms": 11.1601
+    },
+    {
+      "tokens": 2048,
+      "pairs": 8192,
+      "experts_hit": 60,
+      "loop_eager_ms": 17.7013,
+      "gemm_eager_ms": 10.4221,
+      "block_m": 64,
+      "block_n": 64,
+      "block_k": 64,
+      "num_warps": 4,
+      "ms": 15.9383,
+      "read_gb_per_s": 17.8,
+      "max_abs_diff_vs_loop": 0.015625
+    },
+    {
+      "tokens": 2048,
+      "pairs": 8192,
+      "experts_hit": 60,
+      "loop_eager_ms": 17.7013,
+      "gemm_eager_ms": 10.4221,
+      "block_m": 64,
+      "block_n": 64,
+      "block_k": 256,
+      "num_warps": 4,
+      "ms": 34.6913,
+      "read_gb_per_s": 8.2,
+      "max_abs_diff_vs_loop": 0.015625
+    },
+    {
+      "tokens": 2048,
+      "pairs": 8192,
+      "experts_hit": 60,
+      "loop_eager_ms": 17.7013,
+      "gemm_eager_ms": 10.4221,
+      "default": true,
+      "ms": 35.4783
+    }
+  ]
+}

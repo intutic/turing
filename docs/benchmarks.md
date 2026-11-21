@@ -15,16 +15,19 @@ from them by `scripts/make_doc_tables.py` (`--check` fails when a table and its 
 
 ## 1. Summary
 
-* **Speed against vLLM** (§5, [comparison](comparison.md)): on Qwen2.5-1.5B vLLM is 1.01–1.04× faster in fp16 and
-  1.06–1.12× at 4 bits. With the opt-in 4-bit LM head Turing is 1.15–1.16× vLLM at batch 1 and 8. At 16K-token
-  prompts Turing's fp16 is 1.0–1.22× faster per request, and vLLM's fp8 cache with layer 0 kept is 1.3–1.4× faster
-  than Turing's int8 at equal quality.
+* **Speed against vLLM** (§5, §7, §11, [comparison](comparison.md)): on Qwen2.5-1.5B Turing is level with vLLM in
+  fp16 (101% of its throughput) and at 97–99% at 4 bits with its LM head in fp16. With the 4-bit LM head (the
+  default) Turing is 1.05–1.27× vLLM at batch 1 to 64. At 16K-token prompts Turing's fp16 is 1.07–1.29× faster per
+  request, and vLLM's fp8 cache with layer 0 kept is 1.06–1.09× faster than Turing's int8 at equal quality. With
+  prompt lookup Turing is at 100–121% of vLLM's n-gram speculator, with an EAGLE-3 head at 94–99%, and on MoE
+  models at 97–117% below the batch size where vLLM's KV budget runs out.
 * **Low-bit KV caches keep quality without settings** (§2): int8 is free, int4 costs about +0.02 nats, and both pass
   every pass-key retrieval to 32K. On the same model, vLLM's int8/int4 and default fp8 caches lose 16 to 57 GSM8K
   points unless layer 0 is excluded by hand.
 * **4-bit weights** decode 1.5–1.6× faster than fp16 under CUDA graphs (§3); GPTQ costs about 7 GSM8K points
-  (57.6% → 50.4%). TEAL activation sparsity on top of GPTQ is not worth it end to end on the L4: 28–31% slower at
-  batch 1 (107–112 against 155 tok/s) and 4–8 more points lost ([comparison](comparison.md)).
+  (57.6% → 50.4%). TEAL activation sparsity on top of GPTQ is not worth it end to end on the L4: 107–112 tok/s at
+  batch 1 where plain GPTQ ran at 155 in the same session (167 now), and 4–8 more points lost
+  ([comparison](comparison.md)).
 
 ---
 
@@ -71,9 +74,9 @@ pass-key: 20 needles at 2K–32K; ΔNLL: 8 WikiText-2 windows; time per request 
 <!-- table:vs_kv -->
 | KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 2.05 |
-| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 2.32 |
-| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.95 |
+| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 1.95 |
+| Turing int8 | — | 58.2% | 100.0% | +0.003 ± 0.002 | 1.83 |
+| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.09 |
 | vLLM bf16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
 | vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.66 |
 | vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
@@ -186,7 +189,9 @@ from Python and shows why that matters for small Triton kernels:
 `results_w4a16_crossover_cuda.json`). The shapes are five of Qwen2.5-1.5B, from 1536 × 1536 to its 1536 × 151,936 LM
 head, and two 7B MLP shapes, 4096 × 14,336 and 14,336 × 4096. The Triton kernel splits K across programs so a narrow
 layer still fills the GPU, and serves up to `INT4_MAX_ROWS = 64` rows. Marlin (vendored from vLLM, built only with
-`TURING_BUILD_MARLIN=1`) is faster at every row count here, so when it is built `QuantLinear` sends it 1–1,024 rows:
+`TURING_BUILD_MARLIN=1`) is faster at every row count here, and at prefill sizes too
+(`results_w4a16_prefill_rows_cuda.json`, Qwen2.5-1.5B's four layer shapes: 3,398 against 4,406 µs for dequantize +
+cuBLAS at 2,048 rows, 6,846 against 7,682 at 4,096), so when it is built `QuantLinear` sends it 1–4,096 rows:
 
 <!-- table:crossover -->
 | Rows (M) | int4 kernel | int4, no K split | dequantize + cuBLAS | fp16 cuBLAS | Marlin (optional) |
@@ -267,14 +272,15 @@ python scripts/benchmark_kv_decode.py --model HuggingFaceTB/SmolLM2-360M \
 Qwen2.5-1.5B-Instruct, batches of 16 to 128 requests, each a 16K-token prompt and 256 new tokens. vLLM runs at
 `gpu_memory_utilization` 0.85 and records the KV memory it took (14.6 GiB); every Turing setting gets the same bytes
 (Quest's row ran with less, 12.7 GiB), so capacity differs only by bytes per token. Seconds per request
-(`results_longctx_cuda.json`):
+(`results_longctx_cuda.json`; Turing's native, int8 and int4 rows are from the session of 2026-11-21, vLLM's rows and
+the Quest row from the one before):
 
 <!-- table:longctx -->
 | Engine, KV cache | KV capacity (tokens) | B=16 | B=32 | B=64 | B=128 |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| Turing native | 547,840 | 2.25 | 2.12 | 2.07 | 2.05 |
-| Turing int8 | 993,648 | 2.52 | 2.37 | 2.34 | 2.32 |
-| Turing int4 | 1,305,488 | 3.14 | 3.03 | 2.98 | 2.95 |
+| Turing native | 547,840 | 2.11 | 2.01 | 1.97 | 1.95 |
+| Turing int8 | 993,648 | 2.03 | 1.90 | 1.85 | 1.83 |
+| Turing int4 | 1,305,488 | 2.30 | 2.20 | 2.12 | 2.09 |
 | Turing int4, Quest 25% | 1,136,256 | 3.78 | 3.66 | 3.48 | 3.40 |
 | vLLM auto | 547,856 | 2.26 | 2.27 | 2.43 | 2.51 |
 | vLLM fp8 | 1,068,816 | 1.83 | 1.70 | 1.67 | 1.66 |
@@ -284,12 +290,13 @@ Qwen2.5-1.5B-Instruct, batches of 16 to 128 requests, each a 16K-token prompt an
 | vLLM int4_per_token_head, skip layer 0 | 1,876,928 | 4.51 | 4.42 | 4.36 | 4.30 |
 <!-- /table -->
 
-* In fp16 Turing is 1.0–1.22× faster per request than vLLM; prefill attention over pages in the model dtype runs
-  through FlashInfer when it is installed.
-* Turing's int4 cache holds 2.4× the tokens of fp16 but takes 1.4× its time per request (2.95 against 2.05 s at
-  B=128), and int8 1.1×: their prefill reads quantized pages through Turing's own kernel. Quest at 25% of pages is
-  slower still (3.40 s at B=128).
-* vLLM's fp8 cache with layer 0 kept is 1.3–1.4× faster than Turing's int8 at equal quality. vLLM fp8 without a
+* In fp16 Turing is 1.07–1.29× faster per request than vLLM (1.95 against 2.51 s at B=128).
+* Turing's int8 cache holds 1.8× the tokens of fp16 and takes 0.94–0.96× its time per request; int4 holds 2.4× and
+  takes 1.07–1.09×. A prefill chunk is quantized by the decode step's append kernel, and the cached prefix is
+  dequantized by one kernel into pages FlashInfer reads (`triton_kv_decode.py`): one 16K prompt alone prefills at
+  11.2K (int8) and 11.1K (int4) tokens/s against 11.3K in fp16. Quest at 25% of pages was measured before these
+  changes (3.40 s at B=128).
+* vLLM's fp8 cache with layer 0 kept is 1.06–1.09× faster than Turing's int8 at equal quality. vLLM fp8 without a
   skipped layer is fast because it is wrong on this model; quality of each format is in §2.
 
 ---
@@ -327,21 +334,52 @@ For comparison, on the same Qwen files vLLM takes 51.7 s cold and 34.2 s warm to
 
 OLMoE-1B-7B-Instruct in bf16 on the L4, 512-token prompts, 256 new tokens, output tokens per second at batch size B.
 Before, `SparseMoE` looped over the experts a batch routed to, which needs the expert list on the host each layer and
-so ran without CUDA graphs. Now the token-expert pairs are sorted by expert on the GPU and two Triton kernels
-(`turing/kernels/triton_moe.py`) run every expert's rows at once, so decode steps are captured in CUDA graphs. GSM8K
-is 8-shot exact match on the first 200 test problems through each version (`results_moe_speed_base_cuda.json`,
-`results_moe_speed_cuda.json`, `results_moe_gsm8k_base_cuda.json`, `results_moe_gsm8k_cuda.json`):
+so ran without CUDA graphs. Now routing, the sort of token-expert pairs by expert, both expert products and the sum
+over each token's experts are Triton kernels (`turing/kernels/triton_moe.py`), so decode steps are captured in CUDA
+graphs. GSM8K is 8-shot exact match on the first 200 test problems (`results_moe_speed_base_cuda.json`,
+`results_moe_speed_cuda.json`, `results_moe_gsm8k_base_cuda.json`, `results_moe_gsm8k_cuda.json`; the GSM8K run of
+the grouped kernels predates the routing and sum kernels):
 
 <!-- table:moe_decode -->
 | Setting | B=1 | B=8 | B=32 | B=64 | TTFT, B=1 | GSM8K (n=200) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | Turing, per-expert loop, no CUDA graph | 16 | 38 | 97 | 114 | 0.327 s | 33.5% ± 3.3 |
-| Turing, grouped GEMM + CUDA graphs | 79 | 189 | 436 | 482 | 0.076 s | 35.0% ± 3.4 |
-| vLLM | 94 | 205 | 490 | 583 | 0.078 s | — |
+| Turing, grouped GEMM + CUDA graphs | 94 | 204 | 475 | 732 | 0.070 s | 35.0% ± 3.4 |
+| vLLM | 94 | 205 | 490 | 582 | 0.078 s | — |
 <!-- /table -->
 
-The kernels match the per-expert loop at 1e-4 in fp32 (`tests/test_triton_moe.py`). Decode is 4.2–4.9× faster than
-before; vLLM is still 1.08–1.21× faster than Turing at these batch sizes.
+The kernels match the per-expert loop at 1e-4 in fp32 (`tests/test_triton_moe.py`). Decode is 4.9–6.4× faster than
+the loop. Against vLLM Turing is level at batch 1 and 8 (100.4% and 99.7%), 3% behind at batch 32 and 26% ahead at
+batch 64, where vLLM's KV budget (4.6 GiB, 37,776 tokens) holds 49 of the 64 requests at a time and Turing's (6.8
+GiB) all of them. At batch 1 the experts are read cold at 247 of the L4's 262 GB/s
+(`results_moe_kernel_cold_cuda.json`, 16 layers a call so that no weight is in the GPU's cache).
+
+### 4-bit experts
+
+`--quantization` and `turing convert` pack an MoE layer's experts in 4 bits too. Qwen1.5-MoE-A2.7B-Chat (60 experts,
+top-4, a shared expert), converted with GPTQ, against vLLM on Qwen's own GPTQ-Int4 checkpoint; 512-token prompts, 256
+new tokens, every engine at its default KV budget (`results_moe_w4_speed_cuda.json`,
+`results_moe_w4_speed_triton_cuda.json`, `results_moe_w4_gsm8k_cuda.json`, `results_moe_w4_quality_vllm_cuda.json`):
+
+<!-- table:moe_w4 -->
+| Setting | B=1 | B=8 | B=32 | B=64 | TTFT, B=64 | GSM8K (n=500) |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| vLLM GPTQ-Int4 (Qwen's checkpoint) | 114 | 350 | 621 | 817 | 2.09 s | 40.6% ± 2.2 |
+| Turing GPTQ (4-bit LM head, the default) | 133 | 367 | 630 | 819 | 1.97 s | 45.8% ± 2.2 |
+| Turing GPTQ, fp16 LM head | 107 | 338 | 604 | 797 | 1.98 s | 46.0% ± 2.2 |
+| Turing GPTQ, 4-bit LM head, Triton kernels (no Marlin) | 119 | 272 | 458 | 522 | 4.71 s | — |
+<!-- /table -->
+
+* With the Marlin MoE kernel (vendored from vLLM, built by `TURING_BUILD_MARLIN=1`) and the default 4-bit LM head,
+  Turing is 1.17 / 1.05 / 1.01 / 1.00× vLLM at batch 1 / 8 / 32 / 64, and its first token comes sooner at every
+  batch size. With the LM head in fp16, as in Qwen's checkpoint, Turing is at 94–98% of vLLM.
+* A build without Marlin runs the Triton int4 kernels. They read whole quantization groups per step, which doubles
+  the rate at which they stream cold weights, but a prefill is bound by unpacking the codes: that row's first token
+  at batch 64 takes 4.7 s. Its numbers predate the routing, alignment and sum kernels.
+* OLMoE-1B-7B, packed by round-to-nearest at load, decodes at 267 / 577 / 1,105 / 1,424 tok/s at batch 1 / 8 / 32 /
+  64 (229 / 550 / 1,080 / 1,403 with the LM head in fp16), 1.9–2.8× its bf16 rate. Its WikiText-2 NLL moves by
+  +0.059 ± 0.012 nats with round-to-nearest and +0.019 ± 0.008 with GPTQ (n = 8 windows;
+  `results_moe_w4_quality_cuda.json`).
 
 ### Expert offload
 
@@ -370,6 +408,24 @@ steps; `results_moe_offload_cuda.json`). "decider" picks copy-to-GPU or run-on-C
 | offload slots=512 lfru device | 7.03 | 72.4% | 7.9 | 98.4% |
 | all experts on the GPU | 15.92 | — | 13.9 | — |
 <!-- /table -->
+
+### Expert offload in `turing serve`
+
+`--moe-expert-slots N` keeps `N` experts per layer on the GPU and the rest in pinned host memory, copied into the
+least recently used slot when a token is routed to them ([serving §5a](serving.md#5a-moe-expert-offload)). 512-token
+prompts, 256 new tokens, output tokens per second (`results_moe_offload_serve_cuda.json`):
+
+<!-- table:moe_offload_serve -->
+| Model | Experts per layer on the GPU | B=1 | B=2 | B=8 | Slot hit rate (B=1) | Peak GPU GiB |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| OLMoE-1B-7B-0924-Instruct | all | 89.4 | 110.1 | 199.7 | — | 18.7 |
+| OLMoE-1B-7B-0924-Instruct | 48 of 64 | 25.5 | 40.5 | 53.8 | 88.6% | 17.3 |
+| OLMoE-1B-7B-0924-Instruct | 32 of 64 | 14.4 | 23.2 | 24.1 | 73.1% | 16.1 |
+<!-- /table -->
+
+OLMoE routes every token to 8 of 64 experts, so with 48 or 32 slots most steps copy experts in, and throughput falls
+to 29% and 16% of the all-on-GPU rate at batch 1. The outputs do not depend on the slots: GSM8K with 32 slots is
+40.5% ± 3.5 against 37.5% ± 3.4 with every expert on the GPU (n = 200, `results_moe_offload_gsm8k_cuda.json`).
 
 ---
 
@@ -455,3 +511,58 @@ moves NLL by +0.000 to +0.001. Both were on by default before v1.6 and are off n
 | SmolLM2-360M | 2.309 | +8.920 ± 0.430 | +0.001 ± 0.001 |
 | SmolLM2-1.7B | 1.921 | +6.848 ± 0.215 | +0.001 ± 0.001 |
 <!-- /table -->
+
+---
+
+## 11. Speculative decoding
+
+**Prompt lookup** (`--draft-tokens`, 8 by default). Qwen2.5-1.5B-Instruct in fp16, 60 greedy requests per workload
+of up to 256 new tokens, sent in waves of 1, 2 or 8 (the next wave starts when the last has finished). Output tokens
+per second; vLLM runs its n-gram speculator with the same number of drafts (`results_speculation_cuda.json`):
+
+<!-- table:spec_lookup -->
+| Workload | Requests in flight | Turing, no drafts | Turing, 8 drafts | Drafts accepted | Tokens per target pass | vLLM, no drafts | vLLM, 8 drafts |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| code | 1 | 76 | 435 | 74.0% | 6.62 | — | 411 |
+| code | 2 | 136 | 708 | 73.9% | 6.63 | — | 654 |
+| code | 8 | 439 | 1,626 | 73.8% | 6.63 | 459 | 1,629 |
+| rewrite | 1 | 74 | 197 | 27.1% | 2.86 | — | 180 |
+| rewrite | 2 | 133 | 326 | 27.1% | 2.86 | — | 292 |
+| rewrite | 8 | 408 | 837 | 27.1% | 2.86 | 409 | 756 |
+| chat | 1 | 76 | 120 | 14.2% | 1.67 | — | 103 |
+| chat | 2 | 140 | 212 | 14.0% | 1.65 | — | 175 |
+| chat | 8 | 511 | 647 | 14.1% | 1.65 | 507 | 546 |
+<!-- /table -->
+
+* Drafted tokens are verified as extra rows of the batched decode step, so a request's drafts cost no forward of
+  their own. Over the nine cells, 8 drafts give 2.5× the undrafted rate (geometric mean; 2.2× with 4 and 2.8× with
+  15, which loses 6% to 8 on chat at 8 requests), and never less than 1.27×.
+* Greedy output with drafts equals the undrafted output in 521 of 540 requests. The others first differ at a token
+  whose two candidates were the model's top two and at most 0.03 apart in fp16, as two batch sizes can differ
+  (`results_spec_divergence_cuda.json`).
+
+**EAGLE-3 draft head** (`--draft-head`). Qwen3-8B in bf16 with the published `RedHatAI/Qwen3-8B-speculator.eagle3`
+head, 24 requests per workload in waves of 1, 2 or 4, both engines with chains of up to 5 drafts
+(`results_eagle3_cuda.json`):
+
+<!-- table:eagle3 -->
+| Workload | Requests in flight | Turing, no drafts | Turing, 5 drafts | Drafts accepted | Tokens per target pass | vLLM, no drafts | vLLM, 5 drafts |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| code | 1 | 15.7 | 48.0 | 60.6% | 3.96 | 16.5 | 50.8 |
+| code | 2 | 27.5 | 83.8 | 60.5% | 3.96 | 27.0 | 88.8 |
+| code | 4 | — | 141.1 | 60.4% | 3.95 | — | 144.5 |
+| rewrite | 1 | 16.3 | 50.1 | 65.1% | 4.37 | 16.5 | 51.1 |
+| rewrite | 2 | 28.2 | 88.3 | 65.4% | 4.39 | 28.6 | 89.4 |
+| rewrite | 4 | — | 146.5 | 65.1% | 4.37 | — | 148.6 |
+| chat | 1 | 16.5 | 33.5 | 37.4% | 2.64 | 16.7 | 33.8 |
+| chat | 2 | 30.4 | 60.6 | 37.4% | 2.64 | 30.8 | 62.3 |
+| chat | 4 | — | 105.1 | 37.5% | 2.64 | — | 109.3 |
+<!-- /table -->
+
+* The head runs once per draft position for every drafting request, from a paged pool of its own and under CUDA
+  graphs. At equal chain length Turing is at 94–99% of vLLM.
+* A request's chain is as long as its drafts are likely to be reached, so a higher limit costs little where drafts
+  fail: with a limit of 7 Turing reaches 53.5 / 94.0 / 157.0 tok/s on rewrite and 49.8 / 85.5 / 141.6 on code at
+  1 / 2 / 4 requests. Chat is fastest with 3 (114.7 tok/s at 4 requests). vLLM was measured at 3 and 5.
+* 11 of 16 chat requests differ from undrafted greedy output, each first at a token whose two candidates were the
+  model's top two and at most 0.25 apart (bf16; `results_spec_divergence_eagle3_cuda.json`).

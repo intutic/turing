@@ -1,0 +1,126 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "torch": "2.9.1+cu129",
+    "gpu": "NVIDIA L4",
+    "model": "Qwen/Qwen3-8B",
+    "dtype": "bf16",
+    "draft_tokens": 3,
+    "drafter": "RedHatAI/Qwen3-8B-speculator.eagle3",
+    "requests": 16,
+    "new_tokens": 256
+  },
+  "note": "L4 session of 2026-11-21 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "rows": [
+    {
+      "workload": "chat",
+      "request": 0,
+      "first_difference": 7,
+      "plain_tokens": 250,
+      "drafted_tokens": 253,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 1,
+      "first_difference": 20,
+      "plain_tokens": 211,
+      "drafted_tokens": 197,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 3,
+      "first_difference": 8,
+      "plain_tokens": 182,
+      "drafted_tokens": 170,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 4,
+      "first_difference": 22,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.25,
+      "top2_gap": 0.25,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 5,
+      "first_difference": 27,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.25,
+      "top2_gap": 0.25,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 6,
+      "first_difference": 233,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.125,
+      "top2_gap": 0.125,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 7,
+      "first_difference": 90,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.25,
+      "top2_gap": 0.25,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 8,
+      "first_difference": 52,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 11,
+      "first_difference": 24,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.0,
+      "top2_gap": 0.0,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 13,
+      "first_difference": 28,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.25,
+      "top2_gap": 0.25,
+      "both_in_top2": true
+    },
+    {
+      "workload": "chat",
+      "request": 15,
+      "first_difference": 18,
+      "plain_tokens": 256,
+      "drafted_tokens": 256,
+      "gap": 0.125,
+      "top2_gap": 0.125,
+      "both_in_top2": true
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "python": "3.10.12"
+  },
+  "text": "GSM8K and pass-key prompts and scoring from turing/serving; WikiText-2 windows as scripts/eval_kv_quality.py",
+  "note": "L4 session of 2026-11-21 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "rows": [
+    {
+      "engine": "vllm",
+      "runtime": "vllm 0.31.0",
+      "model": "Qwen/Qwen1.5-MoE-A2.7B-Chat-GPTQ-Int4",
+      "dtype": "float16",
+      "kv_cache_dtype": "auto",
+      "kv_skip_layers": [],
+      "max_model_len": 4128,
+      "gsm8k": {
+        "n": 500,
+        "shots": 8,
+        "exact_match": 0.406,
+        "stderr": 0.021983962090086417
+      },
+      "seconds": 310.1
+    }
+  ]
+}

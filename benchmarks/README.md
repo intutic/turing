@@ -12,7 +12,10 @@ python scripts/make_doc_tables.py --check  # fail if any table differs from the 
 ## Hardware
 
 GPU results (`*_cuda.json`) come from one NVIDIA L4 (24 GB) on a Google Cloud `g2-standard-16`, PyTorch 2.9 with
-CUDA 12.9; vLLM 0.31 and llama.cpp ran on the same machine. `*_mps.json` files come from an Apple M4 Pro.
+CUDA 12.9; vLLM 0.31 and llama.cpp ran on the same machine. It is a Spot VM: it was restarted twice during the
+session of 2026-11-21, so rows of one table can come from different physical GPUs, and each file's `note` names the
+session its rows are from. `results_4bit_speed_no_marlin_cuda.json` is the 4-bit main row in a build without the
+Marlin extension. `*_mps.json` files come from an Apple M4 Pro.
 
 ## Reproducing the main comparison
 
@@ -61,9 +64,12 @@ python scripts/eval_vllm_quality.py --help        # the same checks for vLLM's c
 | :--- | :--- | :--- |
 | `scripts/eval_parity.py`, `scripts/eval_gguf_parity.py` | `results_parity_*.json`, `results_gguf_parity_mps.json` | Models & hardware |
 | `scripts/benchmark_kv_decode.py` | `results_kv_decode_*.json` | Benchmarks |
-| `scripts/benchmark_w4a16.py` | `results_w4a16_crossover_*.json` | Benchmarks |
+| `scripts/benchmark_w4a16.py` | `results_w4a16_crossover_*.json`, `results_w4a16_prefill_rows_cuda.json` (256 to 4,096 rows), `results_w4a16_gemv_groups_cuda.json` (the few-row kernel of a build without Marlin) | Benchmarks |
 | `scripts/benchmark_cold_start.py` | `results_cold_start_*.json` | Comparison |
 | `scripts/benchmark_e2e_generation.py --model allenai/OLMoE-1B-7B-0924-Instruct --dtype bf16`, `turing eval-accuracy` | `results_moe_speed_*.json`, `results_moe_gsm8k_*.json` | Benchmarks |
+| `turing convert --method gptq`, then `scripts/benchmark_e2e_generation.py --model <converted directory>` and `turing eval-accuracy` (Qwen1.5-MoE-A2.7B-Chat; vLLM on `Qwen/Qwen1.5-MoE-A2.7B-Chat-GPTQ-Int4`) | `results_moe_w4_speed*_cuda.json`, `results_moe_w4_gsm8k_cuda.json`, `results_moe_w4_quality*_cuda.json` | Benchmarks |
+| `scripts/benchmark_e2e_generation.py --moe-expert-slots N`, `turing eval-accuracy --moe-expert-slots N` | `results_moe_offload_serve_cuda.json`, `results_moe_offload_gsm8k_cuda.json` | Benchmarks |
+| `scripts/benchmark_e2e_generation.py --batches 12,24,48` | `results_batch_sizes_cuda.json` | Comparison |
 | `scripts/benchmark_moe_offload_olmoe.py` | `results_moe_offload_cuda.json` | Benchmarks |
 | `scripts/benchmark_ingest_ladder_all_tiers.py`, `scripts/benchmark_ring_reader_ab.py` | `results_ingest_ladder*.json`, `results_ring_reader_ab_mps.json` | Benchmarks |
 | `scripts/benchmark_cpp_engine.py` | `results_cpp_engine_*.json` | Benchmarks |
@@ -73,6 +79,8 @@ python scripts/eval_vllm_quality.py --help        # the same checks for vLLM's c
 | `scripts/benchmark_weight_formats.py` | prints batch-1 decode speed and weight memory per weight format | — |
 | `scripts/benchmark_vectorized_batch_union.py` | prints MoE offload against `SparseMoE` on one layer of a small Mixtral checkpoint | — |
 | `scripts/diag_int4_kv.py`, `scripts/diag_teal.py` | print per-layer int4 KV error and the cost of TEAL per projection | — |
+| `scripts/benchmark_moe_kernel.py` | `results_moe_kernel_*_cuda.json` (grouped MoE kernels by block and tile size, against one GEMM pair per expert; `--layers 16` reads the weights cold, `--w4` packs the experts in 4 bits) | Benchmarks |
+| `scripts/benchmark_speculation.py`, `scripts/diag_spec_divergence.py` | `results_speculation_cuda.json`, `results_speculation_repeat_cuda.json` (one cell four more times), `results_spec_divergence_cuda.json`; with `--draft-head RedHatAI/Qwen3-8B-speculator.eagle3 --model Qwen/Qwen3-8B --dtype bf16`: `results_eagle3_cuda.json`, `results_spec_divergence_eagle3_cuda.json` | Benchmarks |
 | `scripts/verify_model_resolutions.py` | checks every model alias against the Hugging Face Hub | — |
 | `scripts/eval_xkv_transfer.py`, `eval_lineage.py`, `eval_kslot.py`, `eval_debate.py` | `results_xkv_transfer_*`, `results_lineage_cuda`, `results_kslot_cuda`, `results_debate_cuda` | Experimental components |
 

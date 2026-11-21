@@ -77,13 +77,14 @@ def t_vs_4bit():
         ("llama.cpp Q4_K_M", lambda x: x["engine"] == "llama.cpp", q_l.get("qwen2.5-1.5b-instruct-q4_k_m.gguf", {}).get("gsm8k")),
         ("vLLM GPTQ-Int4 (Qwen's checkpoint)", lambda x: x["engine"] == "vllm" and x["model"].endswith("GPTQ-Int4"),
          q_v.get("Qwen/Qwen2.5-1.5B-Instruct-GPTQ-Int4", {}).get("gsm8k")),
-        ("Turing GPTQ", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
+        ("Turing GPTQ, fp16 LM head (`--no-quantize-lm-head`)",
+         lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
          and not x.get("activation_sparsity") and not x.get("quantize_lm_head"), q_t.get(("w4a16-gptq", 0.0, False))),
-        ("Turing GPTQ + 4-bit LM head (opt-in)", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
+        ("Turing GPTQ (4-bit LM head, the default)", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
          and not x.get("activation_sparsity") and x.get("quantize_lm_head"), q_t.get(("w4a16-gptq", 0.0, True))),
-        ("Turing GPTQ + TEAL 25%", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
+        ("Turing GPTQ, fp16 LM head, TEAL 25%", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
          and x.get("activation_sparsity") == 0.25, q_t.get(("w4a16-gptq", 0.25, False))),
-        ("Turing GPTQ + TEAL 40%", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
+        ("Turing GPTQ, fp16 LM head, TEAL 40%", lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
          and x.get("activation_sparsity") == 0.4, q_t.get(("w4a16-gptq", 0.4, False))),
         ("vLLM fp16 (reference)", lambda x: x["engine"] == "vllm" and x["model"] == "Qwen/Qwen2.5-1.5B-Instruct", None),
         ("Turing fp16 (reference)", lambda x: x["engine"] == "turing" and x.get("quantization") == "none"
@@ -474,6 +475,92 @@ def t_debate():
     return table(["Arm", "GSM8K accuracy", "Paired Δ vs single", "Tokens generated"],
                  [[r["arm"], pm(r["accuracy"], r["se"], 2, False), pm(r["paired_delta_vs_single"], r["paired_delta_se"], 2),
                    f"{r['tokens_generated']:,}"] for r in load("results_debate_cuda.json")])
+
+
+# ---------------------------------------------------------------------------------------------- speculation, MoE
+
+def _drafting(name, k, digits):
+    """Workload x requests in flight: each engine without drafts and with k, from a benchmark_speculation.py file."""
+    rows = load(name)
+
+    def cell(eng, w, c, drafts):
+        r = [x for x in rows if (x["engine"], x["workload"], x["concurrency"], x["draft_tokens"]) == (eng, w, c, drafts)]
+        return r[0] if r else None
+
+    def f(r):
+        return f"{r['output_tok_per_s']:,.{digits}f}" if r else "—"
+    out = []
+    for w in ("code", "rewrite", "chat"):
+        for c in sorted({r["concurrency"] for r in rows}):
+            t0, tk, v0, vk = cell("turing", w, c, 0), cell("turing", w, c, k), cell("vllm", w, c, 0), cell("vllm", w, c, k)
+            if tk is None:
+                continue
+            out.append([w, c, f(t0), f(tk), pct(tk["acceptance_rate"]), f"{tk['tokens_per_pass']:.2f}", f(v0), f(vk)])
+    return table(["Workload", "Requests in flight", "Turing, no drafts", f"Turing, {k} drafts", "Drafts accepted",
+                  "Tokens per target pass", "vLLM, no drafts", f"vLLM, {k} drafts"], out)
+
+
+def t_spec_lookup():
+    return _drafting("results_speculation_cuda.json", 8, 0)
+
+
+def t_eagle3():
+    return _drafting("results_eagle3_cuda.json", 5, 1)
+
+
+def _by_batch(rows, match, digits=0):
+    got = {r["batch"]: r for r in rows if match(r)}
+    return got, lambda b: f"{got[b]['output_tok_per_s']:,.{digits}f}" if b in got else "—"
+
+
+def t_moe_w4():
+    """Qwen1.5-MoE-A2.7B in 4 bits: vLLM on Qwen's GPTQ checkpoint, Turing's own GPTQ conversion with the Marlin MoE
+    kernel (4-bit and fp16 LM head) and with the Triton int4 kernels of a build without Marlin."""
+    speed, triton = load("results_moe_w4_speed_cuda.json"), load("results_moe_w4_speed_triton_cuda.json")
+    gsm = {bool(r["quantize_lm_head"]): r for r in load("results_moe_w4_gsm8k_cuda.json") if "Qwen1.5-MoE" in r["model"]}
+    vq = load("results_moe_w4_quality_vllm_cuda.json")[0]["gsm8k"]
+    qwen = lambda x: "Qwen1.5-MoE" in x["model"]  # noqa: E731
+    arms = [("vLLM GPTQ-Int4 (Qwen's checkpoint)", speed, lambda x: x["engine"] == "vllm" and qwen(x), vq),
+            ("Turing GPTQ (4-bit LM head, the default)", speed,
+             lambda x: x["engine"] == "turing" and qwen(x) and x.get("quantize_lm_head"), gsm.get(True)),
+            ("Turing GPTQ, fp16 LM head", speed,
+             lambda x: x["engine"] == "turing" and qwen(x) and not x.get("quantize_lm_head"), gsm.get(False)),
+            ("Turing GPTQ, 4-bit LM head, Triton kernels (no Marlin)", triton,
+             lambda x: qwen(x) and x.get("quantize_lm_head"), None)]
+    bats = sorted({r["batch"] for r in speed if qwen(r)})
+    out = []
+    for label, rows, match, g in arms:
+        got, tok = _by_batch(rows, match)
+        out.append([label, *[tok(b) for b in bats],
+                    f"{got[max(got)]['mean_ttft_s']:.2f} s" if got else "—",
+                    f"{pct(g['exact_match'])} ± {100 * g['stderr']:.1f}" if g else "—"])
+    return table(["Setting", *[f"B={b}" for b in bats], f"TTFT, B={max(bats)}", "GSM8K (n=500)"], out)
+
+
+def t_moe_offload_serve():
+    rows = load("results_moe_offload_serve_cuda.json")
+    bats = sorted({r["batch"] for r in rows})
+    out = []
+    for model in dict.fromkeys(r["model"] for r in rows):
+        for slots in dict.fromkeys(r.get("moe_expert_slots") for r in rows if r["model"] == model):
+            got, tok = _by_batch(rows, lambda x: x["model"] == model and x.get("moe_expert_slots") == slots, 1)
+            one = got[min(got)]
+            off = one.get("moe_offload") or {}
+            out.append([short(model) + (", 4-bit (RTN)" if "rtn" in str(one.get("quantization")) else ""),
+                        f"{slots} of {off['experts_per_layer']}" if slots else "all",
+                        *[tok(b) for b in bats], pct(off["hit_rate"]) if off else "—", f"{one['gpu_peak_gib']:.1f}"])
+    return table(["Model", "Experts per layer on the GPU", *[f"B={b}" for b in bats], "Slot hit rate (B=1)",
+                  "Peak GPU GiB"], out)
+
+
+def t_batch_sizes():
+    rows = load("results_batch_sizes_cuda.json")
+    bats = sorted({r["batch"] for r in rows})
+    out = []
+    for eng, label in (("vllm", "vLLM"), ("turing", "Turing")):
+        got, tok = _by_batch(rows, lambda x: x["engine"] == eng)
+        out.append([label, *[tok(b) for b in bats]])
+    return table(["Engine", *[f"B={b}" for b in bats]], out)
 
 
 TABLES = {k[2:]: v for k, v in globals().items() if k.startswith("t_") and callable(v)}

@@ -133,9 +133,11 @@ Source: `benchmarks/results/results_gguf_parity_mps.json`.
 ## Memory
 
 - **Weights:** 2 bytes per parameter in fp16/bf16, 4 in fp32 (the default on CPU and MPS).
-- **4-bit weights** (`turing convert` or `--quantization`): attention and dense-MLP projections take half a byte per
-  weight plus an fp16 scale and a uint8 zero per 64 weights. Embeddings, the LM head, routers and MoE experts stay in
-  the model dtype.
+- **4-bit weights** (`turing convert` or `--quantization`): attention and dense-MLP projections and MoE experts take
+  half a byte per weight plus an fp16 scale and a uint8 zero per 64 weights, and so does the LM head unless
+  `--no-quantize-lm-head` is given. Embeddings and routers stay in the model dtype.
+- **MoE models larger than the GPU:** `--moe-expert-slots N` keeps `N` experts per layer on the GPU and the rest in
+  host memory ([serving §5a](serving.md#5a-moe-expert-offload)).
 - **KV cache:** the pool takes `--kv-cache-memory-fraction` (default 0.6) of the GPU memory left after the weights.
 
 A 7B model in fp16 (about 15 GB of weights) leaves room for a KV pool on a 24 GB GPU. A 70B model needs about 141 GB

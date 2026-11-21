@@ -54,7 +54,7 @@ def save(out, rows, keep):
 
 
 def bench(a):
-    cmd = [os.path.join(a.bin, "llama-batched-bench"), "-m", a.gguf, "-ngl", "99",
+    cmd = [os.path.join(a.bin, "llama-batched-bench"), "-m", a.gguf, "-ngl", str(a.ngl),
            "-c", str(max(a.batches) * (a.context + a.new_tokens) + 64), "-b", "2048", "-ub", "512",
            "-npp", str(a.context), "-ntg", str(a.new_tokens), "-npl", ",".join(map(str, a.batches))]
     p = subprocess.run(cmd, capture_output=True, text=True)
@@ -65,7 +65,7 @@ def bench(a):
     rev = git_rev(os.path.dirname(os.path.dirname(os.path.abspath(a.bin))))
     rows = [dict(engine="llama.cpp", model=os.path.basename(a.gguf), batch=r["batch"], context=r["pp"],
                  new_tokens=r["tg"], seconds=r["t"], output_tok_per_s=round(r["batch"] * r["tg"] / r["t"], 1),
-                 decode_tok_per_s=r["s_tg"], runtime=f"llama.cpp {rev}") for r in got]
+                 decode_tok_per_s=r["s_tg"], gpu_layers=a.ngl, runtime=f"llama.cpp {rev}") for r in got]
     for r in rows:
         print(json.dumps(r), flush=True)
     name = os.path.basename(a.gguf)
@@ -77,7 +77,7 @@ def gsm8k(a):
     from transformers import AutoTokenizer
     acc_eval, _ = turing_evals()
     tok = AutoTokenizer.from_pretrained(a.tokenizer)
-    srv = subprocess.Popen([os.path.join(a.bin, "llama-server"), "-m", a.gguf, "-ngl", "99", "-c",
+    srv = subprocess.Popen([os.path.join(a.bin, "llama-server"), "-m", a.gguf, "-ngl", str(a.ngl), "-c",
                             str(a.parallel * 4096), "-np", str(a.parallel), "--port", str(a.port)],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     url = f"http://127.0.0.1:{a.port}"
@@ -125,7 +125,7 @@ def coldstart(a):
             if cache == "cold":
                 evict([a.gguf])
             t0 = time.time()
-            srv = subprocess.Popen([os.path.join(a.bin, "llama-server"), "-m", a.gguf, "-ngl", "99", "--port",
+            srv = subprocess.Popen([os.path.join(a.bin, "llama-server"), "-m", a.gguf, "-ngl", str(a.ngl), "--port",
                                     str(a.port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
                 for _ in range(600):
@@ -156,6 +156,7 @@ def main():
     ap.add_argument("--runs", type=int, default=5)
     ap.add_argument("--gguf", required=True)
     ap.add_argument("--bin", default=os.path.expanduser("~/llama.cpp/build/bin"))
+    ap.add_argument("--ngl", type=int, default=99, help="layers on the GPU (the rest run on the CPU)")
     ap.add_argument("--context", type=int, default=512)
     ap.add_argument("--new-tokens", type=int, default=256)
     ap.add_argument("--batches", default="1,8")
