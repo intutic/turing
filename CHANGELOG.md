@@ -76,6 +76,17 @@ All notable changes to this project are documented here. The format follows
   flight while they are still on the device, and that step's tokens are read and emitted while it runs. The GPU
   no longer waits for the host between two such steps (vLLM does the same with its asynchronous scheduling). The
   packed prefill forward makes no blocking copy to the device any more.
+- With a draft head on CUDA, the GPU no longer waits for the host inside a draft-and-verify cycle where it can be
+  avoided. The steps of the head's chain are queued one behind the other (the chain made three blocking copies a
+  draft position), and when every request being served drafts, the step that verifies the drafts is launched
+  behind the chain while they are still on the device (`ContinuousBatchEngine._verify_ahead`): the host reads the
+  drafts and the target's picks together when that step is done. The device idled 3.4% of such a cycle on
+  Qwen3-8B on an L4 before (vLLM: 0.3%).
+- A 4-bit MoE layer with a shared expert (Qwen2-MoE) served by the Marlin kernels: the shared expert's gate and up
+  projections are fused like an MLP's (one kernel less a layer), and in a captured step of up to 128 rows the
+  routing and the routed experts are launched on a second CUDA stream that joins the capture, so a replay runs
+  them beside the shared expert (`SparseMoE._two_branches`). vLLM's step does the same, which is what its one-row
+  decode on Qwen1.5-MoE was faster by. The experts' Marlin kernels have a lock array of their own for it.
 - In a prefill forward over pages FlashInfer reads in place (the model dtype, fp8), the decode rows are requests of
   one query each in a FlashInfer call of their own instead of the decode kernel's three launches a layer. A burst
   of 32 prompts of 16K tokens on Qwen2.5-1.5B with an fp8 cache spent 51.6 s in its prefill steps before and 50.0

@@ -458,11 +458,36 @@ class SparseMoE(nn.Module):
         return self._host is None and (self._marlin_for(x) is not None or (
             self._grouped(x) and tokens * self.top_k < GEMM_MIN_ROWS * self.num_experts))
 
+    # Rows up to which a captured step runs the routed experts beside the shared expert (_two_branches)
+    BRANCH_MAX_ROWS = 128
+
+    def _two_branches(self, x: torch.Tensor, marlin) -> torch.Tensor:
+        """The Marlin path inside a CUDA graph capture, for a layer with a shared expert: the routing and the routed
+        experts are launched on a second stream that joins the capture, the shared expert and its gate on the first,
+        and the two meet at the sum. The graph then holds them as two branches and a replay runs them side by side:
+        at decode sizes one kernel alone does not use all of the device's memory bandwidth (one row on Qwen1.5-MoE
+        on an L4: a layer's kernels summed are the same, the step is shorter). x is alive until the branches have
+        joined, and a block the second stream frees is only taken again by that stream after the next fork, so no
+        kernel of a replay reads memory another one may still write."""
+        from ..kernels.marlin_moe import marlin_moe
+        main = torch.cuda.current_stream(x.device)
+        side = _branch_stream(x.device)
+        side.wait_stream(main)
+        with torch.cuda.stream(side):
+            weights, experts = self.route(x)
+            out = marlin_moe(x, marlin, weights, experts, self.act)
+        gate, shared = self.shared_expert_gate(x), self.shared_expert(x)
+        main.wait_stream(side)
+        return gated_add(out, gate, shared)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         shape = x.shape
         x = x.reshape(-1, shape[-1])
-        weights, experts = self.route(x)
         marlin = self._marlin_for(x)
+        if marlin is not None and self.shared_expert is not None and self._host is None \
+                and x.shape[0] <= self.BRANCH_MAX_ROWS and torch.cuda.is_current_stream_capturing():
+            return self._two_branches(x, marlin).view(shape)
+        weights, experts = self.route(x)
         if marlin is not None:  # every input size: decode steps and prefill chunks
             from ..kernels.marlin_moe import marlin_moe
             cpu = stream = None
@@ -543,6 +568,17 @@ class SparseMoE(nn.Module):
         if self.shared_expert is not None:
             out = gated_add(out, self.shared_expert_gate(x), self.shared_expert(x))
         return out.view(shape)
+
+
+_BRANCH_STREAMS: dict = {}  # device -> torch.cuda.Stream
+
+
+def _branch_stream(device: torch.device) -> "torch.cuda.Stream":
+    """The device's second stream for SparseMoE._two_branches (one for every layer: each fork waits for the first
+    stream, and so for the join before it)."""
+    if device not in _BRANCH_STREAMS:
+        _BRANCH_STREAMS[device] = torch.cuda.Stream(device)
+    return _BRANCH_STREAMS[device]
 
 
 def append_chunk(pool: KVPool, layer: int, cache: KVCache, k: torch.Tensor, v: torch.Tensor) -> None:
@@ -1621,6 +1657,8 @@ class SubspaceCausalLM(nn.Module):
             a = layer.self_attn
             n += fuse_linears(a, "_qkv", (a.q_proj, a.k_proj, a.v_proj))
             m = layer.mlp
+            if isinstance(m, SparseMoE):  # its shared expert is an MLP beside the routed ones
+                m = m.shared_expert
             if isinstance(m, SubspaceMLP) and m.gate_proj is not None:
                 n += fuse_linears(m, "_gate_up", (m.gate_proj, m.up_proj))
         self.__dict__["_projections_fused"] = True

@@ -2,6 +2,7 @@
 both checkpoint layouts, and the refused variants."""
 
 import json
+import warnings
 
 import pytest
 import torch
@@ -125,6 +126,15 @@ def test_the_heads_paged_pool_drafts_what_its_tensor_caches_draft():
     want = run()
     assert head.use_pool(4096)
     assert run() == want and head.graphs  # each step a replay of its CUDA graph
+    # a chain's steps are queued one behind the other: a call waits for the device once, to read its drafts
+    torch.cuda.set_sync_debug_mode("warn")
+    try:
+        with warnings.catch_warnings(record=True) as waits:
+            warnings.simplefilter("always")
+            assert run() == want
+    finally:
+        torch.cuda.set_sync_debug_mode("default")
+    assert len(waits) == len(calls), [str(w.message) for w in waits]
     head.graphs = None
     assert run() == want  # and with the step's kernels launched one by one
     assert all(len(d) == item[3] for call, drafts in zip(calls, want) for item, d in zip(call, drafts))
@@ -307,6 +317,51 @@ def test_draft_head_on_cuda_with_concurrent_requests_keeps_greedy_output():
     engine = _engine(model, _target_head(model), device="cuda", draft_tokens=3)
     assert _generate(engine, 16, prompts) == ref
     assert engine.spec_drafted > 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="a verify step is launched ahead on CUDA only")
+def test_the_verify_step_is_launched_behind_the_chain_and_gives_the_same_tokens():
+    """With a draft head on CUDA the step that verifies a chain's drafts is queued before the host has read them
+    (_verify_ahead): the same tokens as plain greedy decoding for requests that end one after the other (a step
+    in flight when one leaves), and a launch does not wait for the device (but for the ones that capture a graph)."""
+    model = _target("cuda")
+    prompts, lens = (PROMPT, PROMPT[3:] + [44, 45], PROMPT[5:]), (48, 21, 33)
+
+    def run(engine):
+        async def collect(r):
+            return [t async for t in engine.stream_request(r)]
+
+        async def go():
+            await engine.start()
+            try:
+                reqs = [await engine.add_request(prompt_tokens=p, max_new_tokens=n, temperature=0.0,
+                                                 stop_token_ids=set()) for p, n in zip(prompts, lens)]
+                return await asyncio.gather(*[collect(r) for r in reqs])
+            finally:
+                await engine.stop()
+        return asyncio.run(go())
+    ref = run(_engine(model, device="cuda"))
+    engine = _engine(model, _target_head(model), device="cuda", draft_tokens=3)
+    engine.SPEC_PROBE = 10 ** 9  # never judged: the head is never rested
+    launch, waits = engine._verify_ahead, []
+
+    def counted(reqs):
+        torch.cuda.set_sync_debug_mode("warn")
+        try:
+            with warnings.catch_warnings(record=True) as seen:
+                warnings.simplefilter("always")
+                launched = launch(reqs)
+        finally:
+            torch.cuda.set_sync_debug_mode("default")
+        if launched:
+            waits.append(len(seen))
+        return launched
+    engine._verify_ahead = counted
+    assert run(engine) == ref
+    pool = engine.kv_pool  # a padded decode step leaves the pool its scratch page
+    assert engine._verifying is None and pool.used_pages == (getattr(pool, "_scratch", None) is not None)
+    assert engine.spec_drafted > 0
+    assert len(waits) > 20 and sorted(waits)[len(waits) // 2] == 0, waits
 
 
 @pytest.mark.parametrize("overlap", [False, True])

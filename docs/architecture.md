@@ -48,7 +48,9 @@ once per step instead of once for the prompts and once for the decode. Around th
   copy-on-write, evicted LRU when the pool is short; store/remove events feed llm-d (`kv_events.py`).
 * **Speculative decoding**: drafts from prompt lookup (an incremental n-gram index of the request's own tokens) or
   from an EAGLE-3 head (`turing/models/eagle3.py`, `--draft-head`), verified as extra rows of the batched decode
-  step (`row_starts` in `causal_lm.py`); greedy and sampled outputs keep the distribution of plain decoding. A
+  step (`row_starts` in `causal_lm.py`); greedy and sampled outputs keep the distribution of plain decoding. With a
+  head on CUDA the verify step is launched behind the head's chain from drafts still on the device
+  (`_verify_ahead` in `engine.py`). A
   request drafts only while its tokens per step beat plain decoding at the step times the engine measures ([serving §5](serving.md#5-prefix-caching-and-speculative-decoding)).
 * **Overlapped decode** (CUDA): the next decode step is launched from the previous step's tokens while they are
   still on the device, and the host reads and emits them while that step runs, so the GPU does not wait for the
@@ -134,7 +136,12 @@ The kernels on the serving path run on CUDA only; on MPS and CPU, attention and 
   run through int4 variants of the grouped kernels, which read 256 columns of each weight row per step and, when
   most experts get one row, skip the tensor-core tile; or, when the Marlin extension is built and the shapes fit its
   tiles, through the vendored Marlin MoE kernel at every input size (`marlin_moe.py`). In that case the experts are
-  on the GPU in Marlin's layout only and the packed buffers stay in host memory. An offloaded layer keeps its
+  on the GPU in Marlin's layout only and the packed buffers stay in host memory. A shared expert's gate and up
+  projections are fused like an MLP's, and in a captured step of up to 128 rows the routing and the routed experts
+  are launched on a second CUDA stream that joins the capture (`SparseMoE._two_branches`): the graph holds them as
+  a branch beside the shared expert, and a replay runs the two side by side, which shortens a decode step whose
+  kernels each leave memory bandwidth unused (the experts' kernels have a lock array of their own for that: two
+  Marlin kernels at once on the same locks never finish). An offloaded layer keeps its
   resident experts the same way and computes the others on the CPU for decode steps of up to 8 rows
   (`csrc/turing_w4_expert_cpu.hpp`).
 * **Off CUDA** (MPS, CPU): a decode step appends and reads every row of the batch at once (one gather and one

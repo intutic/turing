@@ -104,6 +104,26 @@ def test_quantize_model_packs_the_experts_and_tgate4_restores_them(method, tmp_p
     torch.testing.assert_close(loaded(ids)[0], logits, atol=1e-5, rtol=0)
 
 
+@torch.no_grad()
+@pytest.mark.parametrize("quantized", [False, True])
+def test_a_shared_experts_gate_and_up_are_fused_like_an_mlps(quantized, tmp_path):
+    """fuse_projections on a model of MoE layers with a shared expert: q/k/v and the shared expert's gate/up, one
+    linear each (a decode step launches one kernel less a layer), the same logits, and .tgate4 still saves."""
+    torch.manual_seed(0)
+    model = SubspaceCausalLM(_cfg(E=4, H=64, F=64, layers=2, shared=True)).eval()
+    if quantized:
+        quantize_model(model, "rtn")
+    ids = torch.randint(0, 128, (1, 9))
+    ref = model(ids)[0]
+    assert model.fuse_projections() == 2 * len(model.layers)
+    shared = model.layers[0].mlp.shared_expert
+    assert shared.__dict__["_gate_up"][0].out_features == 2 * shared.gate_proj.out_features
+    torch.testing.assert_close(model(ids)[0], ref, atol=1e-5, rtol=1e-5)
+    if quantized:
+        save_quantized(model, str(tmp_path))
+        torch.testing.assert_close(load_quantized(str(tmp_path))[0](ids)[0], ref, atol=1e-5, rtol=1e-5)
+
+
 def test_offload_and_tensor_parallel_refuse_packed_experts():
     from turing.core.heterogeneous_moe import HostExpertBank
     from turing.models.tensor_parallel import _shard_moe

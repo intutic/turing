@@ -26,7 +26,7 @@ import torch.nn.functional as F
 
 from ..core.kv_cache import KVCache, KVPool, KVPoolExhausted
 from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
-from .causal_lm import RMSNorm
+from .causal_lm import RMSNorm, host_tensor
 
 # keys and values [1, kv_heads, positions, head_dim]; or, once use_pool() was called, a KVCache of the head's own pool
 HeadCache = Optional[Tuple[torch.Tensor, torch.Tensor]]
@@ -70,7 +70,10 @@ class _StepGraph:
     def run(self, feat: torch.Tensor, positions: List[int], slots: List[int], starts: List[int],
             tokens: Optional[torch.Tensor] = None) -> Tuple[Optional[torch.Tensor], torch.Tensor]:
         R, pad = len(positions), self.rows - len(positions)
-        self.meta.copy_(torch.tensor([positions + [0] * pad, slots + [self.scratch] * pad, starts + [0] * pad]))
+        # through pinned memory: a plain copy waits for the head step still running, and a chain of k drafts is k
+        # steps the host can queue one behind the other
+        self.meta.copy_(host_tensor([positions + [0] * pad, slots + [self.scratch] * pad, starts + [0] * pad],
+                                    self.meta.dtype, self.meta.device))
         self.feat[:R].copy_(feat)
         if tokens is not None:
             self.tokens[:R].copy_(tokens)
@@ -180,7 +183,7 @@ class Eagle3Head(nn.Module):
                 graph = self.graphs[(first, rows)] = _StepGraph(self, embed, rows, first)
             return graph.run(feat, positions, slots, starts, tokens)
         dev = feat.device
-        ints = lambda x: torch.tensor(x, dtype=torch.int32, device=dev)  # noqa: E731
+        ints = lambda x: host_tensor(x, torch.int32, dev)  # noqa: E731
         tok = None
         if first:
             emb, feat = embed(tokens), self.fc(feat)
@@ -188,7 +191,7 @@ class Eagle3Head(nn.Module):
             tok = self.lm_head(self.norm(feat)).argmax(-1)
             tok = tok + self.d2t[tok]
             emb = embed(tok)
-        return tok, self._step(emb, feat, torch.tensor(positions, device=dev), ints(slots), ints(starts))
+        return tok, self._step(emb, feat, host_tensor(positions, torch.long, dev), ints(slots), ints(starts))
 
     def _step(self, emb: torch.Tensor, feat: torch.Tensor, positions: torch.Tensor, slots: torch.Tensor,
               starts: torch.Tensor) -> torch.Tensor:
@@ -201,7 +204,7 @@ class Eagle3Head(nn.Module):
         return self._out(attn.reshape(emb.shape[0], -1), residual)
 
     @torch.inference_mode()
-    def _draft_many_pool(self, embed: nn.Module, work: list) -> list:
+    def _draft_many_pool(self, embed: nn.Module, work: list, host: bool = True) -> list:
         dev, lens, ks, caches = work[0][0].device, [w[0].shape[0] for w in work], [w[3] for w in work], []
         for (_, _, _, n, cache), T in zip(work, lens):
             cache = cache if isinstance(cache, KVCache) else KVCache(self.pool)
@@ -227,21 +230,25 @@ class Eagle3Head(nn.Module):
             last[r] = at - 1
         rows = [r for r in live if ks[r] > 0]  # the requests still drafting; `out` holds their last outputs
         drafts = torch.zeros(len(work), max(ks), dtype=torch.long, device=dev)
+        # no index made from a host list below (it is copied to the device with a wait for the head step in flight):
+        # the chain's steps are queued one behind the other, and the drafts are read once at the end
+        rowsel = lambda x: host_tensor(x, torch.long, dev)  # noqa: E731
         if rows:
-            out = out[torch.tensor([last[r] for r in rows], device=dev)]
+            out = out.index_select(0, rowsel([last[r] for r in rows]))
         for i in range(max(ks) if rows else 0):
             keep = [j for j, r in enumerate(rows) if ks[r] > i + 1]  # they feed this draft back for another
             if len(keep) < len(rows):  # the others take their last draft from `out` and leave
                 tok = self.lm_head(self.norm(out)).argmax(-1)
-                drafts[rows, i] = tok + self.d2t[tok]
+                drafts[:, i].index_copy_(0, rowsel(rows), tok + self.d2t[tok])
                 if not keep:
                     break
-                out = out[torch.tensor(keep, device=dev)]
+                out = out.index_select(0, rowsel(keep))
                 rows = [rows[j] for j in keep]
             tok, out = self._run(embed, False, out, [work[r][2] + lens[r] + i for r in rows],
                                  [caches[r].slot for r in rows], [caches[r].length + i for r in rows])
-            drafts[rows, i] = tok  # the same draft the leavers' pick gave for these rows
-        drafts = drafts.tolist()
+            drafts[:, i].index_copy_(0, rowsel(rows), tok)  # the same draft the leavers' pick gave for these rows
+        if host:
+            drafts = drafts.tolist()
         for r in live:
             results[r] = (drafts[r][:ks[r]], caches[r])
         return results
@@ -253,14 +260,16 @@ class Eagle3Head(nn.Module):
         return self.draft_many(embed, [(aux, next_tokens, start, k, cache)])[0]
 
     @torch.inference_mode()
-    def draft_many(self, embed: nn.Module, work: List[Tuple[torch.Tensor, torch.Tensor, int, int, HeadCache]]
-                   ) -> List[Tuple[List[int], HeadCache]]:
+    def draft_many(self, embed: nn.Module, work: List[Tuple[torch.Tensor, torch.Tensor, int, int, HeadCache]],
+                   host: bool = True) -> List[Tuple[List[int], HeadCache]]:
         """draft for several requests at once: work holds (aux, next_tokens, start, k, cache) per request (k = 0:
         take the positions in without drafting). Every linear layer runs once per draft position over the rows of
         all requests (a head step costs about one read of the head's weights, however many requests draft);
-        attention runs per request over its own cache, or for all rows in the decode kernel (use_pool)."""
+        attention runs per request over its own cache, or for all rows in the decode kernel (use_pool).
+        host=False (with a pool): the drafts stay on the device, one tensor per request, and nothing here waits for
+        them, so the caller can queue the step that verifies them behind the chain."""
         if self.pool is not None:
-            return self._draft_many_pool(embed, work)
+            return self._draft_many_pool(embed, work, host)
         dev, kv = work[0][0].device, self.num_kv_heads
         lens = [w[0].shape[0] for w in work]
         positions = torch.cat([w[2] + torch.arange(T, device=dev) for w, T in zip(work, lens)])
@@ -277,7 +286,8 @@ class Eagle3Head(nn.Module):
             pad = ki.new_empty(1, kv, max(n - 1, 0), self.head_dim)
             chains.append([torch.cat([ki, pad], dim=2), torch.cat([vi, pad], dim=2), ki.shape[2]])
             at += T
-        last = torch.tensor([sum(lens[:i + 1]) - 1 for i in range(len(work))], device=dev)
+        rowsel = lambda x: host_tensor(x, torch.long, dev)  # noqa: E731
+        last = rowsel([sum(lens[:i + 1]) - 1 for i in range(len(work))])
         out = self._out(torch.cat(attn), residual)[last]  # each request's last verified position
         ks = [w[3] for w in work]
         drafts = torch.zeros(len(work), max(ks), dtype=torch.long, device=dev)
@@ -285,15 +295,15 @@ class Eagle3Head(nn.Module):
         for i in range(max(ks)):
             tok = self.lm_head(self.norm(out)).argmax(-1)
             tok = tok + self.d2t[tok]
-            drafts[rows, i] = tok
+            drafts[:, i].index_copy_(0, rowsel(rows), tok)
             keep = [j for j, r in enumerate(rows) if ks[r] > i + 1]
             if not keep:
                 break
             if len(keep) < len(rows):
-                sel = torch.tensor(keep, device=dev)
+                sel = rowsel(keep)
                 tok, out = tok[sel], out[sel]
             rows = [rows[j] for j in keep]
-            positions = torch.tensor([work[r][2] + lens[r] + i for r in rows], device=dev)
+            positions = rowsel([work[r][2] + lens[r] + i for r in rows])
             residual, q, k, v = self._rows(embed(tok), out, positions)
             attn = []
             for j, r in enumerate(rows):

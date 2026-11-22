@@ -199,6 +199,10 @@ class ContinuousBatchEngine:
         # device, their host copy, the CUDA event that marks the copy].
         self.overlap_decode = self.device.type == "cuda" and not getattr(self.model, "decode_syncs", lambda: False)()
         self._ahead: Optional[list] = None
+        # With a draft head: the step that verifies a chain's drafts, launched behind the chain before the host has
+        # read them (_verify_ahead): (its _flight entry, each request's drafts, their cache lengths before, the
+        # step's logits, its tapped states).
+        self._verifying: Optional[tuple] = None
         self.ride_prefill = True  # decoding requests take their token in a step's packed prefill forward (_riders)
         # Seconds per step (moving averages, _timed): a request keeps drafting only while its tokens per step exceed
         # what the step's extra rows cost against a plain step of the same requests (_speculation_pays). While
@@ -560,7 +564,7 @@ class ContinuousBatchEngine:
                         req.error, req.uncacheable = e, True  # its cache may be half-written: never index it
                         self._finish_request(req, now, "error")
                 self.running_batch = []
-                self._ahead = None
+                self._ahead = self._verifying = None
             await asyncio.sleep(0)
 
     # ------------------------------------------------------------------ one scheduler step
@@ -580,6 +584,8 @@ class ContinuousBatchEngine:
         self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
 
         with torch.inference_mode():
+            # a draft head's verify step launched ahead was its requests' step: its rows, and who they were
+            flown, flew = self._verify_settle()
             # Prefill: chunks of the prefilling requests, in priority order, until this forward's token budget is
             # spent (compute-bound); a request's chunk is its remaining prompt, capped by what is left of the budget.
             # A step budget above FORWARD_TOKENS is spent over several steps of one forward each: a request gets its
@@ -667,13 +673,15 @@ class ContinuousBatchEngine:
             first = {id(r) for r, e, _, _ in done if e >= len(r.prefill_tokens)} | {id(r) for r, _ in riders}
             flying = {id(r) for r in self._ahead[0]} if self._ahead else set()  # their last tokens: on the device
             decode = [r for r in self.running_batch if r.state == RequestState.DECODING and id(r) not in first
+                      and id(r) not in flew
                       and (id(r) in flying or (r.first_token_at is not None and r.generated_tokens))]
             if more:  # they take their next token with the last forward of this budget
                 self._settle()
                 decode = []
             decode = self._grow(decode)
             now = time.perf_counter()
-            if self._last_step is not None and decode and not work:  # a whole step: forward, host work, event loop
+            # a whole step: forward, host work, event loop
+            if self._last_step is not None and (decode or flown) and not work:
                 self._timed(self._last_step[0], now - self._last_step[1])
             self._last_step = None
             for r in decode:
@@ -722,11 +730,12 @@ class ContinuousBatchEngine:
                     ids = torch.tensor([[r.generated_tokens[-1]]], dtype=torch.long, device=self.device)
                     logits, r.past_kv = self._forward(ids, r.past_kv, [r.adapter])
                     self._emit(r, self._sample([r], logits[:, -1])[0], time.time())
-            if n_decoding or riders:
+            if n_decoding or riders or flown:
                 self._decode_steps += 1
                 self._spec_hold = max(self._spec_hold - 1, 0)
                 if not work:  # a prefill in the same step would be timed with it
-                    self._last_step = (("drafts", _bucket(rows)) if in_step or serial else _bucket(rows), now)
+                    self._last_step = (("drafts", _bucket(rows or flown)) if in_step or serial or flown
+                                       else _bucket(rows), now)
 
         self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
 
@@ -1020,7 +1029,7 @@ class ContinuousBatchEngine:
     def _head_extend(self, req: AsyncSequenceRequest, aux: torch.Tensor, next_tokens: List[int], start: int) -> None:
         """Give the draft head the verified positions start .. start + len(aux) - 1 (aux: the target's tapped hidden
         states there; next_tokens: the tokens that follow them). A gap since the positions it last saw resets it."""
-        item = (aux, torch.tensor(next_tokens, device=self.device), start, 0, self._head_seen(req, start))
+        item = (aux, host_tensor(next_tokens, torch.long, self.device), start, 0, self._head_seen(req, start))
         req.head_cache = self.draft_head.draft_many(self.model.embed_tokens, [item])[0][1]
         req.head_next = None if self._head_lost(req.head_cache) else start + len(next_tokens)
 
@@ -1036,13 +1045,71 @@ class ContinuousBatchEngine:
                 reqs.append(req)
         if not items:
             return
-        tokens = torch.tensor([t for item in items for t in item[1]], device=self.device)
+        tokens = host_tensor([t for item in items for t in item[1]], torch.long, self.device)
         tokens = tokens.split([len(item[1]) for item in items])
         items = [(aux, toks, start, k, cache) for (aux, _, start, k, cache), toks in zip(items, tokens)]
-        drafted = self.draft_head.draft_many(self.model.embed_tokens, items)
+        ahead = self._verifies_ahead(reqs)
+        drafted = self.draft_head.draft_many(self.model.embed_tokens, items, **({"host": False} if ahead else {}))
         for req, (_, toks, start, _, _), (drafts, cache) in zip(reqs, items, drafted):
             req.head_drafts, req.head_cache = drafts, cache
             req.head_next = None if self._head_lost(cache) else start + len(toks)
+        if ahead and not self._verify_ahead(reqs):
+            for req in reqs:  # the usual way: the drafts on the host, for the next step to verify
+                req.head_drafts = req.head_drafts.tolist() if torch.is_tensor(req.head_drafts) else req.head_drafts
+
+    def _verifies_ahead(self, reqs: List[AsyncSequenceRequest]) -> bool:
+        """The step that verifies the drafts the head is about to make for reqs can be launched before the host has
+        read them: reqs are every request there is to serve (the next step is theirs alone, with no prompt to
+        prefill), all greedy, and their drafts are verified as rows of one decode step."""
+        if not (self.overlap_decode and self.draft_head.pool is not None) or self.waiting_queue \
+                or {id(r) for r in self.running_batch if r.state != RequestState.FINISHED} != {id(r) for r in reqs}:
+            return False
+        return all(r.state == RequestState.DECODING and r.temperature <= 1e-5 and self._verify_in_step(r)
+                   and self._may_draft(r, len(reqs)) for r in reqs)
+
+    def _verify_ahead(self, reqs: List[AsyncSequenceRequest]) -> bool:
+        """Launch the decode step that verifies reqs' drafts (device tensors in head_drafts, still being computed)
+        behind the head's chain: the device goes from the chain to the target with no wait for the host between
+        them (the read of the drafts, the scheduler's turn, the step's inputs and its launch, about half of the
+        time the device idled in a cycle). The drafts and the target's picks are read together when the step is done
+        (_verify_settle). False, with nothing launched, when a request has no draft to verify (the head's pool was
+        full, or its output limit is reached) or the pool has no page for a row."""
+        drafts = []
+        for r in reqs:
+            k = min(len(r.head_drafts), r.max_new_tokens - len(r.generated_tokens) - 1)
+            if r.head_cache is None or k < 1 or r.head_next != r.past_kv.length:
+                return False
+            drafts.append(r.head_drafts[:k])
+        if sum(len(d) + 1 for d in drafts) > DecodeGraphs.BUCKETS[-1] or not self._top_up(reqs):
+            return False
+        last = host_tensor([r.generated_tokens[-1] for r in reqs], torch.long, self.device)
+        ids = torch.cat([t for i, d in enumerate(drafts) for t in (last[i:i + 1], d)])
+        starts = [r.past_kv.length for r in reqs]
+        logits, _ = self._forward(ids[:, None], [r.past_kv for r, d in zip(reqs, drafts) for _ in range(len(d) + 1)])
+        logits = logits[:, -1]
+        for r in reqs:
+            r.head_drafts = []
+        self._verifying = (self._flight(reqs, torch.cat([ids, logits.argmax(-1)])), [len(d) for d in drafts], starts,
+                           logits, self.model.last_aux[:, 0])
+        return True
+
+    def _verify_settle(self) -> tuple:
+        """Read the step _verify_ahead launched (its drafts and the target's picks: one wait, for that step) and do
+        with them what a decode step does: accept, emit, and draft again. Returns the step's rows (0: there was
+        none) and the ids of its requests, which have had this scheduler step's tokens."""
+        ahead, self._verifying = self._verifying, None
+        if ahead is None:
+            return 0, ()
+        (reqs, _, host, event), ks, starts, logits, aux = ahead
+        event.synchronize()
+        vals, at, spec = host.tolist(), 0, []
+        for r, k in zip(reqs, ks):
+            spec.append((r, vals[at + 1:at + 1 + k]))
+            at += k + 1
+        rows = [(r, None) for r, k in zip(reqs, ks) for _ in range(k + 1)]
+        self._decoded([], spec, rows, starts, logits, sum(r.state == RequestState.DECODING for r in reqs),
+                      tops=vals[at:], aux=aux)
+        return at, {id(r) for r in reqs}
 
     # verify passes before judging (and the span of the moving average); plain tokens of rest; steps with no draft
     SPEC_PROBE, SPEC_REST, SPEC_MISSES = 16, 64, 8
@@ -1229,19 +1296,22 @@ class ContinuousBatchEngine:
         self._decoded(plain, spec, rows, starts, logits[:, -1], n)
 
     def _decoded(self, plain: List[AsyncSequenceRequest], spec: list, rows: list, starts: List[int],
-                 logits: torch.Tensor, n: int) -> None:
+                 logits: torch.Tensor, n: int, tops: Optional[List[int]] = None,
+                 aux: Optional[torch.Tensor] = None) -> None:
         """Sample, verify and emit after the forward that gave `rows` their logits [len(rows), V] (a decode step, or
-        a packed prefill they rode in)."""
-        aux = self.model.last_aux[:, 0] if self.draft_head is not None else None  # each row's tapped states
-        tops = None
-        if all(r.temperature <= 1e-5 and r.logits_processor is None for r, _ in rows):
+        a packed prefill they rode in). tops, aux: the rows' argmax and tapped states, from a step that was launched
+        ahead (_verify_settle); a request of such a step may have been cancelled or preempted since."""
+        if aux is None and self.draft_head is not None:
+            aux = self.model.last_aux[:, 0]  # each row's tapped states
+        if tops is None and all(r.temperature <= 1e-5 and r.logits_processor is None for r, _ in rows):
             tops = logits.argmax(-1).tolist()  # greedy rows only: one host read for the whole step
         tokens = tops[:len(plain)] if tops is not None else self._sample(plain, logits[:len(plain)]) if plain else []
         at, verified = len(plain), []
         for (r, drafts), start in zip(spec, starts):
-            emitted = self._accept(r, drafts, logits[at:at + len(drafts) + 1],
-                                   tops[at:at + len(drafts) + 1] if tops is not None else None)
-            verified.append((r, drafts, emitted, start, aux[at:at + len(emitted)] if aux is not None else None))
+            if r.state == RequestState.DECODING:
+                emitted = self._accept(r, drafts, logits[at:at + len(drafts) + 1],
+                                       tops[at:at + len(drafts) + 1] if tops is not None else None)
+                verified.append((r, drafts, emitted, start, aux[at:at + len(emitted)] if aux is not None else None))
             at += len(drafts) + 1
         now = time.time()
         for r, t in zip(plain, tokens):

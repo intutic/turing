@@ -69,8 +69,11 @@ def marlin_moe_pack(gate_up: Packed, down: Packed, dtype: torch.dtype) -> Marlin
     """A SparseMoE's packed experts (on a CUDA device) -> Marlin's copy for activations of `dtype`; check
     marlin_moe_supported first. The inputs are left as they are."""
     with torch.inference_mode(False), torch.no_grad():  # normal tensors: used in and out of inference mode
-        return MarlinExperts(_pack(gate_up, dtype), _pack(down, dtype), _workspace(gate_up[0].device.index or 0),
-                             gate_up[0].shape[2] * 2, down[0].shape[2] * 2)
+        # locks of the experts' own: in a captured step their kernels run beside the dense layers'
+        # (SparseMoE._two_branches)
+        locks = _workspace(gate_up[0].device.index or 0, "moe")
+        return MarlinExperts(_pack(gate_up, dtype), _pack(down, dtype), locks, gate_up[0].shape[2] * 2,
+                             down[0].shape[2] * 2)
 
 
 def marlin_moe_store(w: MarlinExperts, slot: int, gate_up: Packed, down: Packed, dtype: torch.dtype) -> None:

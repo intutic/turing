@@ -134,6 +134,75 @@ def test_a_quantized_moe_model_decodes_through_marlin_as_through_the_triton_kern
 
 @needs_marlin
 @torch.inference_mode()
+def test_a_captured_step_runs_the_routed_experts_beside_the_shared_expert(monkeypatch):
+    """SparseMoE._two_branches: inside a capture the routing and the routed experts are launched on a second stream.
+    Three layers one after the other in one graph (each fork takes memory the one before freed), replayed on new
+    inputs: the eager output every time. Outside a capture, and past BRANCH_MAX_ROWS rows, one stream as before."""
+    from turing.models.causal_lm import SparseMoE
+    layers = []
+    for seed in range(3):
+        moe = _moe(shared=True, **SHAPE)
+        torch.manual_seed(seed)
+        for p in moe.parameters():
+            p.normal_(0.0, 0.05)
+        quantize_experts(moe, "rtn")
+        moe = moe.to("cuda", torch.float16)
+        assert moe.use_marlin(torch.float16)
+        layers.append(moe)
+    forks, two = [], SparseMoE._two_branches
+    monkeypatch.setattr(SparseMoE, "_two_branches", lambda self, x, w: forks.append(x.shape[0]) or two(self, x, w))
+
+    def stack(x):
+        for moe in layers:
+            x = x + moe(x)
+        return x
+    g = torch.Generator(device="cuda").manual_seed(3)
+    static = torch.randn(4, 1, 256, device="cuda", dtype=torch.float16, generator=g)
+    eager = stack(static)
+    assert not forks
+    graph = torch.cuda.CUDAGraph()
+    torch.cuda.synchronize()
+    with torch.cuda.graph(graph):
+        out = stack(static)
+    assert forks == [4, 4, 4]
+    graph.replay()
+    torch.testing.assert_close(out, eager, atol=2e-3, rtol=1e-3)
+    for _ in range(5):
+        static.copy_(torch.randn(4, 1, 256, device="cuda", dtype=torch.float16, generator=g))
+        graph.replay()
+        torch.testing.assert_close(out, stack(static), atol=2e-3, rtol=1e-3)
+    wide = torch.randn(SparseMoE.BRANCH_MAX_ROWS + 1, 256, device="cuda", dtype=torch.float16, generator=g)
+    with torch.cuda.graph(torch.cuda.CUDAGraph()):
+        layers[0](wide)
+    assert forks == [4, 4, 4]
+
+
+@needs_marlin
+@torch.inference_mode()
+def test_a_model_with_shared_experts_decodes_from_graphs_as_it_does_eagerly():
+    """The whole decode step of a 4-bit MoE model with shared experts, captured with its two branches a layer
+    (DecodeGraphs): the eager step's logits for batches of one to three rows, step after step."""
+    import copy
+    torch.manual_seed(0)
+    cfg = _cfg(layers=3, shared=True, **SHAPE)
+    cfg.kv_pool_gib = 0.02
+    base = quantize_model(SubspaceCausalLM(cfg).eval(), "rtn").to("cuda", torch.float16)
+    prompts = [torch.randint(0, 128, (1, n), device="cuda") for n in (24, 9, 17)]
+    steps = [torch.randint(0, 128, (B, 1), device="cuda") for B in (1, 1, 1, 2, 2, 3, 3, 3)]
+    outs = []
+    for graphs in (False, True):
+        model = copy.deepcopy(base)
+        model.config.cuda_graphs = graphs
+        caches = [model(p)[1] for p in prompts]
+        outs.append([model(ids, past_key_values=caches[:ids.shape[0]])[0][:, -1].clone() for ids in steps])
+        assert all(layer.mlp._marlin is not None for layer in model.layers)
+        assert bool(model._graphs.graphs) == graphs
+    for a, b in zip(*outs):
+        torch.testing.assert_close(a.float(), b.float(), atol=5e-3, rtol=0)
+
+
+@needs_marlin
+@torch.inference_mode()
 def test_an_offloaded_models_decode_step_is_a_chain_of_graphs_with_the_eager_logits():
     """DecodeGraphs for a model whose 4-bit MoE layers are offloaded: the step is captured as graphs cut at every
     layer (StepCuts), the host reads the routing between them and the CPU takes the experts that are not resident.

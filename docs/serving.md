@@ -185,7 +185,11 @@ Generation responses report what the server did in these headers: `X-Turing-Mode
   served model's next tokens from its hidden states after three layers. It drafts a chain of up to `--draft-tokens`
   tokens after every target forward, verified by the same rule, so outputs keep the target's distribution. The
   head's layers run once per draft position over the rows of every drafting request; on CUDA its keys and values
-  live in a paged pool of their own and each head step is a replay of a CUDA graph. Each draft costs a forward of
+  live in a paged pool of their own and each head step is a replay of a CUDA graph. The steps of a chain are queued
+  one behind the other, and when every request being served drafts (greedy requests, no prompt waiting), the step
+  that verifies the drafts is queued behind the chain while they are still on the device: the host reads the
+  drafts and the target's picks together when that step is done, and the GPU goes from the chain to the target and
+  back without waiting for the scheduler in between. Each draft costs a forward of
   the head whether or not the target gets to it, so a request's chain is as long as its drafts are likely to be
   reached: with a share p of its recently checked drafts accepted, it drafts while p to the power of the draft's
   place in the chain is at least 0.15. Heads in the

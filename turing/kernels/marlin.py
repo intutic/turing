@@ -72,7 +72,9 @@ def marlin_layout(qweight: torch.Tensor, scales: torch.Tensor, zeros: torch.Tens
 
 
 @functools.lru_cache(maxsize=None)
-def _workspace(index: int) -> torch.Tensor:
+def _workspace(index: int, user: str = "") -> torch.Tensor:
+    """The kernel's lock array on device `index`, one per `user`: kernels that share one must run one after the
+    other (two at once on the same locks never finish)."""
     sms = torch.cuda.get_device_properties(index).multi_processor_count
     with torch.inference_mode(False):
         return torch.zeros(sms * MAX_BLOCKS_PER_SM, dtype=torch.int32, device=torch.device("cuda", index))
