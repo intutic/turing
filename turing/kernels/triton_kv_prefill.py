@@ -125,8 +125,11 @@ def triton_pool_prefill(pool: KVPool, layer: int, q: torch.Tensor, slot: int, st
         q = q.contiguous()
     out = torch.empty(L, H, D, device=q.device, dtype=q.dtype)
     grid = lambda meta: (triton.cdiv(L * G, meta["BLOCK_M"]), Hkv)
+    # LB, the tuning bucket: the chunk's length as a power of 2 from 512 to 2,048. Shorter chunks share the first:
+    # the tail a prompt leaves for the next forward can be of any length, and a bucket for each stalled a serving
+    # process for seconds at its first use (eight builds and their timing)
     _pool_prefill_kernel[grid](q, pool.page_table, kc, vc, *scales, out, slot, start, L,
-                               min(triton.next_power_of_2(L), 2048), q.stride(1), q.stride(2),
+                               min(max(triton.next_power_of_2(L), 512), 2048), q.stride(1), q.stride(2),
                                pool.page_table.stride(0), scale if scale is not None else 1.0 / math.sqrt(D),
                                float(softcap), int(window), G=G, D=D, HKV=Hkv, MODE=mode, GROUP=INT4_GROUP,
                                WINDOW=window > 0, SOFTCAP=softcap > 0, IEEE=q.dtype == torch.float32)

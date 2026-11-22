@@ -109,6 +109,10 @@ def run_turing(a, batches):
                 # one prompt at the measured length: the kernels only a prompt longer than a step uses are built
                 # (or read from Triton's cache) here, not inside the first measured batch
                 await batch(prompts(tok, 1, a.context, seed=97), [8])
+            # and one prompt a forward and a few tokens long: its tail is a short chunk over a cached prefix, as the
+            # last forward of a burst is once decode rows take prompt tokens' places; that kernel is tuned at its
+            # first use
+            await batch(prompts(tok, 1, engine.FORWARD_TOKENS + 24, seed=96), [2])
             for B in batches:
                 preempted = engine.preemptions
                 secs, n, ttft, own = await batch(prompts(tok, B, a.context))

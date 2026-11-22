@@ -846,10 +846,20 @@ class SubspaceAttention(nn.Module):
         outs = []
         if R:
             T = q.shape[2] - R
-            qr, kr, vr = (x[0, :, T:].transpose(0, 1)[:, :, None] for x in (q, k, v))  # [R, heads, 1, D]
-            rode = triton_pool_decode(pool, layer, qr, kr, vr, packed.rider_slots, packed.rider_starts,
-                                      scale=self.scale, window=self.window or 0, softcap=self.softcap or 0.0,
-                                      n_splits=packed.rider_splits)
+            if pool.layer_fields(layer, "k")[3] in ("native", "fp8") \
+                    and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap, min_chunk=1):
+                # pages FlashInfer reads in place: the decode rows as requests of one query each, in a call of
+                # their own (in the chunks' call they would set its tile size: 1.66 ms a row at 16K tokens on
+                # Qwen2.5-1.5B, against 1.05 from the decode kernel)
+                triton_pool_append(pool, layer, None, k[:, :, T:], v[:, :, T:], packed.rider_slots, packed.rider_starts)
+                rode = flashinfer_prefill(pool, layer, q[:, :, T:], [c.slot for c in packed.caches[n:]],
+                                          packed.starts[n:], [1] * R, self.scale, tag="rows")
+            else:
+                qr, kr, vr = (x[0, :, T:].transpose(0, 1)[:, :, None] for x in (q, k, v))  # [R, heads, 1, D]
+                rode = triton_pool_decode(pool, layer, qr, kr, vr, packed.rider_slots, packed.rider_starts,
+                                          scale=self.scale, window=self.window or 0, softcap=self.softcap or 0.0,
+                                          n_splits=packed.rider_splits).transpose(1, 2).reshape(
+                                              1, R, self.num_heads * self.head_dim)
             q, k, v = q[:, :, :T], k[:, :, :T], v[:, :, :T]
         if n and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # every request in one call
             for c, off, m in zip(caches, offsets, lens):
@@ -860,7 +870,7 @@ class SubspaceAttention(nn.Module):
                 sl = slice(off, off + m)
                 outs.append(self._attend_one(q[:, :, sl], k[:, :, sl], v[:, :, sl], c))
         if R:
-            outs.append(rode.transpose(1, 2).reshape(1, R, self.num_heads * self.head_dim))
+            outs.append(rode)
         return outs[0] if len(outs) == 1 else torch.cat(outs, dim=1)
 
     def _decode_step(self, q, k, v, step: "DecodeStep") -> torch.Tensor:
@@ -1299,9 +1309,11 @@ class PrefillGraphs:
         torch.cuda.synchronize()
         return time.perf_counter()
 
-    def eager_took(self, key: tuple, since: float) -> None:
+    def eager_took(self, key: tuple, since: float, scale: float = 1.0) -> None:
+        """scale: 1 for the step's own eager forward at its first use; for a forward of fewer prompt tokens timed
+        in its place (prefill_packed), the step's tokens over that forward's."""
         torch.cuda.synchronize()
-        self.trial[key] = [(time.perf_counter() - since) * 1e3]
+        self.trial[key] = [(time.perf_counter() - since) * 1e3 * scale]
 
     @staticmethod
     def _inputs(key: tuple, device):
@@ -1317,7 +1329,9 @@ class PrefillGraphs:
     @torch.inference_mode()
     def _capture(self, model: "SubspaceCausalLM", key: tuple, pool: KVPool, entry: list) -> None:
         """Capture the step into entry; its inputs already hold the step that asked for it."""
-        if self.pool is None:
+        if self.pool is None or not any(e[1] is not None for e in self.graphs.values()):
+            # no graph holds the pool any more (all dropped, or the only one replaced): a capture into it would
+            # fail PyTorch's allocator check (use_count > 0), so this one starts a new pool
             self.pool = torch.cuda.graph_pool_handle()
         ids, slots, positions, last, rows = entry[2]
         chunk = PackedPrefill.fresh(pool, key[0], key[1], slots, positions, last, rows)
@@ -1449,6 +1463,11 @@ class SubspaceCausalLM(nn.Module):
         return (not caches[0].pool.track_pages and self.config.decode_attention != "sdpa"
                 and self.can_pack_prefill(caches))
 
+    def packed_step_graph(self, caches: List[KVCache], lens: List[int], riders: int = 0) -> bool:
+        """Whether prefill_packed would replay this step from a CUDA graph, or is still timing its shape for one
+        (PrefillGraphs.step_key): caches as prefill_packed takes them, lens the prompt chunks' lengths."""
+        return self._prefill_graphs.step_key(self, caches, lens + [1] * riders, riders) is not None
+
     @torch.inference_mode()
     def prefill_packed(self, chunks: List[List[int]], caches: List[KVCache], riders: int = 0) -> torch.Tensor:
         """Prefill the next chunk of several requests in one forward (speed plan P4.3): chunks[i] continues caches[i]
@@ -1470,7 +1489,19 @@ class SubspaceCausalLM(nn.Module):
             packed = PackedPrefill(caches, lens, dev, riders)
             ids = torch.tensor([[t for x in chunks for t in x]], dtype=torch.long, device=dev)
             logits = self._body(ids, 0, None, None, packed=packed)[0]
-            if timed is not None:
+            n, over = len(lens) - riders, sum(lens) - graphs.MAX_STEP_TOKENS
+            if timed is not None and riders and 0 < over < lens[n - 1]:
+                # A step past MAX_STEP_TOKENS rows: its graph is judged against the forward the engine runs
+                # without one, with the decode rows inside that many rows and the last chunk `over` tokens
+                # shorter (ContinuousBatchEngine._step_batch), by the prompt token. Timed now, after the pass
+                # above, whose keys and values it writes again.
+                cut = lens[:n - 1] + [lens[n - 1] - over] + lens[n:]
+                flat = [t for x in chunks[:n - 1] for t in x] + chunks[n - 1][:-over] + [x[0] for x in chunks[n:]]
+                short = PackedPrefill(caches, cut, dev, riders)
+                timed = graphs.time_eager(shape)
+                self._body(torch.tensor([flat], dtype=torch.long, device=dev), 0, None, None, packed=short)
+                graphs.eager_took(shape, timed, (sum(lens) - riders) / (sum(cut) - riders))
+            elif timed is not None:
                 graphs.eager_took(shape, timed)
         for c, n in zip(caches, lens):
             c.length += n

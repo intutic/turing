@@ -32,24 +32,28 @@ _STATE = {}  # (device, pages read) -> [wrapper, plan key, last layer served, th
 
 
 def flashinfer_prefill_supported(pool: KVPool, layer: int, q: torch.Tensor, window: Optional[int],
-                                 softcap: Optional[float]) -> bool:
-    return (HAS_FLASHINFER and q.is_cuda and q.dtype in (torch.float16, torch.bfloat16) and q.shape[2] >= MIN_CHUNK
-            and not window and not softcap and pool.dtype == q.dtype)
+                                 softcap: Optional[float], min_chunk: int = MIN_CHUNK) -> bool:
+    # heads under 64 dims: FlashInfer has no kernel configuration for them ("Invalid configuration" at run time)
+    return (HAS_FLASHINFER and q.is_cuda and q.dtype in (torch.float16, torch.bfloat16) and q.shape[2] >= min_chunk
+            and q.shape[3] >= 64 and not window and not softcap and pool.dtype == q.dtype)
 
 
 def flashinfer_prefill(pool: KVPool, layer: int, q: torch.Tensor, slots: List[int], starts: List[int],
-                       lens: List[int], scale: Optional[float] = None) -> torch.Tensor:
+                       lens: List[int], scale: Optional[float] = None, tag: str = "") -> torch.Tensor:
     """As triton_pool_prefill (no window or soft-cap), for one or more requests packed in one row: q [1, H, T, D] holds
     request i's lens[i] queries at positions starts[i] .. over page-table row slots[i] (its chunk's K/V already
-    appended), T = sum(lens) -> [1, T, H * D]. One plan per forward serves every layer and every request."""
+    appended), T = sum(lens) -> [1, T, H * D]. One plan per forward serves every layer and every request. A second
+    set of requests in the same forward (its decode rows) takes a tag: a plan of its own."""
     _, H, T, D = q.shape
     storage = pool.layer_fields(layer, "k")[3]
     in_place = storage in ("native", "fp8")
-    kind = storage if in_place else "temporary"  # each kind of pages has its own plan (and fp8 its own kernel)
+    kind = (storage if in_place else "temporary") + tag  # each kind of pages has its own plan (and fp8 its own kernel)
     st = _STATE.get((q.device, kind))
     if st is None:
-        ws = torch.empty(128 << 20, dtype=torch.uint8, device=q.device)
-        st = _STATE[(q.device, kind)] = [flashinfer.BatchPrefillWithPagedKVCacheWrapper(ws, "HND"), None, None, None]
+        with torch.inference_mode(False):  # normal tensors: plan() writes them in place, in and out of inference mode
+            ws = torch.empty((64 if tag else 128) << 20, dtype=torch.uint8, device=q.device)
+            st = _STATE[(q.device, kind)] = [flashinfer.BatchPrefillWithPagedKVCacheWrapper(ws, "HND"), None, None,
+                                             None]
     totals = [s + n for s, n in zip(starts, lens)]
     pages = [-(-t // 16) for t in totals]
     key = (id(pool), pool.page_table.data_ptr(), tuple(slots), tuple(starts), tuple(lens), H, D, scale, q.dtype)

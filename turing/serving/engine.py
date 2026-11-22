@@ -376,7 +376,12 @@ class ContinuousBatchEngine:
     # Prompt tokens in one prefill forward. A larger forward costs more per token (SmolLM2-360M on an L4, 1,024-token
     # prompts: 21.5 ms a prompt two at a time, 25 eight at a time), needs working memory beyond the pool's reserve
     # and cannot be replayed from a CUDA graph, so a larger step budget (--prefill-chunk) is spent in several
-    # forwards, one a scheduler step.
+    # forwards, one a scheduler step. The decode rows riding in a forward count in it too, unless the step replays
+    # from a graph: past 2,048 rows cuBLAS runs other kernels for some layer shapes, slower ones on an L4 for
+    # SmolLM2-1.7B (two 1,024-token prompts and 2 / 32 / 62 decode rows, back to back: 154 / 181 / 205 ms, and
+    # 138 / 165 / 190 with the rows inside 2,048), and a graph of the step replays what the eager forward ran.
+    # SmolLM2-360M's steps are bound by the host instead (58 ms eager, 41 from a graph, either way), so a model
+    # keeps the graphs that beat its eager forward (PrefillGraphs) and its other steps keep to the row count.
     FORWARD_TOKENS = 2048
 
     def _try_reserve(self, req: AsyncSequenceRequest) -> bool:
@@ -595,10 +600,11 @@ class ContinuousBatchEngine:
             for req in prefill:
                 if budget <= 0:
                     break
-                if req.prefill_offset == 0 and budget < len(req.prefill_tokens) <= forward:
+                if req.prefill_offset == 0 and budget < len(req.prefill_tokens) <= forward \
+                        and all(r.prefill_offset == 0 for r, _ in work):
                     # a prompt that fits a forward is not split over two: it starts the next one. Whole prompts need
                     # no read of a cached prefix, and a forward of them can be replayed from a CUDA graph
-                    # (PrefillGraphs)
+                    # (PrefillGraphs). A forward that continues a prompt cannot, and is filled
                     break
                 end = min(req.prefill_offset + budget, len(req.prefill_tokens))
                 budget -= end - req.prefill_offset
@@ -614,6 +620,17 @@ class ContinuousBatchEngine:
                      and getattr(self.model, "can_pack_prefill", lambda _: False)(caches))
             ride_plain, ride_spec, n_riding = self._riders(work) if packs and not more else ([], [], 0)
             riders, ride_starts = self._rows(ride_plain, ride_spec)
+            over = sum(e - r.prefill_offset for r, e in work) + len(riders) - self.FORWARD_TOKENS
+            if 0 < over <= len(riders) < self.FORWARD_TOKENS and not self.model.packed_step_graph(
+                    caches + [r.past_kv for r, _ in riders], [e - r.prefill_offset for r, e in work], len(riders)):
+                # the decode rows take the places of the last prompt tokens, which wait for the next forward (as
+                # vLLM counts a step's tokens): the forward keeps to FORWARD_TOKENS rows
+                while over > 0:
+                    req, end = work.pop()
+                    if end - req.prefill_offset > over:
+                        work.append((req, end - over))
+                    over -= end - req.prefill_offset
+                caches = [r.past_kv for r, _ in work]
             if packs and len(work) + len(riders) > 1:
                 # every chunk of this step in one forward (one set of GEMMs), attention per request
                 last = self.model.prefill_packed([r.prefill_tokens[r.prefill_offset:e] for r, e in work]

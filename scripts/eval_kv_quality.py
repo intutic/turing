@@ -45,6 +45,10 @@ ARMS |= {  # KV cache settings through the cache; low-bit arms vs exact_forward,
     "fp8": ("chunk", _EXACT, dict(kv_cache_dtype="fp8"), "exact_forward"),
     "int8_nosmooth": ("chunk", _EXACT, dict(kv_cache_dtype="int8", kv_smoothing=False), "exact_forward"),
     "int4_nosmooth": ("chunk", _EXACT, dict(kv_cache_dtype="int4", kv_smoothing=False), "exact_forward"),
+    # token by token through the decode kernel, which reads the 1-byte pages itself (the chunk pass reads them
+    # converted back to the model dtype)
+    "int8_decode": ("decode", _EXACT, dict(kv_cache_dtype="int8"), "exact_forward"),
+    "fp8_decode": ("decode", _EXACT, dict(kv_cache_dtype="fp8"), "exact_forward"),
     "quest25": ("decode", _EXACT, dict(kv_page_budget=0.25), "exact_decode"),
     "quest10": ("decode", _EXACT, dict(kv_page_budget=0.10), "exact_decode"),
     "int8_quest25": ("decode", _EXACT, dict(kv_cache_dtype="int8", kv_page_budget=0.25), "exact_decode"),

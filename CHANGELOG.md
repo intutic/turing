@@ -60,6 +60,28 @@ All notable changes to this project are documented here. The format follows
   the output.
 - A prefill graph gives the pages of its padding back after each replay, and falls back to the eager forward
   when the pool has no page for them or for the padding rows' scratch page.
+- The RoPE kernel rotates a tile of positions per program instead of one vector: a 2,048-token prefill step of
+  SmolLM2-1.7B spent 0.60 ms a layer in it on an L4, now 0.12 (one 16K-token prompt on Qwen2.5-1.5B: 25 ms of
+  1,386, now 9 of 1,364).
+- The decode rows that ride in a prefill forward count in its 2,048 rows: the last prompt in the forward gives
+  that many tokens up to the next one, as vLLM counts a step's tokens. Past 2,048 rows cuBLAS runs other, slower
+  kernels for SmolLM2-1.7B's layers on an L4 (a step of two 1,024-token prompts and 2 / 32 / 62 decode rows:
+  154 / 181 / 205 ms, and 138 / 165 / 190 with the rows inside 2,048). A step that replays from a CUDA graph keeps
+  its whole prompts (SmolLM2-360M: 41 ms from the graph, 58 eagerly either way), and a graph of a step past 2,048
+  rows is now judged against the eager forward inside them. A forward that continues a prompt is filled with the
+  next prompt's first tokens instead of stopping at whole prompts.
+- In a prefill forward over pages FlashInfer reads in place (the model dtype, fp8), the decode rows are requests of
+  one query each in a FlashInfer call of their own instead of the decode kernel's three launches a layer. A burst
+  of 32 prompts of 16K tokens on Qwen2.5-1.5B with an fp8 cache spent 51.6 s in its prefill steps before and 50.0
+  after (the rows in the chunks' own call cost more: 52.8 s, they set its tile size). FlashInfer is no longer
+  asked for heads under 64 dimensions, which it has no kernel configuration for, and its buffers are created
+  outside inference mode, so a caller outside it can plan with them too.
+- The paged prefill kernel tunes its tiles once for every chunk of up to 512 tokens instead of once per power of
+  two below that: each new bucket stalled the process for 0.6 to 3.8 s at its first chunk (eight builds and their
+  timing), and the tail a prompt leaves for the next forward can be of any length.
+- `scripts/benchmark_e2e_generation.py` warms up with one prompt a forward and a few tokens long too (a short chunk
+  over a cached prefix), and `scripts/eval_kv_quality.py` has `int8_decode` and `fp8_decode` arms, which feed one
+  token a step through the decode kernel.
 - `scripts/benchmark_e2e_generation.py` warms up with requests that end one after the other (a decode graph for
   every row count) and, when the warm-up prompts are shorter than the measured ones, with one prompt of the
   measured length for both engines, so no kernel is built inside the first measured batch.
@@ -145,6 +167,9 @@ All notable changes to this project are documented here. The format follows
 - Package description corrected (it still advertised 70B models on one GPU).
 
 ### Fixed
+- Once every prefill graph of a model had been dropped (none beat its eager forward), the next capture failed
+  inside PyTorch's allocator (`use_count > 0`) and with it the request: the graphs' shared memory pool had been
+  released with the last of them. A capture with no graph left now starts a new pool.
 - A model switched from an int4 KV pool to another storage kept int4's key smoothing, and the layer guard for the
   new storage was then measured, and cached on disk, with smoothed keys. Smoothing is now dropped when the storage
   is not int4.

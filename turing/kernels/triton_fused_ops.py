@@ -56,36 +56,46 @@ if HAS_TRITON:
 
     @triton.jit
     def _rope_kernel(X, XK, C, Sn, Y, YK, H, HK, L, n_q, s_xb, s_xh, s_xl, s_kb, s_kh, s_kl, s_cb, s_cl,
-                     s_yb, s_yh, s_yl, s_zb, s_zh, s_zl, D: tl.constexpr, R: tl.constexpr, BLOCK_D: tl.constexpr):
-        """One (b, h, l) vector of q (the first n_q programs) or of k (the rest): y[:R] = x*cos + rotate_half(x)*sin
-        (each product rounded, then the sum), y[R:] = x."""
+                     s_yb, s_yh, s_yl, s_zb, s_zh, s_zl, D: tl.constexpr, R: tl.constexpr, BLOCK_D: tl.constexpr,
+                     BLOCK_L: tl.constexpr):
+        """BLOCK_L consecutive positions of one (b, h) of q (the first n_q programs) or of k (the rest):
+        y[:R] = x*cos + rotate_half(x)*sin (each product rounded, then the sum), y[R:] = x. One vector a program
+        (BLOCK_L 1, a decode step's rows) is 131,072 programs for a 2,048-token step of SmolLM2-1.7B (64 q and k
+        heads): 0.60 ms a layer on an L4, against 0.12 in tiles of 2,048 elements."""
         pid = tl.program_id(0).to(tl.int64)
+        tiles = (L + BLOCK_L - 1) // BLOCK_L
         if pid < n_q:
-            l = pid % L
-            h = (pid // L) % H
-            b = pid // (L * H)
-            x_row = X + b * s_xb + h * s_xh + l * s_xl
-            y_row = Y + b * s_yb + h * s_yh + l * s_yl
+            t = pid % tiles
+            h = (pid // tiles) % H
+            b = pid // (tiles * H)
+            x_row = X + b * s_xb + h * s_xh
+            y_row = Y + b * s_yb + h * s_yh
+            s_x = pid * 0 + s_xl  # int64 in both branches
+            s_y = pid * 0 + s_yl
         else:
             p = pid - n_q
-            l = p % L
-            h = (p // L) % HK
-            b = p // (L * HK)
-            x_row = XK + b * s_kb + h * s_kh + l * s_kl
-            y_row = YK + b * s_zb + h * s_zh + l * s_zl
-        d = tl.arange(0, BLOCK_D)
-        x = tl.load(x_row + d, mask=d < D, other=0.0)
+            t = p % tiles
+            h = (p // tiles) % HK
+            b = p // (tiles * HK)
+            x_row = XK + b * s_kb + h * s_kh
+            y_row = YK + b * s_zb + h * s_zh
+            s_x = pid * 0 + s_kl
+            s_y = pid * 0 + s_zl
+        l = (t * BLOCK_L + tl.arange(0, BLOCK_L))[:, None]
+        d = tl.arange(0, BLOCK_D)[None, :]
+        live = l < L
+        x = tl.load(x_row + l * s_x + d, mask=live & (d < D), other=0.0)
         half = R // 2
         rot_mask = d < R
         partner = tl.where(d < half, d + half, d - half)
-        xp = tl.load(x_row + partner, mask=rot_mask, other=0.0).to(tl.float32)
+        xp = tl.load(x_row + l * s_x + partner, mask=live & rot_mask, other=0.0).to(tl.float32)
         xp = tl.where(d < half, -xp, xp).to(x.dtype)  # rotate_half: (-x2, x1)
-        c = tl.load(C + b * s_cb + l * s_cl + d, mask=rot_mask, other=0.0).to(x.dtype)
-        s = tl.load(Sn + b * s_cb + l * s_cl + d, mask=rot_mask, other=0.0).to(x.dtype)
+        c = tl.load(C + b * s_cb + l * s_cl + d, mask=live & rot_mask, other=0.0).to(x.dtype)
+        s = tl.load(Sn + b * s_cb + l * s_cl + d, mask=live & rot_mask, other=0.0).to(x.dtype)
         t1 = (x.to(tl.float32) * c.to(tl.float32)).to(x.dtype)
         t2 = (xp.to(tl.float32) * s.to(tl.float32)).to(x.dtype)
         y = tl.where(rot_mask, (t1.to(tl.float32) + t2.to(tl.float32)).to(x.dtype), x)
-        tl.store(y_row + d, y, mask=d < D)
+        tl.store(y_row + l * s_y + d, y, mask=live & (d < D))
 
 
 def fused_ops_supported(x: torch.Tensor) -> bool:
@@ -138,11 +148,14 @@ def _rope_both(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.T
     yq = torch.empty(q.shape, device=q.device, dtype=q.dtype)
     yk = torch.empty(k.shape, device=k.device, dtype=k.dtype)
     s_cb = cos.stride(0) if cos.dim() == 4 else 0
-    _rope_kernel[(B * (H + HK) * L,)](q, k, cos, sin, yq, yk, H, HK, L, B * H * L,
-                                      q.stride(0), q.stride(1), q.stride(2), k.stride(0), k.stride(1), k.stride(2),
-                                      s_cb, cos.stride(-2), yq.stride(0), yq.stride(1), yq.stride(2),
-                                      yk.stride(0), yk.stride(1), yk.stride(2), D=D, R=cos.shape[-1],
-                                      BLOCK_D=triton.next_power_of_2(D))
+    BLOCK_D = triton.next_power_of_2(D)
+    BLOCK_L = 1 if L == 1 else max(1, 2048 // BLOCK_D)  # two builds: a decode step's rows, and tiles of positions
+    tiles = triton.cdiv(L, BLOCK_L)
+    _rope_kernel[(B * (H + HK) * tiles,)](q, k, cos, sin, yq, yk, H, HK, L, B * H * tiles,
+                                          q.stride(0), q.stride(1), q.stride(2), k.stride(0), k.stride(1), k.stride(2),
+                                          s_cb, cos.stride(-2), yq.stride(0), yq.stride(1), yq.stride(2),
+                                          yk.stride(0), yk.stride(1), yk.stride(2), D=D, R=cos.shape[-1],
+                                          BLOCK_D=BLOCK_D, BLOCK_L=BLOCK_L)
     return yq, yk
 
 

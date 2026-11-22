@@ -256,9 +256,12 @@ Both are on by default.
 * **Lanes** (`LanePolicy`): `interactive`, `batch` and `background`, chosen by `lane` / `X-Turing-Lane` or by the
   request's shape. Waiting requests are ordered by lane, and each lane has its own prefill budget per scheduler step (2,048, 1,024
   and 512 prompt tokens, over all waiting requests). A prompt that fits a step's budget is not split over two
-  steps: it waits for the next one if the rest of this step's budget is too small. A longer prompt takes what is
-  left of each step. One forward takes at most 2,048 prompt tokens: an engine built with a larger budget spends it
-  over several scheduler steps, and the requests already decoding take their next token with the last of them. `/metrics` reports waiting, running, admitted and finished requests per lane.
+  steps while the step holds whole prompts only (such a step can be replayed from a CUDA graph): it waits for the
+  next one if the rest of this step's budget is too small. A longer prompt takes what is left of each step. One
+  forward takes at most 2,048 rows: an engine built with a larger budget spends it over several scheduler steps,
+  and the requests already decoding take their next token with the last of them, as rows of that forward. Their
+  rows count in the 2,048 (the last prompt in the forward leaves that many tokens for the next one) unless the
+  step replays from a graph. `/metrics` reports waiting, running, admitted and finished requests per lane.
 
 ---
 

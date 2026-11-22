@@ -180,6 +180,95 @@ def test_decoding_requests_ride_in_the_prefill_forwards_of_a_burst(draft):
     assert engine.spec_accepted >= 3 * draft and engine.spec_drafted > engine.spec_accepted or not draft
 
 
+@pytest.mark.parametrize("storage", ["native", "fp8", "int8"])
+@torch.no_grad()
+def test_decode_rows_through_flashinfer(storage, monkeypatch):
+    """Where FlashInfer reads a layer's pages in place (model dtype, fp8), the decode rows of a packed prefill are
+    requests of one query each in a call of their own; an int8 layer's rows keep the decode kernel. Either way the
+    logits and caches are those of the decode kernel's path (a cache listed twice: a draft row)."""
+    from turing.config import ModelConfig
+    from turing.kernels import flashinfer_prefill as fi
+    from turing.models import causal_lm
+    if not fi.HAS_FLASHINFER:
+        pytest.skip("flashinfer is not installed")
+    torch.manual_seed(0)
+    cfg = ModelConfig(name="riders", vocab_size=128, hidden_dim=256, ffn_dim=512, num_layers=3, num_heads=4,
+                      num_kv_heads=2, head_dim=64)  # FlashInfer serves heads of 64 dims and more
+    cfg.kv_cache_dtype, cfg.cuda_graphs, cfg.kv_pool_gib = storage, False, 0.05
+    model = causal_lm.SubspaceCausalLM(cfg).eval().to("cuda", torch.float16)
+    pool = model.kv_pool()
+    g = torch.Generator().manual_seed(5)
+    prompts = [torch.randint(0, 128, (n,), generator=g).tolist() for n in (540, 40)]
+    rows = [torch.randint(0, 128, (n,), generator=g).tolist() for n in (30, 17, 23)]
+
+    def step(through_flashinfer):
+        if not through_flashinfer:  # the rows' own check fails: they take the decode kernel, the chunks as before
+            real_ok = causal_lm.flashinfer_prefill_supported
+            monkeypatch.setattr(causal_lm, "flashinfer_prefill_supported",
+                                lambda *a, **kw: "min_chunk" not in kw and real_ok(*a, **kw))
+        calls = {"flashinfer": 0, "decode": 0}
+        for name, key in (("flashinfer_prefill", "flashinfer"), ("triton_pool_decode", "decode")):
+            real = getattr(causal_lm, name)
+            monkeypatch.setattr(causal_lm, name, lambda *a, _r=real, _k=key, **kw: calls.__setitem__(_k, calls[_k] + 1) or _r(*a, **kw))
+        riders = []
+        for r in rows:
+            c = KVCache(pool)
+            model(torch.tensor([r[:-1]], device="cuda"), past_key_values=c)
+            riders.append(c)
+        riders.append(riders[0])  # a draft after the first row's token
+        new = [KVCache(pool) for _ in prompts]
+        out = model.prefill_packed(prompts + [r[-1:] for r in rows] + [[9]], new + riders, riders=len(riders))
+        kv = [[x.float().clone() for layer in (0, pool.num_layers - 1) for x in pool.read(layer, c, c.length)]
+              for c in new + riders[:3]]  # the first row's cache holds its token and the draft
+        monkeypatch.undo()
+        return out.float(), kv, calls
+
+    out, kv, calls = step(True)
+    ref, ref_kv, ref_calls = step(False)
+    in_place = [pool.layer_fields(i, "k")[3] in ("native", "fp8") for i in range(pool.num_layers)]
+    assert calls == {"flashinfer": pool.num_layers + in_place.count(True), "decode": in_place.count(False)}
+    assert ref_calls == {"flashinfer": pool.num_layers, "decode": pool.num_layers}
+    torch.testing.assert_close(out, ref, atol=2e-2, rtol=2e-2)
+    for a, b in zip(kv, ref_kv):
+        for x, y in zip(a, b):  # a stored code may round apart where the two paths' states differ in the last bit
+            apart = (x - y).abs() > 2e-2 + 2e-2 * y.abs()
+            assert apart.float().mean() < 0.01 and ((x - y).abs() <= 0.13 * y.abs().clamp(min=1.0))[apart].all()
+
+
+@pytest.mark.parametrize("graphs", [False, True])
+def test_decode_rows_count_in_a_full_forward(graphs):
+    """A forward full of prompt tokens gives the last ones' places to the decode rows riding in it (it keeps to
+    FORWARD_TOKENS rows, here 64), and those tokens go first in the next forward; a step that a CUDA graph can
+    replay (whole prompts with no cached prefix) keeps its prompts whole. The tokens are those of plain decoding."""
+    from tests.test_engine_generation import PROMPT, _run
+    from tests.test_hf_parity import _tiny
+    from turing.config import TuringConfig
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    from turing.serving.engine import ContinuousBatchEngine
+    long = torch.randint(0, 128, (120,), generator=torch.Generator().manual_seed(7)).tolist()
+    b = len(PROMPT) - 3  # 35 tokens; PROMPT's 38 go first, alone
+
+    def run(ride):
+        model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
+        model.config.kv_pool_gib, model.config.cuda_graphs = 0.01, graphs
+        engine = ContinuousBatchEngine(model.config, TuringConfig(device="cuda", max_batch_size=8), model=model,
+                                       prefix_caching=False, draft_tokens=0, prefill_chunk_size=64)
+        engine.ride_prefill, engine.FORWARD_TOKENS = ride, 64
+        packed, pack = [], model.prefill_packed
+        model.prefill_packed = lambda chunks, *x, **kw: packed.append([len(c) for c in chunks]) or pack(chunks, *x, **kw)
+        reqs = [dict(prompt_tokens=p, max_new_tokens=n, temperature=0.0, stop_token_ids=set())
+                for p, n in ((PROMPT, 30), (PROMPT[3:], 30), (long, 6))]
+        _, outs = _run(engine, *reqs)
+        return outs, packed
+
+    ref, _ = run(False)
+    outs, packed = run(True)
+    first = 29 if graphs else 28  # two fresh chunks and a decode row: a graph's step, or 65 rows cut to 64
+    assert packed == [[b, first, 1], [62, 1, 1], [120 - first - 62, 1, 1]]
+    assert all(sum(step) <= 64 for step in packed[1:])
+    assert outs == ref
+
+
 @pytest.mark.parametrize("storage", ["int8", "int4", "fp8"])
 @pytest.mark.parametrize("Hkv,D", [(2, 128), (8, 64)])
 def test_chunk_append_kernel_stores_what_the_reference_stores(storage, Hkv, D):
@@ -390,6 +479,74 @@ def test_a_prefill_graph_no_faster_than_the_eager_forward_is_dropped_with_every_
         pair(40)
         assert (2, 64, 0) in graphs.dead and sorted(graphs.graphs) == [(1, 64, 0)] and graphs.limit == 95
         assert graphs.step_key(model, [KVCache(pool), KVCache(pool)], [40, 40], 0) is None
+
+
+def test_a_capture_after_every_graph_was_dropped_gets_a_new_pool():
+    """All prefill graphs share one memory pool; once the last of them is dropped PyTorch's allocator refuses a
+    capture into that pool, so the next capture starts another."""
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    g = torch.Generator().manual_seed(2)
+    a, b = (torch.randint(0, 128, (1, n), generator=g).cuda() for n in (40, 20))  # buckets of 64 and 32
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
+    model.config.kv_pool_gib = 0.02
+    graphs, pool = model._prefill_graphs, model.kv_pool()
+    first = lambda ids: model(ids, past_key_values=KVCache(pool), logits_to_keep=1)[0][0, -1].float()  # noqa: E731
+    with torch.no_grad():
+        first(a), first(a)
+        handle = graphs.pool
+        graphs.trial[(1, 64, 0)][0] = 0.0
+        first(a)  # judged and dropped: no graph is left
+        assert not graphs.graphs
+        eager = first(b)
+        torch.testing.assert_close(first(b), eager, atol=2e-3, rtol=2e-3)  # captured
+        assert sorted(graphs.graphs) == [(1, 32, 0)] and graphs.pool != handle
+
+
+@pytest.mark.parametrize("storage", ["native", "int8"])
+@torch.no_grad()
+def test_a_step_past_the_row_count_is_judged_against_the_forward_inside_it(storage, monkeypatch):
+    """A packed step whose decode rows take it past MAX_STEP_TOKENS rows: at its first use the eager forward the
+    engine would run instead (the last chunk shorter by the rows over) is timed after the step's own, which leaves
+    the step's logits and caches as they are; a replay has to beat that time by the prompt token."""
+    from tests.test_hf_parity import _tiny
+    from turing.models.causal_lm import PrefillGraphs
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    monkeypatch.setattr(PrefillGraphs, "MAX_STEP_TOKENS", 64)
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
+    model.config.kv_cache_dtype, model.config.kv_pool_gib = storage, 0.02
+    pool, graphs = model.kv_pool(), model._prefill_graphs
+    g = torch.Generator().manual_seed(5)
+    prompts = [torch.randint(0, 128, (32,), generator=g).tolist() for _ in range(2)]
+    rows = [torch.randint(0, 128, (n,), generator=g).tolist() for n in (30, 17, 23)]
+
+    def step(timed):
+        riders = []
+        for r in rows:
+            c = KVCache(pool)
+            model(torch.tensor([r[:-1]], device="cuda"), past_key_values=c)
+            riders.append(c)
+        new = [KVCache(pool) for _ in prompts]
+        if not timed:
+            monkeypatch.setattr(graphs, "time_eager", lambda key: None)
+        out = model.prefill_packed(prompts + [r[-1:] for r in rows], new + riders, riders=len(rows)).float()
+        kv = [x.float().clone() for c in new + riders for x in pool.read(pool.num_layers - 1, c, c.length)]
+        return out, kv
+
+    bodies, body = [], model._body
+    monkeypatch.setattr(model, "_body", lambda ids, *a, **kw: bodies.append(ids.shape[1]) or body(ids, *a, **kw))
+    key = (2, 32, 4)
+    out, kv = step(True)
+    assert bodies[-2:] == [67, 64] and len(graphs.trial[key]) == 1  # the step, then the forward inside 64 rows
+    spent = graphs.trial[key][0]
+    graphs.seen.clear(), graphs.trial.clear()
+    ref, ref_kv = step(False)
+    assert bodies[-1] == 67 and key not in graphs.trial
+    tol = dict(atol=1e-3, rtol=1e-3) if storage == "native" else dict(atol=2e-2, rtol=2e-2)
+    torch.testing.assert_close(out, ref, **tol)
+    for x, y in zip(kv, ref_kv):
+        torch.testing.assert_close(x, y, **tol)
+    assert spent > 0
 
 
 def test_int4_layers_with_a_cached_prefix_take_the_gather_path_and_the_rest_the_kernel():

@@ -93,7 +93,7 @@ The kernels on the serving path run on CUDA only; on MPS and CPU, attention and 
 
 | Kernel | Module | Used for |
 | :--- | :--- | :--- |
-| Paged decode | `triton_kv_decode.py` | Fused quantize-and-append, split-K attention over each row's pages, reduction. In a prefill the same kernels serve the decode rows that ride along, quantize a chunk into an int8/int4 layer, and dequantize a low-bit prefix into pages FlashInfer reads |
+| Paged decode | `triton_kv_decode.py` | Fused quantize-and-append, split-K attention over each row's pages, reduction. In a prefill the same kernels serve the decode rows that ride along over int8/int4 pages (over pages in the model dtype or fp8 the rows are a FlashInfer call of one query each), quantize a chunk into an int8/int4 layer, and dequantize a low-bit prefix into pages FlashInfer reads |
 | Paged prefill | `triton_kv_prefill.py` | A prompt chunk attending over the request's cached prefix and itself, through the page table |
 | FlashInfer prefill | `flashinfer_prefill.py` | Optional (when `flashinfer` imports): chunks of at least 512 tokens without a sliding window or soft-capping. Layers stored in the model dtype or in fp8 are read in place, int8/int4 layers from temporary pages |
 | int4 GEMM | `triton_w4a16.py` | 4-bit weights, up to `INT4_MAX_ROWS` input rows (§4) |
@@ -123,7 +123,11 @@ The kernels on the serving path run on CUDA only; on MPS and CPU, attention and 
   time: otherwise a prompt alone of that length or longer stays eager on this model and GPU, in steps of any
   shape, and another shape is dropped by itself. A step whose prompts differ so much in length that padding them
   to the longest would make up over a quarter of it stays eager. The engine does not split a prompt that fits one forward's budget over
-  two, so the forwards of a burst are whole prompts.
+  two, so the forwards of a burst are whole prompts. A step whose decode rows take it past 2,048 rows is judged
+  against the eager forward that keeps to them (the last prompt gives the rows' count of tokens up to the next
+  forward, by the prompt token): past that row count cuBLAS runs other kernels for some layer shapes, slower ones
+  on an L4 for SmolLM2-1.7B, whose bursts then run eagerly inside 2,048 rows, while SmolLM2-360M's, bound by the
+  host, keep their graphs.
 * **MoE layers** (`SparseMoE`): routing (softmax, top-k, normalisation) is one kernel, token-expert pairs are
   grouped by expert on the device in three, and the grouped kernels then run one program per block of an expert's
   rows; from 1,024 rows per expert on average (a large prefill chunk) each expert runs as one cuBLAS GEMM pair on

@@ -55,7 +55,7 @@ def test_rope_matches_apply_rotary_pos_emb(dtype, rot, decode):
     from turing.kernels.triton_fused_ops import rope
     torch.manual_seed(0)
     B, H, Hkv, D = 3, 12, 2, 128
-    L = 1 if decode else 7
+    L = 1 if decode else 37  # tiles of 16 positions at D = 128: two whole ones and a part
     fused = torch.randn(B, L, (H + 2 * Hkv) * D, device="cuda", dtype=dtype)  # q/k as views of a fused qkv
     q = fused[..., :H * D].view(B, L, H, D).transpose(1, 2)
     k = fused[..., H * D:(H + Hkv) * D].view(B, L, Hkv, D).transpose(1, 2)
