@@ -197,7 +197,13 @@ if HAS_TRITON:
             alpha = tl.exp(m_i - m_new)
             l_i = l_i * alpha + tl.sum(p, 1)
             if MODE == 1 and not IEEE:
-                acc = acc * alpha[:, None] + tl.dot((p * vsc[None, :]).to(q.dtype), vc.to(q.dtype))
+                # p * scale goes into the product in 16 bits: divided by its largest value in the block first, or
+                # fp16 would round the small weights of a long context to zero (their keys and zero points would
+                # still count, their codes not)
+                w = p * vsc[None, :]
+                wmax = tl.max(w, 1)
+                wmax = tl.where(wmax > 0, wmax, 1.0)
+                acc = acc * alpha[:, None] + tl.dot((w / wmax[:, None]).to(q.dtype), vc.to(q.dtype)) * wmax[:, None]
                 zacc = zacc * alpha + tl.sum(p * vz[None, :], 1)
             elif MODE == 3 and not IEEE:
                 vb = tl.load(V + row[:, None] * D + offs_d[None, :], mask=valid[:, None], other=0)

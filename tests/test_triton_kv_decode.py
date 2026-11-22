@@ -72,6 +72,33 @@ def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, 
             torch.testing.assert_close(pool.kmin[0, c.pages[-1]], pool.kmin[0, r.pages[-1]], rtol=0, atol=0)
 
 
+def test_int8_pages_under_fp16_queries_keep_the_small_weights_of_a_long_context():
+    """16,000 tokens whose values span a small range, under scores a few units apart: most tokens' attention weight
+    times their value scale is below what fp16 holds. The path that puts the codes in the tensor-core products
+    still counts them (it scales each block's weights by their largest before the 16-bit product)."""
+    from turing.kernels.triton_kv_decode import triton_pool_decode
+    g = torch.Generator(device="cuda").manual_seed(4)
+    H, Hkv, D, T = 12, 2, 128, 16000
+    pool = KVPool(1, Hkv, D, T // PAGE + 8, torch.float16, "cuda", "int8")
+    c = KVCache(pool)
+    c.reserve(T + 1)
+    for s in range(0, T, 4000):
+        pool.append(0, c, torch.randn(1, Hkv, 4000, D, device="cuda", generator=g).half(),
+                    (0.02 * torch.randn(1, Hkv, 4000, D, device="cuda", generator=g)).half())
+        c.length = s + 4000
+    q = (3.0 * torch.randn(1, H, 1, D, device="cuda", generator=g)).half()  # scores with a standard deviation of 3
+    k = torch.randn(1, Hkv, 1, D, device="cuda", generator=g).half()
+    v = (0.02 * torch.randn(1, Hkv, 1, D, device="cuda", generator=g)).half()
+    rows = torch.tensor([[c.slot], [T]], dtype=torch.int32, device="cuda")
+    out = triton_pool_decode(pool, 0, q, k, v, rows[0], rows[1]).float()
+    c.length = T + 1
+    pool.dtype = torch.float32  # the reference dequantizes in fp32
+    kr, vr = pool.read(0, c, T + 1)
+    ref = F.scaled_dot_product_attention(q.double(), kr.double(), vr.double(), enable_gqa=True).float()
+    assert ref.abs().max() > 1e-3
+    torch.testing.assert_close(out, ref, atol=5e-5, rtol=0)
+
+
 # Families whose decode differs from Llama's in the kernel or the graph: sliding windows, soft-capping with a custom
 # scale (Gemma 2), two RoPE bases (Gemma 3), learned positions (GPT-2), partial rotary (Phi-2), MoE (OLMoE, no graphs).
 ARCH_CASES = [("llama", "native"), ("llama", "int8"), ("mistral_sliding", "native"), ("gemma2", "native"),

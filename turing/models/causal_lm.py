@@ -17,7 +17,7 @@ import torch.nn.functional as F
 
 from ..config import ModelConfig
 from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
-from ..core.kv_cache import KVCache, KVPool, KVPoolExhausted, kv_roundtrip
+from ..core.kv_cache import PAGE, KVCache, KVPool, KVPoolExhausted, kv_roundtrip
 try:  # the native extension: one packed 4-bit expert on the CPU (csrc/turing_w4_expert_cpu.hpp)
     from ..turing_csrc import w4_expert_cpu
 except ImportError:  # a build without it: offload copies missing experts in, as before
@@ -1220,13 +1220,17 @@ class PrefillGraphs:
         if self.seen[key] < 2 or (key not in self.graphs and len(self.graphs) >= self.MAX_GRAPHS):
             return None
         starts = row_starts(caches)
-        scratch = pool.scratch_slot() if r else 0  # before the stamp: its first use writes the page table
+        # the padding's pages are held for this forward only: each prompt keeps what it had, or what its tokens need
+        keep = [max(len(c.pages), -(-m // PAGE)) for c, m in zip(caches[:n], lens)]
         try:
+            scratch = pool.scratch_slot() if r else 0  # before the stamp: its first use writes the page table
             for c in caches[:n]:
                 c.reserve(b)
             for c, s in zip(caches[n:], starts[n:]):
                 c.reserve(s + 1)
         except KVPoolExhausted:
+            for c, pages in zip(caches[:n], keep):
+                c.trim(pages)
             return None
         stamp = (id(pool), pool.page_table.data_ptr())
         entry = self.graphs.get(key)
@@ -1251,6 +1255,8 @@ class PrefillGraphs:
                 self._capture(model, key, pool, entry)
             except BaseException as e:
                 del self.graphs[key]
+                for c, pages in zip(caches[:n], keep):
+                    c.trim(pages)
                 if not isinstance(e, torch.OutOfMemoryError):
                     raise
                 self._drop(key)  # no room for the graph's copy of the step's activations: the eager forward
@@ -1259,10 +1265,14 @@ class PrefillGraphs:
         trial = self.trial.get(key)
         if trial is None:
             graph.replay()
+            for c, pages in zip(caches[:n], keep):  # whoever takes these pages writes them after this replay does
+                c.trim(pages)
             return logits[0, :n + riding].clone()  # the next replay overwrites the static output
         torch.cuda.synchronize()  # the caller reads the logits next, so the waits cost nothing
         t = time.perf_counter()
         graph.replay()
+        for c, pages in zip(caches[:n], keep):
+            c.trim(pages)
         out = logits[0, :n + riding].clone()
         torch.cuda.synchronize()
         trial.append((time.perf_counter() - t) * 1e3)

@@ -320,7 +320,8 @@ class KVPool:
         """A page-table row with one page of its own, for the padding rows of a CUDA-graph decode step (they write and
         read only there). Reserved on first use."""
         if getattr(self, "_scratch", None) is None:
-            slot, page = self.new_slot(), self.alloc_pages(1)[0]
+            page = self.alloc_pages(1)[0]  # before the row: a full pool raises here and loses nothing
+            slot = self.new_slot()
             self.page_table[slot, 0] = page
             self._scratch = slot
         return self._scratch
@@ -503,6 +504,13 @@ class KVCache:
         # is the decode step the engine launched ahead
         row.copy_(ids.pin_memory(), non_blocking=True) if row.is_cuda else row.copy_(ids)
         self.pages += new
+
+    def trim(self, pages: int) -> None:
+        """Give back the pages after the first `pages`. Their page-table entries stay as they are: nothing reads
+        past the pages a cache holds, and the next reserve() writes them again."""
+        if len(self.pages) > pages:
+            self.pool.decref(self.pages[pages:])
+            del self.pages[pages:]
 
     def clone(self, share: bool = True) -> "KVCache":
         """share=True: full pages are shared copy-on-write and only the partial last page is copied (a fork);

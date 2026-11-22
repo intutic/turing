@@ -298,6 +298,7 @@ def test_a_step_of_several_prompts_and_decode_rows_replays_from_one_graph(arch, 
         for c in riders[-1:]:
             c.length = cached[-1] + 2
         assert [c.length for c in new] == list(lens)
+        assert [len(c.pages) for c in new] == [-(-n // 16) for n in lens]  # the padding's pages are given back
         for c in new[:1] + riders[:1]:  # decode steps overwrite the padding's keys and values
             for _ in range(3):
                 out.append(model(torch.tensor([rand(1)], device="cuda"), past_key_values=c)[0][0, -1:])

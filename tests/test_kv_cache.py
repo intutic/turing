@@ -160,6 +160,28 @@ def test_page_table_takes_more_requests_than_its_first_rows_and_keeps_their_page
     assert pool.used_pages == 0
 
 
+def test_a_cache_gives_back_pages_and_a_full_pool_keeps_its_rows():
+    """trim() returns a cache's last pages (a prefill graph's padding) and reserve() takes pages again after it; the
+    scratch row of the graphs' padding rows costs a full pool nothing when it cannot be had."""
+    pool = KVPool(1, 1, 16, 4, torch.float32, "cpu")
+    c = KVCache(pool)
+    c.reserve(3 * PAGE)
+    kept = c.pages[:1]
+    c.trim(1)
+    assert c.pages == kept and pool.num_free_pages == 3
+    c.trim(2)  # holds fewer already: nothing to give back
+    assert c.pages == kept
+    c.reserve(4 * PAGE)
+    assert len(c.pages) == 4 and len(set(c.pages)) == 4 and pool.num_free_pages == 0
+    assert pool.page_table[c.slot, :4].tolist() == c.pages
+    rows = len(pool._free_slots)
+    with pytest.raises(KVPoolExhausted):
+        pool.scratch_slot()
+    assert len(pool._free_slots) == rows
+    c.free()
+    assert pool.page_table[pool.scratch_slot(), 0].item() in range(4) and pool.num_free_pages == 3
+
+
 def test_independent_copy_and_exhaustion():
     k, v = _kv(32)
     pool = _pool(pages=4)

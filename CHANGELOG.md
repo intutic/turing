@@ -58,6 +58,8 @@ All notable changes to this project are documented here. The format follows
   tensor-core products, each token's scale and zero are applied once, and a block's V tile is read together with
   its K tile. fp8 pages become fp16/bf16 values by moving bits, with the layer's scales applied to the scores and
   the output.
+- A prefill graph gives the pages of its padding back after each replay, and falls back to the eager forward
+  when the pool has no page for them or for the padding rows' scratch page.
 - `scripts/benchmark_e2e_generation.py` warms up with requests that end one after the other (a decode graph for
   every row count) and, when the warm-up prompts are shorter than the measured ones, with one prompt of the
   measured length for both engines, so no kernel is built inside the first measured batch.
