@@ -5,8 +5,9 @@ launches per layer.
 1. append: each (row, KV head, K or V) program writes this step's token into the row's page (page table lookup),
    quantized as the pool stores it, and for K updates the page's Quest min/max.
 2. decode: each (row, KV head, split) program serves the G query heads that share the KV head, walks the row's pages
-   (all of them, or a Quest list of logical pages), dequantizes in registers and runs an online softmax. Every row
-   splits its own length on the device, so the launch shape depends only on the batch, never on lengths.
+   (all of them, or a Quest list of logical pages), dequantizes in registers (int8 pages under fp16/bf16 queries are
+   not dequantized at all: their codes go into the products) and runs an online softmax. Every row splits its own
+   length on the device, so the launch shape depends only on the batch, never on lengths.
 3. reduce: merges the splits with a log-sum-exp.
 Dot products are fp32; quantization uses IEEE division and round-half-to-even, matching the reference path exactly.
 """
@@ -143,6 +144,14 @@ if HAS_TRITON:
         m_i = tl.full([BLOCK_G], -1.0e30, dtype=tl.float32)
         l_i = tl.zeros([BLOCK_G], dtype=tl.float32)
         acc = tl.zeros([BLOCK_G, D], dtype=tl.float32)
+        # int8 pages under fp16/bf16 queries are never dequantized: with k = c * s + z per token and KV head,
+        # q.k = s * (q.c) + z * sum(q) and sum_n p_n v_n = (p * s).c + sum_n p_n z_n, so the codes go into the
+        # tensor-core products as they are (0..255 is exact in both dtypes) and scale and zero are applied once per
+        # token. Per layer on an L4, 16 rows of 16K tokens: 0.60 ms against 0.70 dequantizing every value; 64 rows
+        # of 1K: 0.16 against 0.26 (pages in the model dtype: 1.08 and 0.30).
+        if MODE == 1 and not IEEE:
+            qsum = tl.sum(q.to(tl.float32), 1)
+            zacc = tl.zeros([BLOCK_G], dtype=tl.float32)
         for i0 in range(start, end, BLOCK_N):
             i = i0 + tl.arange(0, BLOCK_N)
             inside = i < end
@@ -154,11 +163,23 @@ if HAS_TRITON:
                 valid = inside
             page = tl.load(pt_row + lp, mask=valid, other=0).to(tl.int64)
             row = (page * HKV + h) * 16 + i % 16
-            k = _load_rows(K, KS, KZ, row, valid, offs_d, D, MODE, GROUP)
-            if IEEE:  # fp32 queries: IEEE fp32 products; fp16/bf16: tensor cores in that dtype, fp32 accumulation
-                s = tl.dot(q.to(tl.float32), tl.trans(k), input_precision="ieee") * sm_scale
+            if MODE == 1 and not IEEE:
+                kc = tl.load(K + row[:, None] * D + offs_d[None, :], mask=valid[:, None], other=0)
+                # the V tile is read with the K tile, before the first product, so both reads are in flight
+                # together: 16 rows of 16K tokens on an L4, 0.555 against 0.606 ms a layer (228 -> 249 GB/s). The
+                # same order did nothing for fp8 pages (0.635 against 0.633).
+                vc = tl.load(V + row[:, None] * D + offs_d[None, :], mask=valid[:, None], other=0)
+                vsc = tl.load(VS + row, mask=valid, other=0.0).to(tl.float32)
+                vz = tl.load(VZ + row, mask=valid, other=0.0).to(tl.float32)
+                ksc = tl.load(KS + row, mask=valid, other=0.0).to(tl.float32)
+                kz = tl.load(KZ + row, mask=valid, other=0.0).to(tl.float32)
+                s = (tl.dot(q, tl.trans(kc.to(q.dtype))) * ksc[None, :] + qsum[:, None] * kz[None, :]) * sm_scale
             else:
-                s = tl.dot(q, tl.trans(k.to(q.dtype))) * sm_scale
+                k = _load_rows(K, KS, KZ, row, valid, offs_d, D, MODE, GROUP)
+                if IEEE:  # fp32 queries: IEEE fp32 products; fp16/bf16: tensor cores in that dtype, fp32 accumulation
+                    s = tl.dot(q.to(tl.float32), tl.trans(k), input_precision="ieee") * sm_scale
+                else:
+                    s = tl.dot(q, tl.trans(k.to(q.dtype))) * sm_scale
             if SOFTCAP:  # Gemma 2: cap * tanh(s / cap)
                 s = softcap * libdevice.tanh(s / softcap)
             s = tl.where(valid[None, :], s, float("-inf"))
@@ -166,12 +187,18 @@ if HAS_TRITON:
             p = tl.exp(s - m_new[:, None])
             alpha = tl.exp(m_i - m_new)
             l_i = l_i * alpha + tl.sum(p, 1)
-            v = _load_rows(V, VS, VZ, row, valid, offs_d, D, MODE, GROUP)
-            if IEEE:
-                acc = acc * alpha[:, None] + tl.dot(p, v, input_precision="ieee")
+            if MODE == 1 and not IEEE:
+                acc = acc * alpha[:, None] + tl.dot((p * vsc[None, :]).to(q.dtype), vc.to(q.dtype))
+                zacc = zacc * alpha + tl.sum(p * vz[None, :], 1)
             else:
-                acc = acc * alpha[:, None] + tl.dot(p.to(q.dtype), v.to(q.dtype))
+                v = _load_rows(V, VS, VZ, row, valid, offs_d, D, MODE, GROUP)
+                if IEEE:
+                    acc = acc * alpha[:, None] + tl.dot(p, v, input_precision="ieee")
+                else:
+                    acc = acc * alpha[:, None] + tl.dot(p.to(q.dtype), v.to(q.dtype))
             m_i = m_new
+        if MODE == 1 and not IEEE:
+            acc = acc + zacc[:, None]
         if N_SPLITS == 1:  # nothing to merge: the output directly, and no reduce launch
             o = acc / tl.where(l_i > 0, l_i, 1.0)[:, None]
             tl.store(OUT + ((b * HKV + h) * G + offs_g)[:, None] * D + offs_d[None, :], o.to(OUT.dtype.element_ty),
@@ -295,7 +322,8 @@ def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tenso
                                      HKV=Hkv, D=D, MODE=mode, GROUP=INT4_GROUP, TRACK=pool.track_pages)
     if n_splits is None:  # one split (no reduce launch) once the batch alone fills the GPU
         n_splits = max(1, min(32, 256 // (B * Hkv)))
-    BLOCK_N = 64 if D <= 64 else 32  # fp32 K and V tiles must fit the L4's 99 KB of shared memory
+    # fp32 K and V tiles must fit the L4's 99 KB of shared memory; int8 codes under 16-bit queries are 16-bit tiles
+    BLOCK_N = 64 if D <= 64 or (mode == 1 and q.dtype != torch.float32) else 32
     BLOCK_G = max(16, triton.next_power_of_2(G))
     out = torch.empty(B, H, D, device=q.device, dtype=q.dtype)
     acc = torch.empty(B * Hkv * n_splits * G if n_splits > 1 else 1, D, device=q.device, dtype=torch.float32)

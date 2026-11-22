@@ -144,7 +144,7 @@ def test_decoding_requests_ride_in_the_prefill_forwards_of_a_burst(draft):
     from turing.models.hf_loader import RealHuggingFaceLoader
     from turing.serving.engine import ContinuousBatchEngine
     long = torch.randint(0, 128, (120,), generator=torch.Generator().manual_seed(7)).tolist()
-    a, b = len(PROMPT), len(PROMPT) - 3  # 38 and 35 tokens: the first step's 64 end inside the second prompt
+    a, b = len(PROMPT), len(PROMPT) - 3  # 38 and 35 tokens: the second prompt does not fit the first step's 64
 
     def run(ride, k, oracle=None):
         model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
@@ -170,12 +170,12 @@ def test_decoding_requests_ride_in_the_prefill_forwards_of_a_burst(draft):
         return outs, packed, decodes, engine
 
     ref, packed, decodes, _ = run(False, 0)
-    assert packed == [[a, 64 - a], [b - (64 - a), 128 - a - b]] and decodes[0] == 2  # a decode forward from step 2 on
+    # a prompt that fits a step starts the next one whole; the long one takes what is left of each step's 64
+    assert packed == [[b, 64 - b]] and decodes[0] == 1  # a decode forward from step 2 on
     outs, packed, decodes, engine = run(True, draft, ref[0] if draft else None)
     r1, r2 = (1 + draft, 2 * (1 + draft))  # rows of the first request alone, and of both
-    assert packed == [[a, 64 - a], [b - (64 - a), 128 - a - b] + [1] * r1, [64] + [1] * r2,
-                      [120 - (128 - a - b) - 64] + [1] * r2]
-    assert decodes[0] == 4  # none until the prompts are in
+    assert packed == [[b, 64 - b] + [1] * r1, [64] + [1] * r2, [120 - (64 - b) - 64] + [1] * r2]
+    assert decodes[0] == 3  # none until the prompts are in
     assert outs == ref
     assert engine.spec_accepted >= 3 * draft and engine.spec_drafted > engine.spec_accepted or not draft
 
@@ -231,7 +231,7 @@ def test_prefill_graph_matches_the_eager_forward(arch):
         runs = []
         for use in (False, True):
             model.config.cuda_graphs = use
-            graphs.seen[PrefillGraphs.bucket(n)] = 1  # as if the bucket had been used once: capture now
+            graphs.seen[(1, PrefillGraphs.bucket(n), 0)] = 1  # as if the bucket had been used once: capture now
             cache = KVCache(pool)
             out = [model(ids[:, :n], past_key_values=cache, logits_to_keep=1)[0][0, -1]]
             assert cache.length == n
@@ -239,13 +239,13 @@ def test_prefill_graph_matches_the_eager_forward(arch):
                 out.append(model(ids[:, t:t + 1], past_key_values=cache)[0][0, -1])
             runs.append((torch.stack(out), [x.clone() for x in pool.read(0, cache, cache.length)], cache))
         (eager, kv_e, _), (graph, kv_g, _) = runs
-        assert PrefillGraphs.bucket(n) in graphs.graphs
+        assert (1, PrefillGraphs.bucket(n), 0) in graphs.graphs
         torch.testing.assert_close(graph.float(), eager.float(), atol=2e-3, rtol=2e-3)
         for a, b in zip(kv_g, kv_e):
             torch.testing.assert_close(a.float(), b.float(), atol=2e-3, rtol=2e-3)
         for _, _, c in runs:
             c.free()
-    assert sorted(graphs.graphs) == [64, 128]  # one graph per bucket, whatever the prompts' lengths
+    assert sorted(graphs.graphs) == [(1, 64, 0), (1, 128, 0)]  # one graph per bucket, whatever the prompts' lengths
     # a graph reads its token-position tensors on every replay: had they been freed after the capture, these
     # allocations would now sit in their blocks
     junk = [torch.full((s,), 1 << 20, dtype=t, device="cuda") for s in (64, 128) for t in (torch.int32, torch.int64)
@@ -262,6 +262,73 @@ def test_prefill_graph_matches_the_eager_forward(arch):
     del junk
 
 
+@pytest.mark.parametrize("arch,storage", [("llama", "native"), ("qwen2_qkv_bias", "native"), ("gpt2", "native"),
+                                          ("mixtral", "native"), ("llama", "int8"), ("qwen2_qkv_bias", "fp8")])
+@torch.no_grad()
+def test_a_step_of_several_prompts_and_decode_rows_replays_from_one_graph(arch, storage):
+    """PrefillGraphs on a burst step: prompts with no cached prefix (padded to the longest one's bucket) and the
+    decode rows of requests already generating (padded to a decode bucket, one of them listed twice as with a draft)
+    give each request the logits and the cache of the eager packed forward, and decoding goes on from them. With an
+    int8 or fp8 pool the prompts attend over what their pages give back, as the eager forward reads them."""
+    from tests.test_hf_parity import ARCHS, _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    if arch not in ARCHS:
+        pytest.skip(f"no tiny {arch} model in the parity set")
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny(arch), device="cuda")
+    model.config.kv_pool_gib, model.config.kv_cache_dtype = 0.05, storage
+    tol = dict(atol=2e-3, rtol=2e-3) if storage == "native" else dict(atol=2e-2, rtol=2e-2)  # a code may round apart
+    kv_tol = dict(atol=2e-2, rtol=0.13) if storage == "fp8" else tol  # by one E4M3 step: an eighth of the value
+    pool, graphs = model.kv_pool(), model._prefill_graphs
+    g = torch.Generator().manual_seed(13)
+    rand = lambda n: torch.randint(0, 128, (n,), generator=g).tolist()  # noqa: E731
+
+    def step(lens, cached, use):
+        """One packed step: prompts of `lens` tokens, then a decode row for each of `cached` (prompt tokens already
+        in a cache), the last request with a second row (a draft)."""
+        model.config.cuda_graphs = False
+        riders = []
+        for n in cached:
+            c = KVCache(pool)
+            model(torch.tensor([rand(n)], device="cuda"), past_key_values=c)
+            riders.append(c)
+        riders += riders[-1:]
+        model.config.cuda_graphs = use
+        new = [KVCache(pool) for _ in lens]
+        out = [model.prefill_packed([rand(n) for n in lens] + [rand(1) for _ in riders], new + riders, len(riders))]
+        for c in riders[-1:]:
+            c.length = cached[-1] + 2
+        assert [c.length for c in new] == list(lens)
+        for c in new[:1] + riders[:1]:  # decode steps overwrite the padding's keys and values
+            for _ in range(3):
+                out.append(model(torch.tensor([rand(1)], device="cuda"), past_key_values=c)[0][0, -1:])
+        kv = [x.clone() for c in new + riders[:-1] for x in pool.read(pool.num_layers - 1, c, c.length)]
+        for c in new + riders[:-1]:
+            c.free()
+        return torch.cat(out), kv
+
+    for lens, cached, key in (((40, 50, 61), (30, 17), (3, 64, 4)), ((90, 70), (), (2, 96, 0)), ((33,), (9,), (1, 64, 2))):
+        runs = []
+        for use in (False, True):
+            state = g.get_state()
+            graphs.seen[key] = 1  # as if the shape had been used once: capture now
+            runs.append(step(lens, cached, use))
+            if not use:
+                g.set_state(state)  # the same tokens for the graph
+        assert key in graphs.graphs
+        (eager, kv_e), (graph, kv_g) = runs
+        torch.testing.assert_close(graph.float(), eager.float(), **tol)
+        for a, b in zip(kv_g, kv_e):
+            torch.testing.assert_close(a.float(), b.float(), **kv_tol)
+        again, _ = step(lens, cached, True)  # a replay, other tokens
+        assert again.shape == eager.shape and torch.isfinite(again).all()
+    # prompts of unlike lengths (most of the step would be padding) and a prompt continuing a cache stay eager
+    model.config.cuda_graphs = True
+    assert graphs.step_key(model, [KVCache(pool), KVCache(pool)], [20, 90], 0) is None
+    c = KVCache(pool)
+    model(torch.tensor([rand(5)], device="cuda"), past_key_values=c)
+    assert graphs.step_key(model, [c, KVCache(pool)], [40, 40], 0) is None
+
+
 def test_prefill_graph_waits_for_a_bucket_s_second_use_and_skips_what_it_cannot_serve():
     from tests.test_hf_parity import _tiny
     from turing.models.hf_loader import RealHuggingFaceLoader
@@ -276,8 +343,9 @@ def test_prefill_graph_waits_for_a_bucket_s_second_use_and_skips_what_it_cannot_
         cache = KVCache(model.kv_pool())
         model(ids[:, :20], past_key_values=cache, logits_to_keep=1)
         model(ids[:, 20:], past_key_values=cache, logits_to_keep=1)  # a cached prefix: eager
-        assert sorted(model._prefill_graphs.graphs) == [64] and model._prefill_graphs.seen == {64: 3, 32: 1}
-    for arch, kv in (("gemma2", "native"), ("llama", "int8")):  # a sliding window and soft-capping; a low-bit pool
+        assert sorted(model._prefill_graphs.graphs) == [(1, 64, 0)]
+        assert model._prefill_graphs.seen == {(1, 64, 0): 3, (1, 32, 0): 1}
+    for arch, kv in (("gemma2", "native"), ("llama", "int4")):  # a sliding window and soft-capping; an int4 pool
         other = RealHuggingFaceLoader.convert_hf_model(_tiny(arch), device="cuda")
         other.config.kv_pool_gib, other.config.kv_cache_dtype = 0.02, kv
         with torch.no_grad():
@@ -300,15 +368,27 @@ def test_a_prefill_graph_no_faster_than_the_eager_forward_is_dropped_with_every_
     with torch.no_grad():
         eager = first(long)  # timed
         torch.testing.assert_close(first(long), eager, atol=2e-3, rtol=2e-3)  # captured; the first timed replay
-        assert 96 in graphs.graphs and len(graphs.trial[96]) == 2
-        graphs.trial[96][0] = 0.0  # as if the eager forward had taken no time: no replay beats that
+        key = (1, 96, 0)
+        assert key in graphs.graphs and len(graphs.trial[key]) == 2
+        graphs.trial[key][0] = 0.0  # as if the eager forward had taken no time: no replay beats that
         torch.testing.assert_close(first(long), eager, atol=2e-3, rtol=2e-3)  # the second replay: judged
-        assert 96 not in graphs.graphs and 96 not in graphs.trial and graphs.limit == 95
+        assert key not in graphs.graphs and key not in graphs.trial and graphs.limit == 95
         torch.testing.assert_close(first(long), eager, atol=2e-3, rtol=2e-3)  # eager from now on
-        assert 96 not in graphs.graphs and graphs.seen[96] == 3  # not even counted any more
+        assert key not in graphs.graphs and graphs.seen[key] == 3  # not even counted any more
         for _ in range(3):
             first(short)
-        assert sorted(graphs.graphs) == [64] and 64 not in graphs.trial  # a shorter bucket is still judged on its own
+        # a shorter bucket is still judged on its own
+        assert sorted(graphs.graphs) == [(1, 64, 0)] and (1, 64, 0) not in graphs.trial
+        # a step of several prompts of the dropped length stays eager too; a shorter one whose replay is no faster
+        # is dropped by itself
+        pair = lambda n: model.prefill_packed(  # noqa: E731
+            [torch.randint(0, 128, (n,), generator=g).tolist() for _ in range(2)], [KVCache(pool), KVCache(pool)])
+        assert graphs.step_key(model, [KVCache(pool), KVCache(pool)], [70, 70], 0) is None
+        pair(40), pair(40)
+        graphs.trial[(2, 64, 0)][0] = 0.0
+        pair(40)
+        assert (2, 64, 0) in graphs.dead and sorted(graphs.graphs) == [(1, 64, 0)] and graphs.limit == 95
+        assert graphs.step_key(model, [KVCache(pool), KVCache(pool)], [40, 40], 0) is None
 
 
 def test_int4_layers_with_a_cached_prefix_take_the_gather_path_and_the_rest_the_kernel():

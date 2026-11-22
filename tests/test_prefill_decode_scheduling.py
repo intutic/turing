@@ -54,6 +54,64 @@ def test_chunked_prefill_state_progression():
     asyncio.run(_run())
 
 
+def test_a_prompt_that_fits_a_step_is_not_split_over_two():
+    """With 16 prompt tokens a step, a 10-token prompt behind another waits for the next step instead of starting
+    with the 6 tokens left; a 40-token prompt (longer than a step) takes what is left of each step."""
+    async def _run():
+        engine = _create_mini_engine(chunk_size=16)
+        steps, forward, step = [], engine._forward, engine._step_batch
+
+        def spy(ids, *a, **kw):
+            if ids.shape[1] > 1:  # a prompt chunk
+                steps[-1].append(ids.shape[1])
+            return forward(ids, *a, **kw)
+
+        def mark():
+            steps.append([])
+            step()
+        engine._forward, engine._step_batch = spy, mark
+        reqs = [await engine.add_request(prompt_tokens=list(range(1, n + 1)), max_new_tokens=2, temperature=0.0)
+                for n in (10, 10, 40)]
+        await engine.start()
+        try:
+            for r in reqs:
+                async for _ in engine.stream_request(r):
+                    pass
+        finally:
+            await engine.stop()
+        assert [s for s in steps if s] == [[10], [10, 6], [16], [16], [2]]
+
+    asyncio.run(_run())
+
+
+def test_a_step_budget_above_one_forward_is_spent_over_several_steps():
+    """Forwards of 16 prompt tokens: with 16 a step the request already decoding takes a token beside every forward
+    of the long prompt; with 32 a step the prompt still moves 16 tokens a scheduler step and that request takes a
+    token with every second forward (the last of each budget)."""
+    async def _run(chunk):
+        engine = _create_mini_engine(chunk_size=chunk)
+        engine.FORWARD_TOKENS = 16
+        log, forward = [], engine._forward
+
+        def spy(ids, *a, **kw):
+            log.append(ids.shape[1] if ids.shape[1] > 1 else "d")  # a prompt chunk's tokens, or a decode forward
+            return forward(ids, *a, **kw)
+        engine._forward = spy
+        reqs = [await engine.add_request(prompt_tokens=list(range(1, n + 1)), max_new_tokens=m, temperature=0.0)
+                for n, m in ((3, 8), (64, 2))]
+        await engine.start()
+        try:
+            for r in reqs:
+                async for _ in engine.stream_request(r):
+                    pass
+        finally:
+            await engine.stop()
+        return log
+
+    assert asyncio.run(_run(16))[:9] == [3, 13, 16, "d", 16, "d", 16, "d", 3]
+    assert asyncio.run(_run(32))[:9] == [3, 13, 16, "d", 16, 16, "d", 3, "d"]
+
+
 def test_interleaved_prefill_decode_scheduling():
     """Verifies that an incoming 64-token prefill interleaves with an active decoding request without starving it."""
     async def _run():

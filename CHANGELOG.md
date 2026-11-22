@@ -24,9 +24,11 @@ All notable changes to this project are documented here. The format follows
   the resident ones, which are kept in Marlin's layout when that extension is built; the experts used most become
   the resident ones. Such a model's decode step is captured as a chain of CUDA graphs with a stop for the host at
   each layer (`StepCuts`). Experts in the model dtype are copied in on demand.
-- Prefill graphs (`PrefillGraphs`): the first chunk of a prompt that arrives alone, up to 1,024 tokens, is replayed
-  from a CUDA graph of its length bucket, captured at the bucket's second use and kept only if it beats the eager
-  forward on that model and GPU. `scripts/benchmark_first_token.py` measures it.
+- Prefill graphs (`PrefillGraphs`): a prefill step whose prompts all start with no cached prefix, up to 1,024
+  tokens each, is replayed from a CUDA graph: a prompt that arrives alone, or a step of a burst (several prompts of
+  like lengths, plus the decode rows of the requests already generating). A graph is captured at its step shape's
+  second use and kept only if it beats the eager forward on that model and GPU.
+  `scripts/benchmark_first_token.py` measures one prompt alone.
 - `--kv-cache-dtype fp8`: KV pages in float8 E4M3 (the format of vLLM's fp8 cache), read in place by FlashInfer's
   prefill kernel and by the decode kernels, with the layer guard of the other low-bit formats. Opt-in; `auto`
   remains int8.
@@ -45,6 +47,16 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 - The decode step merges its attention splits in one load per query head instead of a loop over the splits, which
   took longer than the attention itself at batch 1.
+- A prompt that fits one prefill forward's budget is no longer split over two forwards: it starts the next one
+  whole if the rest of the current one's budget is too small (a longer prompt still takes what is left of each).
+  Whole prompts need no read of a cached prefix and their forwards can be replayed from a CUDA graph.
+- A prefill budget above 2,048 tokens (`ContinuousBatchEngine(prefill_chunk_size=...)`, the benchmarks'
+  `--prefill-chunk`) is spent over several scheduler steps of one 2,048-token forward each: a request gets its
+  first token after the forward that ends its prompt, and the requests already decoding take their next token with
+  the last forward of the budget. Before, the whole budget was one forward.
+- The decode kernel reads int8 KV pages under fp16/bf16 queries without dequantizing them: the codes go into the
+  tensor-core products, each token's scale and zero are applied once, and a block's V tile is read together with
+  its K tile.
 - A model with offloaded experts no longer launches its next decode step before reading the current one's tokens:
   its step waits for the host at every layer, so the overlap only delayed each token by a step.
 - `turing serve` warns at startup when the weights leave less GPU memory than twice the usual working reserve, where

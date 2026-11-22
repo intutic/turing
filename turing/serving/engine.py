@@ -156,6 +156,7 @@ class ContinuousBatchEngine:
         self.turing_config = turing_config or TuringConfig()
         self.device = self.turing_config.resolve_device()
         self.prefill_chunk_size = prefill_chunk_size
+        self._prefill_left = 0  # prompt tokens of the current step budget not yet prefilled (see _step_batch)
         self.tokenizer = tokenizer
         self.admission = admission
         self.lane_policy = lane_policy
@@ -372,6 +373,11 @@ class ContinuousBatchEngine:
         return req
 
     GROW = 32  # tokens of KV pages a decoding request takes at a time
+    # Prompt tokens in one prefill forward. A larger forward costs more per token (SmolLM2-360M on an L4, 1,024-token
+    # prompts: 21.5 ms a prompt two at a time, 25 eight at a time), needs working memory beyond the pool's reserve
+    # and cannot be replayed from a CUDA graph, so a larger step budget (--prefill-chunk) is spent in several
+    # forwards, one a scheduler step.
+    FORWARD_TOKENS = 2048
 
     def _try_reserve(self, req: AsyncSequenceRequest) -> bool:
         """Give req a cache with the pages of its prefill tokens (reusing cached prefix pages). False if the pool is
@@ -573,24 +579,40 @@ class ContinuousBatchEngine:
         self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
 
         with torch.inference_mode():
-            # Prefill: chunks of the prefilling requests, in priority order, until this step's token budget is spent
-            # (compute-bound); a request's chunk is its remaining prompt, capped by what is left of the budget
+            # Prefill: chunks of the prefilling requests, in priority order, until this forward's token budget is
+            # spent (compute-bound); a request's chunk is its remaining prompt, capped by what is left of the budget.
+            # A step budget above FORWARD_TOKENS is spent over several steps of one forward each: a request gets its
+            # first token after the forward that ends its prompt, and the decoding requests take their next token
+            # with the last forward of the budget only.
             prefill = [r for r in self.running_batch if r.state == RequestState.PREFILLING]
-            budget, work = None, []
+            budget, work, more = 0, [], False
+            if prefill:
+                if self._prefill_left <= 0:
+                    self._prefill_left = self.lane_policy.prefill_chunk_budget(prefill[0].lane) \
+                        if (self.lane_policy and prefill[0].lane) else self.prefill_chunk_size
+                budget = forward = min(self._prefill_left, self.FORWARD_TOKENS)
+                self._prefill_left -= forward
             for req in prefill:
-                if budget is None:
-                    budget = self.lane_policy.prefill_chunk_budget(req.lane) if (self.lane_policy and req.lane) \
-                        else self.prefill_chunk_size
                 if budget <= 0:
+                    break
+                if req.prefill_offset == 0 and budget < len(req.prefill_tokens) <= forward:
+                    # a prompt that fits a forward is not split over two: it starts the next one. Whole prompts need
+                    # no read of a cached prefix, and a forward of them can be replayed from a CUDA graph
+                    # (PrefillGraphs)
                     break
                 end = min(req.prefill_offset + budget, len(req.prefill_tokens))
                 budget -= end - req.prefill_offset
                 work.append((req, end))
+            if self._prefill_left > 0:  # prompt tokens are left after this forward: the budget goes on next step
+                ends = {id(r): e for r, e in work}
+                more = any(ends.get(id(r), r.prefill_offset) < len(r.prefill_tokens) for r in prefill)
+            if not more:
+                self._prefill_left = 0
             caches = [r.past_kv for r, _ in work]
             packs = (bool(work) and self.dist_driver is None and not any(r.adapter for r, _ in work)
                      and all(isinstance(c, KVCache) for c in caches)
                      and getattr(self.model, "can_pack_prefill", lambda _: False)(caches))
-            ride_plain, ride_spec, n_riding = self._riders(work) if packs else ([], [], 0)
+            ride_plain, ride_spec, n_riding = self._riders(work) if packs and not more else ([], [], 0)
             riders, ride_starts = self._rows(ride_plain, ride_spec)
             if packs and len(work) + len(riders) > 1:
                 # every chunk of this step in one forward (one set of GEMMs), attention per request
@@ -637,6 +659,9 @@ class ContinuousBatchEngine:
             first = {id(r) for r, e, _, _ in done if e >= len(r.prefill_tokens)} | {id(r) for r, _ in riders}
             decode = [r for r in self.running_batch if r.state == RequestState.DECODING and r.first_token_at is not None
                       and r.generated_tokens and id(r) not in first]
+            if more:  # they take their next token with the last forward of this budget
+                self._settle()
+                decode = []
             decode = self._grow(decode)
             now = time.perf_counter()
             if self._last_step is not None and decode and not work:  # a whole step: forward, host work, event loop

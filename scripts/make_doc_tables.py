@@ -45,8 +45,20 @@ def table(header, rows, align=None):
 
 # ---------------------------------------------------------------------------------------------- comparisons
 
+def _budget(r):
+    """Tokens a scheduler step takes in the row's run: Turing's prompt tokens between two tokens of a decoding
+    request, vLLM's max_num_batched_tokens (rows from before it was recorded ran with its LLM class's choice on an
+    L4, 8,192)."""
+    return r.get("prefill_chunk", 2048) if r["engine"] == "turing" else r.get("max_num_batched_tokens") or 8192
+
+
+def _own_budget(r):
+    """The row ran at its engine's own setting: 2,048 for Turing's engine, 8,192 for vLLM's LLM class on an L4."""
+    return r["engine"] not in ("turing", "vllm") or _budget(r) == (2048 if r["engine"] == "turing" else 8192)
+
+
 def t_vs_short():
-    rows = load("results_e2e_generation_cuda.json")
+    rows = [r for r in load("results_e2e_generation_cuda.json") if _own_budget(r)]
     batches = sorted({r["batch"] for r in rows})
     out = []
     for model in sorted({r["model"] for r in rows}):
@@ -68,7 +80,7 @@ def t_vs_4bit():
     q_l = {r["model"]: r for r in load("results_4bit_quality_llamacpp_cuda.json")}
 
     def tok(match, b):
-        r = [x for x in speed if match(x) and x["batch"] == b]
+        r = [x for x in speed if match(x) and x["batch"] == b and _own_budget(x)]
         return f"{r[0]['output_tok_per_s']:,.0f}" if r else "—"
 
     def gsm(r):
@@ -121,7 +133,7 @@ def _vs_kv_rows():
     lc = load("results_longctx_cuda.json")
 
     def sreq(match):
-        r = [x for x in lc if match(x) and x["batch"] == 128]
+        r = [x for x in lc if match(x) and x["batch"] == 128 and _own_budget(x)]
         return f"{r[0]['seconds'] / 128:.2f}" if r else "—"
     out = []
     for kv, label in (("native", "Turing bf16 (reference)"), ("int8", "Turing int8"), ("int4", "Turing int4")):
@@ -176,7 +188,7 @@ def t_validation():
 
 
 def t_longctx():
-    lc = load("results_longctx_cuda.json")
+    lc = [r for r in load("results_longctx_cuda.json") if _own_budget(r)]
     batches = sorted({r["batch"] for r in lc})
     keys = []
     for r in lc:
@@ -577,6 +589,30 @@ def t_first_token():
             got = {r["tokens"]: r for r in rows if r["model"] == model and r["prefill"] == variant}
             out.append([short(model), label, *[f"{got[n]['first_token_ms']:.1f}" if n in got else "—" for n in lengths]])
     return table(["Model", "Prefill", *[f"{n:,} tokens" for n in lengths]], out)
+
+
+def t_step_budget():
+    """Both engines at both step budgets (2,048: Turing's engine and vLLM's API server; 8,192: vLLM's LLM class on
+    an L4), on the bursts where the budget decides the first token: output tokens a second and the mean time to the
+    first token at the largest batch."""
+    out = []
+    for name, file, pick, kv in (
+            ("SmolLM2-360M, 1,024-token prompts", "results_e2e_generation_cuda.json",
+             lambda r: r["model"].endswith("SmolLM2-360M") and r["context"] == 1024, None),
+            ("SmolLM2-1.7B, 1,024-token prompts", "results_e2e_generation_cuda.json",
+             lambda r: r["model"].endswith("SmolLM2-1.7B") and r["context"] == 1024, None),
+            ("Qwen2.5-1.5B, 16K-token prompts, 1-byte KV", "results_longctx_cuda.json",
+             lambda r: r["context"] == 16384 and not r.get("kv_skip_layers")
+             and r.get("kv_page_budget", 1.0) == 1.0, {"turing": "int8", "vllm": "fp8"})):
+        rows = [r for r in load(file) if pick(r) and (kv is None or r["kv_cache_dtype"] == kv.get(r["engine"]))]
+        for budget in (2048, 8192):
+            for eng, label in (("vllm", "vLLM"), ("turing", "Turing")):
+                got = {r["batch"]: r for r in rows if r["engine"] == eng and _budget(r) == budget}
+                if got:
+                    r = got[max(got)]
+                    out.append([name, f"{budget:,}", label, max(got), f"{r['output_tok_per_s']:,.0f}",
+                                f"{r['mean_ttft_s']:.2f} s" if r.get("mean_ttft_s") else "not recorded"])
+    return table(["Workload", "Tokens per step", "Engine", "Requests at once", "Output tok/s", "Mean first token"], out)
 
 
 TABLES = {k[2:]: v for k, v in globals().items() if k.startswith("t_") and callable(v)}

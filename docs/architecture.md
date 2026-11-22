@@ -114,11 +114,16 @@ The kernels on the serving path run on CUDA only; on MPS and CPU, attention and 
   missing), so its step is captured as a chain of graphs sharing one memory pool, cut twice per layer (`StepCuts`):
   between two graphs the host reads the routing, launches the graph with the resident experts and computes the
   others on the CPU.
-* **Prefill graphs** (`PrefillGraphs`): the first chunk of a prompt that arrives alone, up to 1,024 tokens on a pool
-  in the model dtype, is padded to a length bucket (steps of 32 tokens to 512, 64 above) and replayed from a graph
-  captured at the bucket's second use; the eager forward of a short prompt is bound by Python's launches, not by
-  the device. A bucket's graph is kept only if its first two replays took under 90% of the eager forward's time;
-  otherwise that length and every longer one stay eager on this model and GPU.
+* **Prefill graphs** (`PrefillGraphs`): a prefill step whose prompts all start with no cached prefix, up to 1,024
+  tokens each on a pool in the model dtype: a prompt that arrives alone, or a step of a burst (several prompts,
+  plus the decode rows of the requests already generating). Every prompt is padded to the length bucket of the
+  longest (steps of 32 tokens to 512, 64 above), the decode rows to a decode-step bucket, and the step is replayed
+  from a graph captured at that shape's second use; the eager forward of short prompts is bound by Python's
+  launches, not by the device. A graph is kept only if its first two replays took under 90% of the eager forward's
+  time: otherwise a prompt alone of that length or longer stays eager on this model and GPU, in steps of any
+  shape, and another shape is dropped by itself. A step whose prompts differ so much in length that padding them
+  to the longest would make up over a quarter of it stays eager. The engine does not split a prompt that fits one forward's budget over
+  two, so the forwards of a burst are whole prompts.
 * **MoE layers** (`SparseMoE`): routing (softmax, top-k, normalisation) is one kernel, token-expert pairs are
   grouped by expert on the device in three, and the grouped kernels then run one program per block of an expert's
   rows; from 1,024 rows per expert on average (a large prefill chunk) each expert runs as one cuBLAS GEMM pair on

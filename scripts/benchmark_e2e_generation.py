@@ -92,9 +92,9 @@ def run_turing(a, batches):
         await engine.start()
         try:
             for B in batches:  # warm-up at this batch size: CUDA graph capture
-                # one prompt alone three times: its prefill graph is captured at its length's second use and judged
-                # on the two replays after it (PrefillGraphs), which the measured request would otherwise pay for
-                for _ in range(3 if B == 1 else 1):
+                # three times: a prefill step's graph is captured at its shape's second use and judged on the two
+                # replays after it (PrefillGraphs), which the measured requests would otherwise pay for
+                for _ in range(3):
                     await batch(prompts(tok, B, a.warmup_context or a.context, seed=99))
             for B in batches:
                 preempted = engine.preemptions
@@ -146,7 +146,11 @@ def run_vllm(a, batches):
     llm = LLM(a.model, dtype=a.dtype or "float16", kv_cache_dtype=kv, enable_prefix_caching=False,
               disable_log_stats=False,  # request metrics (first-token time) are recorded only with stats on
               **({"kv_cache_dtype_skip_layers": skip} if skip else {}),
+              **({"max_num_batched_tokens": a.max_num_batched_tokens} if a.max_num_batched_tokens else {}),
               max_model_len=a.context + a.new_tokens + 16, gpu_memory_utilization=a.gpu_memory_utilization)
+    # the tokens vLLM takes per scheduler step: unset, its LLM class picks by GPU (8,192 on an L4, where its API
+    # server would pick 2,048); Turing's engine takes --prefill-chunk prompt tokens (2,048) plus the decode rows
+    a.max_num_batched_tokens = llm.llm_engine.vllm_config.scheduler_config.max_num_batched_tokens
     capacity, kv_gib = None, None
     try:  # KV capacity vLLM allocated: blocks x block size, and its bytes from the model shape
         from transformers import AutoConfig
@@ -176,7 +180,8 @@ def run_vllm(a, batches):
                          seconds=round(secs, 3), output_tok_per_s=round(n / secs, 1),
                          mean_ttft_s=round(sum(ttft) / len(ttft), 4) if ttft else None, kv_cache_dtype=kv,
                          kv_capacity_tokens=capacity, kv_pool_gib=kv_gib, kv_skip_layers=skip,
-                         gpu_memory_utilization=a.gpu_memory_utilization))
+                         gpu_memory_utilization=a.gpu_memory_utilization,
+                         max_num_batched_tokens=a.max_num_batched_tokens))
         print(json.dumps(rows[-1]), flush=True)
     import vllm
     return rows, f"vllm {vllm.__version__}"
@@ -200,6 +205,8 @@ def main():
     ap.add_argument("--vllm-kv-cache-dtype", default=None, help="vllm: any kv_cache_dtype (int8_per_token_head, ...)")
     ap.add_argument("--kv-skip-layers", default="", help="vllm: layers kept out of the quantized cache, e.g. 0")
     ap.add_argument("--warmup-context", type=int, default=None, help="prompt length of the warm-up batches")
+    ap.add_argument("--max-num-batched-tokens", type=int, default=None,
+                    help="vllm: tokens per scheduler step (default: vLLM's own choice for its LLM class and the GPU)")
     ap.add_argument("--moe-expert-slots", type=float, default=None,
                     help="turing: MoE experts kept on the GPU per layer; the rest in host memory")
     ap.add_argument("--prefill-chunk", type=int, default=2048,
@@ -233,6 +240,9 @@ def main():
                                    and r.get("kv_page_budget", 1.0) == (a.kv_page_budget if a.engine == "turing" else 1.0)
                                    and r.get("quantization", "none") == (a.quantization if a.engine == "turing" else "none")
                                    and r.get("prefill_chunk", 2048) == (a.prefill_chunk if a.engine == "turing" else 2048)
+                                   # rows from before the field was recorded ran with vLLM's choice on an L4
+                                   and (a.engine == "turing"
+                                        or (r.get("max_num_batched_tokens") or 8192) == a.max_num_batched_tokens)
                                    and r.get("moe_expert_slots") == (a.moe_expert_slots if a.engine == "turing" else None)
                                    and r.get("quantize_lm_head", False) == (a.quantize_lm_head and a.engine == "turing")
                                    and r.get("activation_sparsity", 0.0) == (a.activation_sparsity

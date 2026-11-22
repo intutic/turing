@@ -614,14 +614,20 @@ class PackedPrefill:
             self.rider_splits = max(1, min(32, 256 // (size * self.pool.num_kv_heads)))
 
     @classmethod
-    def solo_chunk(cls, pool: KVPool, tokens: int, slots: torch.Tensor, last: torch.Tensor) -> "PackedPrefill":
-        """One chunk at positions 0 .. tokens - 1 with no cached prefix, described by device tensors only: slots
-        [tokens] int32 (its page-table row, repeated) and last [1] (the index of its last real token). Nothing in
-        the forward then depends on a host value, which is what a CUDA graph needs (PrefillGraphs)."""
+    def fresh(cls, pool: KVPool, n: int, b: int, slots: torch.Tensor, positions: torch.Tensor, last: torch.Tensor,
+              rows: Optional[torch.Tensor] = None) -> "PackedPrefill":
+        """n chunks of b tokens each at positions 0 .. b - 1 with no cached prefix, then decode rows, described by
+        device tensors only: slots [n * b] int32 (each token's page-table row), positions [n * b + rows] (the
+        chunks' part is fixed, the decode rows' part is rows[1]), last (the indices whose logits are wanted) and
+        rows [2, R] int32 (the decode rows' page-table rows and positions). Nothing in the forward then depends on
+        a host value, which is what a CUDA graph needs (PrefillGraphs)."""
         self = cls.__new__(cls)
-        self.pool, self.riders, self._freqs, self.last = pool, 0, {}, last
-        self.positions = torch.arange(tokens, device=pool.device)
-        self.solo = (slots, self.positions.to(torch.int32))
+        self.pool, self._freqs, self.last, self.positions = pool, {}, last, positions
+        self.solo = (slots, positions[:n * b].to(torch.int32), n, b)
+        self.riders = 0 if rows is None else rows.shape[1]
+        if self.riders:
+            self.rider_slots, self.rider_starts = rows[0], rows[1]
+            self.rider_splits = max(1, min(32, 256 // (self.riders * pool.num_kv_heads)))
         return self
 
     def freqs(self, rope) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -815,10 +821,26 @@ class SubspaceAttention(nn.Module):
         """Each request's slice of the packed chunk: append its K/V, attend over its pages -> [1, T, H * D]. The
         decode rows at the end (packed.riders) take the decode kernel, as in a step of their own."""
         pool, layer, R = packed.pool, self.layer_idx, packed.riders
-        if packed.solo is not None:  # no cached prefix: append, then plain causal attention over the chunk itself
-            triton_pool_append(pool, layer, None, k, v, *packed.solo)
-            out = self._attend(q, k, v, None, causal=True)
-            return out.transpose(1, 2).reshape(1, q.shape[2], self.num_heads * self.head_dim)
+        if packed.solo is not None:
+            # chunks of one padded length with no cached prefix (PrefillGraphs): append, then plain causal attention
+            # over each chunk by itself, as a batch; the decode rows after them take the decode kernel
+            slots, starts, n, b = packed.solo
+            T = n * b
+            if R:
+                qr, kr, vr = (x[0, :, T:].transpose(0, 1)[:, :, None] for x in (q, k, v))  # [R, heads, 1, D]
+                rode = triton_pool_decode(pool, layer, qr, kr, vr, packed.rider_slots, packed.rider_starts,
+                                          scale=self.scale, window=self.window or 0, softcap=self.softcap or 0.0,
+                                          n_splits=packed.rider_splits)
+                q, k, v = q[:, :, :T], k[:, :, :T], v[:, :, :T]
+            triton_pool_append(pool, layer, None, k, v, slots, starts)
+            storage = pool.layer_fields(layer, "k")[3]
+            if storage != "native":  # attend over what the layer's pages give back, as the eager forward reads them
+                k, v = kv_roundtrip(k, v, storage, pool.fp8_scales[layer] if storage == "fp8" else (1.0, 1.0))
+            qc, kc, vc = (x[0].unflatten(1, (n, b)).transpose(0, 1) for x in (q, k, v))  # [n, heads, b, D]
+            out = self._attend(qc, kc, vc, None, causal=True).transpose(1, 2).reshape(1, T, self.num_heads * self.head_dim)
+            if R:
+                out = torch.cat([out, rode.transpose(1, 2).reshape(1, R, self.num_heads * self.head_dim)], dim=1)
+            return out
         n = len(packed.caches) - R
         caches, offsets, lens, starts = packed.caches[:n], packed.offsets[:n], packed.lens[:n], packed.starts[:n]
         outs = []
@@ -1102,33 +1124,45 @@ class DecodeGraphs:
 
 
 class PrefillGraphs:
-    """CUDA graphs of the prefill of one prompt chunk with no cached prefix: a request's first chunk when it arrives
-    alone. The eager forward issues about 20 launches a layer from Python, which takes longer than the device needs
-    for a short prompt (one 512-token prompt on an L4: 37 ms on the host for 27 ms of device time on Qwen2.5-1.5B, 40
-    for 9 on SmolLM2-360M); a replay costs the device time.
+    """CUDA graphs of prefill steps whose prompts all start with no cached prefix: one prompt arriving alone, or a
+    step of a burst (several prompts' first chunks, plus the decode rows of the requests already generating). The
+    eager forward issues about 20 launches a layer from Python, and a packed step more for each prompt in it, which
+    takes longer than the device needs for short prompts (one 512-token prompt on an L4: 37 ms on the host for 27 ms
+    of device time on Qwen2.5-1.5B, 40 for 9 on SmolLM2-360M); a replay costs the device time.
 
-    One graph per chunk-length bucket. The chunk is padded to its bucket: a padding token costs a token's compute,
-    comes after every real token (causal attention never looks at it) and its keys and values land past the cache's
-    length, where the next tokens overwrite them. A bucket is captured at its second use, so one-off lengths do not
-    pay a capture (about one eager forward more), and all buckets share one memory pool (only one runs at a time).
-    The forward is SubspaceCausalLM._body on a PackedPrefill.solo_chunk: appends through the decode step's append
-    kernel and plain causal attention. Not with a low-bit or Quest pool, a sliding window or soft-capped scores,
-    length-dependent RoPE, LoRA, a draft head (it reads every position's states), or MoE layers that would sync."""
+    One graph per step shape (chunks, their padded length, decode rows padded to a decode bucket). Every chunk is
+    padded to the bucket of the longest: a padding token costs a token's compute, comes after every real token
+    (causal attention never looks at it) and its keys and values land past the cache's length, where the next tokens
+    overwrite them. A shape is captured at its second use, so one-off shapes do not pay a capture (about one eager
+    forward more), and all graphs share one memory pool (only one runs at a time). The forward is
+    SubspaceCausalLM._body on a PackedPrefill.fresh: appends through the decode step's append kernel, plain causal
+    attention over the chunks as a batch (over what an int8 or fp8 layer gives back for them), and the decode kernel
+    for the decode rows. Not with an int4 or Quest pool, a sliding window or soft-capped scores, length-dependent
+    RoPE, LoRA, a draft head (it reads every position's states), or MoE layers that would sync."""
 
     # Longer chunks are bound by the device: on an L4 a replay took the first token of a 64 / 512 / 1,024 / 2,048-token
     # prompt from 36 to 5 / 11 / 21 / 45 ms on SmolLM2-360M and from 34 / 35 / 63 / 130 to 16 / 30 / 62 / 130 ms on
     # Qwen2.5-1.5B, so graphs above 1,024 tokens would cost their captures and memory for under 1%.
     MAX_TOKENS = 1024
+    # A step of more prompt tokens is bound by the device whatever its shape (64 prompts of 1,024 tokens on
+    # SmolLM2-360M, two a step: 49.6 ms eager, 47 from a graph), and its graph would hold a second copy of the
+    # step's activations: at 8,192 tokens a step that ran SmolLM2-1.7B out of memory beside a full KV pool.
+    MAX_STEP_TOKENS = 2048
+    MAX_GRAPHS = 48  # each holds its step's activations in the shared pool's address space and a few MB of launches
+    FILL = 0.75  # chunks of unlike lengths stay eager when they fill less than this of n times the longest
+    KEEP = 0.9
 
     def __init__(self):
-        self.graphs = {}  # bucket -> (key, graph, ids, slots, last, logits)
-        self.seen = {}  # bucket -> eligible chunks so far
+        self.graphs = {}  # (chunks, bucket, decode rows) -> [pool stamp, graph, static inputs, logits, PackedPrefill]
+        self.seen = {}  # step shape -> eligible steps so far
         self.pool = None  # the graphs' shared memory pool
-        # A graph has to earn its place: a bucket's eager forward is timed at its first use and its first two
-        # replays after it; if the faster replay took more than KEEP of the eager time, that length is bound by the
-        # device on this model and GPU (an 8B model on an L4 at any length), and it and every longer one stay eager.
-        self.trial = {}  # bucket -> [eager ms, replay ms, ...] until judged
+        # A graph has to earn its place: a shape's eager forward is timed at its first use and its first two replays
+        # after it; if the faster replay took more than KEEP of the eager time, the device bounds that step on this
+        # model and GPU. For one chunk alone (an 8B model on an L4 at any length) that length and every longer one
+        # then stay eager, in steps of any shape; another shape is dropped by itself.
+        self.trial = {}  # step shape -> [eager ms, replay ms, ...] until judged
         self.limit = self.MAX_TOKENS
+        self.dead = set()
 
     @staticmethod
     def bucket(tokens: int) -> int:
@@ -1136,12 +1170,11 @@ class PrefillGraphs:
         step = 32 if tokens <= 512 else 64
         return -(-tokens // step) * step
 
-    def eligible(self, model: "SubspaceCausalLM", cache: KVCache, tokens: int, logits_to_keep: int, lora: bool) -> bool:
+    def _ok(self, model: "SubspaceCausalLM", cache: KVCache, tokens: int) -> bool:
+        """What a graph over `tokens` positions needs of the model and the pool."""
         cfg, pool = model.config, cache.pool
-        if not (cfg.cuda_graphs and pool.device.type == "cuda" and cache.length == 0
-                and 1 < tokens and self.bucket(tokens) <= self.limit
-                and logits_to_keep == 1 and not lora and not torch.is_grad_enabled() and not model.aux_layers
-                and pool.kv_cache_dtype == "native" and not pool.track_pages):
+        if not (cfg.cuda_graphs and pool.device.type == "cuda" and not torch.is_grad_enabled() and not model.aux_layers
+                and pool.kv_cache_dtype != "int4" and not pool.track_pages):  # int4 keys are smoothed per layer
             return False
         w = model.embed_tokens.weight
         ok = model.__dict__.get("_prefill_graph_ok")
@@ -1150,81 +1183,143 @@ class PrefillGraphs:
                 model.can_pack_prefill([cache]) and pool_decode_supported(pool, w)
                 and not any(m.window is not None or m.softcap is not None
                             for m in model.modules() if isinstance(m, SubspaceAttention)))
-        return ok and all(layer.mlp.graph_safe(w, self.bucket(tokens))
+        return ok and all(layer.mlp.graph_safe(w, tokens)
                           for layer in model.layers if isinstance(layer.mlp, SparseMoE))
 
-    @torch.inference_mode()  # as DecodeGraphs: every capture and replay in one mode
-    def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, cache: KVCache) -> Optional[torch.Tensor]:
-        """Logits [1, 1, V] after the chunk input_ids [1, n], whose keys and values are in the cache (the caller
-        advances its length). None when this chunk takes the eager path: its bucket's first use, or no pages for the
-        padding."""
-        n, pool = input_ids.shape[1], cache.pool
-        b = self.bucket(n)
-        self.seen[b] = self.seen.get(b, 0) + 1
-        if self.seen[b] < 2:
+    def eligible(self, model: "SubspaceCausalLM", cache: KVCache, tokens: int, logits_to_keep: int, lora: bool) -> bool:
+        """One chunk alone (its step shape is (1, bucket(tokens), 0))."""
+        return (cache.length == 0 and 1 < tokens and self.bucket(tokens) <= self.limit and logits_to_keep == 1
+                and not lora and self._ok(model, cache, self.bucket(tokens)))
+
+    def step_key(self, model: "SubspaceCausalLM", caches: List[KVCache], lens: List[int], riders: int) -> Optional[tuple]:
+        """The shape of a packed step (prefill_packed's arguments) if a graph can serve it, else None: every chunk
+        starts an empty cache and the chunks are of like lengths."""
+        n = len(caches) - riders
+        if n < 1 or min(lens[:n]) < 2 or any(c.length for c in caches[:n]):
             return None
+        b = self.bucket(max(lens[:n]))
+        r = next((x for x in DecodeGraphs.BUCKETS if x >= riders), None) if riders else 0
+        key = (n, b, r)
+        if r is None or b > self.limit or n * b > self.MAX_STEP_TOKENS or key in self.dead \
+                or sum(lens[:n]) < self.FILL * n * max(lens[:n]) \
+                or not self._ok(model, caches[0], n * b + r):
+            return None
+        return key
+
+    @torch.inference_mode()  # as DecodeGraphs: every capture and replay in one mode
+    def run(self, model: "SubspaceCausalLM", key: tuple, tokens, caches: List[KVCache],
+            lens: List[int]) -> Optional[torch.Tensor]:
+        """Logits [chunks + decode rows, V] of the step of shape `key`: caches' first key[0] entries are empty and
+        take chunks of lens tokens, the rest are decode rows (a cache listed again: row_starts). tokens is one
+        chunk as a device tensor [1, n], or every chunk's and row's list of ids. The keys and values are then in the
+        caches (the caller advances their lengths). None when the step takes the eager path: its shape's first use,
+        no room for another graph, or no pages for the padding."""
+        n, b, r = key
+        pool, riding = caches[0].pool, len(caches) - n
+        self.seen[key] = self.seen.get(key, 0) + 1
+        if self.seen[key] < 2 or (key not in self.graphs and len(self.graphs) >= self.MAX_GRAPHS):
+            return None
+        starts = row_starts(caches)
+        scratch = pool.scratch_slot() if r else 0  # before the stamp: its first use writes the page table
         try:
-            cache.reserve(b)
+            for c in caches[:n]:
+                c.reserve(b)
+            for c, s in zip(caches[n:], starts[n:]):
+                c.reserve(s + 1)
         except KVPoolExhausted:
             return None
-        key = (id(pool), pool.page_table.data_ptr())
-        entry = self.graphs.get(b)
-        if entry is None or entry[0] != key:
-            entry = self._capture(model, b, pool, key, cache.slot)
-        _, graph, ids, slots, last, logits, _ = entry
-        ids[0, :n].copy_(input_ids[0])
-        slots.fill_(cache.slot)
-        last.fill_(n - 1)
-        trial = self.trial.get(b)
+        stamp = (id(pool), pool.page_table.data_ptr())
+        entry = self.graphs.get(key)
+        if entry is None or entry[0] != stamp:
+            entry = self.graphs[key] = [stamp, None, self._inputs(key, pool.device), None, None]
+        ids, slots, positions, last, rows = entry[2]
+        dev = pool.device
+        if torch.is_tensor(tokens):
+            ids[0, :lens[0]].copy_(tokens[0])
+        else:
+            flat = [t for x in tokens[:n] for t in x + [0] * (b - len(x))] + [x[0] for x in tokens[n:]]
+            ids[0, :len(flat)].copy_(torch.tensor(flat, device=dev))
+        slots.view(n, b).copy_(torch.tensor([[c.slot] for c in caches[:n]], dtype=torch.int32, device=dev))
+        last[:n].copy_(torch.tensor([i * b + m - 1 for i, m in enumerate(lens[:n])], device=dev))
+        if r:  # padding rows write and read the pool's scratch page
+            pad = r - riding
+            rows.copy_(torch.tensor([[c.slot for c in caches[n:]] + [scratch] * pad, starts[n:] + [0] * pad],
+                                    dtype=torch.int32, device=dev))
+            positions[n * b:].copy_(rows[1])
+        if entry[1] is None:
+            try:
+                self._capture(model, key, pool, entry)
+            except BaseException as e:
+                del self.graphs[key]
+                if not isinstance(e, torch.OutOfMemoryError):
+                    raise
+                self._drop(key)  # no room for the graph's copy of the step's activations: the eager forward
+                return None
+        graph, logits = entry[1], entry[3]
+        trial = self.trial.get(key)
         if trial is None:
             graph.replay()
-            return logits.clone()  # the next replay overwrites the static output
+            return logits[0, :n + riding].clone()  # the next replay overwrites the static output
         torch.cuda.synchronize()  # the caller reads the logits next, so the waits cost nothing
         t = time.perf_counter()
         graph.replay()
-        out = logits.clone()
+        out = logits[0, :n + riding].clone()
         torch.cuda.synchronize()
         trial.append((time.perf_counter() - t) * 1e3)
         if len(trial) == 3:
-            del self.trial[b]
+            del self.trial[key]
             if min(trial[1:]) > self.KEEP * trial[0]:
-                self.limit = min(self.limit, b - 1)
-                for longer in [x for x in self.graphs if x >= b]:
-                    del self.graphs[longer]
+                self._drop(key)
         return out
 
-    KEEP = 0.9
+    def _drop(self, key: tuple) -> None:
+        n, b, r = key
+        if (n, r) == (1, 0):
+            self.limit = min(self.limit, b - 1)
+        else:
+            self.dead.add(key)
+        for gone in [k for k in self.graphs if k == key or (n, r) == (1, 0) and k[1] >= b]:
+            del self.graphs[gone]
 
-    def time_eager(self, tokens: int) -> Optional[float]:
-        """Called before the eager forward of a chunk run() declined: the start time if this is its bucket's first
+    def time_eager(self, key: tuple) -> Optional[float]:
+        """Called before the eager forward of a step run() declined: the start time if this is its shape's first
         use (the forward is then timed, see eager_took), else None."""
-        if self.seen.get(self.bucket(tokens)) != 1:
+        if self.seen.get(key) != 1:
             return None
         torch.cuda.synchronize()
         return time.perf_counter()
 
-    def eager_took(self, tokens: int, since: float) -> None:
+    def eager_took(self, key: tuple, since: float) -> None:
         torch.cuda.synchronize()
-        self.trial[self.bucket(tokens)] = [(time.perf_counter() - since) * 1e3]
+        self.trial[key] = [(time.perf_counter() - since) * 1e3]
+
+    @staticmethod
+    def _inputs(key: tuple, device):
+        """A graph's static inputs: ids [1, T], each chunk token's page-table row [n * b], positions [T], the indices
+        whose logits are read [n + r] and the decode rows' page-table rows and positions [2, r] (None without)."""
+        n, b, r = key
+        positions = torch.cat([torch.arange(b).repeat(n), torch.zeros(r, dtype=torch.long)]).to(device)
+        last = torch.cat([torch.zeros(n, dtype=torch.long), n * b + torch.arange(r)]).to(device)
+        return (torch.zeros(1, n * b + r, dtype=torch.long, device=device),
+                torch.zeros(n * b, dtype=torch.int32, device=device), positions, last,
+                torch.zeros(2, r, dtype=torch.int32, device=device) if r else None)
 
     @torch.inference_mode()
-    def _capture(self, model: "SubspaceCausalLM", b: int, pool: KVPool, key, slot: int):
-        device = pool.device
+    def _capture(self, model: "SubspaceCausalLM", key: tuple, pool: KVPool, entry: list) -> None:
+        """Capture the step into entry; its inputs already hold the step that asked for it."""
         if self.pool is None:
             self.pool = torch.cuda.graph_pool_handle()
-        ids = torch.zeros(1, b, dtype=torch.long, device=device)
-        slots = torch.full((b,), slot, dtype=torch.int32, device=device)
-        last = torch.zeros(1, dtype=torch.long, device=device)
-        chunk = PackedPrefill.solo_chunk(pool, b, slots, last)
-        # warm-up (Triton compilation, allocator): it writes this request's reserved pages, as the replay will
+        ids, slots, positions, last, rows = entry[2]
+        chunk = PackedPrefill.fresh(pool, key[0], key[1], slots, positions, last, rows)
+        # warm-up (Triton compilation, allocator): it writes these requests' reserved pages, as the replay will
         model._body(ids, 0, None, None, packed=chunk)
         chunk._freqs = {}
+        torch.cuda.empty_cache()  # the capture allocates the step's activations again, in the graphs' pool
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph, pool=self.pool):
             logits = model._body(ids, 0, None, None, packed=chunk)
         # the chunk too: the graph reads its position tensors (RoPE, the append kernel) on every replay
-        self.graphs[b] = (key, graph, ids, slots, last, logits, chunk)
-        return self.graphs[b]
+        entry[1], entry[3], entry[4] = graph, logits, chunk
 
 
 class SubspaceCausalLM(nn.Module):
@@ -1355,11 +1450,18 @@ class SubspaceCausalLM(nn.Module):
         if dev.type == "cuda" and not self.__dict__.get("_projections_fused"):
             self.fuse_projections()
         lens = [len(x) for x in chunks]
-        for c, s, n in zip(caches, row_starts(caches), lens):
-            c.reserve(s + n)
-        packed = PackedPrefill(caches, lens, dev, riders)
-        ids = torch.tensor([[t for x in chunks for t in x]], dtype=torch.long, device=dev)
-        logits = self._body(ids, 0, None, None, packed=packed)[0]
+        graphs = self._prefill_graphs
+        shape = graphs.step_key(self, caches, lens, riders)  # a step of prompts with no cached prefix: a CUDA graph
+        logits = graphs.run(self, shape, chunks, caches, lens) if shape is not None else None
+        if logits is None:
+            timed = graphs.time_eager(shape) if shape is not None else None
+            for c, s, n in zip(caches, row_starts(caches), lens):
+                c.reserve(s + n)
+            packed = PackedPrefill(caches, lens, dev, riders)
+            ids = torch.tensor([[t for x in chunks for t in x]], dtype=torch.long, device=dev)
+            logits = self._body(ids, 0, None, None, packed=packed)[0]
+            if timed is not None:
+                graphs.eager_took(shape, timed)
         for c, n in zip(caches, lens):
             c.length += n
         return logits
@@ -1441,18 +1543,19 @@ class SubspaceCausalLM(nn.Module):
             start_pos = step.starts
         elif cache is not None:
             if self._prefill_graphs.eligible(self, cache, seq_len, logits_to_keep, lora):
-                logits = self._prefill_graphs.run(self, input_ids, cache)
+                shape = (1, PrefillGraphs.bucket(seq_len), 0)
+                logits = self._prefill_graphs.run(self, shape, input_ids, [cache], [seq_len])
                 if logits is not None:
                     cache.length += seq_len
-                    return logits, returned
-                timed = self._prefill_graphs.time_eager(seq_len)
+                    return logits[None], returned
+                timed = self._prefill_graphs.time_eager(shape)
             cache.reserve(cache.length + seq_len)
             start_pos = cache.length
         else:
             start_pos = 0
         logits = self._body(input_ids, start_pos, cache, step, logits_to_keep)
         if timed is not None:
-            self._prefill_graphs.eager_took(seq_len, timed)
+            self._prefill_graphs.eager_took(shape, timed)
         if step is not None:
             for c in step.caches:
                 c.length += 1
