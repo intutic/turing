@@ -1,0 +1,133 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "args": {
+    "models": "Qwen/Qwen2.5-1.5B-Instruct",
+    "arms": "exact_forward,exact_decode,int8,int8_decode,fp8,fp8_decode",
+    "context": 2048,
+    "decode": 256,
+    "windows": 8,
+    "device": "cuda",
+    "dtype": "bf16",
+    "out": "benchmarks/results/results_quality_kv_decode_instruct_bf16_cuda.json"
+  },
+  "text": "WikiText-2 raw test, consecutive windows",
+  "note": "L4 run of 2026-11-22 after the VM's restart at 10:48 UTC (temporary Spot g2-standard-16, torch 2.9.1+cu129), on the final session's code: the int8_decode and fp8_decode arms feed one token a step through the decode kernel",
+  "rows": [
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.0914467871189117,
+      "se": 0.21173773611486213,
+      "n": 8,
+      "seconds": 2.9752118039999687,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "exact_decode",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.091134637594223,
+      "se": 0.21223506195594785,
+      "n": 8,
+      "seconds": 28.053741092999985,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.0919479429721832,
+      "se": 0.21102933864892712,
+      "n": 8,
+      "seconds": 1.5699928200000386,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int8_decode",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.0912584960460663,
+      "se": 0.2108871717292227,
+      "n": 8,
+      "seconds": 27.76235166999993,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "fp8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.102601870894432,
+      "se": 0.20692961744717353,
+      "n": 8,
+      "seconds": 1.5146898539999256,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "fp8_decode",
+      "mode": "decode",
+      "metric": "nll",
+      "value": 2.10431706905365,
+      "se": 0.20741082950311418,
+      "n": 8,
+      "seconds": 27.86309949400004,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "exact_decode",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -0.0003121495246887207,
+      "se": 0.0011653824225047252,
+      "n": 8,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.0005011558532714844,
+      "se": 0.0013735562216318153,
+      "n": 8,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int8_decode",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": -0.00018829107284545898,
+      "se": 0.0011017865992916976,
+      "n": 8,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "fp8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.011155083775520325,
+      "se": 0.005287068095670235,
+      "n": 8,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "fp8_decode",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.01287028193473816,
+      "se": 0.0052391871225044165,
+      "n": 8,
+      "dtype": "bfloat16"
+    }
+  ]
+}

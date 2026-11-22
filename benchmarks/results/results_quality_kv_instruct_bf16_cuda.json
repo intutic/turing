@@ -1,0 +1,73 @@
+{
+  "env": {
+    "device": "cuda",
+    "torch": "2.9.1+cu129",
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "gpu": "NVIDIA L4"
+  },
+  "args": {
+    "models": "Qwen/Qwen2.5-1.5B-Instruct",
+    "arms": "exact_forward,int8,fp8",
+    "context": 2048,
+    "decode": 256,
+    "windows": 8,
+    "device": "cuda",
+    "dtype": "bf16",
+    "out": "benchmarks/results/results_quality_kv_instruct_bf16_r13_cuda.json"
+  },
+  "text": "WikiText-2 raw test, consecutive windows",
+  "note": "L4 session of 2026-11-22 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "rows": [
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "exact_forward",
+      "mode": "forward",
+      "metric": "nll",
+      "value": 2.0914467871189117,
+      "se": 0.21173773611486213,
+      "n": 8,
+      "seconds": 2.9655116610010737,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.0919479429721832,
+      "se": 0.21102933864892712,
+      "n": 8,
+      "seconds": 18.351748716002476,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "fp8",
+      "mode": "chunk",
+      "metric": "nll",
+      "value": 2.102601870894432,
+      "se": 0.20692961744717353,
+      "n": 8,
+      "seconds": 10.68415002799884,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "int8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.0005011558532714844,
+      "se": 0.0013735562216318153,
+      "n": 8,
+      "dtype": "bfloat16"
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "arm": "fp8",
+      "metric": "delta_nll_vs_exact_forward",
+      "value": 0.011155083775520325,
+      "se": 0.005287068095670235,
+      "n": 8,
+      "dtype": "bfloat16"
+    }
+  ]
+}

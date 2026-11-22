@@ -69,7 +69,10 @@ All notable changes to this project are documented here. The format follows
   154 / 181 / 205 ms, and 138 / 165 / 190 with the rows inside 2,048). A step that replays from a CUDA graph keeps
   its whole prompts (SmolLM2-360M: 41 ms from the graph, 58 eagerly either way), and a graph of a step past 2,048
   rows is now judged against the eager forward inside them. A forward that continues a prompt is filled with the
-  next prompt's first tokens instead of stopping at whole prompts.
+  next prompt's first tokens instead of stopping at whole prompts. SmolLM2-1.7B's mean first token in a burst of
+  64 prompts at 2,048 tokens a step went from 3.02 to 2.75 s (vLLM: 2.66). Where cuBLAS has no such step the rule
+  costs a little: the last prompts of a burst finish in one more small forward, and Qwen2.5-1.5B's 512-token rows
+  at batch 8 and 64 are 1–4% below the session before's.
 - In a prefill forward over pages FlashInfer reads in place (the model dtype, fp8), the decode rows are requests of
   one query each in a FlashInfer call of their own instead of the decode kernel's three launches a layer. A burst
   of 32 prompts of 16K tokens on Qwen2.5-1.5B with an fp8 cache spent 51.6 s in its prefill steps before and 50.0

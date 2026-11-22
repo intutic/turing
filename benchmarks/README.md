@@ -13,8 +13,9 @@ python scripts/make_doc_tables.py --check  # fail if any table differs from the 
 
 GPU results (`*_cuda.json`) come from one NVIDIA L4 (24 GB) on a Google Cloud `g2-standard-16`, PyTorch 2.9 with
 CUDA 12.9; vLLM 0.31 and llama.cpp ran on the same machine. It is a Spot VM: it was restarted twice during the
-session of 2026-11-21 and once during that of 2026-11-22, so rows of one table can come from different physical GPUs,
-and each file's `note` names the session its rows are from. `results_4bit_speed_no_marlin_cuda.json` is the 4-bit main row in a build without the
+session of 2026-11-21 and twice on 2026-11-22 (02:42 and 10:48 UTC), so rows of one table can come from different
+physical GPUs, and each file's `note` names the session its rows are from. The short-prompt, 512-token, 16K and
+4-bit MoE comparisons were measured again in one boot, both engines, after the second restart of 2026-11-22. `results_4bit_speed_no_marlin_cuda.json` is the 4-bit main row in a build without the
 Marlin extension. `*_mps.json` files come from an Apple M4 Pro.
 
 ## Reproducing the main comparison

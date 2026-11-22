@@ -8,9 +8,9 @@
     "lengths": "64,200,512,1024",
     "dtype": "fp16",
     "kv_cache_dtype": "int8",
-    "out": "benchmarks/results/results_first_token_int8_cuda.json"
+    "out": "benchmarks/results/results_first_token_int8_r14_cuda.json"
   },
-  "note": "L4 session of 2026-11-22 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "note": "L4 run of 2026-11-22 after the VM's restart at 10:48 UTC, on commit 195d0f0 (decode rows inside a forward's 2,048 rows, tiled RoPE, a prefill's decode rows through FlashInfer; temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
   "rows": [
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
@@ -19,11 +19,11 @@
       "tokens": 64,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 36.78,
+      "first_token_ms": 37.83,
       "n": 20,
       "pass_medians_ms": [
-        36.77,
-        36.86
+        37.6,
+        38.13
       ],
       "prompts_with_the_same_tokens": 11,
       "prompts": 12
@@ -35,11 +35,11 @@
       "tokens": 64,
       "prefill": "graph",
       "graph_tokens": 64,
-      "first_token_ms": 18.16,
+      "first_token_ms": 18.21,
       "n": 20,
       "pass_medians_ms": [
-        18.15,
-        18.18
+        18.21,
+        18.2
       ],
       "prompts_with_the_same_tokens": 11,
       "prompts": 12
@@ -51,11 +51,11 @@
       "tokens": 200,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 37.19,
+      "first_token_ms": 37.51,
       "n": 20,
       "pass_medians_ms": [
-        37.56,
-        37.01
+        37.63,
+        37.36
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -67,10 +67,10 @@
       "tokens": 200,
       "prefill": "graph",
       "graph_tokens": 224,
-      "first_token_ms": 23.04,
+      "first_token_ms": 23.01,
       "n": 20,
       "pass_medians_ms": [
-        23.01,
+        22.9,
         23.11
       ],
       "prompts_with_the_same_tokens": 12,
@@ -83,11 +83,11 @@
       "tokens": 512,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 41.15,
+      "first_token_ms": 42.08,
       "n": 20,
       "pass_medians_ms": [
-        41.55,
-        40.99
+        42.17,
+        41.81
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -99,11 +99,11 @@
       "tokens": 512,
       "prefill": "graph",
       "graph_tokens": 512,
-      "first_token_ms": 31.78,
+      "first_token_ms": 31.41,
       "n": 20,
       "pass_medians_ms": [
-        31.36,
-        32.23
+        31.27,
+        31.82
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -115,11 +115,11 @@
       "tokens": 1024,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 61.15,
+      "first_token_ms": 60.1,
       "n": 20,
       "pass_medians_ms": [
-        61.54,
-        60.92
+        59.85,
+        60.2
       ],
       "prompts_with_the_same_tokens": 11,
       "prompts": 12
@@ -131,10 +131,10 @@
       "tokens": 1024,
       "prefill": "graph",
       "graph_tokens": 1024,
-      "first_token_ms": 60.56,
+      "first_token_ms": 60.6,
       "n": 20,
       "pass_medians_ms": [
-        60.55,
+        60.0,
         60.84
       ],
       "prompts_with_the_same_tokens": 11,
@@ -147,11 +147,11 @@
       "tokens": 64,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 41.77,
+      "first_token_ms": 39.9,
       "n": 20,
       "pass_medians_ms": [
-        42.38,
-        41.6
+        39.62,
+        40.04
       ],
       "prompts_with_the_same_tokens": 11,
       "prompts": 12
@@ -163,10 +163,10 @@
       "tokens": 64,
       "prefill": "graph",
       "graph_tokens": 64,
-      "first_token_ms": 7.44,
+      "first_token_ms": 7.49,
       "n": 20,
       "pass_medians_ms": [
-        7.44,
+        7.51,
         7.45
       ],
       "prompts_with_the_same_tokens": 11,
@@ -179,11 +179,11 @@
       "tokens": 200,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 40.83,
+      "first_token_ms": 39.69,
       "n": 20,
       "pass_medians_ms": [
-        40.77,
-        40.84
+        39.75,
+        39.54
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -195,11 +195,11 @@
       "tokens": 200,
       "prefill": "graph",
       "graph_tokens": 224,
-      "first_token_ms": 8.85,
+      "first_token_ms": 8.63,
       "n": 20,
       "pass_medians_ms": [
-        8.83,
-        8.86
+        8.54,
+        8.69
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -211,11 +211,11 @@
       "tokens": 512,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 45.01,
+      "first_token_ms": 44.24,
       "n": 20,
       "pass_medians_ms": [
-        44.84,
-        45.02
+        43.84,
+        44.61
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -227,11 +227,11 @@
       "tokens": 512,
       "prefill": "graph",
       "graph_tokens": 512,
-      "first_token_ms": 13.35,
+      "first_token_ms": 12.56,
       "n": 20,
       "pass_medians_ms": [
-        13.33,
-        13.47
+        12.54,
+        12.68
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -243,11 +243,11 @@
       "tokens": 1024,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 45.81,
+      "first_token_ms": 45.31,
       "n": 20,
       "pass_medians_ms": [
-        45.34,
-        46.14
+        45.36,
+        45.1
       ],
       "prompts_with_the_same_tokens": 11,
       "prompts": 12
@@ -259,11 +259,11 @@
       "tokens": 1024,
       "prefill": "graph",
       "graph_tokens": 1024,
-      "first_token_ms": 24.64,
+      "first_token_ms": 22.96,
       "n": 20,
       "pass_medians_ms": [
-        24.62,
-        24.7
+        22.91,
+        23.03
       ],
       "prompts_with_the_same_tokens": 11,
       "prompts": 12
@@ -275,13 +275,13 @@
       "tokens": 64,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 30.09,
+      "first_token_ms": 32.19,
       "n": 20,
       "pass_medians_ms": [
-        29.88,
-        30.25
+        32.02,
+        32.38
       ],
-      "prompts_with_the_same_tokens": 11,
+      "prompts_with_the_same_tokens": 10,
       "prompts": 12
     },
     {
@@ -291,13 +291,13 @@
       "tokens": 64,
       "prefill": "graph",
       "graph_tokens": 64,
-      "first_token_ms": 20.29,
+      "first_token_ms": 20.24,
       "n": 20,
       "pass_medians_ms": [
-        20.21,
-        20.39
+        20.19,
+        20.29
       ],
-      "prompts_with_the_same_tokens": 11,
+      "prompts_with_the_same_tokens": 10,
       "prompts": 12
     },
     {
@@ -307,11 +307,11 @@
       "tokens": 200,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 31.72,
+      "first_token_ms": 32.48,
       "n": 20,
       "pass_medians_ms": [
-        31.76,
-        31.56
+        32.63,
+        32.37
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -323,11 +323,11 @@
       "tokens": 200,
       "prefill": "graph",
       "graph_tokens": 224,
-      "first_token_ms": 27.63,
+      "first_token_ms": 26.72,
       "n": 20,
       "pass_medians_ms": [
-        27.6,
-        27.68
+        26.59,
+        26.79
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -339,11 +339,11 @@
       "tokens": 512,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 41.92,
+      "first_token_ms": 40.62,
       "n": 20,
       "pass_medians_ms": [
-        41.65,
-        42.09
+        40.92,
+        40.62
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -355,11 +355,11 @@
       "tokens": 512,
       "prefill": "graph",
       "graph_tokens": 512,
-      "first_token_ms": 41.96,
+      "first_token_ms": 40.2,
       "n": 20,
       "pass_medians_ms": [
-        42.2,
-        41.9
+        39.93,
+        40.33
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -371,11 +371,11 @@
       "tokens": 1024,
       "prefill": "eager",
       "graph_tokens": null,
-      "first_token_ms": 79.17,
+      "first_token_ms": 75.92,
       "n": 20,
       "pass_medians_ms": [
-        79.46,
-        79.12
+        75.39,
+        76.72
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12
@@ -387,11 +387,11 @@
       "tokens": 1024,
       "prefill": "graph",
       "graph_tokens": 1024,
-      "first_token_ms": 79.21,
+      "first_token_ms": 76.46,
       "n": 20,
       "pass_medians_ms": [
-        79.18,
-        79.29
+        76.3,
+        76.65
       ],
       "prompts_with_the_same_tokens": 12,
       "prompts": 12

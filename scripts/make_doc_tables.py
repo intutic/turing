@@ -108,10 +108,20 @@ def t_vs_4bit():
     return table(head, [[n, tok(m, 1), tok(m, 8), *([tok(m, 64)] if big else []), gsm(q)] for n, m, q in arms])
 
 
+def _loads(*names):
+    """Rows of several results files; a later file's row replaces an earlier one's where the caller keys them."""
+    return [r for name in names for r in load(name)]
+
+
 def _turing_kv_quality():
-    g = {r["kv_cache_dtype"]: r for r in load("results_gsm8k_final_cuda.json")}
-    n = {r["kv_cache_dtype"]: r for r in load("results_niah_final_cuda.json")}
-    d = {r["arm"]: r for r in load("results_quality_instruct_bf16_cuda.json") if r["metric"] != "nll"}
+    """Qwen2.5-1.5B-Instruct in bf16 under each of Turing's caches. The 1-byte caches (int8, fp8) are the final
+    session's (2026-11-22); the reference and int4 are the speed plan's final session's."""
+    bf16 = lambda rows: [r for r in rows if r["dtype"] in ("bf16", "bfloat16")]  # noqa: E731
+    g = {r["kv_cache_dtype"]: r for r in bf16(_loads(
+        "results_gsm8k_final_cuda.json", "results_gsm8k_int8_cuda.json", "results_gsm8k_fp8_cuda.json"))}
+    n = {r["kv_cache_dtype"]: r for r in bf16(_loads("results_niah_final_cuda.json", "results_niah_kv_cuda.json"))}
+    d = {r["arm"]: r for r in _loads("results_quality_instruct_bf16_cuda.json",
+                                     "results_quality_kv_instruct_bf16_cuda.json") if r["metric"] != "nll"}
     return g, n, d
 
 
@@ -137,9 +147,10 @@ def _vs_kv_rows():
         r = [x for x in lc if match(x) and x["batch"] == 128 and _own_budget(x)]
         return f"{r[0]['seconds'] / 128:.2f}" if r else "—"
     out = []
-    for kv, label in (("native", "Turing bf16 (reference)"), ("int8", "Turing int8"), ("int4", "Turing int4")):
+    for kv, label in (("native", "Turing bf16 (reference)"), ("int8", "Turing int8"), ("fp8", "Turing fp8"),
+                      ("int4", "Turing int4")):
         delta = "—" if kv == "native" else pm(d[kv]["value"], d[kv]["se"])
-        out.append([label, "automatic" if kv == "int4" else "—", pct(g[kv]["exact_match"]), pct(n[kv]["accuracy"]),
+        out.append([label, "—" if kv == "native" else "automatic", pct(g[kv]["exact_match"]), pct(n[kv]["accuracy"]),
                     delta, sreq(lambda x, kv=kv: x["engine"] == "turing" and x["kv_cache_dtype"] == kv
                                 and x.get("kv_page_budget", 1.0) == 1.0)])
     for r in load("results_quality_vllm_cuda.json"):
@@ -211,9 +222,13 @@ def t_longctx():
 # ---------------------------------------------------------------------------------------------- Turing quality
 
 def t_kv_quality():
-    rows = [r for r in load("results_quality_cuda.json") if r["metric"] != "nll"]
+    """results_quality_kv_cuda.json is the final session's rerun of the 1-byte caches (2026-11-22); its int8 rows
+    replace the earlier ones."""
+    rows = list({(r["model"], r["arm"]): r for r in _loads("results_quality_cuda.json", "results_quality_kv_cuda.json")
+                 if r["metric"] != "nll"}.values())
     models = list(dict.fromkeys(r["model"] for r in rows))
-    labels = {"int8": "int8 KV", "int4": "int4 KV (smoothed, protected layers)", "int4_nosmooth": "int4 KV, no smoothing",
+    labels = {"int8": "int8 KV", "fp8": "fp8 KV", "int4": "int4 KV (smoothed, protected layers)",
+              "int4_nosmooth": "int4 KV, no smoothing",
               "quest25": "Quest, 25% of pages", "rtn4": "4-bit weights, RTN", "gptq4": "4-bit weights, GPTQ",
               "teal25": "TEAL 25% (decode)", "teal40": "TEAL 40% (decode)", "teal50": "TEAL 50% (decode)",
               "exact_decode": "token by token vs one pass (sanity)"}
@@ -227,25 +242,30 @@ def t_kv_quality():
 
 def t_gsm8k():
     out = []
-    for r in load("results_gsm8k_final_cuda.json"):
+    kv = {(r["kv_cache_dtype"], r["dtype"]): r for r in _loads(  # the final session's 1-byte rows replace the earlier int8 row
+        "results_gsm8k_final_cuda.json", "results_gsm8k_int8_cuda.json", "results_gsm8k_fp8_cuda.json")}
+    for r in kv.values():
         out.append([f"{r['kv_cache_dtype']} KV", r["dtype"], r["batch_size"], pct(r["exact_match"]) + f" ± {pct(r['stderr'])}"])
     for r in load("results_gsm8k_teal_cuda.json"):
         out.append([f"TEAL {r['activation_sparsity']:.0%}" if r["activation_sparsity"] else "native (TEAL baseline)",
                     r["dtype"], r["batch_size"], pct(r["exact_match"]) + f" ± {pct(r['stderr'])}" + f" (n={r['n']})"])
     for r in load("results_gsm8k_diag_cuda.json"):
+        if r["kv_smoothing"] and (r["kv_cache_dtype"], r["dtype"]) in kv:
+            continue  # measured again in the final session
         out.append([f"{r['kv_cache_dtype']} KV{'' if r['kv_smoothing'] else ', smoothing off'}", r["dtype"],
                     r["batch_size"], pct(r["exact_match"]) + f" ± {pct(r['stderr'])}"])
     return table(["Setting", "dtype", "Batch", "GSM8K exact match"], out)
 
 
 def t_niah():
-    rows = load("results_niah_final_cuda.json")
+    rows = list({(r["kv_cache_dtype"], r["dtype"]): r for r in _loads(  # the final session's 1-byte rows replace int8's
+        "results_niah_final_cuda.json", "results_niah_kv_cuda.json")}.values())
     ctxs = sorted({x["context_length"] for x in rows[0]["results"]})
     out = []
     for r in rows:
         by = {c: [x["found"] for x in r["results"] if x["context_length"] == c] for c in ctxs}
-        out.append([f"{r['kv_cache_dtype']} KV", *[f"{sum(v)}/{len(v)}" for v in by.values()], pct(r["accuracy"])])
-    return table(["KV cache", *[f"{c // 1024}K" for c in ctxs], "All"], out)
+        out.append([f"{r['kv_cache_dtype']} KV", r["dtype"], *[f"{sum(v)}/{len(v)}" for v in by.values()], pct(r["accuracy"])])
+    return table(["KV cache", "dtype", *[f"{c // 1024}K" for c in ctxs], "All"], out)
 
 
 def t_formats():
