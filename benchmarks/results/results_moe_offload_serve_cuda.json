@@ -3,7 +3,7 @@
     "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
     "runtime": "2.9.1+cu129"
   },
-  "note": "L4 session of 2026-11-21 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "note": "Mixtral-8x7B and llama.cpp: L4 session of 2026-11-22 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129); OLMoE: session of 2026-11-21",
   "rows": [
     {
       "engine": "turing",
@@ -297,6 +297,108 @@
         "8": 325.764
       },
       "quantize_lm_head": false,
+      "activation_sparsity": 0.0
+    },
+    {
+      "engine": "llama.cpp",
+      "model": "mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf",
+      "batch": 1,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 19.401,
+      "output_tok_per_s": 13.2,
+      "decode_tok_per_s": 14.61,
+      "gpu_layers": 26,
+      "runtime": "llama.cpp e6d624b"
+    },
+    {
+      "engine": "llama.cpp",
+      "model": "mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf",
+      "batch": 2,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 36.702,
+      "output_tok_per_s": 14.0,
+      "decode_tok_per_s": 15.43,
+      "gpu_layers": 26,
+      "runtime": "llama.cpp e6d624b"
+    },
+    {
+      "engine": "turing",
+      "model": "Mixtral-8x7B-Instruct-v0.1",
+      "batch": 1,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 18.64,
+      "output_tok_per_s": 13.7,
+      "mean_ttft_s": 1.0156,
+      "mean_ttft_from_submit_s": 1.0156,
+      "mean_ttft_from_arrival_s": 1.0156,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 11008,
+      "kv_pool_gib": 1.344,
+      "kv_native_layers": [],
+      "quantization": "w4a16-rtn",
+      "gpu_peak_gib": 21.014,
+      "prefill_chunk": 2048,
+      "ride_prefill": true,
+      "moe_expert_slots": 6.0,
+      "moe_offload": {
+        "slots_per_layer": 6.0,
+        "experts_per_layer": 8,
+        "hits": 119976,
+        "misses": 106,
+        "cpu": 31668,
+        "cpu_seconds": 104.589,
+        "hit_rate": 0.7906,
+        "streamed": 576
+      },
+      "preemptions": 0,
+      "engine_step_ms": {
+        "1": 69.086,
+        "2": 121.294
+      },
+      "quantize_lm_head": true,
+      "activation_sparsity": 0.0
+    },
+    {
+      "engine": "turing",
+      "model": "Mixtral-8x7B-Instruct-v0.1",
+      "batch": 2,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 30.995,
+      "output_tok_per_s": 16.5,
+      "mean_ttft_s": 1.267,
+      "mean_ttft_from_submit_s": 1.267,
+      "mean_ttft_from_arrival_s": 1.2667,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 11008,
+      "kv_pool_gib": 1.344,
+      "kv_native_layers": [],
+      "quantization": "w4a16-rtn",
+      "gpu_peak_gib": 21.014,
+      "prefill_chunk": 2048,
+      "ride_prefill": true,
+      "moe_expert_slots": 6.0,
+      "moe_offload": {
+        "slots_per_layer": 6.0,
+        "experts_per_layer": 8,
+        "hits": 142414,
+        "misses": 117,
+        "cpu": 37690,
+        "cpu_seconds": 126.227,
+        "hit_rate": 0.7902,
+        "streamed": 640
+      },
+      "preemptions": 0,
+      "engine_step_ms": {
+        "1": 69.086,
+        "2": 129.475
+      },
+      "quantize_lm_head": true,
       "activation_sparsity": 0.0
     }
   ]

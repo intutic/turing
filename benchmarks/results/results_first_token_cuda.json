@@ -1,0 +1,400 @@
+{
+  "env": {
+    "gpu": "NVIDIA L4",
+    "torch": "2.9.1+cu129"
+  },
+  "args": {
+    "models": "Qwen/Qwen2.5-1.5B-Instruct,HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B",
+    "lengths": "64,200,512,1024",
+    "dtype": "fp16",
+    "kv_cache_dtype": "native",
+    "out": "benchmarks/results/results_first_token_cuda.json"
+  },
+  "note": "L4 session of 2026-11-22 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "rows": [
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 64,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 31.97,
+      "n": 20,
+      "pass_medians_ms": [
+        32.25,
+        31.86
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 64,
+      "prefill": "graph",
+      "graph_tokens": 64,
+      "first_token_ms": 16.41,
+      "n": 20,
+      "pass_medians_ms": [
+        16.39,
+        16.43
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 200,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 32.94,
+      "n": 20,
+      "pass_medians_ms": [
+        32.74,
+        33.05
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 200,
+      "prefill": "graph",
+      "graph_tokens": 224,
+      "first_token_ms": 20.74,
+      "n": 20,
+      "pass_medians_ms": [
+        20.78,
+        20.7
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 512,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 33.33,
+      "n": 20,
+      "pass_medians_ms": [
+        33.22,
+        33.42
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 512,
+      "prefill": "graph",
+      "graph_tokens": 512,
+      "first_token_ms": 30.14,
+      "n": 20,
+      "pass_medians_ms": [
+        30.01,
+        30.23
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 1024,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 61.56,
+      "n": 20,
+      "pass_medians_ms": [
+        61.35,
+        61.69
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 1024,
+      "prefill": "graph",
+      "graph_tokens": 1024,
+      "first_token_ms": 60.55,
+      "n": 20,
+      "pass_medians_ms": [
+        60.34,
+        61.08
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 64,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 33.76,
+      "n": 20,
+      "pass_medians_ms": [
+        34.27,
+        33.28
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 64,
+      "prefill": "graph",
+      "graph_tokens": 64,
+      "first_token_ms": 5.44,
+      "n": 20,
+      "pass_medians_ms": [
+        5.45,
+        5.44
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 200,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 33.78,
+      "n": 20,
+      "pass_medians_ms": [
+        34.17,
+        33.52
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 200,
+      "prefill": "graph",
+      "graph_tokens": 224,
+      "first_token_ms": 6.67,
+      "n": 20,
+      "pass_medians_ms": [
+        6.63,
+        6.76
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 512,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 33.64,
+      "n": 20,
+      "pass_medians_ms": [
+        33.53,
+        33.69
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 512,
+      "prefill": "graph",
+      "graph_tokens": 512,
+      "first_token_ms": 10.66,
+      "n": 20,
+      "pass_medians_ms": [
+        10.62,
+        10.67
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 1024,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 34.1,
+      "n": 20,
+      "pass_medians_ms": [
+        34.12,
+        34.03
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 1024,
+      "prefill": "graph",
+      "graph_tokens": 1024,
+      "first_token_ms": 20.62,
+      "n": 20,
+      "pass_medians_ms": [
+        20.56,
+        20.83
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 64,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 26.51,
+      "n": 20,
+      "pass_medians_ms": [
+        26.6,
+        26.49
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 64,
+      "prefill": "graph",
+      "graph_tokens": 64,
+      "first_token_ms": 18.04,
+      "n": 20,
+      "pass_medians_ms": [
+        18.0,
+        18.1
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 200,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 27.32,
+      "n": 20,
+      "pass_medians_ms": [
+        27.37,
+        27.31
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 200,
+      "prefill": "graph",
+      "graph_tokens": 224,
+      "first_token_ms": 23.37,
+      "n": 20,
+      "pass_medians_ms": [
+        23.35,
+        23.42
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 512,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 40.76,
+      "n": 20,
+      "pass_medians_ms": [
+        40.38,
+        40.92
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 512,
+      "prefill": "graph",
+      "graph_tokens": 512,
+      "first_token_ms": 39.9,
+      "n": 20,
+      "pass_medians_ms": [
+        39.55,
+        40.16
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 1024,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 76.55,
+      "n": 20,
+      "pass_medians_ms": [
+        76.19,
+        76.76
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "native",
+      "tokens": 1024,
+      "prefill": "graph",
+      "graph_tokens": 1024,
+      "first_token_ms": 76.7,
+      "n": 20,
+      "pass_medians_ms": [
+        76.8,
+        76.51
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    }
+  ]
+}

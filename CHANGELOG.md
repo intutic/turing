@@ -14,9 +14,9 @@ All notable changes to this project are documented here. The format follows
   v0.31.0 like the dense one and built by the same `TURING_BUILD_MARLIN=1`). With it a layer keeps its experts on
   the GPU in Marlin's layout only (the packed buffers move to host memory) and runs every input size through it.
   Qwen1.5-MoE-A2.7B in 4 bits on an L4 (LM head in fp16) goes from 98 / 259 / 446 / 506 tok/s at batch 1 / 8 / 32 /
-  64 with the Triton kernels to 107 / 338 / 604 / 797, and its first token at batch 64 from 4.7 s to 2.0 s; with
-  the default 4-bit LM head it runs at 133 / 367 / 630 / 819 (vLLM on Qwen's GPTQ-Int4 checkpoint: 114 / 350 /
-  621 / 817).
+  64 with the Triton kernels to 109 / 342 / 609 / 803, and its first token at batch 64 from 4.7 s to 1.9 s; with
+  the default 4-bit LM head it runs at 136 / 369 / 633 / 824 (vLLM on Qwen's GPTQ-Int4 checkpoint: 116 / 354 /
+  629 / 828).
 - `--moe-expert-slots N`: MoE expert offload in the serving path. `N` experts per layer stay on the GPU (a fraction
   is an average over the layers), the rest in host memory; works with experts in the model dtype and in 4 bits.
   A 4-bit expert that is not on the GPU is computed on the CPU for decode steps of up to 8 rows
@@ -34,8 +34,8 @@ All notable changes to this project are documented here. The format follows
   remains int8.
 - `--draft-head`: speculative decoding with a published EAGLE-3 draft head (`turing/models/eagle3.py`). The head
   runs once per draft position for all drafting requests, and a request's chain is as long as its drafts are
-  likely to be reached by the target. Qwen3-8B on an L4 with chains of up to 5: 48.0 / 83.8 / 141.1 tok/s on code
-  prompts at 1 / 2 / 4 requests (16 and 28 without drafts at 1 and 2; vLLM with the same head 50.8 / 88.8 / 144.5).
+  likely to be reached by the target. Qwen3-8B on an L4 with chains of up to 5: 50.1 / 80.6 / 131.8 tok/s on code
+  prompts at 1 / 2 / 4 requests (16.5 / 26.5 / 46.3 without drafts; vLLM with the same head 50.6 / 82.3 / 134.9).
 - Overlapped decode on CUDA: the next decode step is launched before the host has read the current step's tokens.
 - `turing bench-bw` (also `turing doctor`) reports the device's read bandwidth and matmul rates and, with `--model`,
   the least time a batch-1 decode step can take; `--tune` measures the int4 kernel crossover on the GPU present.
@@ -82,7 +82,7 @@ All notable changes to this project are documented here. The format follows
 - Speculative decoding stops for a request while its drafts do not pay for the rows they add, measured from the
   engine's own step times over about 16 steps; prompt lookup uses an incremental n-gram index instead of scanning the sequence each step.
 - `--draft-tokens` defaults to 8 (it was 4): over code, rewrite and chat prompts at 1, 2 and 8 requests on an L4,
-  8 drafts gave 2.5x the plain rate (geometric mean) against 2.2x with 4, and at least 1.27x in every case.
+  8 drafts gave 2.4x the plain rate (geometric mean) against 2.1x with 4, and at least 1.27x in every case.
 - The prefill budget per scheduler step is 2,048 prompt tokens (1,024 and 512 for the batch and background lanes); it
   was 512 (256, 128).
 - With the Marlin extension built, 4-bit linear layers use it up to 4,096 rows (it was 1,024): prefill chunks of

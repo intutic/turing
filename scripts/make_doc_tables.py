@@ -89,6 +89,7 @@ def t_vs_4bit():
         ("llama.cpp Q4_K_M", lambda x: x["engine"] == "llama.cpp", q_l.get("qwen2.5-1.5b-instruct-q4_k_m.gguf", {}).get("gsm8k")),
         ("vLLM GPTQ-Int4 (Qwen's checkpoint)", lambda x: x["engine"] == "vllm" and x["model"].endswith("GPTQ-Int4"),
          q_v.get("Qwen/Qwen2.5-1.5B-Instruct-GPTQ-Int4", {}).get("gsm8k")),
+        ("vLLM AWQ (Qwen's checkpoint)", lambda x: x["engine"] == "vllm" and x["model"].endswith("-AWQ"), None),
         ("Turing GPTQ, fp16 LM head (`--no-quantize-lm-head`)",
          lambda x: x["engine"] == "turing" and x.get("quantization") == "w4a16-gptq"
          and not x.get("activation_sparsity") and not x.get("quantize_lm_head"), q_t.get(("w4a16-gptq", 0.0, False))),
@@ -580,37 +581,41 @@ def t_batch_sizes():
 
 
 def t_first_token():
-    """Time to the first token of one prompt arriving alone, by prompt length: eager prefill and PrefillGraphs."""
-    rows = load("results_first_token_cuda.json")
+    """Time to the first token of one prompt arriving alone, by prompt length: eager prefill and PrefillGraphs, with
+    pages in the model's dtype and in int8 (what `turing serve` uses on CUDA)."""
+    rows = load("results_first_token_cuda.json") + load("results_first_token_int8_cuda.json")
     lengths = sorted({r["tokens"] for r in rows})
     out = []
     for model in dict.fromkeys(r["model"] for r in rows):
-        for variant, label in (("eager", "eager"), ("graph", "CUDA graph")):
-            got = {r["tokens"]: r for r in rows if r["model"] == model and r["prefill"] == variant}
-            out.append([short(model), label, *[f"{got[n]['first_token_ms']:.1f}" if n in got else "—" for n in lengths]])
-    return table(["Model", "Prefill", *[f"{n:,} tokens" for n in lengths]], out)
+        for kv in dict.fromkeys(r["kv_cache_dtype"] for r in rows):
+            for variant, label in (("eager", "eager"), ("graph", "CUDA graph")):
+                got = {r["tokens"]: r for r in rows if (r["model"], r["kv_cache_dtype"], r["prefill"]) == (model, kv, variant)}
+                out.append([short(model), kv, label, *[f"{got[n]['first_token_ms']:.1f}" if n in got else "—" for n in lengths]])
+    return table(["Model", "KV cache", "Prefill", *[f"{n:,} tokens" for n in lengths]], out)
 
 
 def t_step_budget():
     """Both engines at both step budgets (2,048: Turing's engine and vLLM's API server; 8,192: vLLM's LLM class on
     an L4), on the bursts where the budget decides the first token: output tokens a second and the mean time to the
     first token at the largest batch."""
+    long = lambda r: r["context"] == 16384 and not r.get("kv_skip_layers") and r.get("kv_page_budget", 1.0) == 1.0  # noqa: E731
     out = []
-    for name, file, pick, kv in (
+    for name, file, pick, arms in (
             ("SmolLM2-360M, 1,024-token prompts", "results_e2e_generation_cuda.json",
-             lambda r: r["model"].endswith("SmolLM2-360M") and r["context"] == 1024, None),
+             lambda r: r["model"].endswith("SmolLM2-360M") and r["context"] == 1024, (("vllm", None), ("turing", None))),
             ("SmolLM2-1.7B, 1,024-token prompts", "results_e2e_generation_cuda.json",
-             lambda r: r["model"].endswith("SmolLM2-1.7B") and r["context"] == 1024, None),
-            ("Qwen2.5-1.5B, 16K-token prompts, 1-byte KV", "results_longctx_cuda.json",
-             lambda r: r["context"] == 16384 and not r.get("kv_skip_layers")
-             and r.get("kv_page_budget", 1.0) == 1.0, {"turing": "int8", "vllm": "fp8"})):
-        rows = [r for r in load(file) if pick(r) and (kv is None or r["kv_cache_dtype"] == kv.get(r["engine"]))]
+             lambda r: r["model"].endswith("SmolLM2-1.7B") and r["context"] == 1024, (("vllm", None), ("turing", None))),
+            ("Qwen2.5-1.5B, 16K-token prompts, 1-byte KV", "results_longctx_cuda.json", long,
+             (("vllm", "fp8"), ("turing", "int8"), ("turing", "fp8")))):
+        rows = [r for r in load(file) if pick(r)]
         for budget in (2048, 8192):
-            for eng, label in (("vllm", "vLLM"), ("turing", "Turing")):
-                got = {r["batch"]: r for r in rows if r["engine"] == eng and _budget(r) == budget}
+            for eng, kv in arms:
+                got = {r["batch"]: r for r in rows if r["engine"] == eng and _budget(r) == budget
+                       and (kv is None or r["kv_cache_dtype"] == kv)}
                 if got:
                     r = got[max(got)]
-                    out.append([name, f"{budget:,}", label, max(got), f"{r['output_tok_per_s']:,.0f}",
+                    out.append([name, f"{budget:,}", ("vLLM" if eng == "vllm" else "Turing") + (f" {kv}" if kv else ""),
+                                max(got), f"{r['output_tok_per_s']:,.0f}",
                                 f"{r['mean_ttft_s']:.2f} s" if r.get("mean_ttft_s") else "not recorded"])
     return table(["Workload", "Tokens per step", "Engine", "Requests at once", "Output tok/s", "Mean first token"], out)
 

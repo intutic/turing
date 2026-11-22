@@ -1,0 +1,400 @@
+{
+  "env": {
+    "gpu": "NVIDIA L4",
+    "torch": "2.9.1+cu129"
+  },
+  "args": {
+    "models": "Qwen/Qwen2.5-1.5B-Instruct,HuggingFaceTB/SmolLM2-360M,HuggingFaceTB/SmolLM2-1.7B",
+    "lengths": "64,200,512,1024",
+    "dtype": "fp16",
+    "kv_cache_dtype": "int8",
+    "out": "benchmarks/results/results_first_token_int8_cuda.json"
+  },
+  "note": "L4 session of 2026-11-22 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "rows": [
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 64,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 36.78,
+      "n": 20,
+      "pass_medians_ms": [
+        36.77,
+        36.86
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 64,
+      "prefill": "graph",
+      "graph_tokens": 64,
+      "first_token_ms": 18.16,
+      "n": 20,
+      "pass_medians_ms": [
+        18.15,
+        18.18
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 200,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 37.19,
+      "n": 20,
+      "pass_medians_ms": [
+        37.56,
+        37.01
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 200,
+      "prefill": "graph",
+      "graph_tokens": 224,
+      "first_token_ms": 23.04,
+      "n": 20,
+      "pass_medians_ms": [
+        23.01,
+        23.11
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 512,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 41.15,
+      "n": 20,
+      "pass_medians_ms": [
+        41.55,
+        40.99
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 512,
+      "prefill": "graph",
+      "graph_tokens": 512,
+      "first_token_ms": 31.78,
+      "n": 20,
+      "pass_medians_ms": [
+        31.36,
+        32.23
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 1024,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 61.15,
+      "n": 20,
+      "pass_medians_ms": [
+        61.54,
+        60.92
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 1024,
+      "prefill": "graph",
+      "graph_tokens": 1024,
+      "first_token_ms": 60.56,
+      "n": 20,
+      "pass_medians_ms": [
+        60.55,
+        60.84
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 64,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 41.77,
+      "n": 20,
+      "pass_medians_ms": [
+        42.38,
+        41.6
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 64,
+      "prefill": "graph",
+      "graph_tokens": 64,
+      "first_token_ms": 7.44,
+      "n": 20,
+      "pass_medians_ms": [
+        7.44,
+        7.45
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 200,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 40.83,
+      "n": 20,
+      "pass_medians_ms": [
+        40.77,
+        40.84
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 200,
+      "prefill": "graph",
+      "graph_tokens": 224,
+      "first_token_ms": 8.85,
+      "n": 20,
+      "pass_medians_ms": [
+        8.83,
+        8.86
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 512,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 45.01,
+      "n": 20,
+      "pass_medians_ms": [
+        44.84,
+        45.02
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 512,
+      "prefill": "graph",
+      "graph_tokens": 512,
+      "first_token_ms": 13.35,
+      "n": 20,
+      "pass_medians_ms": [
+        13.33,
+        13.47
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 1024,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 45.81,
+      "n": 20,
+      "pass_medians_ms": [
+        45.34,
+        46.14
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-360M",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 1024,
+      "prefill": "graph",
+      "graph_tokens": 1024,
+      "first_token_ms": 24.64,
+      "n": 20,
+      "pass_medians_ms": [
+        24.62,
+        24.7
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 64,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 30.09,
+      "n": 20,
+      "pass_medians_ms": [
+        29.88,
+        30.25
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 64,
+      "prefill": "graph",
+      "graph_tokens": 64,
+      "first_token_ms": 20.29,
+      "n": 20,
+      "pass_medians_ms": [
+        20.21,
+        20.39
+      ],
+      "prompts_with_the_same_tokens": 11,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 200,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 31.72,
+      "n": 20,
+      "pass_medians_ms": [
+        31.76,
+        31.56
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 200,
+      "prefill": "graph",
+      "graph_tokens": 224,
+      "first_token_ms": 27.63,
+      "n": 20,
+      "pass_medians_ms": [
+        27.6,
+        27.68
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 512,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 41.92,
+      "n": 20,
+      "pass_medians_ms": [
+        41.65,
+        42.09
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 512,
+      "prefill": "graph",
+      "graph_tokens": 512,
+      "first_token_ms": 41.96,
+      "n": 20,
+      "pass_medians_ms": [
+        42.2,
+        41.9
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 1024,
+      "prefill": "eager",
+      "graph_tokens": null,
+      "first_token_ms": 79.17,
+      "n": 20,
+      "pass_medians_ms": [
+        79.46,
+        79.12
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    },
+    {
+      "model": "HuggingFaceTB/SmolLM2-1.7B",
+      "dtype": "fp16",
+      "kv_cache_dtype": "int8",
+      "tokens": 1024,
+      "prefill": "graph",
+      "graph_tokens": 1024,
+      "first_token_ms": 79.21,
+      "n": 20,
+      "pass_medians_ms": [
+        79.18,
+        79.29
+      ],
+      "prompts_with_the_same_tokens": 12,
+      "prompts": 12
+    }
+  ]
+}

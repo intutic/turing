@@ -13,8 +13,8 @@ python scripts/make_doc_tables.py --check  # fail if any table differs from the 
 
 GPU results (`*_cuda.json`) come from one NVIDIA L4 (24 GB) on a Google Cloud `g2-standard-16`, PyTorch 2.9 with
 CUDA 12.9; vLLM 0.31 and llama.cpp ran on the same machine. It is a Spot VM: it was restarted twice during the
-session of 2026-11-21, so rows of one table can come from different physical GPUs, and each file's `note` names the
-session its rows are from. `results_4bit_speed_no_marlin_cuda.json` is the 4-bit main row in a build without the
+session of 2026-11-21 and once during that of 2026-11-22, so rows of one table can come from different physical GPUs,
+and each file's `note` names the session its rows are from. `results_4bit_speed_no_marlin_cuda.json` is the 4-bit main row in a build without the
 Marlin extension. `*_mps.json` files come from an Apple M4 Pro.
 
 ## Reproducing the main comparison
@@ -33,6 +33,12 @@ python scripts/benchmark_e2e_generation.py --engine vllm   --model $M $SP       
 python scripts/benchmark_e2e_generation.py --engine vllm   --model Qwen/Qwen2.5-1.5B-Instruct-GPTQ-Int4 $SP
 python scripts/benchmark_llamacpp.py bench --gguf qwen2.5-1.5b-instruct-q4_k_m.gguf --batches 1,8,64 --out $OUT
 ```
+
+Each engine runs at its own step budget unless told otherwise: Turing's engine takes 2,048 prompt tokens per forward,
+vLLM's `LLM` class 8,192 tokens per step on an L4. `--prefill-chunk 8192` (Turing) and `--max-num-batched-tokens 2048`
+(vLLM) give the other engine's budget; every row records the one it ran with. The comparison's step-budget table has
+SmolLM2-360M and SmolLM2-1.7B (`--context 1024 --batches 1,8,32,64`, `results_e2e_generation_cuda.json`) and the 16K
+rows below at both.
 
 GSM8K for the same settings (500 problems, 8-shot, greedy):
 
@@ -68,7 +74,8 @@ python scripts/eval_vllm_quality.py --help        # the same checks for vLLM's c
 | `scripts/benchmark_cold_start.py` | `results_cold_start_*.json` | Comparison |
 | `scripts/benchmark_e2e_generation.py --model allenai/OLMoE-1B-7B-0924-Instruct --dtype bf16`, `turing eval-accuracy` | `results_moe_speed_*.json`, `results_moe_gsm8k_*.json` | Benchmarks |
 | `turing convert --method gptq`, then `scripts/benchmark_e2e_generation.py --model <converted directory>` and `turing eval-accuracy` (Qwen1.5-MoE-A2.7B-Chat; vLLM on `Qwen/Qwen1.5-MoE-A2.7B-Chat-GPTQ-Int4`) | `results_moe_w4_speed*_cuda.json`, `results_moe_w4_gsm8k_cuda.json`, `results_moe_w4_quality*_cuda.json` | Benchmarks |
-| `scripts/benchmark_e2e_generation.py --moe-expert-slots N`, `turing eval-accuracy --moe-expert-slots N` | `results_moe_offload_serve_cuda.json`, `results_moe_offload_gsm8k_cuda.json` | Benchmarks |
+| `scripts/benchmark_e2e_generation.py --moe-expert-slots N`, `turing eval-accuracy --moe-expert-slots N`; for Mixtral-8x7B a 4-bit directory from `turing convert` with `--moe-expert-slots 6`, against `scripts/benchmark_llamacpp.py bench --ngl 26` on its Q4_K_M GGUF | `results_moe_offload_serve_cuda.json`, `results_moe_offload_gsm8k_cuda.json` | Benchmarks |
+| `scripts/benchmark_first_token.py` (`--kv-cache-dtype int8` for the pool `turing serve` uses on CUDA) | `results_first_token_cuda.json`, `results_first_token_int8_cuda.json` | Benchmarks |
 | `scripts/benchmark_e2e_generation.py --batches 12,24,48` | `results_batch_sizes_cuda.json` | Comparison |
 | `scripts/benchmark_moe_offload_olmoe.py` | `results_moe_offload_cuda.json` | Benchmarks |
 | `scripts/benchmark_ingest_ladder_all_tiers.py`, `scripts/benchmark_ring_reader_ab.py` | `results_ingest_ladder*.json`, `results_ring_reader_ab_mps.json` | Benchmarks |
