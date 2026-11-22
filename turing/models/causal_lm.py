@@ -591,6 +591,14 @@ class DecodeStep:
         return self._freqs[key]
 
 
+def host_tensor(values, dtype, device) -> torch.Tensor:
+    """Host values as a tensor on `device` without waiting for the kernels queued there: on CUDA through pinned
+    memory (a copy from pageable memory, which torch.tensor(..., device=) makes, waits for every one of them, and
+    with it for the step the engine launched ahead)."""
+    t = torch.as_tensor(values, dtype=dtype)
+    return t.pin_memory().to(device, non_blocking=True) if torch.device(device).type == "cuda" else t.to(device)
+
+
 class PackedPrefill:
     """Prompt chunks of several requests as one row of tokens [1, T] (speed plan P4.3): the linear layers, norms and
     MLPs run once over every chunk; attention appends and attends per request through the paged prefill kernel. Built
@@ -600,15 +608,16 @@ class PackedPrefill:
         self.pool, self.caches, self.lens = caches[0].pool, caches, lens
         self.starts = row_starts(caches)  # a rider's cache listed again: its drafts, at the positions after it
         self.offsets = [sum(lens[:i]) for i in range(len(lens))]
-        self.positions = torch.cat([torch.arange(s, s + n) for s, n in zip(self.starts, lens)]).to(device)
-        self.last = torch.tensor([o + n - 1 for o, n in zip(self.offsets, lens)], device=device)
+        self.positions = host_tensor(torch.cat([torch.arange(s, s + n) for s, n in zip(self.starts, lens)]),
+                                     torch.long, device)
+        self.last = host_tensor([o + n - 1 for o, n in zip(self.offsets, lens)], torch.long, device)
         self._freqs = {}
         self.solo = None
         # the last `riders` chunks are decode rows (one token each): the decode kernel appends and attends for them
         self.riders = riders
         if riders:
-            rows = torch.tensor([[c.slot for c in caches[-riders:]], self.starts[-riders:]], dtype=torch.int32)
-            self.rider_slots, self.rider_starts = rows.to(device)
+            self.rider_slots, self.rider_starts = host_tensor(
+                [[c.slot for c in caches[-riders:]], self.starts[-riders:]], torch.int32, device)
             # splits as a decode step of the next graph size up: no kernel build of its own for each row count
             size = next((b for b in DecodeGraphs.BUCKETS if b >= riders), riders)
             self.rider_splits = max(1, min(32, 256 // (size * self.pool.num_kv_heads)))
@@ -1214,11 +1223,13 @@ class PrefillGraphs:
                 or sum(lens[:n]) < self.FILL * n * max(lens[:n]) \
                 or not self._ok(model, caches[0], n * b + r):
             return None
+        if riders and n * b + riders > self.MAX_STEP_TOKENS and model.forward_rows()[1]:
+            return None  # a graph replays the slower kernels cuBLAS runs past that row count on this model
         return key
 
     @torch.inference_mode()  # as DecodeGraphs: every capture and replay in one mode
     def run(self, model: "SubspaceCausalLM", key: tuple, tokens, caches: List[KVCache],
-            lens: List[int]) -> Optional[torch.Tensor]:
+            lens: List[int], rider_ids: Optional[torch.Tensor] = None) -> Optional[torch.Tensor]:
         """Logits [chunks + decode rows, V] of the step of shape `key`: caches' first key[0] entries are empty and
         take chunks of lens tokens, the rest are decode rows (a cache listed again: row_starts). tokens is one
         chunk as a device tensor [1, n], or every chunk's and row's list of ids. The keys and values are then in the
@@ -1252,13 +1263,15 @@ class PrefillGraphs:
             ids[0, :lens[0]].copy_(tokens[0])
         else:
             flat = [t for x in tokens[:n] for t in x + [0] * (b - len(x))] + [x[0] for x in tokens[n:]]
-            ids[0, :len(flat)].copy_(torch.tensor(flat, device=dev))
-        slots.view(n, b).copy_(torch.tensor([[c.slot] for c in caches[:n]], dtype=torch.int32, device=dev))
-        last[:n].copy_(torch.tensor([i * b + m - 1 for i, m in enumerate(lens[:n])], device=dev))
+            ids[0, :len(flat)].copy_(host_tensor(flat, torch.long, dev))
+            if rider_ids is not None:
+                ids[0, n * b:n * b + riding].copy_(rider_ids)
+        slots.view(n, b).copy_(host_tensor([[c.slot] for c in caches[:n]], torch.int32, dev))
+        last[:n].copy_(host_tensor([i * b + m - 1 for i, m in enumerate(lens[:n])], torch.long, dev))
         if r:  # padding rows write and read the pool's scratch page
             pad = r - riding
-            rows.copy_(torch.tensor([[c.slot for c in caches[n:]] + [scratch] * pad, starts[n:] + [0] * pad],
-                                    dtype=torch.int32, device=dev))
+            rows.copy_(host_tensor([[c.slot for c in caches[n:]] + [scratch] * pad, starts[n:] + [0] * pad],
+                                   torch.int32, dev))
             positions[n * b:].copy_(rows[1])
         if entry[1] is None:
             try:
@@ -1309,11 +1322,9 @@ class PrefillGraphs:
         torch.cuda.synchronize()
         return time.perf_counter()
 
-    def eager_took(self, key: tuple, since: float, scale: float = 1.0) -> None:
-        """scale: 1 for the step's own eager forward at its first use; for a forward of fewer prompt tokens timed
-        in its place (prefill_packed), the step's tokens over that forward's."""
+    def eager_took(self, key: tuple, since: float) -> None:
         torch.cuda.synchronize()
-        self.trial[key] = [(time.perf_counter() - since) * 1e3 * scale]
+        self.trial[key] = [(time.perf_counter() - since) * 1e3]
 
     @staticmethod
     def _inputs(key: tuple, device):
@@ -1468,40 +1479,109 @@ class SubspaceCausalLM(nn.Module):
         (PrefillGraphs.step_key): caches as prefill_packed takes them, lens the prompt chunks' lengths."""
         return self._prefill_graphs.step_key(self, caches, lens + [1] * riders, riders) is not None
 
+    def forward_rows(self) -> Tuple[int, bool]:
+        """(rows, cliff) for an eager prefill forward of this model on this GPU, measured by calibrate_forward_rows:
+        the row count at which a forward of about 2,048 rows is cheapest per token (2,040 or 2,048), and whether a
+        forward past 2,048 rows costs over 5% more per token. (2,048, False) where it was not measured."""
+        return self.__dict__.get("_forward_rows") or (2048, False)
+
+    @staticmethod
+    def _rows_plan(us_2040: float, us_2048: float, us_2056: float) -> Tuple[int, bool]:
+        """forward_rows from the time per token of forwards of 2,040, 2,048 and 2,056 rows."""
+        return (2040 if us_2040 < 0.985 * us_2048 else 2048), us_2056 > 1.05 * us_2048
+
     @torch.inference_mode()
-    def prefill_packed(self, chunks: List[List[int]], caches: List[KVCache], riders: int = 0) -> torch.Tensor:
+    def calibrate_forward_rows(self, pool: KVPool) -> Tuple[int, bool]:
+        """Time eager prefill forwards of 2,040, 2,048 and 2,056 random tokens (one fresh prompt each; eight passes
+        over the three after a warm-up one, every other pass in reverse order, the median of each) and set
+        forward_rows. cuBLAS picks a GEMM's kernel
+        by its row count, and the best count differs by layer shape. Measured on an L4 (torch 2.9.1+cu129, fp16),
+        microseconds per token: SmolLM2-1.7B 68.9 up to 2,048 rows and 77.7 from 2,049 (other kernels for its
+        fused q/k/v and down projections); Qwen2.5-1.5B 58.8 up to 2,046 rows, 60.9 at 2,047 and 2,048 and 62.2
+        from 2,049 (its down projection). Kept between processes with the KV calibration, per GPU and torch
+        build. Not measured (2,048, False) off CUDA, for a model whose context is under 2,056 tokens or whose
+        layers are under a million weights, or with a pool too small for the three prompts."""
+        import json
+        import os
+        cfg, w = self.config, self.embed_tokens.weight
+        self.__dict__["_forward_rows"] = None
+        if w.device.type != "cuda" or cfg.max_position_embeddings < 2056 or cfg.hidden_dim * cfg.ffn_dim < 1 << 20 \
+                or pool.track_pages:
+            return self.forward_rows()
+        probe = KVCache(pool)
+        packs = self.can_pack_prefill([probe])
+        probe.free()
+        if not packs:
+            return self.forward_rows()
+        path, key = self._kv_calibration_file(), f"{torch.cuda.get_device_name(w.device)}|{torch.__version__}"
+        rec = {}
+        try:
+            with open(path) as f:
+                rec = json.load(f)
+        except (TypeError, OSError, ValueError):
+            pass
+        plan = (rec.get("forward_rows") or {}).get(key)
+        if plan is None:
+            ids = torch.randint(0, cfg.vocab_size, (2056,), generator=torch.Generator().manual_seed(0)).tolist()
+            took = {2040: [], 2048: [], 2056: []}
+            try:
+                for rep in range(9):
+                    for m in (list(took) if rep % 2 else list(took)[::-1]):  # a drift of the clock cancels
+                        cache = KVCache(pool)
+                        try:
+                            torch.cuda.synchronize()
+                            since = time.perf_counter()
+                            self.prefill_packed([ids[:m]], [cache])  # longer than a graph's chunk: eager
+                            torch.cuda.synchronize()
+                            if rep:
+                                took[m].append((time.perf_counter() - since) / m)
+                        finally:
+                            cache.free()
+            except KVPoolExhausted:
+                return self.forward_rows()
+            us = [sorted(v)[len(v) // 2] * 1e6 for v in took.values()]
+            plan = [*self._rows_plan(*us), *(round(x, 2) for x in us)]
+            if path is not None:
+                rec.setdefault("forward_rows", {})[key] = plan
+                try:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    tmp = f"{path}.{os.getpid()}"
+                    with open(tmp, "w") as f:
+                        json.dump(rec, f)
+                    os.replace(tmp, path)
+                except OSError:
+                    pass  # a read-only home: measure again next time
+        self.__dict__["_forward_rows"] = (int(plan[0]), bool(plan[1]))
+        return self.forward_rows()
+
+    @torch.inference_mode()
+    def prefill_packed(self, chunks: List[List[int]], caches: List[KVCache], riders: int = 0,
+                       rider_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
         """Prefill the next chunk of several requests in one forward (speed plan P4.3): chunks[i] continues caches[i]
         (filled in place). Returns the logits of each chunk's last token [len(chunks), V]. Check can_pack_prefill
         first. The last `riders` chunks are decode rows, one token each (check can_ride_prefill): the same pass over
         the weights gives requests that are already decoding their next token. As in a decode step, a cache listed
-        k + 1 times there verifies k drafts (row_starts); the caller then sets its length to what it accepted."""
+        k + 1 times there verifies k drafts (row_starts); the caller then sets its length to what it accepted.
+        rider_ids [riders]: the decode rows' tokens on the device (those chunks' values are then not read), for a
+        forward launched before the host has seen them. Nothing here waits for the kernels already queued."""
         dev = self.embed_tokens.weight.device
         if dev.type == "cuda" and not self.__dict__.get("_projections_fused"):
             self.fuse_projections()
         lens = [len(x) for x in chunks]
         graphs = self._prefill_graphs
         shape = graphs.step_key(self, caches, lens, riders)  # a step of prompts with no cached prefix: a CUDA graph
-        logits = graphs.run(self, shape, chunks, caches, lens) if shape is not None else None
+        logits = graphs.run(self, shape, chunks, caches, lens, rider_ids) if shape is not None else None
         if logits is None:
             timed = graphs.time_eager(shape) if shape is not None else None
             for c, s, n in zip(caches, row_starts(caches), lens):
                 c.reserve(s + n)
             packed = PackedPrefill(caches, lens, dev, riders)
-            ids = torch.tensor([[t for x in chunks for t in x]], dtype=torch.long, device=dev)
+            ids = host_tensor([t for x in chunks for t in x], torch.long, dev)
+            if rider_ids is not None:
+                ids = torch.cat([ids[:len(ids) - riders], rider_ids.to(torch.long)])
+            ids = ids[None]
             logits = self._body(ids, 0, None, None, packed=packed)[0]
-            n, over = len(lens) - riders, sum(lens) - graphs.MAX_STEP_TOKENS
-            if timed is not None and riders and 0 < over < lens[n - 1]:
-                # A step past MAX_STEP_TOKENS rows: its graph is judged against the forward the engine runs
-                # without one, with the decode rows inside that many rows and the last chunk `over` tokens
-                # shorter (ContinuousBatchEngine._step_batch), by the prompt token. Timed now, after the pass
-                # above, whose keys and values it writes again.
-                cut = lens[:n - 1] + [lens[n - 1] - over] + lens[n:]
-                flat = [t for x in chunks[:n - 1] for t in x] + chunks[n - 1][:-over] + [x[0] for x in chunks[n:]]
-                short = PackedPrefill(caches, cut, dev, riders)
-                timed = graphs.time_eager(shape)
-                self._body(torch.tensor([flat], dtype=torch.long, device=dev), 0, None, None, packed=short)
-                graphs.eager_took(shape, timed, (sum(lens) - riders) / (sum(cut) - riders))
-            elif timed is not None:
+            if timed is not None:
                 graphs.eager_took(shape, timed)
         for c, n in zip(caches, lens):
             c.length += n
@@ -1847,6 +1927,7 @@ class SubspaceCausalLM(nn.Module):
                         _scratch(m.dequant_numel(), w.device, w.dtype)
             pool = KVPool.for_model(cfg, w.dtype, w.device)
             self._kv_pool = pool
+            self.calibrate_forward_rows(pool)
         return pool
 
     @torch.inference_mode()

@@ -258,10 +258,11 @@ Both are on by default.
   and 512 prompt tokens, over all waiting requests). A prompt that fits a step's budget is not split over two
   steps while the step holds whole prompts only (such a step can be replayed from a CUDA graph): it waits for the
   next one if the rest of this step's budget is too small. A longer prompt takes what is left of each step. One
-  forward takes at most 2,048 rows: an engine built with a larger budget spends it over several scheduler steps,
-  and the requests already decoding take their next token with the last of them, as rows of that forward. Their
-  rows count in the 2,048 (the last prompt in the forward leaves that many tokens for the next one) unless the
-  step replays from a graph. `/metrics` reports waiting, running, admitted and finished requests per lane.
+  forward takes at most 2,048 prompt tokens: an engine built with a larger budget spends it over several scheduler
+  steps, and the requests already decoding take their next token with the last of them, as rows of that forward.
+  How many rows a forward that cuts a prompt takes (2,040 or 2,048, those rows included or on top) is measured for
+  the model on the GPU at startup: cuBLAS picks its kernels by the row count. Steps that prefill are launched
+  ahead like decode steps: the next forward is queued before the host has read the tokens of the one in flight. `/metrics` reports waiting, running, admitted and finished requests per lane.
 
 ---
 

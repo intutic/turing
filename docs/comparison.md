@@ -53,8 +53,9 @@ included (`results_e2e_generation_cuda.json`):
 <!-- /table -->
 
 **Step budgets.** vLLM's offline `LLM` class takes 8,192 tokens per scheduler step on an L4, decode rows included
-(its API server takes 2,048); Turing's engine takes 2,048 tokens per forward, the rows of the requests already
-decoding included (a step replayed from a CUDA graph takes them on top of its whole prompts). Every other table on
+(its API server takes 2,048); Turing's engine takes 2,048 prompt tokens per forward, or 2,040 where the model's
+forward measured cheaper per token at that row count, with the rows of the requests already decoding on top or
+included, whichever measured faster for the model. Every other table on
 this page has each engine at its own setting. Both engines at both settings
 (Turing: `--prefill-chunk`, spent over forwards of 2,048 tokens; vLLM: `max_num_batched_tokens`), at the largest
 batch; the 16K rows are from `results_longctx_cuda.json`:

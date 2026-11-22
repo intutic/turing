@@ -95,6 +95,11 @@ def run_turing(a, batches):
         counts = await asyncio.gather(*[drain(r, at) for r, at in zip(reqs, handed)])
         return time.perf_counter() - t0, sum(counts), ttft, own
 
+    def graph_state():
+        g = getattr(model, "_prefill_graphs", None)
+        return g and (sorted(k for k, e in g.graphs.items() if e[1] is not None), sorted(g.dead),
+                      sorted((k, len(v)) for k, v in g.trial.items()))
+
     async def main():
         await engine.start()
         try:
@@ -105,6 +110,14 @@ def run_turing(a, batches):
                     await batch(prompts(tok, B, a.warmup_context or a.context, seed=99))
                 # requests that end one after the other: a decode graph for every number of rows up to B
                 await batch(prompts(tok, B, a.warmup_context or a.context, seed=98), [4 + i for i in range(B)])
+                # and until a burst of this size leaves the prefill graphs as it found them: what the engine does
+                # with a step depends on how its shape's graph was judged, so shapes can appear for the first
+                # time after others were dropped, and a measured batch would pay for their captures
+                for _ in range(8):
+                    before = graph_state()
+                    await batch(prompts(tok, B, a.warmup_context or a.context, seed=99))
+                    if graph_state() == before:
+                        break
             if a.warmup_context and a.warmup_context < a.context:
                 # one prompt at the measured length: the kernels only a prompt longer than a step uses are built
                 # (or read from Triton's cache) here, not inside the first measured batch

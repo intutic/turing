@@ -35,8 +35,8 @@ python scripts/benchmark_e2e_generation.py --engine vllm   --model Qwen/Qwen2.5-
 python scripts/benchmark_llamacpp.py bench --gguf qwen2.5-1.5b-instruct-q4_k_m.gguf --batches 1,8,64 --out $OUT
 ```
 
-Each engine runs at its own step budget unless told otherwise: Turing's engine takes 2,048 tokens per forward (prompt
-tokens and the decode rows riding with them), vLLM's `LLM` class 8,192 tokens per step on an L4. `--prefill-chunk 8192` (Turing) and `--max-num-batched-tokens 2048`
+Each engine runs at its own step budget unless told otherwise: Turing's engine takes 2,048 prompt tokens per forward
+(2,040 where that measured cheaper for the model), vLLM's `LLM` class 8,192 tokens per step on an L4. `--prefill-chunk 8192` (Turing) and `--max-num-batched-tokens 2048`
 (vLLM) give the other engine's budget; every row records the one it ran with. The comparison's step-budget table has
 SmolLM2-360M and SmolLM2-1.7B (`--context 1024 --batches 1,8,32,64`, `results_e2e_generation_cuda.json`) and the 16K
 rows below at both.

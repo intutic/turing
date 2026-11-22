@@ -174,8 +174,9 @@ def test_decoding_requests_ride_in_the_prefill_forwards_of_a_burst(draft):
     assert packed == [[b, 64 - b]] and decodes[0] == 1  # a decode forward from step 2 on
     outs, packed, decodes, engine = run(True, draft, ref[0] if draft else None)
     r1, r2 = (1 + draft, 2 * (1 + draft))  # rows of the first request alone, and of both
-    assert packed == [[b, 64 - b] + [1] * r1, [64] + [1] * r2, [120 - (64 - b) - 64] + [1] * r2]
-    assert decodes[0] == 3  # none until the prompts are in
+    # the first prompt alone is a packed forward too: a step launched ahead (_ride_ahead)
+    assert packed == [[a], [b, 64 - b] + [1] * r1, [64] + [1] * r2, [120 - (64 - b) - 64] + [1] * r2]
+    assert decodes[0] == 4  # none until the prompts are in
     assert outs == ref
     assert engine.spec_accepted >= 3 * draft and engine.spec_drafted > engine.spec_accepted or not draft
 
@@ -235,11 +236,13 @@ def test_decode_rows_through_flashinfer(storage, monkeypatch):
             assert apart.float().mean() < 0.01 and ((x - y).abs() <= 0.13 * y.abs().clamp(min=1.0))[apart].all()
 
 
-@pytest.mark.parametrize("graphs", [False, True])
-def test_decode_rows_count_in_a_full_forward(graphs):
-    """A forward full of prompt tokens gives the last ones' places to the decode rows riding in it (it keeps to
-    FORWARD_TOKENS rows, here 64), and those tokens go first in the next forward; a step that a CUDA graph can
-    replay (whole prompts with no cached prefix) keeps its prompts whole. The tokens are those of plain decoding."""
+@pytest.mark.parametrize("plan,graphs", [((64, False), True), ((64, True), False), ((64, True), True),
+                                         ((56, False), False)])
+def test_a_forward_keeps_to_the_rows_the_model_measured(plan, graphs):
+    """The engine cuts a forward to the row count the model's forward_rows gives (here FORWARD_TOKENS is 64): a
+    forward that cuts or continues a prompt takes `rows` in all, decode rows included, where that is under
+    FORWARD_TOKENS or rows past it cost more (cliff); the cut tokens go first in the next forward, and the last
+    forward of a burst runs as it is. The tokens are those of plain decoding."""
     from tests.test_engine_generation import PROMPT, _run
     from tests.test_hf_parity import _tiny
     from turing.config import TuringConfig
@@ -251,6 +254,7 @@ def test_decode_rows_count_in_a_full_forward(graphs):
     def run(ride):
         model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
         model.config.kv_pool_gib, model.config.cuda_graphs = 0.01, graphs
+        model.forward_rows = lambda: plan
         engine = ContinuousBatchEngine(model.config, TuringConfig(device="cuda", max_batch_size=8), model=model,
                                        prefix_caching=False, draft_tokens=0, prefill_chunk_size=64)
         engine.ride_prefill, engine.FORWARD_TOKENS = ride, 64
@@ -263,10 +267,82 @@ def test_decode_rows_count_in_a_full_forward(graphs):
 
     ref, _ = run(False)
     outs, packed = run(True)
-    first = 29 if graphs else 28  # two fresh chunks and a decode row: a graph's step, or 65 rows cut to 64
-    assert packed == [[b, first, 1], [62, 1, 1], [120 - first - 62, 1, 1]]
-    assert all(sum(step) <= 64 for step in packed[1:])
+    # the second forward cuts the long prompt, the third continues it, the last ends the burst
+    assert packed[0] == [len(PROMPT)]  # the first prompt, alone
+    assert packed[1:] == {(64, False): [[b, 29, 1], [64, 1, 1], [27, 1, 1]],  # 65 and 66 rows: nothing to gain
+                          (64, True): [[b, 28, 1], [62, 1, 1], [30, 1, 1]],
+                          (56, False): [[b, 20, 1], [54, 1, 1], [46, 1, 1]]}[plan]
     assert outs == ref
+
+
+def test_whole_prompts_stay_whole_unless_rows_past_the_forward_cost_more():
+    """A forward of whole new prompts with decode rows riding: the rows come on top, or, on a model with a cliff
+    past FORWARD_TOKENS rows, take the places of the last prompt's last tokens when another forward follows."""
+    from tests.test_engine_generation import _run
+    from tests.test_hf_parity import _tiny
+    from turing.config import TuringConfig
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    from turing.serving.engine import ContinuousBatchEngine
+    g = torch.Generator().manual_seed(3)
+    prompts = [torch.randint(0, 128, (32,), generator=g).tolist() for _ in range(6)]
+
+    def run(plan):
+        model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
+        model.config.kv_pool_gib, model.config.cuda_graphs = 0.01, False
+        model.forward_rows = lambda: plan
+        engine = ContinuousBatchEngine(model.config, TuringConfig(device="cuda", max_batch_size=8), model=model,
+                                       prefix_caching=False, draft_tokens=0, prefill_chunk_size=64)
+        engine.FORWARD_TOKENS = 64
+        packed, pack = [], model.prefill_packed
+        model.prefill_packed = lambda chunks, *x, **kw: packed.append([len(c) for c in chunks]) or pack(chunks, *x, **kw)
+        _, outs = _run(engine, *[dict(prompt_tokens=p, max_new_tokens=8, temperature=0.0, stop_token_ids=set())
+                                 for p in prompts])
+        return outs, packed
+
+    ref, packed = run((64, False))
+    assert packed == [[32, 32], [32, 32, 1, 1], [32, 32, 1, 1, 1, 1]]
+    outs, packed = run((64, True))
+    # two rows over: the fourth prompt leaves 2 tokens; then a forward that continues it, cut to 64 rows; the last
+    # forward ends the burst and runs whole
+    assert packed == [[32, 32], [32, 30, 1, 1], [2, 32, 27, 1, 1, 1], [5, 1, 1, 1, 1, 1]]
+    assert outs == ref
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_forward_rows_are_measured_once_and_kept(cached, tmp_path, monkeypatch):
+    """calibrate_forward_rows times forwards of 2,040, 2,048 and 2,056 tokens, gives the pool its pages back and
+    keeps the plan with the KV calibration; a second model of the same weights reads it."""
+    import json
+    from turing.config import ModelConfig
+    from turing.models.causal_lm import SubspaceCausalLM
+    monkeypatch.setenv("TURING_CACHE_DIR", str(tmp_path))
+
+    def model():
+        torch.manual_seed(0)
+        cfg = ModelConfig(name="rows", vocab_size=256, hidden_dim=1024, ffn_dim=1024, num_layers=2, num_heads=16,
+                          num_kv_heads=4, head_dim=64)
+        cfg.kv_pool_gib = 0.05
+        return SubspaceCausalLM(cfg).eval().to("cuda", torch.float16)
+
+    first = model()
+    bodies, body = [], first._body
+    first._body = lambda ids, *a, **kw: bodies.append(ids.shape[1]) or body(ids, *a, **kw)
+    pool = first.kv_pool()
+    rows, cliff = first.forward_rows()
+    assert rows in (2040, 2048) and isinstance(cliff, bool) and sorted(bodies) == sorted([2040, 2048, 2056] * 9)
+    assert pool.used_pages == 0
+    (path,) = tmp_path.glob("kv_calibration/*.json")
+    (plan,) = json.loads(path.read_text())["forward_rows"].values()
+    assert plan[:2] == [rows, cliff] and len(plan) == 5
+    if cached:
+        plan[:2] = [2040, True]
+        rec = json.loads(path.read_text())
+        rec["forward_rows"] = {k: plan for k in rec["forward_rows"]}
+        path.write_text(json.dumps(rec))
+        second = model()
+        second._body = lambda *a, **kw: pytest.fail("measured again")
+        second.kv_pool()
+        assert second.forward_rows() == (2040, True)
 
 
 @pytest.mark.parametrize("storage", ["int8", "int4", "fp8"])
@@ -501,52 +577,6 @@ def test_a_capture_after_every_graph_was_dropped_gets_a_new_pool():
         eager = first(b)
         torch.testing.assert_close(first(b), eager, atol=2e-3, rtol=2e-3)  # captured
         assert sorted(graphs.graphs) == [(1, 32, 0)] and graphs.pool != handle
-
-
-@pytest.mark.parametrize("storage", ["native", "int8"])
-@torch.no_grad()
-def test_a_step_past_the_row_count_is_judged_against_the_forward_inside_it(storage, monkeypatch):
-    """A packed step whose decode rows take it past MAX_STEP_TOKENS rows: at its first use the eager forward the
-    engine would run instead (the last chunk shorter by the rows over) is timed after the step's own, which leaves
-    the step's logits and caches as they are; a replay has to beat that time by the prompt token."""
-    from tests.test_hf_parity import _tiny
-    from turing.models.causal_lm import PrefillGraphs
-    from turing.models.hf_loader import RealHuggingFaceLoader
-    monkeypatch.setattr(PrefillGraphs, "MAX_STEP_TOKENS", 64)
-    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
-    model.config.kv_cache_dtype, model.config.kv_pool_gib = storage, 0.02
-    pool, graphs = model.kv_pool(), model._prefill_graphs
-    g = torch.Generator().manual_seed(5)
-    prompts = [torch.randint(0, 128, (32,), generator=g).tolist() for _ in range(2)]
-    rows = [torch.randint(0, 128, (n,), generator=g).tolist() for n in (30, 17, 23)]
-
-    def step(timed):
-        riders = []
-        for r in rows:
-            c = KVCache(pool)
-            model(torch.tensor([r[:-1]], device="cuda"), past_key_values=c)
-            riders.append(c)
-        new = [KVCache(pool) for _ in prompts]
-        if not timed:
-            monkeypatch.setattr(graphs, "time_eager", lambda key: None)
-        out = model.prefill_packed(prompts + [r[-1:] for r in rows], new + riders, riders=len(rows)).float()
-        kv = [x.float().clone() for c in new + riders for x in pool.read(pool.num_layers - 1, c, c.length)]
-        return out, kv
-
-    bodies, body = [], model._body
-    monkeypatch.setattr(model, "_body", lambda ids, *a, **kw: bodies.append(ids.shape[1]) or body(ids, *a, **kw))
-    key = (2, 32, 4)
-    out, kv = step(True)
-    assert bodies[-2:] == [67, 64] and len(graphs.trial[key]) == 1  # the step, then the forward inside 64 rows
-    spent = graphs.trial[key][0]
-    graphs.seen.clear(), graphs.trial.clear()
-    ref, ref_kv = step(False)
-    assert bodies[-1] == 67 and key not in graphs.trial
-    tol = dict(atol=1e-3, rtol=1e-3) if storage == "native" else dict(atol=2e-2, rtol=2e-2)
-    torch.testing.assert_close(out, ref, **tol)
-    for x, y in zip(kv, ref_kv):
-        torch.testing.assert_close(x, y, **tol)
-    assert spent > 0
 
 
 def test_int4_layers_with_a_cached_prefix_take_the_gather_path_and_the_rest_the_kernel():

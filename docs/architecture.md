@@ -123,11 +123,9 @@ The kernels on the serving path run on CUDA only; on MPS and CPU, attention and 
   time: otherwise a prompt alone of that length or longer stays eager on this model and GPU, in steps of any
   shape, and another shape is dropped by itself. A step whose prompts differ so much in length that padding them
   to the longest would make up over a quarter of it stays eager. The engine does not split a prompt that fits one forward's budget over
-  two, so the forwards of a burst are whole prompts. A step whose decode rows take it past 2,048 rows is judged
-  against the eager forward that keeps to them (the last prompt gives the rows' count of tokens up to the next
-  forward, by the prompt token): past that row count cuBLAS runs other kernels for some layer shapes, slower ones
-  on an L4 for SmolLM2-1.7B, whose bursts then run eagerly inside 2,048 rows, while SmolLM2-360M's, bound by the
-  host, keep their graphs.
+  two, so the forwards of a burst are whole prompts. Past 2,048 rows cuBLAS runs other kernels for some layer
+  shapes, slower ones on an L4 for SmolLM2-1.7B: a model that measured that at startup (`forward_rows`) gets no
+  graph for a step its decode rows take past 2,048 rows, and its bursts run eagerly inside them.
 * **MoE layers** (`SparseMoE`): routing (softmax, top-k, normalisation) is one kernel, token-expert pairs are
   grouped by expert on the device in three, and the grouped kernels then run one program per block of an expert's
   rows; from 1,024 rows per expert on average (a large prefill chunk) each expert runs as one cuBLAS GEMM pair on

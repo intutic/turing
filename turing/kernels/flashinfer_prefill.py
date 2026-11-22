@@ -28,7 +28,8 @@ except Exception:  # not installed, or built for another torch/CUDA: Turing's ow
     HAS_FLASHINFER = False
 
 MIN_CHUNK = 512  # below this the plan's host work is a larger share than the attention it saves
-_STATE = {}  # (device, pages read) -> [wrapper, plan key, last layer served, the requests' physical pages]
+# (device, pages read) -> [wrapper, plan key, last layer served, the requests' physical pages, event after the plan]
+_STATE = {}
 
 
 def flashinfer_prefill_supported(pool: KVPool, layer: int, q: torch.Tensor, window: Optional[int],
@@ -53,13 +54,18 @@ def flashinfer_prefill(pool: KVPool, layer: int, q: torch.Tensor, slots: List[in
         with torch.inference_mode(False):  # normal tensors: plan() writes them in place, in and out of inference mode
             ws = torch.empty((64 if tag else 128) << 20, dtype=torch.uint8, device=q.device)
             st = _STATE[(q.device, kind)] = [flashinfer.BatchPrefillWithPagedKVCacheWrapper(ws, "HND"), None, None,
-                                             None]
+                                             None, None]
     totals = [s + n for s, n in zip(starts, lens)]
     pages = [-(-t // 16) for t in totals]
     key = (id(pool), pool.page_table.data_ptr(), tuple(slots), tuple(starts), tuple(lens), H, D, scale, q.dtype)
     # the plan holds the page indices: plan again at each new forward (a layer no later than the last one served), as
     # a reused slot can hold other pages with the same (start, L)
     if st[1] != key or layer <= st[2]:
+        if st[4] is not None:
+            # plan() copies from the wrapper's own pinned buffer without waiting; the copies of the plan before
+            # this one may still be queued behind a forward in flight (the engine launches a step ahead), and
+            # must have read that buffer before it is written again
+            st[4].synchronize()
         qo, kv = [0], [0]
         for n, p in zip(lens, pages):
             qo.append(qo[-1] + n)
@@ -73,6 +79,8 @@ def flashinfer_prefill(pool: KVPool, layer: int, q: torch.Tensor, slots: List[in
                    H, pool.num_kv_heads, D, 16, causal=True, sm_scale=scale if scale is not None else D ** -0.5,
                    q_data_type=q.dtype, kv_data_type=torch.float8_e4m3fn if storage == "fp8" else q.dtype)
         st[1] = key
+        st[4] = torch.cuda.Event()
+        st[4].record()
     st[2] = layer
     scales = {}
     if in_place:

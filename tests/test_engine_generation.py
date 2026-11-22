@@ -580,3 +580,60 @@ def test_a_request_passing_longropes_switch_is_recomputed_with_the_long_frequenc
                                            stop_token_ids=set()))
         assert out == ref and req.past_kv is None
         assert engine.preemptions == 0 and engine.kv_pool.used_pages == 0  # not a preemption: the pool was never short
+
+
+def _burst_engine(overlap):
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
+    model.config.kv_pool_gib, model.config.cuda_graphs = 0.01, False  # no captures: they synchronize
+    engine = ContinuousBatchEngine(model.config, TuringConfig(device="cuda", max_batch_size=8), model=model,
+                                   prefix_caching=False, draft_tokens=0, prefill_chunk_size=64)
+    engine.FORWARD_TOKENS, engine.overlap_decode = 64, overlap
+    return engine
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="a launch can only wait for the device on CUDA")
+@pytest.mark.parametrize("stop", [False, True])
+def test_steps_that_prefill_are_launched_ahead_and_give_the_same_tokens(stop):
+    """_ride_ahead: while prompts are prefilled, each step's forward (their chunks, and the decoding requests as
+    rows) is launched from the tokens of the step in flight, without a wait for the device; first tokens and the
+    riders' tokens are read one step later. The tokens are those of the engine that reads every step before the
+    next (one request stops on a token that was still in flight when its next row was launched)."""
+    g = torch.Generator().manual_seed(11)
+    prompts = [PROMPT, PROMPT[3:]] + [torch.randint(0, 128, (n,), generator=g).tolist() for n in (120, 50, 150)]
+
+    def run(overlap, stops=()):
+        engine = _burst_engine(overlap)
+        ahead, ride, packed, pack = [], engine._ride_ahead, [], engine.model.prefill_packed
+
+        def spy(prefill, work):
+            ahead.append(ride(prefill, work))
+            return ahead[-1]
+
+        def strict(chunks, *a, **kw):
+            packed.append(len(chunks))
+            if len(packed) <= 2 or not overlap:  # the first forwards build kernels
+                return pack(chunks, *a, **kw)
+            torch.cuda.set_sync_debug_mode("error")
+            try:
+                return pack(chunks, *a, **kw)
+            finally:
+                torch.cuda.set_sync_debug_mode("default")
+        engine._ride_ahead, engine.model.prefill_packed = spy, strict
+        reqs, outs = _run(engine, *[dict(prompt_tokens=p, max_new_tokens=12 + 3 * i, temperature=0.0,
+                                         stop_token_ids=set(stops) if i == 0 else set())
+                                    for i, p in enumerate(prompts)])
+        assert engine._ahead is None and engine.kv_pool.used_pages == 0
+        return reqs, outs, ahead
+
+    _, ref, ahead = run(False)
+    assert not any(ahead)
+    stops = [ref[0][5]] if stop else []
+    if stop:
+        _, ref, _ = run(False, stops)
+        assert len(ref[0]) < 12
+    reqs, outs, ahead = run(True, stops)
+    assert outs == ref and sum(ahead) >= 6  # every step that prefilled
+    assert reqs[0].finish_reason == ("stop" if stop else "length")
+    assert all(r.first_token_at is not None and r.first_token_at >= r.created_at for r in reqs)

@@ -63,16 +63,19 @@ All notable changes to this project are documented here. The format follows
 - The RoPE kernel rotates a tile of positions per program instead of one vector: a 2,048-token prefill step of
   SmolLM2-1.7B spent 0.60 ms a layer in it on an L4, now 0.12 (one 16K-token prompt on Qwen2.5-1.5B: 25 ms of
   1,386, now 9 of 1,364).
-- The decode rows that ride in a prefill forward count in its 2,048 rows: the last prompt in the forward gives
-  that many tokens up to the next one, as vLLM counts a step's tokens. Past 2,048 rows cuBLAS runs other, slower
-  kernels for SmolLM2-1.7B's layers on an L4 (a step of two 1,024-token prompts and 2 / 32 / 62 decode rows:
-  154 / 181 / 205 ms, and 138 / 165 / 190 with the rows inside 2,048). A step that replays from a CUDA graph keeps
-  its whole prompts (SmolLM2-360M: 41 ms from the graph, 58 eagerly either way), and a graph of a step past 2,048
-  rows is now judged against the eager forward inside them. A forward that continues a prompt is filled with the
-  next prompt's first tokens instead of stopping at whole prompts. SmolLM2-1.7B's mean first token in a burst of
-  64 prompts at 2,048 tokens a step went from 3.02 to 2.75 s (vLLM: 2.66). Where cuBLAS has no such step the rule
-  costs a little: the last prompts of a burst finish in one more small forward, and Qwen2.5-1.5B's 512-token rows
-  at batch 8 and 64 are 1–4% below the session before's.
+- A prefill forward's row count is measured per model and GPU (`SubspaceCausalLM.calibrate_forward_rows`, once at
+  startup, kept with the KV calibration): cuBLAS picks a GEMM's kernel by its row count, and the best count
+  differs by layer shape. On an L4 SmolLM2-1.7B's forward costs 13% more per token from 2,049 rows than at 2,048,
+  and Qwen2.5-1.5B's 3.5% less at 2,046 rows or fewer than at 2,048. A forward that cuts or continues a prompt now
+  takes the cheapest count (2,040 or 2,048), the decode rows riding in it included; a forward of whole new prompts
+  keeps them whole, with the rows on top, unless rows past 2,048 cost the model over 5% more and no CUDA graph
+  serves the step. Only what another forward takes anyway is cut. A forward that continues a prompt is filled
+  with the next prompt's first tokens instead of stopping at whole prompts.
+- Steps that prefill are launched ahead, as decode steps already were (`ContinuousBatchEngine._ride_ahead`): the
+  forward of the next chunks, with the decoding requests as rows, is launched from the tokens of the step in
+  flight while they are still on the device, and that step's tokens are read and emitted while it runs. The GPU
+  no longer waits for the host between two such steps (vLLM does the same with its asynchronous scheduling). The
+  packed prefill forward makes no blocking copy to the device any more.
 - In a prefill forward over pages FlashInfer reads in place (the model dtype, fp8), the decode rows are requests of
   one query each in a FlashInfer call of their own instead of the decode kernel's three launches a layer. A burst
   of 32 prompts of 16K tokens on Qwen2.5-1.5B with an fp8 cache spent 51.6 s in its prefill steps before and 50.0

@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 
 from ..config import ModelConfig, TuringConfig
-from ..models.causal_lm import DecodeGraphs, SubspaceCausalLM
+from ..models.causal_lm import DecodeGraphs, SubspaceCausalLM, host_tensor
 from ..core.kv_cache import PAGE, KVCache, KVPoolExhausted, kv_bytes_per_token
 from .traffic import (
     AdmissionController, AdmissionDecision,
@@ -376,12 +376,8 @@ class ContinuousBatchEngine:
     # Prompt tokens in one prefill forward. A larger forward costs more per token (SmolLM2-360M on an L4, 1,024-token
     # prompts: 21.5 ms a prompt two at a time, 25 eight at a time), needs working memory beyond the pool's reserve
     # and cannot be replayed from a CUDA graph, so a larger step budget (--prefill-chunk) is spent in several
-    # forwards, one a scheduler step. The decode rows riding in a forward count in it too, unless the step replays
-    # from a graph: past 2,048 rows cuBLAS runs other kernels for some layer shapes, slower ones on an L4 for
-    # SmolLM2-1.7B (two 1,024-token prompts and 2 / 32 / 62 decode rows, back to back: 154 / 181 / 205 ms, and
-    # 138 / 165 / 190 with the rows inside 2,048), and a graph of the step replays what the eager forward ran.
-    # SmolLM2-360M's steps are bound by the host instead (58 ms eager, 41 from a graph, either way), so a model
-    # keeps the graphs that beat its eager forward (PrefillGraphs) and its other steps keep to the row count.
+    # forwards, one a scheduler step. The decode rows riding in a forward come on top of it, or count in it where
+    # the model's forward measured cheaper that way (_row_target).
     FORWARD_TOKENS = 2048
 
     def _try_reserve(self, req: AsyncSequenceRequest) -> bool:
@@ -618,18 +614,13 @@ class ContinuousBatchEngine:
             packs = (bool(work) and self.dist_driver is None and not any(r.adapter for r, _ in work)
                      and all(isinstance(c, KVCache) for c in caches)
                      and getattr(self.model, "can_pack_prefill", lambda _: False)(caches))
+            if packs and not more and self._ride_ahead(prefill, work):
+                self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
+                return
             ride_plain, ride_spec, n_riding = self._riders(work) if packs and not more else ([], [], 0)
             riders, ride_starts = self._rows(ride_plain, ride_spec)
-            over = sum(e - r.prefill_offset for r, e in work) + len(riders) - self.FORWARD_TOKENS
-            if 0 < over <= len(riders) < self.FORWARD_TOKENS and not self.model.packed_step_graph(
-                    caches + [r.past_kv for r, _ in riders], [e - r.prefill_offset for r, e in work], len(riders)):
-                # the decode rows take the places of the last prompt tokens, which wait for the next forward (as
-                # vLLM counts a step's tokens): the forward keeps to FORWARD_TOKENS rows
-                while over > 0:
-                    req, end = work.pop()
-                    if end - req.prefill_offset > over:
-                        work.append((req, end - over))
-                    over -= end - req.prefill_offset
+            if work and packs:
+                self._fit(work, prefill, [r for r, _ in riders])
                 caches = [r.past_kv for r, _ in work]
             if packs and len(work) + len(riders) > 1:
                 # every chunk of this step in one forward (one set of GEMMs), attention per request
@@ -674,8 +665,9 @@ class ContinuousBatchEngine:
             # a request whose first token came from this step's prefill decodes from the next step: its consumer gets
             # that token now instead of after a decode forward (one step time of TTFT, P4.1)
             first = {id(r) for r, e, _, _ in done if e >= len(r.prefill_tokens)} | {id(r) for r, _ in riders}
-            decode = [r for r in self.running_batch if r.state == RequestState.DECODING and r.first_token_at is not None
-                      and r.generated_tokens and id(r) not in first]
+            flying = {id(r) for r in self._ahead[0]} if self._ahead else set()  # their last tokens: on the device
+            decode = [r for r in self.running_batch if r.state == RequestState.DECODING and id(r) not in first
+                      and (id(r) in flying or (r.first_token_at is not None and r.generated_tokens))]
             if more:  # they take their next token with the last forward of this budget
                 self._settle()
                 decode = []
@@ -694,6 +686,8 @@ class ContinuousBatchEngine:
             n_decoding = rows = len(decode)
             if self._ahead is not None or (decode and all(self._overlaps(r, len(decode)) for r in decode)):
                 pending = [r for r in self._ahead[0] if r.state != RequestState.FINISHED] if self._ahead else decode
+                if len(pending) == len(decode) and {id(r) for r in pending} == {id(r) for r in decode}:
+                    decode = pending  # the rows in the order of the step in flight (one that prefilled orders its own)
                 if pending == decode and all(self._overlaps(r, len(decode)) for r in decode):
                     self._decode_ahead(decode)
                     decode = []
@@ -736,6 +730,102 @@ class ContinuousBatchEngine:
 
         self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
 
+    def _fit(self, work: list, prefill: list, riders: list) -> None:
+        """Cut work's last chunks so that the forward keeps to _row_target's rows with `riders` decode rows in it;
+        the cut tokens wait for the next forward. Only what another forward takes anyway is cut: the forward that
+        ends a burst runs as it is."""
+        took = sum(e - r.prefill_offset for r, e in work)
+        over = took + len(riders) - self._row_target(work, riders, [r.past_kv for r, _ in work])
+        if 0 < over < took and sum(len(r.prefill_tokens) - r.prefill_offset for r in prefill) > took:
+            while over > 0:
+                req, end = work.pop()
+                if end - req.prefill_offset > over:
+                    work.append((req, end - over))
+                over -= end - req.prefill_offset
+
+    def _ride_ahead(self, prefill: list, work: list) -> bool:
+        """One overlapped step that prefills, as _decode_ahead is for a decode step: the forward of work's chunks,
+        with every decoding request riding as a row, is launched from the tokens of the step in flight while they
+        are still on the device. That step's tokens are then read and emitted while this forward runs, and this
+        step's own (the first token of each prompt it ends, the riders' next ones) are sampled on the device and
+        left for the next step to read. The GPU then goes from one forward to the next with no wait for the host's
+        work between them (reading and emitting tokens, choosing the next chunks, building its inputs), which vLLM
+        hides the same way (its asynchronous scheduling). False, with nothing done, where a request needs the host
+        between two steps (a logits processor, drafts, an adapter) or the pool has no page for a riding row; a
+        request that stopped on a token still in flight has one row computed for nothing."""
+        if not (self.overlap_decode and self.ride_prefill and self.device.type == "cuda") or self.draft_head is not None \
+                or self._rope_switch is not None or getattr(self.model, "can_ride_prefill", None) is None:
+            return False
+        flying = self._ahead[0] if self._ahead else []
+        at = {id(r): i for i, r in enumerate(flying) if r.state != RequestState.FINISHED}
+        decoding = [r for r in self.running_batch if r.state == RequestState.DECODING]
+        if any(r.adapter is not None or not isinstance(r.past_kv, KVCache) or r.logits_processor is not None
+               or self._may_draft(r, len(decoding)) or not (id(r) in at or r.generated_tokens) for r in decoding) \
+                or any(r.logits_processor is not None for r, _ in work):
+            return False
+        # the rows that take another token: those whose last one the host has, then those of the step in flight
+        going = [r for r in decoding if len(r.generated_tokens) + (id(r) in at) < r.max_new_tokens]
+        go = {id(r) for r in going}
+        riders = [r for r in going if id(r) not in at] + [r for r in flying if id(r) in at and id(r) in go]
+        caches = [r.past_kv for r, _ in work]
+        if riders and not (self.model.can_ride_prefill(caches + [r.past_kv for r in riders]) and self._top_up(riders)
+                           and all(len(r.past_kv.pages) * PAGE >= r.past_kv.length + 1 for r in riders)):
+            return False
+        self._fit(work, prefill, riders)
+        caches = [r.past_kv for r, _ in work]
+        held = [r.generated_tokens[-1] for r in riders if id(r) not in at]
+        rider_ids = None
+        if len(held) < len(riders):  # tokens still on the device
+            rows = [at[id(r)] for r in riders[len(held):]]
+            rider_ids = self._ahead[1] if rows == list(range(len(flying))) else \
+                self._ahead[1].index_select(0, host_tensor(rows, torch.long, self.device))
+            if held:
+                rider_ids = torch.cat([host_tensor(held, rider_ids.dtype, self.device), rider_ids])
+        chunks = [r.prefill_tokens[r.prefill_offset:e] for r, e in work]
+        logits = self.model.prefill_packed(chunks + [[t] for t in held] + [[0]] * (len(riders) - len(held)),
+                                           caches + [r.past_kv for r in riders], riders=len(riders),
+                                           rider_ids=rider_ids)
+        ended = [i for i, (r, e) in enumerate(work) if e >= len(r.prefill_tokens)]
+        reqs = [work[i][0] for i in ended] + riders
+        if reqs:
+            rows = logits if len(reqs) == logits.shape[0] else \
+                torch.cat([logits[i:i + 1] for i in ended] + [logits[len(work):]])
+            entry = self._flight(reqs, self._sample_tokens(reqs, rows))
+        else:
+            entry = self._flight([], None)
+        for req, end in work:
+            req.prefill_offset = end
+            if end >= len(req.prefill_tokens):  # its first token is in this step's entry
+                req.state = RequestState.DECODING
+                if self.prefix_cache is not None and not req.uncacheable:
+                    self.prefix_cache.insert(req.prefill_tokens, req.past_kv,
+                                             self._prefix_key(req.adapter, req.past_kv.rope_len))
+        self._settle()
+        self._ahead = entry
+        self._last_step = None
+        if riders:
+            self._decode_steps += 1
+            self._spec_hold = max(self._spec_hold - 1, 0)
+        return True
+
+    def _row_target(self, work: list, riders: list, caches: list) -> int:
+        """The rows this step's forward should keep to, prompt tokens and decode rows together (a count it cannot
+        exceed where nothing is to be cut), from what the model measured on this GPU (forward_rows): cuBLAS picks
+        a GEMM's kernel by its row count. A forward that cuts or continues a prompt takes the count at which the
+        model's forward is cheapest per token (Qwen2.5-1.5B on an L4: 2,040, 3.5% under 2,048 and 6% under 2,049
+        and more). A forward of whole new prompts keeps them whole, with the decode rows on top, unless rows past
+        FORWARD_TOKENS cost this model over 5% more (SmolLM2-1.7B: 13%) and no CUDA graph serves the step."""
+        none = self.FORWARD_TOKENS + len(riders)
+        plan = getattr(self.model, "forward_rows", None)
+        if plan is None or not all(isinstance(c, KVCache) for c in caches):
+            return none
+        rows, cliff = plan()
+        if all(r.prefill_offset == 0 and e >= len(r.prefill_tokens) for r, e in work):
+            graph = riders and self.model.packed_step_graph(
+                caches + [r.past_kv for r in riders], [e - r.prefill_offset for r, e in work], len(riders))
+            return self.FORWARD_TOKENS if cliff and riders and not graph else none
+        return rows if rows < self.FORWARD_TOKENS or cliff else none
+
     def _riders(self, work: list) -> tuple:
         """The decoding requests that take their next tokens from this step's packed prefill forward, as rows of one
         token after work's prompt chunks, instead of from a decode forward of their own: one pass over the weights
@@ -747,6 +837,8 @@ class ContinuousBatchEngine:
         can = getattr(self.model, "can_ride_prefill", None)
         if not self.ride_prefill or can is None or self.draft_head is not None or self._rope_switch is not None:
             return [], [], 0
+        if self._ahead and any(r.first_token_at is None and r.state == RequestState.DECODING for r in self._ahead[0]):
+            self._settle()  # first tokens of a step launched ahead (_ride_ahead): those requests ride from now on
         decode = [r for r in self.running_batch if r.state == RequestState.DECODING and r.first_token_at is not None
                   and r.generated_tokens and r.adapter is None and isinstance(r.past_kv, KVCache)]
         if not decode or not can([r.past_kv for r, _ in work] + [r.past_kv for r in decode]):
@@ -854,14 +946,18 @@ class ContinuousBatchEngine:
         """One decode forward for reqs from ids [B, 1] on the device; its tokens are sampled there and copied to
         pinned host memory without waiting. Returns the _ahead entry."""
         logits, _ = self._forward(ids, [r.past_kv for r in reqs], [r.adapter for r in reqs])
-        tokens = self._sample_tokens(reqs, logits[:, -1])
-        if tokens.is_cuda:
-            host = torch.empty(tokens.shape, dtype=tokens.dtype, pin_memory=True)
-            host.copy_(tokens, non_blocking=True)
+        return self._flight(reqs, self._sample_tokens(reqs, logits[:, -1]))
+
+    def _flight(self, reqs: List[AsyncSequenceRequest], tokens: Optional[torch.Tensor]) -> list:
+        """The _ahead entry of a step just launched: its tokens [len(reqs)] (None for a step that gives none) are
+        copied to pinned host memory without waiting."""
+        host, event = tokens, None
+        if self.device.type == "cuda":
+            if tokens is not None:
+                host = torch.empty(tokens.shape, dtype=tokens.dtype, pin_memory=True)
+                host.copy_(tokens, non_blocking=True)
             event = torch.cuda.Event()
             event.record()  # reached when this step and the copy are done, whatever is queued after them
-        else:
-            host, event = tokens, None
         return [list(reqs), tokens, host, event]
 
     def _settle(self) -> None:
@@ -873,8 +969,11 @@ class ContinuousBatchEngine:
         if event is not None:
             event.synchronize()
         now = time.time()
-        for r, t in zip(reqs, host.tolist()):
+        for r, t in zip(reqs, host.tolist() if reqs else ()):
             if r.state != RequestState.FINISHED:  # cancelled since the launch
+                if r.first_token_at is None:  # the step ended its prompt (_ride_ahead): this is its first token
+                    r.first_token_at = r.last_token_at = now
+                    self.recent_ttft.append(now - r.created_at)
                 self._emit(r, t, now)
 
     def _decode_ahead(self, decode: List[AsyncSequenceRequest]) -> None:

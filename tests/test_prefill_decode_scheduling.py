@@ -226,3 +226,12 @@ def test_latency_percentiles_are_null_until_there_are_samples():
     lat = asyncio.run(_run())
     assert lat["avg_ttft_ms"] > 0.0
     assert lat["p50_ttft_ms"] is None and lat["p99_ttft_ms"] is None and lat["avg_itl_ms"] is None
+
+
+def test_forward_rows_plan_from_the_measured_times():
+    """SubspaceCausalLM._rows_plan with the times per token an L4 measured (2,040, 2,048 and 2,056 rows)."""
+    from turing.models.causal_lm import SubspaceCausalLM
+    assert SubspaceCausalLM._rows_plan(58.5, 60.9, 62.2) == (2040, False)   # Qwen2.5-1.5B
+    assert SubspaceCausalLM._rows_plan(59.1, 60.2, 62.7) == (2040, False)   # the same model, a noisier run
+    assert SubspaceCausalLM._rows_plan(69.3, 68.9, 77.7) == (2048, True)    # SmolLM2-1.7B
+    assert SubspaceCausalLM._rows_plan(20.0, 20.1, 20.3) == (2048, False)
