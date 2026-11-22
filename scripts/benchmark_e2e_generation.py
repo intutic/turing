@@ -72,10 +72,10 @@ def run_turing(a, batches):
     engine.ride_prefill = not a.no_ride_prefill
     rows = []
 
-    async def batch(ps):
+    async def batch(ps, new_tokens=None):
         t0 = time.perf_counter()
-        reqs = [await engine.add_request(prompt_tokens=p, max_new_tokens=a.new_tokens, temperature=0.0,
-                                         stop_token_ids=set()) for p in ps]
+        reqs = [await engine.add_request(prompt_tokens=p, max_new_tokens=new_tokens[i] if new_tokens else a.new_tokens,
+                                         temperature=0.0, stop_token_ids=set()) for i, p in enumerate(ps)]
         ttft = []
 
         async def drain(r):
@@ -96,6 +96,12 @@ def run_turing(a, batches):
                 # replays after it (PrefillGraphs), which the measured requests would otherwise pay for
                 for _ in range(3):
                     await batch(prompts(tok, B, a.warmup_context or a.context, seed=99))
+                # requests that end one after the other: a decode graph for every number of rows up to B
+                await batch(prompts(tok, B, a.warmup_context or a.context, seed=98), [4 + i for i in range(B)])
+            if a.warmup_context and a.warmup_context < a.context:
+                # one prompt at the measured length: the kernels only a prompt longer than a step uses are built
+                # (or read from Triton's cache) here, not inside the first measured batch
+                await batch(prompts(tok, 1, a.context, seed=97), [8])
             for B in batches:
                 preempted = engine.preemptions
                 secs, n, ttft = await batch(prompts(tok, B, a.context))
@@ -167,6 +173,9 @@ def run_vllm(a, batches):
     for B in batches:  # warm-up at every batch size, as for Turing
         llm.generate([{"prompt_token_ids": p} for p in prompts(tok, B, a.warmup_context or a.context, seed=99)], sp,
                      use_tqdm=False)
+    if a.warmup_context and a.warmup_context < a.context:  # and one prompt at the measured length, as for Turing
+        llm.generate([{"prompt_token_ids": p} for p in prompts(tok, 1, a.context, seed=97)],
+                     SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True), use_tqdm=False)
     rows = []
     for B in batches:
         ps = prompts(tok, B, a.context)

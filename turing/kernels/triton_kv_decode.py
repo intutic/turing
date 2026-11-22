@@ -152,6 +152,12 @@ if HAS_TRITON:
         if MODE == 1 and not IEEE:
             qsum = tl.sum(q.to(tl.float32), 1)
             zacc = tl.zeros([BLOCK_G], dtype=tl.float32)
+        # fp8 pages under fp16/bf16 queries: every E4M3 value is exact in both dtypes, so the bytes become those
+        # values by moving bits (_e4m3) and the layer's two scales are applied to the scores and to the output,
+        # instead of building each value in fp32 and scaling it. 16 rows of 16K tokens: 0.60 against 0.66 ms.
+        if MODE == 3 and not IEEE:
+            k_scale = tl.load(KS)
+            v_scale = tl.load(VS)
         for i0 in range(start, end, BLOCK_N):
             i = i0 + tl.arange(0, BLOCK_N)
             inside = i < end
@@ -174,6 +180,9 @@ if HAS_TRITON:
                 ksc = tl.load(KS + row, mask=valid, other=0.0).to(tl.float32)
                 kz = tl.load(KZ + row, mask=valid, other=0.0).to(tl.float32)
                 s = (tl.dot(q, tl.trans(kc.to(q.dtype))) * ksc[None, :] + qsum[:, None] * kz[None, :]) * sm_scale
+            elif MODE == 3 and not IEEE:
+                kb = tl.load(K + row[:, None] * D + offs_d[None, :], mask=valid[:, None], other=0)
+                s = tl.dot(q, tl.trans(_e4m3(kb, q))) * (sm_scale * k_scale)
             else:
                 k = _load_rows(K, KS, KZ, row, valid, offs_d, D, MODE, GROUP)
                 if IEEE:  # fp32 queries: IEEE fp32 products; fp16/bf16: tensor cores in that dtype, fp32 accumulation
@@ -190,6 +199,9 @@ if HAS_TRITON:
             if MODE == 1 and not IEEE:
                 acc = acc * alpha[:, None] + tl.dot((p * vsc[None, :]).to(q.dtype), vc.to(q.dtype))
                 zacc = zacc * alpha + tl.sum(p * vz[None, :], 1)
+            elif MODE == 3 and not IEEE:
+                vb = tl.load(V + row[:, None] * D + offs_d[None, :], mask=valid[:, None], other=0)
+                acc = acc * alpha[:, None] + tl.dot(p.to(q.dtype), _e4m3(vb, q))
             else:
                 v = _load_rows(V, VS, VZ, row, valid, offs_d, D, MODE, GROUP)
                 if IEEE:
@@ -199,6 +211,8 @@ if HAS_TRITON:
             m_i = m_new
         if MODE == 1 and not IEEE:
             acc = acc + zacc[:, None]
+        if MODE == 3 and not IEEE:
+            acc = acc * v_scale
         if N_SPLITS == 1:  # nothing to merge: the output directly, and no reduce launch
             o = acc / tl.where(l_i > 0, l_i, 1.0)[:, None]
             tl.store(OUT + ((b * HKV + h) * G + offs_g)[:, None] * D + offs_d[None, :], o.to(OUT.dtype.element_ty),
@@ -274,6 +288,21 @@ def pool_append_supported(pool: KVPool, layer: int) -> bool:
     return pool_dequant_supported(pool) and not pool.track_pages and pool.layer_fields(layer, "k")[3] != "native"
 
 
+if HAS_TRITON:
+    @triton.jit
+    def _e4m3(b, like):
+        """E4M3 bytes as the same values in `like`'s dtype (fp16 or bf16; each E4M3 value is exact in both): the sign
+        and the exponent and mantissa bits moved into place, and below 8 (subnormal) the magnitude times 2^-9."""
+        b16 = b.to(tl.int16)
+        mag = b16 & 0x7F
+        if like.dtype == tl.bfloat16:
+            bits = ((mag + 960) << 4) | ((b16 & 0x80) << 8)
+        else:
+            bits = ((mag + 64) << 7) | ((b16 & 0x80) << 8)
+        sub = mag.to(like.dtype) * 0.001953125
+        return tl.where(mag < 8, tl.where(b16 > 127, -sub, sub), bits.to(like.dtype, bitcast=True))
+
+
 def triton_pool_append(pool: KVPool, layer: int, cache, k: torch.Tensor, v: torch.Tensor,
                        slots: Optional[torch.Tensor] = None, starts: Optional[torch.Tensor] = None) -> None:
     """KVPool.append for a prefill chunk through the decode step's append kernel, one program per token, head and
@@ -322,8 +351,9 @@ def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tenso
                                      HKV=Hkv, D=D, MODE=mode, GROUP=INT4_GROUP, TRACK=pool.track_pages)
     if n_splits is None:  # one split (no reduce launch) once the batch alone fills the GPU
         n_splits = max(1, min(32, 256 // (B * Hkv)))
-    # fp32 K and V tiles must fit the L4's 99 KB of shared memory; int8 codes under 16-bit queries are 16-bit tiles
-    BLOCK_N = 64 if D <= 64 or (mode == 1 and q.dtype != torch.float32) else 32
+    # fp32 K and V tiles must fit the L4's 99 KB of shared memory; int8 codes and fp8 bytes under 16-bit queries are
+    # 16-bit tiles
+    BLOCK_N = 64 if D <= 64 or (mode in (1, 3) and q.dtype != torch.float32) else 32
     BLOCK_G = max(16, triton.next_power_of_2(G))
     out = torch.empty(B, H, D, device=q.device, dtype=q.dtype)
     acc = torch.empty(B * Hkv * n_splits * G if n_splits > 1 else 1, D, device=q.device, dtype=torch.float32)

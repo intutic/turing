@@ -56,7 +56,11 @@ All notable changes to this project are documented here. The format follows
   the last forward of the budget. Before, the whole budget was one forward.
 - The decode kernel reads int8 KV pages under fp16/bf16 queries without dequantizing them: the codes go into the
   tensor-core products, each token's scale and zero are applied once, and a block's V tile is read together with
-  its K tile.
+  its K tile. fp8 pages become fp16/bf16 values by moving bits, with the layer's scales applied to the scores and
+  the output.
+- `scripts/benchmark_e2e_generation.py` warms up with requests that end one after the other (a decode graph for
+  every row count) and, when the warm-up prompts are shorter than the measured ones, with one prompt of the
+  measured length for both engines, so no kernel is built inside the first measured batch.
 - A model with offloaded experts no longer launches its next decode step before reading the current one's tokens:
   its step waits for the host at every layer, so the overlap only delayed each token by a step.
 - `turing serve` warns at startup when the weights leave less GPU memory than twice the usual working reserve, where
