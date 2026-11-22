@@ -545,9 +545,13 @@ def t_moe_offload_serve():
         for slots in dict.fromkeys(r.get("moe_expert_slots") for r in rows if r["model"] == model):
             got, tok = _by_batch(rows, lambda x: x["model"] == model and x.get("moe_expert_slots") == slots, 1)
             one = got[min(got)]
+            if one["engine"] == "llama.cpp":  # the reference: whole layers on the GPU, the others on the CPU
+                out.append([f"llama.cpp, {short(model)}", f"all, in {one['gpu_layers']} layers (the rest on the CPU)",
+                            *[tok(b) for b in bats], "—", "—"])
+                continue
             off = one.get("moe_offload") or {}
             out.append([short(model) + (", 4-bit (RTN)" if "rtn" in str(one.get("quantization")) else ""),
-                        f"{slots} of {off['experts_per_layer']}" if slots else "all",
+                        f"{slots:g} of {off['experts_per_layer']}" if slots else "all",
                         *[tok(b) for b in bats], pct(off["hit_rate"]) if off else "—", f"{one['gpu_peak_gib']:.1f}"])
     return table(["Model", "Experts per layer on the GPU", *[f"B={b}" for b in bats], "Slot hit rate (B=1)",
                   "Peak GPU GiB"], out)
@@ -561,6 +565,18 @@ def t_batch_sizes():
         got, tok = _by_batch(rows, lambda x: x["engine"] == eng)
         out.append([label, *[tok(b) for b in bats]])
     return table(["Engine", *[f"B={b}" for b in bats]], out)
+
+
+def t_first_token():
+    """Time to the first token of one prompt arriving alone, by prompt length: eager prefill and PrefillGraphs."""
+    rows = load("results_first_token_cuda.json")
+    lengths = sorted({r["tokens"] for r in rows})
+    out = []
+    for model in dict.fromkeys(r["model"] for r in rows):
+        for variant, label in (("eager", "eager"), ("graph", "CUDA graph")):
+            got = {r["tokens"]: r for r in rows if r["model"] == model and r["prefill"] == variant}
+            out.append([short(model), label, *[f"{got[n]['first_token_ms']:.1f}" if n in got else "—" for n in lengths]])
+    return table(["Model", "Prefill", *[f"{n:,} tokens" for n in lengths]], out)
 
 
 TABLES = {k[2:]: v for k, v in globals().items() if k.startswith("t_") and callable(v)}

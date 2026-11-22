@@ -42,6 +42,39 @@ def test_low_bit_error_is_within_half_a_step_of_each_group(dtype, levels, group)
         assert (err <= step / 2 + 2e-3 * g.abs().amax(-1, keepdim=True)).all()  # + fp16 rounding of scale and zero
 
 
+def test_fp8_stores_pytorchs_e4m3_cast_and_a_layers_scale_sets_its_range():
+    k, v = _kv(40)
+    pool = _pool("fp8")
+    kr, vr = pool.read(0, _fill(pool, k, v), 40)
+    for x, xr in ((k, kr), (v, vr)):
+        torch.testing.assert_close(xr, x.to(torch.float8_e4m3fn).float(), rtol=0, atol=0)  # round to nearest even
+        assert ((x - xr).abs() <= x.abs() / 16 + 2.0 ** -10).all()  # 3 mantissa bits: half a step
+    # values past 448 and values below 2^-6 need the layer's scales: K / 4 reaches 1,792, V / 2^-6 resolves 2^-15
+    big, small = k * 10, v * 0.01
+    assert big.abs().max() > 448 and small.abs().median() < 2.0 ** -6
+    for scales, exact in (([(4.0, 2.0 ** -6)], True), (None, False)):
+        pool = KVPool(1, 2, 64, 128, torch.float32, "cpu", "fp8", fp8_scales=scales)
+        kr, vr = pool.read(0, _fill(pool, big, small), 40)
+        ok = all(((x - xr).abs() <= x.abs() / 16 + s * 2.0 ** -10).all()
+                 for x, xr, s in ((big, kr, 4.0), (small, vr, 2.0 ** -6)))
+        assert ok == exact
+    assert pool.fp8_scales == ((1.0, 1.0),) and kr.abs().max() == 448  # without scales: saturated
+
+
+@torch.no_grad()
+def test_an_fp8_pool_takes_the_layer_guard_and_no_smoothing():
+    from tests.test_hf_parity import _tiny
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cpu")
+    model.config.kv_cache_dtype, model.config.kv_pool_gib = "int4", 0.01
+    model.kv_pool()
+    assert model._kv_smoothed  # int4's key smoothing
+    model.config.kv_cache_dtype = "fp8"
+    pool = model.kv_pool()
+    assert pool.kv_cache_dtype == "fp8" and pool.fp8_scales == ((1.0, 1.0),) * model.config.num_layers
+    assert model.config.kv_native_layers is not None and model._kv_native_auto == "fp8"  # chosen again, for fp8
+    assert not model._kv_smoothed and all(layer.self_attn.k_smooth is None for layer in model.layers)
+
+
 def test_uneven_chunks_keep_content_and_page_bounds():
     k, v = _kv(600)
     pool = _pool(track=True)
@@ -141,7 +174,7 @@ def test_independent_copy_and_exhaustion():
 
 
 @torch.no_grad()
-@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
+@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4", "fp8"])
 def test_chunked_prefill_equals_step_decode_and_full_budget_equals_no_selection(kv_cache_dtype):
     hf = _tiny_llama()
     ids = torch.randint(0, 128, (1, 40), generator=torch.Generator().manual_seed(2))
@@ -189,7 +222,7 @@ def test_batched_decode_across_requests_matches_each_request_alone(kv_cache_dtyp
     assert [c.length for c in caches] == [8, 20, 36]
 
 
-@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
+@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4", "fp8"])
 def test_kv_bytes_per_token_matches_what_a_page_holds(kv_cache_dtype):
     pool = _pool(kv_cache_dtype, H=3, layers=2)
     k, v = _kv(48, H=3)
@@ -230,7 +263,7 @@ def test_elastic_manager_drives_the_serving_pool():
         KVCache(pool).reserve((pool.page_limit + 1) * PAGE)
 
 
-@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
+@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4", "fp8"])
 def test_batched_read_and_append_equal_per_request(kv_cache_dtype):
     pool = _pool(kv_cache_dtype, pages=64)
     g = torch.Generator().manual_seed(0)

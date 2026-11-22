@@ -42,6 +42,7 @@ _EXACT = dict(sparsity_ratio=0.0, enable_recirculation=False)
 ARMS |= {  # KV cache settings through the cache; low-bit arms vs exact_forward, Quest arms vs exact_decode
     "int8": ("chunk", _EXACT, dict(kv_cache_dtype="int8"), "exact_forward"),
     "int4": ("chunk", _EXACT, dict(kv_cache_dtype="int4"), "exact_forward"),
+    "fp8": ("chunk", _EXACT, dict(kv_cache_dtype="fp8"), "exact_forward"),
     "int8_nosmooth": ("chunk", _EXACT, dict(kv_cache_dtype="int8", kv_smoothing=False), "exact_forward"),
     "int4_nosmooth": ("chunk", _EXACT, dict(kv_cache_dtype="int4", kv_smoothing=False), "exact_forward"),
     "quest25": ("decode", _EXACT, dict(kv_page_budget=0.25), "exact_decode"),

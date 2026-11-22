@@ -401,7 +401,7 @@ def test_drafts_that_never_match_cost_a_short_probe_and_the_output_is_unchanged(
 
 # ---------------------------------------------------------------------------------------------- drafts as decode rows
 
-@pytest.mark.parametrize("kv", ["native", "int8", "int4"])
+@pytest.mark.parametrize("kv", ["native", "int8", "int4", "fp8"])
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 def test_rows_of_one_request_in_a_decode_step_equal_decoding_them_one_by_one(kv, device):
     """A request's cache listed four times with four consecutive tokens: one decode step gives the logits of four

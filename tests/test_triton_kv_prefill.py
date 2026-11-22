@@ -26,7 +26,8 @@ def _reference(pool, layer, cache, q, start, L, scale, window, softcap):
     return out.transpose(1, 2).reshape(1, L, H * q.shape[-1])
 
 
-@pytest.mark.parametrize("kv_cache_dtype,native", [("native", False), ("int8", False), ("int4", False), ("int4", True)])
+@pytest.mark.parametrize("kv_cache_dtype,native", [("native", False), ("int8", False), ("int4", False), ("int4", True),
+                                                   ("fp8", False)])
 @pytest.mark.parametrize("H,Hkv,D", [(12, 2, 128), (8, 8, 64)])
 @pytest.mark.parametrize("start,L", [(0, 50), (37, 70), (160, 16)])  # off page boundaries; a cached prefix
 @pytest.mark.parametrize("window,softcap", [(0, 0.0), (24, 0.0), (0, 30.0)])
@@ -179,7 +180,7 @@ def test_decoding_requests_ride_in_the_prefill_forwards_of_a_burst(draft):
     assert engine.spec_accepted >= 3 * draft and engine.spec_drafted > engine.spec_accepted or not draft
 
 
-@pytest.mark.parametrize("storage", ["int8", "int4"])
+@pytest.mark.parametrize("storage", ["int8", "int4", "fp8"])
 @pytest.mark.parametrize("Hkv,D", [(2, 128), (8, 64)])
 def test_chunk_append_kernel_stores_what_the_reference_stores(storage, Hkv, D):
     """triton_pool_append (a prefill chunk into a low-bit layer) against KVPool.append: the same codes, scales and
@@ -201,7 +202,7 @@ def test_chunk_append_kernel_stores_what_the_reference_stores(storage, Hkv, D):
         cache.length = 337
     for which in ("k", "v"):
         for a, b in zip(pools[0].layer_fields(0, which)[:3], pools[1].layer_fields(0, which)[:3]):
-            if a is None:  # native storage has no scales
+            if a is None or a.dim() == 1:  # native storage has no scales; fp8's is the layer's, not stored per token
                 continue
             pa, pb = (t[p.page_table[c.slot, :22].long()].transpose(1, 2).flatten(0, 1)[:337]  # the written tokens
                       for t, p, c in ((a, pools[0], caches[0]), (b, pools[1], caches[1])))
@@ -209,6 +210,105 @@ def test_chunk_append_kernel_stores_what_the_reference_stores(storage, Hkv, D):
                 assert torch.equal(pa, pb)
             else:
                 torch.testing.assert_close(pa.float(), pb.float(), atol=0, rtol=1e-3)
+
+
+@pytest.mark.parametrize("arch", ["llama", "qwen2_qkv_bias", "gpt2", "mixtral"])
+@torch.no_grad()
+def test_prefill_graph_matches_the_eager_forward(arch):
+    """PrefillGraphs: a prompt with no cached prefix replayed from a CUDA graph of its length bucket (padded to it)
+    gives the logits and the cache of the eager forward, and decoding goes on from it as from the eager cache."""
+    from tests.test_hf_parity import ARCHS, _tiny
+    from turing.models.causal_lm import PrefillGraphs
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    if arch not in ARCHS:
+        pytest.skip(f"no tiny {arch} model in the parity set")
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny(arch), device="cuda")
+    model.config.kv_pool_gib = 0.02
+    pool, graphs = model.kv_pool(), model._prefill_graphs
+    g = torch.Generator().manual_seed(11)
+    for n in (40, 33, 64, 97):  # 40 and 33 share the 64-token bucket with 64; 97 pads to 128
+        ids = torch.randint(0, 128, (1, n + 3), generator=g).cuda()
+        runs = []
+        for use in (False, True):
+            model.config.cuda_graphs = use
+            graphs.seen[PrefillGraphs.bucket(n)] = 1  # as if the bucket had been used once: capture now
+            cache = KVCache(pool)
+            out = [model(ids[:, :n], past_key_values=cache, logits_to_keep=1)[0][0, -1]]
+            assert cache.length == n
+            for t in range(n, n + 3):  # decode steps overwrite the padding's keys and values
+                out.append(model(ids[:, t:t + 1], past_key_values=cache)[0][0, -1])
+            runs.append((torch.stack(out), [x.clone() for x in pool.read(0, cache, cache.length)], cache))
+        (eager, kv_e, _), (graph, kv_g, _) = runs
+        assert PrefillGraphs.bucket(n) in graphs.graphs
+        torch.testing.assert_close(graph.float(), eager.float(), atol=2e-3, rtol=2e-3)
+        for a, b in zip(kv_g, kv_e):
+            torch.testing.assert_close(a.float(), b.float(), atol=2e-3, rtol=2e-3)
+        for _, _, c in runs:
+            c.free()
+    assert sorted(graphs.graphs) == [64, 128]  # one graph per bucket, whatever the prompts' lengths
+    # a graph reads its token-position tensors on every replay: had they been freed after the capture, these
+    # allocations would now sit in their blocks
+    junk = [torch.full((s,), 1 << 20, dtype=t, device="cuda") for s in (64, 128) for t in (torch.int32, torch.int64)
+            for _ in range(32)]
+    for n in (40, 97):
+        ids = torch.randint(0, 128, (1, n), generator=g).cuda()
+        outs = []
+        for use in (False, True):
+            model.config.cuda_graphs = use
+            cache = KVCache(pool)
+            outs.append(model(ids, past_key_values=cache, logits_to_keep=1)[0][0, -1].float())
+            cache.free()
+        torch.testing.assert_close(outs[1], outs[0], atol=2e-3, rtol=2e-3)
+    del junk
+
+
+def test_prefill_graph_waits_for_a_bucket_s_second_use_and_skips_what_it_cannot_serve():
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    ids = torch.randint(0, 128, (1, 50), generator=torch.Generator().manual_seed(1)).cuda()
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
+    model.config.kv_pool_gib = 0.02
+    with torch.no_grad():
+        for expect in (0, 1, 1):  # eager, capture, replay
+            model(ids, past_key_values=KVCache(model.kv_pool()), logits_to_keep=1)
+            assert len(model._prefill_graphs.graphs) == expect
+        model(ids, past_key_values=KVCache(model.kv_pool()))  # every position's logits: eager
+        cache = KVCache(model.kv_pool())
+        model(ids[:, :20], past_key_values=cache, logits_to_keep=1)
+        model(ids[:, 20:], past_key_values=cache, logits_to_keep=1)  # a cached prefix: eager
+        assert sorted(model._prefill_graphs.graphs) == [64] and model._prefill_graphs.seen == {64: 3, 32: 1}
+    for arch, kv in (("gemma2", "native"), ("llama", "int8")):  # a sliding window and soft-capping; a low-bit pool
+        other = RealHuggingFaceLoader.convert_hf_model(_tiny(arch), device="cuda")
+        other.config.kv_pool_gib, other.config.kv_cache_dtype = 0.02, kv
+        with torch.no_grad():
+            for _ in range(3):
+                other(ids, past_key_values=KVCache(other.kv_pool()), logits_to_keep=1)
+        assert not other._prefill_graphs.graphs
+
+
+def test_a_prefill_graph_no_faster_than_the_eager_forward_is_dropped_with_every_longer_one():
+    """PrefillGraphs times a bucket's eager forward and its first two replays: where the replay is no faster (the
+    length is bound by the device on this model and GPU), that bucket and the longer ones go back to the eager path."""
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    g = torch.Generator().manual_seed(2)
+    long, short = (torch.randint(0, 128, (1, n), generator=g).cuda() for n in (70, 40))  # buckets of 96 and 64
+    model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
+    model.config.kv_pool_gib = 0.02
+    graphs, pool = model._prefill_graphs, model.kv_pool()
+    first = lambda ids: model(ids, past_key_values=KVCache(pool), logits_to_keep=1)[0][0, -1].float()  # noqa: E731
+    with torch.no_grad():
+        eager = first(long)  # timed
+        torch.testing.assert_close(first(long), eager, atol=2e-3, rtol=2e-3)  # captured; the first timed replay
+        assert 96 in graphs.graphs and len(graphs.trial[96]) == 2
+        graphs.trial[96][0] = 0.0  # as if the eager forward had taken no time: no replay beats that
+        torch.testing.assert_close(first(long), eager, atol=2e-3, rtol=2e-3)  # the second replay: judged
+        assert 96 not in graphs.graphs and 96 not in graphs.trial and graphs.limit == 95
+        torch.testing.assert_close(first(long), eager, atol=2e-3, rtol=2e-3)  # eager from now on
+        assert 96 not in graphs.graphs and graphs.seen[96] == 3  # not even counted any more
+        for _ in range(3):
+            first(short)
+        assert sorted(graphs.graphs) == [64] and 64 not in graphs.trial  # a shorter bucket is still judged on its own
 
 
 def test_int4_layers_with_a_cached_prefix_take_the_gather_path_and_the_rest_the_kernel():

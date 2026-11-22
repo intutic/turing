@@ -18,7 +18,7 @@ def _filled(pool, T, g):
     return c
 
 
-@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
+@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4", "fp8"])
 @pytest.mark.parametrize("H,Hkv,D", [(9, 3, 64), (32, 8, 128)])
 @pytest.mark.parametrize("budget", [None, 0.25])
 @pytest.mark.parametrize("native", [False, True])
@@ -57,7 +57,7 @@ def test_fused_decode_step_matches_reference(kv_cache_dtype, H, Hkv, D, budget, 
         page_f, page_r, slot = c.pages[(T - 1) // PAGE], r.pages[(T - 1) // PAGE], (T - 1) % PAGE
         # the fused append stores exactly what the reference append stores, in the fields layer 0 uses (a layer the
         # pool keeps in the model dtype never writes its low-bit slots)
-        for t in (x for w in ("k", "v") for x in pool.layer_fields(0, w)[:3] if x is not None):
+        for t in (x for w in ("k", "v") for x in pool.layer_fields(0, w)[:3] if x is not None and x.dim() > 1):
             torch.testing.assert_close(t[page_f, :, slot], t[page_r, :, slot], rtol=0, atol=0)
         if budget is None:
             kr, vr = pool.read(0, r, T)
@@ -243,7 +243,7 @@ def test_sdpa_decode_attention_matches_the_kernel():
     torch.testing.assert_close(outs[1], outs[0], atol=1e-3, rtol=0)
 
 
-@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4"])
+@pytest.mark.parametrize("kv_cache_dtype", ["native", "int8", "int4", "fp8"])
 def test_one_split_writes_the_output_directly_and_matches_the_split_path(kv_cache_dtype):
     """n_splits = 1 (a large batch) stores attention without the reduce launch; same result as the split path. K and V
     are passed as non-contiguous views of one fused projection, as the model's fused q/k/v gives them."""

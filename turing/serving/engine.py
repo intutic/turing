@@ -196,7 +196,7 @@ class ContinuousBatchEngine:
         # the device, and the host reads and emits them while that step runs, so the GPU does not wait for the host
         # between steps. _ahead is the launched step whose tokens the host has not read: [requests, tokens on the
         # device, their host copy, the CUDA event that marks the copy].
-        self.overlap_decode = self.device.type == "cuda"
+        self.overlap_decode = self.device.type == "cuda" and not getattr(self.model, "decode_syncs", lambda: False)()
         self._ahead: Optional[list] = None
         self.ride_prefill = True  # decoding requests take their token in a step's packed prefill forward (_riders)
         # Seconds per step (moving averages, _timed): a request keeps drafting only while its tokens per step exceed

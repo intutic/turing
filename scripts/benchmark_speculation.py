@@ -29,17 +29,23 @@ import time
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 
 
+CODE_MODULES = ("argparse", "ast", "bisect", "calendar", "cmd", "configparser", "csv", "difflib", "fractions",
+                "heapq", "json.decoder", "json.encoder", "shlex", "statistics", "string", "textwrap")
+
+
 def code_prompts(n):
-    """Functions of 12 to 45 lines from the turing package, evenly spaced over the sorted source files."""
+    """Functions of 12 to 45 lines from Python's standard library (CODE_MODULES), evenly spaced: the same prompts
+    for every engine run under one Python version. (They came from the turing package itself until 2026-11-21, so
+    two runs on either side of a code change had different prompts: 5,244 against 4,993 output tokens without
+    drafts in results_eagle3_cuda.json's code rows.)"""
+    import importlib
+    import inspect
     found = []
-    for dirpath, _, files in sorted(os.walk(os.path.join(ROOT, "turing"))):
-        for name in sorted(files):
-            if not name.endswith(".py"):
-                continue
-            src = open(os.path.join(dirpath, name), encoding="utf-8").read()
-            for node in ast.walk(ast.parse(src)):
-                if isinstance(node, ast.FunctionDef) and 12 <= node.end_lineno - node.lineno + 1 <= 45:
-                    found.append(textwrap.dedent("\n".join(src.splitlines()[node.lineno - 1:node.end_lineno])))
+    for name in CODE_MODULES:
+        src = inspect.getsource(importlib.import_module(name))
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.FunctionDef) and 12 <= node.end_lineno - node.lineno + 1 <= 45:
+                found.append(textwrap.dedent("\n".join(src.splitlines()[node.lineno - 1:node.end_lineno])))
     step = max(1, len(found) // n)
     return ["Add type hints to every parameter that lacks one. Change nothing else and reply with the complete "
             f"function only.\n\n```python\n{f}\n```" for f in found[::step][:n]]
@@ -78,6 +84,7 @@ def run_turing(a, work):
     tok = AutoTokenizer.from_pretrained(a.model)
     model, _ = RealHuggingFaceLoader.load_hf_model_into_turing(a.model, device=a.device, dtype=a.dtype)
     model.config.kv_pool_fraction = None  # as turing serve: all free memory but a reserve
+    from turing.models.causal_lm import PrefillGraphs
     head = None
     if a.draft_head:
         from turing.models.eagle3 import load_eagle3
@@ -106,6 +113,15 @@ def run_turing(a, work):
                 prompts = tokenized(tok, contents)
                 for k in a.draft_tokens:  # CUDA graphs and the verify forward's shapes, before anything is timed
                     await cell(prompts[:4], k, max(a.concurrency))
+                # and the prefill graph of every prompt length a request arriving alone will have: captured at a
+                # length bucket's second use and judged on the two replays after it (PrefillGraphs)
+                first = {}
+                for p in prompts:
+                    first.setdefault(PrefillGraphs.bucket(len(p)), p)
+                for p in first.values():
+                    for _ in range(3):
+                        r = await engine.add_request(prompt_tokens=p, max_new_tokens=1, temperature=0.0, draft_tokens=0)
+                        [t async for t in engine.stream_request(r)]
                 for c in a.concurrency:
                     plain = None
                     for k in a.draft_tokens:
@@ -188,7 +204,7 @@ def main():
                      r["draft_tokens"])
     keep = [r for r in old.get("rows", []) if key(r) not in {key(n) for n in rows}]
     import torch
-    env = dict(platform=platform.platform(), torch=torch.__version__,
+    env = dict(platform=platform.platform(), python=platform.python_version(), torch=torch.__version__,
                gpu=torch.cuda.get_device_name(0) if torch.cuda.is_available() else None)
     with open(a.out, "w") as f:
         json.dump(dict(env=env, versions=dict(old.get("versions", {}), **{a.engine: version}), rows=keep + rows), f,

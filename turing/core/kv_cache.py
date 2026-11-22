@@ -11,6 +11,12 @@ same slot in every layer. Storage modes (`kv_cache_dtype`):
   [len(native_layers), num_pages, Hkv, 16, D]); set when calibration finds a layer the low-bit format damages.
 - "int4":   asymmetric round-to-nearest per group of 32 values along D, fp16 scale and zero per group, two codes per
             byte (D' = D / 2, G = D / 32).
+- "fp8":    float8 E4M3 bytes of x / scale, round to nearest even, saturating at +-448 (D' = D, no per-token
+            fields): vLLM's fp8 cache format, which FlashInfer's prefill kernel reads in place (int8 and int4 pages
+            are dequantized into temporary pages for it first). One scale per layer for K and one for V
+            (`fp8_scale`), 1 unless the pool is given others: scales fitted to each layer's largest values left the
+            per-layer damage where it was (KL 0.3825 with them and with 1 on Qwen2.5-1.5B, 0.0049 against 0.0050 on
+            SmolLM2-1.7B), so none are calibrated.
 K is stored after RoPE. A request (`KVCache`) owns a row of the pool's device page table and the pages it lists; a
 clone shares its full pages copy-on-write (refcounted) and copies only the partial last page, so a fork costs one page
 per layer. At most one partial page per request is unused, instead of a per-request capacity margin.
@@ -20,12 +26,14 @@ writes the same layout with fused kernels.
 """
 
 from typing import Optional, Sequence, List, Tuple
+import logging
 import math
 import torch
 
 PAGE = 16
 INT4_GROUP = 32
-KV_CACHE_DTYPES = ("native", "int8", "int4")
+KV_CACHE_DTYPES = ("native", "int8", "int4", "fp8")
+FP8_MAX = 448.0
 
 
 def resolve_kv_cache_dtype(choice: str, device) -> str:
@@ -39,7 +47,8 @@ def kv_bytes_per_token(num_layers: int, num_kv_heads: int, head_dim: int, kv_cac
     """K and V bytes one token adds to the cache across all layers (scales included, Quest metadata excluded)."""
     per_head = {"native": head_dim * native_bytes,
                 "int8": head_dim + 4,
-                "int4": head_dim // 2 + 4 * (head_dim // INT4_GROUP)}[kv_cache_dtype]
+                "int4": head_dim // 2 + 4 * (head_dim // INT4_GROUP),
+                "fp8": head_dim}[kv_cache_dtype]
     return 2 * num_layers * num_kv_heads * per_head
 
 
@@ -63,6 +72,35 @@ def _dequantize(codes: torch.Tensor, scale: torch.Tensor, zero: torch.Tensor, gr
     return (g * scale.float().unsqueeze(-1) + zero.float().unsqueeze(-1)).flatten(-2).to(dtype)
 
 
+def _fp8_encode(x: torch.Tensor, scale) -> torch.Tensor:
+    """x [..., D] -> the E4M3 bytes (uint8) of x / scale: round to nearest even, saturating at +-448. Integer
+    arithmetic on the fp32 bits, which the fused append kernel repeats exactly and every device has (MPS has no
+    float8 cast)."""
+    y = (x.float() / scale).clamp(-FP8_MAX, FP8_MAX)
+    bits = y.contiguous().view(torch.int32)
+    mag = bits & 0x7FFFFFFF
+    normal = ((mag + 0x7FFFF + ((mag >> 20) & 1)) >> 20) - 960  # 3 mantissa bits, exponent bias 127 -> 7
+    sub = torch.round(y.abs() * 512.0).to(torch.int32)  # below 2^-6: multiples of 2^-9 (8 is the smallest normal)
+    return (torch.where(mag < 0x3C800000, sub, normal) | ((bits >> 24) & 0x80)).to(torch.uint8)
+
+
+def _fp8_decode(codes: torch.Tensor, scale, dtype) -> torch.Tensor:
+    """As the kernels decode (exact on every device): below 8 multiples of 2^-9, else the fp32 with these exponent
+    and mantissa bits. 0x7F, NaN in E4M3, is never written and reads as 480."""
+    mag = (codes & 0x7F).to(torch.int32)
+    x = torch.where(mag < 8, mag / 512.0, ((mag + 960) << 20).view(torch.float32))
+    return (torch.where(codes > 127, -x, x) * scale).to(dtype)
+
+
+def kv_roundtrip(k: torch.Tensor, v: torch.Tensor, storage: str, fp8_scale=(1.0, 1.0)) -> Tuple[torch.Tensor,
+                                                                                               torch.Tensor]:
+    """What a pool in `storage` gives back for K and V [..., D] (the probe select_kv_native_layers uses)."""
+    if storage == "fp8":
+        return tuple(_fp8_decode(_fp8_encode(x, s), s, x.dtype) for x, s in zip((k, v), fp8_scale))
+    bits, group = (8, k.shape[-1]) if storage == "int8" else (4, INT4_GROUP)
+    return tuple(_dequantize(*_quantize(x, bits, group), group, x.dtype) for x in (k, v))
+
+
 def _pack4(codes: torch.Tensor) -> torch.Tensor:
     return codes[..., 0::2] | (codes[..., 1::2] << 4)
 
@@ -79,7 +117,7 @@ class KVPool:
     @torch.inference_mode(False)
     def __init__(self, num_layers: int, num_kv_heads: int, head_dim: int, num_pages: int, dtype, device,
                  kv_cache_dtype: str = "native", track_pages: bool = False, max_tokens_per_request: int = 131072,
-                 native_layers: Sequence[int] = ()):
+                 native_layers: Sequence[int] = (), fp8_scales: Optional[Sequence[Sequence[float]]] = None):
         if kv_cache_dtype not in KV_CACHE_DTYPES:
             raise ValueError(f"kv_cache_dtype must be one of {KV_CACHE_DTYPES}, not {kv_cache_dtype!r}")
         if kv_cache_dtype == "int4" and head_dim % INT4_GROUP:
@@ -95,10 +133,15 @@ class KVPool:
             self.k, self.v = (torch.empty(shape((D,)), dtype=dtype, device=device) for _ in range(2))
             self.k_scale = self.k_zero = self.v_scale = self.v_zero = None
         else:
-            width, groups = (D, 1) if kv_cache_dtype == "int8" else (D // 2, D // INT4_GROUP)
+            width, groups = (D // 2, D // INT4_GROUP) if kv_cache_dtype == "int4" else (D, 1)
             self.k, self.v = (torch.empty(shape((width,)), dtype=torch.uint8, device=device) for _ in range(2))
-            self.k_scale, self.k_zero, self.v_scale, self.v_zero = (
+            self.k_scale, self.k_zero, self.v_scale, self.v_zero = (None,) * 4 if kv_cache_dtype == "fp8" else (
                 torch.empty(shape((groups,)), dtype=torch.float16, device=device) for _ in range(4))
+        # fp8: each layer's (K scale, V scale), on the host for FlashInfer and on the device for the kernels ([L, 2, 4],
+        # the scale first: 16 bytes apart, so Triton compiles one variant for every layer's pointer)
+        self.fp8_scales = tuple((float(a), float(b)) for a, b in fp8_scales or ((1.0, 1.0),) * L)
+        self.fp8_scale = (torch.tensor(self.fp8_scales, dtype=torch.float32, device=device)[:, :, None].repeat(1, 1, 4)
+                          if kv_cache_dtype == "fp8" else None)
         # layers a low-bit pool keeps in the model dtype (their slots in the low-bit tensors stay unused)
         self.native_layers = tuple(sorted(set(native_layers))) if kv_cache_dtype != "native" else ()
         self._hi = {layer: i for i, layer in enumerate(self.native_layers)}
@@ -152,6 +195,14 @@ class KVPool:
             free, total = torch.cuda.mem_get_info(device)
             free += torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
             budget = cls.cuda_budget(free, total, config.kv_pool_fraction)
+            if config.kv_pool_fraction is None and free - budget < 0.999 * max(0.1 * total, 1.5 * 2 ** 30):
+                # the weights left less than twice the usual reserve: half goes to the pool, and a long prompt's
+                # working memory may not fit in the other half (Mixtral-8x7B with 6.5 of 8 experts a layer on a
+                # 24 GB card served short prompts and ran out of memory on a 512-token one)
+                logging.getLogger(__name__).warning(
+                    "%.1f GiB of GPU memory is free after the weights: %.1f GiB for the KV pool, %.1f GiB for working "
+                    "memory. Long prompts may run out of memory; keep fewer weights on the GPU (--moe-expert-slots, "
+                    "--quantization) or set --kv-pool-gib.", free / 2 ** 30, budget / 2 ** 30, (free - budget) / 2 ** 30)
         else:
             budget = min(4 * 2 ** 30, 64 * -(-config.max_position_embeddings // PAGE) * page_bytes)
         return cls(L, H, D, max(1, int(budget // page_bytes)), dtype, device, config.kv_cache_dtype, track,
@@ -169,9 +220,13 @@ class KVPool:
 
     def layer_fields(self, layer: int, which: str):
         """(codes, scale, zero, storage) of one layer's K or V ("k" / "v"): tensors indexed [page, head, slot, ...],
-        scale and zero None for native storage; storage is "native", "int8" or "int4"."""
+        scale and zero None for native storage; storage is "native", "int8", "int4" or "fp8" (scale and zero then
+        both the layer's one scale, a 4-wide tensor whose first element counts)."""
         if layer in self._hi:
             return (self.k_hi if which == "k" else self.v_hi)[self._hi[layer]], None, None, "native"
+        if self.kv_cache_dtype == "fp8":
+            s = self.fp8_scale[layer, 0 if which == "k" else 1]
+            return (self.k if which == "k" else self.v)[layer], s, s, "fp8"
         codes, scale, zero = ((self.k, self.k_scale, self.k_zero) if which == "k"
                               else (self.v, self.v_scale, self.v_zero))
         if self.kv_cache_dtype == "native":
@@ -183,6 +238,9 @@ class KVPool:
         codes_t, scale_t, zero_t, storage = self.layer_fields(layer, which)
         if storage == "native":
             codes_t[phys, :, slot] = xt.to(codes_t.dtype)
+            return
+        if storage == "fp8":
+            codes_t[phys, :, slot] = _fp8_encode(xt, scale_t[0])
             return
         bits, group = (8, self.head_dim) if storage == "int8" else (4, INT4_GROUP)
         codes, scale, zero = _quantize(xt, bits, group)
@@ -319,7 +377,9 @@ class KVPool:
             codes_t, scale_t, zero_t, storage = self.layer_fields(layer, which)
             g = lambda t: t[phys].permute(0, 2, 1, 3, 4).flatten(2, 3)  # [B, W, Hkv, 16, w] -> [B, Hkv, W*16, w]
             codes = g(codes_t)
-            if storage != "native":
+            if storage == "fp8":
+                codes = _fp8_decode(codes, scale_t[0], self.dtype)
+            elif storage != "native":
                 group = self.head_dim if storage == "int8" else INT4_GROUP
                 if storage == "int4":
                     codes = _unpack4(codes)
@@ -343,6 +403,8 @@ class KVPool:
         codes = self._gather(codes_t, phys)
         if storage == "native":
             return codes
+        if storage == "fp8":
+            return _fp8_decode(codes, scale_t[0], self.dtype)
         group = self.head_dim if storage == "int8" else INT4_GROUP
         if storage == "int4":
             codes = _unpack4(codes)

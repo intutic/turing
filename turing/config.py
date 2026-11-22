@@ -59,7 +59,7 @@ class ModelConfig:
     router_layer_idx: Optional[int] = None # Defaults to num_layers // 3
     rms_norm_eps: float = 1e-6
     enable_recirculation: bool = False
-    kv_cache_dtype: str = "native"     # "native", "int8" or "int4" (see turing/core/kv_cache.py)
+    kv_cache_dtype: str = "native"     # "native", "int8", "int4" or "fp8" (see turing/core/kv_cache.py)
     kv_page_budget: float = 1.0        # Quest: share of 16-token pages a decode step reads; 1.0 reads all
     kv_select_min_tokens: int = 8192   # Quest only from this length: on an L4 it beats reading every page only at
                                        # batch >= 64 and >= 8K tokens (results_quest_threshold_cuda_smollm2_360m.json)
@@ -68,8 +68,8 @@ class ModelConfig:
     cuda_graphs: bool = True           # replay decode steps as CUDA graphs (CUDA only; see DecodeGraphs)
     decode_attention: str = "kernel"   # CUDA decode: "kernel" (fused paged Triton) or "sdpa" (gather pages, then SDPA)
     kv_smoothing: bool = True          # int4 KV: outlier key channels scaled down (SubspaceCausalLM.calibrate_kv_smoothing)
-    kv_native_layers: Optional[Tuple[int, ...]] = None  # int8/int4 KV: layers kept in the model dtype; None = chosen
-                                                         # by calibration (calibrate_kv_smoothing), () = none
+    kv_native_layers: Optional[Tuple[int, ...]] = None  # int8/int4/fp8 KV: layers kept in the model dtype; None =
+                                                         # chosen by calibration (select_kv_native_layers), () = none
     rope_scaling: Optional[dict] = None  # HF rope-parameters dict ({"rope_type": "llama3", ...}); see hf_rope_scaling
     attention_bias: bool = False       # q/k/v projection biases (Qwen2, GPT-2, OPT, GPT-NeoX, Phi-2)
     qk_norm: bool = False              # per-head norm on q and k before RoPE (Qwen3, Gemma 3)

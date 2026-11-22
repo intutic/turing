@@ -92,7 +92,10 @@ def run_turing(a, batches):
         await engine.start()
         try:
             for B in batches:  # warm-up at this batch size: CUDA graph capture
-                await batch(prompts(tok, B, a.warmup_context or a.context, seed=99))
+                # one prompt alone three times: its prefill graph is captured at its length's second use and judged
+                # on the two replays after it (PrefillGraphs), which the measured request would otherwise pay for
+                for _ in range(3 if B == 1 else 1):
+                    await batch(prompts(tok, B, a.warmup_context or a.context, seed=99))
             for B in batches:
                 preempted = engine.preemptions
                 secs, n, ttft = await batch(prompts(tok, B, a.context))
@@ -188,7 +191,7 @@ def main():
     ap.add_argument("--new-tokens", type=int, default=256)
     ap.add_argument("--dtype", default="fp16")
     ap.add_argument("--kv-cache-dtype", default="native", choices=["native", "int8", "int4", "fp8"],
-                    help="turing: native/int8/int4; vllm: native (auto) or int8/fp8 (fp8)")
+                    help="turing: native/int8/int4/fp8; vllm: native (auto) or int8/fp8 (fp8)")
     ap.add_argument("--kv-page-budget", type=float, default=1.0, help="turing: Quest share of pages read per step")
     ap.add_argument("--kv-pool-gib", type=float, default=None, help="turing: KV pool size")
     ap.add_argument("--kv-pool-gib-from", default=None,
@@ -197,7 +200,7 @@ def main():
     ap.add_argument("--vllm-kv-cache-dtype", default=None, help="vllm: any kv_cache_dtype (int8_per_token_head, ...)")
     ap.add_argument("--kv-skip-layers", default="", help="vllm: layers kept out of the quantized cache, e.g. 0")
     ap.add_argument("--warmup-context", type=int, default=None, help="prompt length of the warm-up batches")
-    ap.add_argument("--moe-expert-slots", type=int, default=None,
+    ap.add_argument("--moe-expert-slots", type=float, default=None,
                     help="turing: MoE experts kept on the GPU per layer; the rest in host memory")
     ap.add_argument("--prefill-chunk", type=int, default=2048,
                     help="turing: prompt tokens prefilled per scheduler step, over all waiting requests")
@@ -212,7 +215,7 @@ def main():
     if a.engine == "vllm":
         a.dtype = {"fp16": "float16", "bf16": "bfloat16"}.get(a.dtype, a.dtype)
     batches = [int(b) for b in a.batches.split(",")]
-    if a.engine == "turing" and a.kv_cache_dtype == "fp8" or a.engine == "vllm" and a.kv_cache_dtype == "int4":
+    if a.engine == "vllm" and a.kv_cache_dtype == "int4":
         raise SystemExit(f"{a.engine} has no {a.kv_cache_dtype} KV cache here")
     if a.kv_pool_gib_from:
         got = [r["kv_pool_gib"] for r in json.load(open(a.kv_pool_gib_from))["rows"]

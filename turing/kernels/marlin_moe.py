@@ -73,6 +73,15 @@ def marlin_moe_pack(gate_up: Packed, down: Packed, dtype: torch.dtype) -> Marlin
                              gate_up[0].shape[2] * 2, down[0].shape[2] * 2)
 
 
+def marlin_moe_store(w: MarlinExperts, slot: int, gate_up: Packed, down: Packed, dtype: torch.dtype) -> None:
+    """One expert's packed matrices (on the device, without the expert dimension) into slot `slot` of w: how an
+    offloaded layer replaces a resident expert (SparseMoE._load)."""
+    packed = [marlin_pack(q, s, z, dtype) for q, s, z in (gate_up, down)]  # both before the slot changes
+    for dst, m in zip((w.gate_up, w.down), packed):
+        for d, src in zip(dst, (m.qweight, m.scales, m.zeros)):
+            d[slot].copy_(src)
+
+
 def _block_rows(pairs: int, num_experts: int) -> int:
     """vLLM's choice (fused_marlin_moe): the smallest block of 8 to 64 rows that an average expert does not fill."""
     for block in (8, 16, 32, 48, 64):

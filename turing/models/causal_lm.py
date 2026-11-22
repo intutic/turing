@@ -6,15 +6,22 @@ ModelConfig, and tests/test_hf_parity.py checks every family against HuggingFace
 """
 
 import math
+import os
+import time
 from typing import List, Optional, Tuple, Union, Any
 import gc
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from ..config import ModelConfig
 from ..core.rope import RotaryEmbedding, apply_rotary_pos_emb
-from ..core.kv_cache import INT4_GROUP, KVCache, KVPool, _dequantize, _quantize
+from ..core.kv_cache import KVCache, KVPool, KVPoolExhausted, kv_roundtrip
+try:  # the native extension: one packed 4-bit expert on the CPU (csrc/turing_w4_expert_cpu.hpp)
+    from ..turing_csrc import w4_expert_cpu
+except ImportError:  # a build without it: offload copies missing experts in, as before
+    w4_expert_cpu = None
 from ..kernels.triton_kv_decode import (pool_append_supported, pool_decode_supported, triton_pool_append,
                                         triton_pool_decode)
 from ..kernels import triton_fused_ops as fused_ops
@@ -23,6 +30,9 @@ from ..kernels.flashinfer_prefill import flashinfer_prefill, flashinfer_prefill_
 from ..kernels.triton_moe import HAS_TRITON as HAS_MOE_KERNELS
 from ..kernels.triton_moe import (GEMM_MIN_ROWS, fused_moe, fused_moe_supported, fused_moe_w4,
                                   fused_moe_w4_supported, gated_add, gemm_moe, moe_route)
+
+
+_CPU_THREADS = min(os.cpu_count() or 1, 16)  # for the CPU expert kernel
 
 
 class RMSNorm(nn.Module):
@@ -196,6 +206,7 @@ class SparseMoE(nn.Module):
             self.shared_expert = SubspaceMLP(config, config.shared_expert_ffn_dim)
             self.shared_expert_gate = nn.Linear(H, 1, bias=False)
         self._host = None  # offload: every expert's arrays in host memory, by name
+        self._cuts = None  # StepCuts while DecodeGraphs captures a step through this (offloaded) layer
         self._marlin = None  # use_marlin: (activation dtype, the experts in Marlin's layout)
 
     def route(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -222,9 +233,10 @@ class SparseMoE(nn.Module):
         """Serve packed experts with the vendored Marlin MoE kernel (turing.kernels.marlin_moe) where it is built and
         the shapes fit: the experts are converted to Marlin's layout for activations of `dtype`, and the packed
         buffers move to host memory, so the device holds each expert once (they still save and convert from there).
-        Not for offloaded experts, whose slots the Triton kernels read."""
+        An offloaded layer converts its slots: the resident experts are then Marlin's, the packed slot arrays are
+        dropped (host memory has every expert already), and an expert that takes a slot is converted on the way in."""
         from ..kernels.marlin_moe import marlin_moe_pack, marlin_moe_supported
-        if self.gate_up is not None or self._host is not None or self._marlin is not None:
+        if self.gate_up is not None or self._marlin is not None:
             return self._marlin is not None
         q = self.gate_up_q
         if not marlin_moe_supported(q.shape[2] * 2, self.down_q.shape[2] * 2, self.group, dtype, q.device):
@@ -232,7 +244,7 @@ class SparseMoE(nn.Module):
         self._marlin = (dtype, marlin_moe_pack((q, self.gate_up_scales, self.gate_up_zeros),
                                                (self.down_q, self.down_scales, self.down_zeros), dtype))
         for name in self._arrays():
-            self._buffers[name] = self._buffers[name].cpu()
+            self._buffers[name] = None if self._host is not None else self._buffers[name].cpu()
         return True
 
     def _arrays(self) -> Tuple[str, ...]:
@@ -247,7 +259,9 @@ class SparseMoE(nn.Module):
         recently. The device arrays keep their names with `slots` as their leading dimension; slot_of maps an expert
         to its slot (-1: on the host only). A decode step then syncs with the host once per layer, so it is not
         captured in a CUDA graph. Prefill-sized inputs, and a step that routes to more experts than there are slots,
-        stream the missing experts through the device without changing which ones are resident."""
+        stream the missing experts through the device without changing which ones are resident. Packed 4-bit experts
+        take another road for a few tokens (_cpu_experts): the missing ones run on the CPU, nothing is copied, and
+        the residents become the experts used most (_rebalance)."""
         if self._host is not None:
             raise ValueError("this layer's experts are already offloaded")
         if self._marlin is not None:
@@ -269,7 +283,10 @@ class SparseMoE(nn.Module):
         self._host, self.num_slots = host, slots
         self._expert_slot = list(range(slots)) + [-1] * (self.num_experts - slots)  # host-side copy of slot_of
         self._slot_expert, self._slot_used, self._tick = list(range(slots)), [0] * slots, 0
-        self.offload_hits = self.offload_misses = self.offload_streamed = 0
+        self.offload_hits = self.offload_misses = self.offload_streamed = self.offload_cpu = 0
+        self.offload_cpu_s = 0.0  # seconds in the CPU kernel
+        self._uses = [0] * self.num_experts  # small steps that needed each expert (halved at every rebalance)
+        self._small_steps = 0
 
     def _ensure(self, needed: List[int]) -> None:
         """Bring the experts in `needed` (at most num_slots of them) onto the device, each replacing the resident
@@ -285,32 +302,144 @@ class SparseMoE(nn.Module):
         self.offload_hits += len(needed) - len(missing)
         self.offload_misses += len(missing)
         for e in missing:
-            slot = min((i for i in range(self.num_slots) if self._slot_used[i] != self._tick),
-                       key=self._slot_used.__getitem__)
+            self._load(e, min((i for i in range(self.num_slots) if self._slot_used[i] != self._tick),
+                              key=self._slot_used.__getitem__))
+
+    def _load(self, e: int, slot: int) -> None:
+        """Copy expert e from host memory into `slot`, replacing the expert there."""
+        if self._marlin is not None:  # the slots are Marlin's: converted on the device, then stored
+            from ..kernels.marlin_moe import marlin_moe_store
+            p = {name: host[e].to(self.slot_of.device, non_blocking=True) for name, host in self._host.items()}
+            marlin_moe_store(self._marlin[1], slot, (p["gate_up_q"], p["gate_up_scales"], p["gate_up_zeros"]),
+                             (p["down_q"], p["down_scales"], p["down_zeros"]), self._marlin[0])
+        else:
             for name, host in self._host.items():
                 getattr(self, name)[slot].copy_(host[e], non_blocking=True)
-            old = self._slot_expert[slot]
-            self._expert_slot[old], self._expert_slot[e] = -1, slot
-            self._slot_expert[slot], self._slot_used[slot] = e, self._tick
-            self.slot_of[old], self.slot_of[e] = -1, slot
+        old = self._slot_expert[slot]
+        self._expert_slot[old], self._expert_slot[e] = -1, slot
+        self._slot_expert[slot], self._slot_used[slot] = e, self._tick
+        self.slot_of[old], self.slot_of[e] = -1, slot
 
-    def expert_weights(self, e: int, dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tensor]:
+    # A missing packed expert costs a copy of all its weights to the device (92 MB for Mixtral-8x7B) or one pass over
+    # them on the CPU (csrc/turing_w4_expert_cpu.hpp); for a few tokens the pass is cheaper and leaves the slots alone.
+    CPU_ROWS = 8
+    REBALANCE = 64  # steps of at most CPU_ROWS tokens between looks at which experts are used most
+
+    def _cpu_ok(self) -> bool:
+        return (self.gate_up is None and self.act is F.silu and w4_expert_cpu is not None
+                and self.group <= 128 and self.group % 16 == 0)  # the CPU kernel's groups
+
+    def _cpu_serves(self, x: torch.Tensor) -> bool:
+        return x.shape[0] <= self.CPU_ROWS and x.is_cuda and self._cpu_ok()
+
+    def cut_safe(self, x: torch.Tensor, rows: int) -> bool:
+        """A decode step of `rows` rows through this offloaded layer can be captured as CUDA graphs with a stop for
+        the host (StepCuts): its slots are Marlin's, and the CPU takes the experts that are not resident."""
+        return self._host is not None and self._marlin_for(x) is not None and rows <= self.CPU_ROWS and self._cpu_ok()
+
+    def between_graphs(self, site: list, rows: int, launch) -> None:
+        """The host's part of a captured decode step at this layer, between the graph that made the routing and the
+        one that adds this layer's output: which routed experts are not resident, `launch` (the graph with the
+        resident ones), and the others on the CPU meanwhile, into the site's static tensor. site: [layer, x, weights,
+        experts, extra, extra is not zero]; the first `rows` rows are requests, the rest padding."""
+        _, x, weights, experts, extra, dirty = site
+        en = experts[:rows].cpu().numpy()  # the wait for the graph before
+        needed = np.unique(en).tolist()
+        self._count(needed)
+        missing = [e for e in needed if self._expert_slot[e] < 0]
+        host = (x[:rows].float().cpu(), weights[:rows].cpu()) if missing else None
+        launch()
+        if missing:
+            extra[:rows].copy_(self._cpu_experts(host[0], host[1], en, needed, missing))
+            site[5] = True
+        else:
+            self.offload_hits += len(needed)
+            if dirty:
+                extra.zero_()
+                site[5] = False
+
+    def _count(self, needed: List[int]) -> None:
+        """A small step's experts, hits and misses alike, towards which stay resident; every REBALANCE such steps
+        the residency is looked at, before the step reads its slots."""
+        for e in needed:
+            self._uses[e] += 1
+        self._small_steps += 1
+        if self._small_steps % self.REBALANCE == 0:
+            self._rebalance()
+
+    def _cpu_experts(self, xs: torch.Tensor, w: torch.Tensor, ex: torch.Tensor, needed: List[int],
+                     missing: List[int]) -> torch.Tensor:
+        """The weighted outputs of the experts in `missing` for the tokens routed to them, computed on the CPU from
+        the packed host arrays: [T, H] in fp32 on the host (zero rows for the other tokens). xs [T, H] fp32, w and ex
+        [T, top_k] (fp32 routing weights, expert ids): host copies (tensors or arrays) of the step's input and
+        routing."""
+        self._tick += 1
+        for e in needed:
+            if self._expert_slot[e] >= 0:
+                self._slot_used[self._expert_slot[e]] = self._tick
+        self.offload_hits += len(needed) - len(missing)
+        self.offload_cpu += len(missing)
+        h = self.__dict__.get("_host_np")
+        if h is None:  # the host arrays as the kernel takes them (fp16 scales as their bits), viewed once
+            h = self._host_np = {k: v.numpy().view("uint16") if v.dtype == torch.float16 else v.numpy()
+                                 for k, v in self._host.items()}
+        # numpy from here on: torch's CPU nonzero opens an OpenMP region for any size, and its threads then spin for
+        # milliseconds beside the kernel's (an expert took 5.4 ms instead of 2.6 on a 16-thread L4 host)
+        xn, wn, en = (np.asarray(t) for t in (xs, w, ex))
+        out, t = np.zeros_like(xn), time.perf_counter()
+        for e in missing:
+            rows, cols = np.nonzero(en == e)
+            y = w4_expert_cpu(xn[rows], h["gate_up_q"][e], h["gate_up_scales"][e], h["gate_up_zeros"][e],
+                              h["down_q"][e], h["down_scales"][e], h["down_zeros"][e], self.group, _CPU_THREADS)
+            out[rows] += y * wn[rows, cols, None]  # a token is routed to an expert once: the rows are distinct
+        self.offload_cpu_s += time.perf_counter() - t
+        return torch.from_numpy(out)
+
+    def _rebalance(self) -> None:
+        """Make the most-used expert that is not resident resident, in place of the least-used resident one, when it
+        was needed by half as many steps again (one copy); then halve the counts so they follow the traffic."""
+        out = max((e for e in range(self.num_experts) if self._expert_slot[e] < 0), key=self._uses.__getitem__)
+        slot = min(range(self.num_slots), key=lambda i: self._uses[self._slot_expert[i]])
+        if self._uses[out] > 1.5 * self._uses[self._slot_expert[slot]] + 4:
+            self._load(out, slot)
+            self.offload_misses += 1
+        self._uses = [u // 2 for u in self._uses]
+
+    def dequant_numel(self) -> int:
+        """Elements of one packed expert's two matrices once dequantized (the scratch buffer expert_weights fills)."""
+        arrays = self._host if self._host is not None else self._buffers  # offloaded: the device may hold Marlin's only
+        return 2 * (arrays["gate_up_q"][0].numel() + arrays["down_q"][0].numel())
+
+    def expert_weights(self, e: int, dtype: torch.dtype, scratch: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
         """Expert e's (gate_up [2F, H], down [H, F]) in dtype, dequantized when the experts are packed. An offloaded
-        expert that is not resident is copied to the device for this call only."""
+        expert that is not resident is copied to the device for this call only. With scratch, packed experts on CUDA
+        are dequantized by one launch each into a buffer shared by every layer, valid until the next such call: the
+        reference makes temporaries of three times a matrix (0.7 GiB for a Mixtral gate/up), which did not fit
+        beside six of eight experts and the KV pool on a 24 GB card."""
         if self._host is None:
             parts = {name: getattr(self, name)[e] for name in self._arrays()}
-        elif self._expert_slot[e] >= 0:
+        elif self._expert_slot[e] >= 0 and self._marlin is None:
             parts = {name: getattr(self, name)[self._expert_slot[e]] for name in self._host}
-        else:
+        else:  # not resident (or resident in Marlin's layout only): from host memory
             self.offload_streamed += 1
             dev = self.router.weight.device
             parts = {name: host[e].to(dev, non_blocking=True) for name, host in self._host.items()}
         if "gate_up" in parts:
             return parts["gate_up"].to(dtype), parts["down"].to(dtype)
-        from .quant import dequantize
+        from .quant import _scratch, dequantize
         dev = self.router.weight.device  # after use_marlin the packed buffers are in host memory
-        return (dequantize(parts["gate_up_q"], parts["gate_up_scales"], parts["gate_up_zeros"], dtype).to(dev),
-                dequantize(parts["down_q"], parts["down_scales"], parts["down_zeros"], dtype).to(dev))
+        gq, dq = parts["gate_up_q"], parts["down_q"]
+        if scratch and dev.type == "cuda" and gq.device == dev and dtype in (torch.float16, torch.bfloat16):
+            from ..kernels.triton_w4a16 import HAS_TRITON, dequantize_cuda
+            if HAS_TRITON:
+                n = 2 * gq.numel()
+                buf = _scratch(self.dequant_numel(), dev, dtype)
+                return (dequantize_cuda(gq, parts["gate_up_scales"], parts["gate_up_zeros"],
+                                        buf[:n].view(gq.shape[0], -1), self.group),
+                        dequantize_cuda(dq, parts["down_scales"], parts["down_zeros"],
+                                        buf[n:].view(dq.shape[0], -1), self.group))
+        return (dequantize(gq, parts["gate_up_scales"], parts["gate_up_zeros"], dtype).to(dev),
+                dequantize(dq, parts["down_scales"], parts["down_zeros"], dtype).to(dev))
 
     def _grouped(self, x: torch.Tensor) -> bool:
         """The grouped Triton kernels serve inputs like x on this device."""
@@ -322,9 +451,12 @@ class SparseMoE(nn.Module):
         """The Marlin copy of the experts if it serves inputs like x (use_marlin), else None."""
         return self._marlin[1] if self._marlin is not None and x.is_cuda and x.dtype == self._marlin[0] else None
 
-    def graph_safe(self, x: torch.Tensor) -> bool:
-        """The forward for inputs like x makes no host sync (a decode step with this layer can go in a CUDA graph)."""
-        return self._host is None and (self._marlin_for(x) is not None or self._grouped(x))
+    def graph_safe(self, x: torch.Tensor, tokens: int = 1) -> bool:
+        """The forward for `tokens` inputs like x makes no host sync (it can go in a CUDA graph): not offloaded, and
+        served by Marlin or by the grouped kernels (which hand over to a loop over experts at GEMM_MIN_ROWS rows
+        per expert)."""
+        return self._host is None and (self._marlin_for(x) is not None or (
+            self._grouped(x) and tokens * self.top_k < GEMM_MIN_ROWS * self.num_experts))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         shape = x.shape
@@ -333,7 +465,44 @@ class SparseMoE(nn.Module):
         marlin = self._marlin_for(x)
         if marlin is not None:  # every input size: decode steps and prefill chunks
             from ..kernels.marlin_moe import marlin_moe
+            cpu = stream = None
+            if self._host is not None and self._cuts is not None:
+                # a decode step being captured as graphs (StepCuts): nothing here waits for the host. The graph
+                # before this point made x and the routing, the next holds the resident experts (the slots are
+                # looked up there: the host may change them in between), and what the CPU computed is added after.
+                cuts = self._cuts
+                cuts.cut()
+                slots = self.slot_of[experts]
+                out = marlin_moe(x, marlin, weights.masked_fill(slots < 0, 0), slots.clamp(min=0), self.act)
+                extra = cuts.cut(lambda: torch.zeros(x.shape, dtype=torch.float32, device=x.device))
+                if cuts.capturing:
+                    cuts.sites.append([self, x, weights, experts, extra, False])
+                out = (out.float() + extra).to(out.dtype)
+                if self.shared_expert is not None:
+                    out = gated_add(out, self.shared_expert_gate(x), self.shared_expert(x))
+                return out.view(shape)
+            if self._host is not None:  # offloaded: the slots hold the resident experts; one host sync for the rest
+                en = experts.cpu().numpy()  # the layer's wait for the device; a unique on the device costs more launches
+                needed = np.unique(en).tolist()
+                small = self._cpu_serves(x)
+                if small:
+                    self._count(needed)
+                missing = [e for e in needed if self._expert_slot[e] < 0]
+                if missing and small:  # host copies before the launch below (see the Triton path)
+                    cpu = (x.float().cpu(), weights.cpu(), en, needed, missing)
+                elif missing:  # a prefill chunk: the missing experts pass through the device, one at a time
+                    stream = (weights, experts, missing)
+                elif small:
+                    self.offload_hits += len(needed)
+                slots = self.slot_of[experts]
+                weights, experts = weights.masked_fill(slots < 0, 0), slots.clamp(min=0)
             out = marlin_moe(x, marlin, weights, experts, self.act)
+            if cpu is not None:
+                out = (out.float() + self._cpu_experts(*cpu).to(out.device)).to(out.dtype)
+            if stream is not None:
+                rest = gemm_moe(x, stream[0], stream[1], self.num_experts,
+                                lambda e: self.expert_weights(e, x.dtype, scratch=True), self.act, only=stream[2])
+                out = (out.float() + rest.float()).to(out.dtype)
             if self.shared_expert is not None:
                 out = gated_add(out, self.shared_expert_gate(x), self.shared_expert(x))
             return out.view(shape)
@@ -342,19 +511,35 @@ class SparseMoE(nn.Module):
                                f"(SparseMoE.use_marlin); got {x.dtype} on {x.device}")
         # the grouped kernels, up to GEMM_MIN_ROWS rows per expert (a large prefill chunk): then cuBLAS per expert
         ids, grouped = experts, experts.numel() < GEMM_MIN_ROWS * self.num_experts and self._grouped(x)
-        if grouped and self._host is not None:  # offloaded: this step's experts onto the device (one host sync)
-            needed = torch.unique(experts).tolist()
-            grouped = len(needed) <= self.num_slots
-            if grouped:
-                self._ensure(needed)
-                ids = self.slot_of[experts]
+        extra = None
+        if grouped and self._host is not None:  # offloaded: one host sync to see which experts this step needs
+            en = experts.cpu().numpy()
+            needed = np.unique(en).tolist()
+            cpu = self._cpu_serves(x)
+            if cpu:
+                self._count(needed)
+            missing = [e for e in needed if self._expert_slot[e] < 0]
+            if missing and cpu:  # a few tokens: the missing experts on the CPU, the rest here
+                # host copies now: after the launch below, a copy would wait for the device to finish it, and the
+                # CPU is to work while the device runs the resident experts
+                extra = (x.float().cpu(), weights.cpu(), en, needed, missing)
+                slots = self.slot_of[experts]
+                weights, ids = weights.masked_fill(slots < 0, 0), slots.clamp(min=0)
+            else:
+                grouped = len(needed) <= self.num_slots
+                if grouped:
+                    self._ensure(needed)
+                    ids = self.slot_of[experts]
         if not grouped:
-            out = gemm_moe(x, weights, experts, self.num_experts, lambda e: self.expert_weights(e, x.dtype), self.act)
+            out = gemm_moe(x, weights, experts, self.num_experts,
+                           lambda e: self.expert_weights(e, x.dtype, scratch=True), self.act)
         elif self.gate_up is None:
             out = fused_moe_w4(x, (self.gate_up_q, self.gate_up_scales, self.gate_up_zeros),
                                (self.down_q, self.down_scales, self.down_zeros), weights, ids, self.group)
         else:  # no host sync unless offloaded, so a decode step with this layer can go in a CUDA graph
             out = fused_moe(x, self.gate_up, self.down, weights, ids)
+        if extra is not None:
+            out = (out.float() + self._cpu_experts(*extra).to(out.device)).to(out.dtype)
         if self.shared_expert is not None:
             out = gated_add(out, self.shared_expert_gate(x), self.shared_expert(x))
         return out.view(shape)
@@ -418,6 +603,7 @@ class PackedPrefill:
         self.positions = torch.cat([torch.arange(s, s + n) for s, n in zip(self.starts, lens)]).to(device)
         self.last = torch.tensor([o + n - 1 for o, n in zip(self.offsets, lens)], device=device)
         self._freqs = {}
+        self.solo = None
         # the last `riders` chunks are decode rows (one token each): the decode kernel appends and attends for them
         self.riders = riders
         if riders:
@@ -426,6 +612,17 @@ class PackedPrefill:
             # splits as a decode step of the next graph size up: no kernel build of its own for each row count
             size = next((b for b in DecodeGraphs.BUCKETS if b >= riders), riders)
             self.rider_splits = max(1, min(32, 256 // (size * self.pool.num_kv_heads)))
+
+    @classmethod
+    def solo_chunk(cls, pool: KVPool, tokens: int, slots: torch.Tensor, last: torch.Tensor) -> "PackedPrefill":
+        """One chunk at positions 0 .. tokens - 1 with no cached prefix, described by device tensors only: slots
+        [tokens] int32 (its page-table row, repeated) and last [1] (the index of its last real token). Nothing in
+        the forward then depends on a host value, which is what a CUDA graph needs (PrefillGraphs)."""
+        self = cls.__new__(cls)
+        self.pool, self.riders, self._freqs, self.last = pool, 0, {}, last
+        self.positions = torch.arange(tokens, device=pool.device)
+        self.solo = (slots, self.positions.to(torch.int32))
+        return self
 
     def freqs(self, rope) -> Tuple[torch.Tensor, torch.Tensor]:
         """cos, sin [T, R] at each token's position (frequencies that do not depend on the sequence length), computed
@@ -472,7 +669,8 @@ class SubspaceAttention(nn.Module):
         self.register_buffer("k_smooth", None, persistent=False)   # [1, Hkv, 1, D]
         self.register_buffer("q_smooth", None, persistent=False)   # [1, H, 1, D]
         self._k_absmax = None  # running max |k| per (KV head, channel) during calibration
-        self._kv_roundtrip = None  # (bits, group) during select_kv_native_layers: K and V take a low-bit round trip
+        self._kv_roundtrip = None  # kv_roundtrip's arguments during select_kv_native_layers: K and V as a low-bit
+                                   # pool would give them back
 
         self.rope = None
         if not config.learned_positions and config.rotary_dim != 0:
@@ -531,8 +729,7 @@ class SubspaceAttention(nn.Module):
         if self.k_smooth is not None:
             k, q = k / self.k_smooth.to(k.dtype), q * self.q_smooth.to(q.dtype)
         if self._kv_roundtrip is not None:
-            bits, group = self._kv_roundtrip
-            k, v = (_dequantize(*_quantize(x, bits, group), group, x.dtype) for x in (k, v))
+            k, v = kv_roundtrip(k, v, *self._kv_roundtrip)
 
         if step is not None:  # one decode token for each request of the step
             return self.o_proj(self._decode_step(q, k, v, step)), None, None
@@ -618,6 +815,10 @@ class SubspaceAttention(nn.Module):
         """Each request's slice of the packed chunk: append its K/V, attend over its pages -> [1, T, H * D]. The
         decode rows at the end (packed.riders) take the decode kernel, as in a step of their own."""
         pool, layer, R = packed.pool, self.layer_idx, packed.riders
+        if packed.solo is not None:  # no cached prefix: append, then plain causal attention over the chunk itself
+            triton_pool_append(pool, layer, None, k, v, *packed.solo)
+            out = self._attend(q, k, v, None, causal=True)
+            return out.transpose(1, 2).reshape(1, q.shape[2], self.num_heads * self.head_dim)
         n = len(packed.caches) - R
         caches, offsets, lens, starts = packed.caches[:n], packed.offsets[:n], packed.lens[:n], packed.starts[:n]
         outs = []
@@ -741,6 +942,43 @@ class SubspaceDecoderLayer(nn.Module):
             x = self.post_attention_layernorm(x)
         return x, k_out, v_out
 
+class StepCuts:
+    """A decode step captured as consecutive CUDA graphs sharing one memory pool, cut where a layer needs the host:
+    an offloaded MoE layer reads its routing there, launches the graph with its resident experts and runs the others
+    on the CPU meanwhile (SparseMoE.between_graphs). Replayed in capture order by DecodeGraphs.run. Run eagerly, such
+    a step is bound by the host: 32 layers of Mixtral-8x7B took 54 ms a token on an L4 host besides the CPU's
+    experts, for about 30 ms of device time."""
+
+    def __init__(self):
+        self.graphs, self.sites, self.pool, self._live = [], [], torch.cuda.graph_pool_handle(), None
+
+    @property
+    def capturing(self) -> bool:
+        return self._live is not None
+
+    def begin(self) -> None:
+        graph = torch.cuda.CUDAGraph()
+        live = torch.cuda.graph(graph, pool=self.pool)
+        live.__enter__()
+        self._live = live  # only a capture that began is ended
+        self.graphs.append(graph)
+
+    def end(self) -> None:
+        live, self._live = self._live, None
+        live.__exit__(None, None, None)
+
+    def cut(self, between=None):
+        """End the graph being captured, call `between` outside any capture (static tensors are made there) and
+        begin the next graph; returns what `between` returned. In the warm-up passes only `between` runs."""
+        live = self.capturing
+        if live:
+            self.end()
+        made = between() if between is not None else None
+        if live:
+            self.begin()
+        return made
+
+
 class DecodeGraphs:
     """CUDA graphs of one decode step through SubspaceCausalLM._body, one per batch bucket. A step is copied into the
     graph's static buffers (token ids, page-table slots, lengths; padding rows point at the pool's scratch page) and
@@ -761,13 +999,14 @@ class DecodeGraphs:
 
     def eligible(self, model: "SubspaceCausalLM", caches: List[KVCache], lora: bool,
                  starts: Optional[List[int]] = None) -> bool:
-        cfg, pool = model.config, caches[0].pool
+        cfg, pool, w = model.config, caches[0].pool, model.embed_tokens.weight
         longest = max(starts if starts is not None else [c.length for c in caches]) + 1
+        bucket = next((b for b in self.BUCKETS if b >= len(caches)), 0)
         return (cfg.cuda_graphs and pool.device.type == "cuda" and len(caches) <= self.BUCKETS[-1]
                 and not lora and not torch.is_grad_enabled()
                 and (not pool.track_pages or longest <= self.CONTEXT_BUCKETS[-1] * 16)
-                and all(layer.mlp.graph_safe(model.embed_tokens.weight)
-                        for layer in model.layers if isinstance(layer.mlp, SparseMoE))  # else routing syncs
+                and all(layer.mlp.graph_safe(w) or layer.mlp.cut_safe(w, bucket)  # else routing syncs: eager
+                        for layer in model.layers if isinstance(layer.mlp, SparseMoE))
                 and cfg.decode_attention == "kernel"  # the SDPA path reads lengths on the host
                 and pool_decode_supported(pool, model.embed_tokens.weight))
 
@@ -806,7 +1045,13 @@ class DecodeGraphs:
         rows.copy_(host, non_blocking=True)
         slot[1].record()
         ids[:B].copy_(input_ids)
-        graph.replay()
+        if isinstance(graph, StepCuts):  # graphs 2i and 2i + 1 end at offloaded layer i's two cuts; then the rest
+            for i, site in enumerate(graph.sites):
+                graph.graphs[2 * i].replay()
+                site[0].between_graphs(site, B, graph.graphs[2 * i + 1].replay)
+            graph.graphs[-1].replay()
+        else:
+            graph.replay()
         if aux is not None:
             model.last_aux = aux[:B].clone()
         return logits[:B].clone()  # the next replay overwrites the static output
@@ -820,22 +1065,166 @@ class DecodeGraphs:
         rows[0] = pool.scratch_slot()
         step = DecodeStep(pool, rows[0], rows[1])
         step.quest_width = width
-        side = torch.cuda.Stream(device)
-        side.wait_stream(torch.cuda.current_stream(device))
-        with torch.cuda.stream(side):  # warm-up (Triton compilation, allocator) writes only the scratch page
-            for _ in range(2):
-                step._freqs, step.quest_plan = {}, None
-                model._body(ids, rows[1], None, step)
-        torch.cuda.current_stream(device).wait_stream(side)
-        graph = torch.cuda.CUDAGraph()
-        step._freqs, step.quest_plan = {}, None
-        with torch.cuda.graph(graph):
-            logits = model._body(ids, rows[1], None, step)
+        # offloaded MoE layers (eligible only when cut_safe): the step becomes a chain of graphs, and their forward
+        # takes the path without host syncs from the warm-up on
+        offloaded = [layer.mlp for layer in model.layers
+                     if isinstance(layer.mlp, SparseMoE) and layer.mlp._host is not None]
+        cuts = StepCuts() if offloaded else None
+        for moe in offloaded:
+            moe._cuts = cuts
+        try:
+            side = torch.cuda.Stream(device)
+            side.wait_stream(torch.cuda.current_stream(device))
+            with torch.cuda.stream(side):  # warm-up (Triton compilation, allocator) writes only the scratch page
+                for _ in range(2):
+                    step._freqs, step.quest_plan = {}, None
+                    model._body(ids, rows[1], None, step)
+            torch.cuda.current_stream(device).wait_stream(side)
+            step._freqs, step.quest_plan = {}, None
+            if cuts is None:
+                graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(graph):
+                    logits = model._body(ids, rows[1], None, step)
+            else:
+                graph = cuts
+                cuts.begin()
+                logits = model._body(ids, rows[1], None, step)
+        finally:
+            for moe in offloaded:  # first: a layer left in capture mode would add its resident experts only
+                moe._cuts = None
+            if cuts is not None and cuts.capturing:
+                cuts.end()
         # [buffer, the CUDA event after the last copy out of it]
         pinned = [[torch.empty(2, bucket, dtype=torch.int32, pin_memory=True), None] for _ in range(2)]
         aux = model.last_aux if model.aux_layers else None  # the captured step's tapped states: a static output too
         self.graphs[(bucket, width)] = (key, graph, ids, rows, logits, pinned, [0], aux)
         return self.graphs[(bucket, width)]
+
+
+class PrefillGraphs:
+    """CUDA graphs of the prefill of one prompt chunk with no cached prefix: a request's first chunk when it arrives
+    alone. The eager forward issues about 20 launches a layer from Python, which takes longer than the device needs
+    for a short prompt (one 512-token prompt on an L4: 37 ms on the host for 27 ms of device time on Qwen2.5-1.5B, 40
+    for 9 on SmolLM2-360M); a replay costs the device time.
+
+    One graph per chunk-length bucket. The chunk is padded to its bucket: a padding token costs a token's compute,
+    comes after every real token (causal attention never looks at it) and its keys and values land past the cache's
+    length, where the next tokens overwrite them. A bucket is captured at its second use, so one-off lengths do not
+    pay a capture (about one eager forward more), and all buckets share one memory pool (only one runs at a time).
+    The forward is SubspaceCausalLM._body on a PackedPrefill.solo_chunk: appends through the decode step's append
+    kernel and plain causal attention. Not with a low-bit or Quest pool, a sliding window or soft-capped scores,
+    length-dependent RoPE, LoRA, a draft head (it reads every position's states), or MoE layers that would sync."""
+
+    # Longer chunks are bound by the device: on an L4 a replay took the first token of a 64 / 512 / 1,024 / 2,048-token
+    # prompt from 36 to 5 / 11 / 21 / 45 ms on SmolLM2-360M and from 34 / 35 / 63 / 130 to 16 / 30 / 62 / 130 ms on
+    # Qwen2.5-1.5B, so graphs above 1,024 tokens would cost their captures and memory for under 1%.
+    MAX_TOKENS = 1024
+
+    def __init__(self):
+        self.graphs = {}  # bucket -> (key, graph, ids, slots, last, logits)
+        self.seen = {}  # bucket -> eligible chunks so far
+        self.pool = None  # the graphs' shared memory pool
+        # A graph has to earn its place: a bucket's eager forward is timed at its first use and its first two
+        # replays after it; if the faster replay took more than KEEP of the eager time, that length is bound by the
+        # device on this model and GPU (an 8B model on an L4 at any length), and it and every longer one stay eager.
+        self.trial = {}  # bucket -> [eager ms, replay ms, ...] until judged
+        self.limit = self.MAX_TOKENS
+
+    @staticmethod
+    def bucket(tokens: int) -> int:
+        """Padded length: steps of 32 to 512 tokens and 64 above (at most 6% more tokens than asked for from 512)."""
+        step = 32 if tokens <= 512 else 64
+        return -(-tokens // step) * step
+
+    def eligible(self, model: "SubspaceCausalLM", cache: KVCache, tokens: int, logits_to_keep: int, lora: bool) -> bool:
+        cfg, pool = model.config, cache.pool
+        if not (cfg.cuda_graphs and pool.device.type == "cuda" and cache.length == 0
+                and 1 < tokens and self.bucket(tokens) <= self.limit
+                and logits_to_keep == 1 and not lora and not torch.is_grad_enabled() and not model.aux_layers
+                and pool.kv_cache_dtype == "native" and not pool.track_pages):
+            return False
+        w = model.embed_tokens.weight
+        ok = model.__dict__.get("_prefill_graph_ok")
+        if ok is None:  # what does not change with the request
+            ok = model.__dict__["_prefill_graph_ok"] = (
+                model.can_pack_prefill([cache]) and pool_decode_supported(pool, w)
+                and not any(m.window is not None or m.softcap is not None
+                            for m in model.modules() if isinstance(m, SubspaceAttention)))
+        return ok and all(layer.mlp.graph_safe(w, self.bucket(tokens))
+                          for layer in model.layers if isinstance(layer.mlp, SparseMoE))
+
+    @torch.inference_mode()  # as DecodeGraphs: every capture and replay in one mode
+    def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, cache: KVCache) -> Optional[torch.Tensor]:
+        """Logits [1, 1, V] after the chunk input_ids [1, n], whose keys and values are in the cache (the caller
+        advances its length). None when this chunk takes the eager path: its bucket's first use, or no pages for the
+        padding."""
+        n, pool = input_ids.shape[1], cache.pool
+        b = self.bucket(n)
+        self.seen[b] = self.seen.get(b, 0) + 1
+        if self.seen[b] < 2:
+            return None
+        try:
+            cache.reserve(b)
+        except KVPoolExhausted:
+            return None
+        key = (id(pool), pool.page_table.data_ptr())
+        entry = self.graphs.get(b)
+        if entry is None or entry[0] != key:
+            entry = self._capture(model, b, pool, key, cache.slot)
+        _, graph, ids, slots, last, logits, _ = entry
+        ids[0, :n].copy_(input_ids[0])
+        slots.fill_(cache.slot)
+        last.fill_(n - 1)
+        trial = self.trial.get(b)
+        if trial is None:
+            graph.replay()
+            return logits.clone()  # the next replay overwrites the static output
+        torch.cuda.synchronize()  # the caller reads the logits next, so the waits cost nothing
+        t = time.perf_counter()
+        graph.replay()
+        out = logits.clone()
+        torch.cuda.synchronize()
+        trial.append((time.perf_counter() - t) * 1e3)
+        if len(trial) == 3:
+            del self.trial[b]
+            if min(trial[1:]) > self.KEEP * trial[0]:
+                self.limit = min(self.limit, b - 1)
+                for longer in [x for x in self.graphs if x >= b]:
+                    del self.graphs[longer]
+        return out
+
+    KEEP = 0.9
+
+    def time_eager(self, tokens: int) -> Optional[float]:
+        """Called before the eager forward of a chunk run() declined: the start time if this is its bucket's first
+        use (the forward is then timed, see eager_took), else None."""
+        if self.seen.get(self.bucket(tokens)) != 1:
+            return None
+        torch.cuda.synchronize()
+        return time.perf_counter()
+
+    def eager_took(self, tokens: int, since: float) -> None:
+        torch.cuda.synchronize()
+        self.trial[self.bucket(tokens)] = [(time.perf_counter() - since) * 1e3]
+
+    @torch.inference_mode()
+    def _capture(self, model: "SubspaceCausalLM", b: int, pool: KVPool, key, slot: int):
+        device = pool.device
+        if self.pool is None:
+            self.pool = torch.cuda.graph_pool_handle()
+        ids = torch.zeros(1, b, dtype=torch.long, device=device)
+        slots = torch.full((b,), slot, dtype=torch.int32, device=device)
+        last = torch.zeros(1, dtype=torch.long, device=device)
+        chunk = PackedPrefill.solo_chunk(pool, b, slots, last)
+        # warm-up (Triton compilation, allocator): it writes this request's reserved pages, as the replay will
+        model._body(ids, 0, None, None, packed=chunk)
+        chunk._freqs = {}
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, pool=self.pool):
+            logits = model._body(ids, 0, None, None, packed=chunk)
+        # the chunk too: the graph reads its position tensors (RoPE, the append kernel) on every replay
+        self.graphs[b] = (key, graph, ids, slots, last, logits, chunk)
+        return self.graphs[b]
 
 
 class SubspaceCausalLM(nn.Module):
@@ -861,6 +1250,7 @@ class SubspaceCausalLM(nn.Module):
         self.norm = make_norm(config, config.hidden_dim) if config.final_norm else None
         self.lm_head = nn.Linear(emb_dim, config.vocab_size, bias=config.lm_head_bias)
         self._graphs = DecodeGraphs()
+        self._prefill_graphs = PrefillGraphs()
         # EAGLE-3 drafting (turing.models.eagle3): with aux_layers set, a forward leaves the residual stream after
         # those layers in last_aux [B, T, len(aux_layers) * H] (T = 1 for a decode step)
         self.aux_layers: Optional[Tuple[int, ...]] = None
@@ -895,27 +1285,46 @@ class SubspaceCausalLM(nn.Module):
             if lora:
                 set_active_adapters(self, None)
 
-    def offload_experts(self, slots: int) -> int:
+    def offload_experts(self, slots: float) -> int:
         """Keep `slots` experts per MoE layer on the device and the rest in host memory (SparseMoE.offload), for a
-        model whose experts do not all fit on the GPU: call it before moving the model there. Returns the number of
-        layers offloaded."""
+        model whose experts do not all fit on the GPU: call it before moving the model there. A fraction is an
+        average: 6.5 keeps 6 in one layer and 7 in the next (an expert of Mixtral-8x7B is 92 MB, and half an expert a
+        layer is 1.4 GiB that a whole one more would not leave). Returns the number of layers offloaded."""
         moes = [layer.mlp for layer in self.layers if isinstance(layer.mlp, SparseMoE)]
         if not moes:
             raise ValueError("expert offload needs a model with MoE layers")
-        for moe in moes:
-            moe.offload(slots)
+        counts = [int((i + 1) * slots) - int(i * slots) for i in range(len(moes))]
+        for moe, n in zip(moes, counts):  # before any layer changes
+            if not 0 < n < moe.num_experts:
+                raise ValueError(f"expert slots must be between 1 and {moe.num_experts - 1} in every layer; "
+                                 f"{slots:g} gives a layer {n}")
+        for i, (moe, n) in enumerate(zip(moes, counts)):
+            moe.offload(n)
+            # the layers look at their residents on different steps: a change copies an expert in (and converts it
+            # when the slots are Marlin's), and all of them on one step would stall that token
+            moe._small_steps = i * moe.REBALANCE // len(moes)
         self._graphs.graphs.clear()
+        self._prefill_graphs.graphs.clear()
         return len(moes)
 
+    def decode_syncs(self) -> bool:
+        """A decode step waits for the host inside the forward (offloaded experts): launching the next step before
+        reading this one's tokens gains nothing then (ContinuousBatchEngine.overlap_decode)."""
+        return any(isinstance(layer.mlp, SparseMoE) and layer.mlp._host is not None for layer in self.layers)
+
     def expert_offload_stats(self) -> Optional[dict]:
-        """Decode-step expert uses served from the device (hits) or copied in first (misses), and experts streamed
-        for prefill-sized inputs, summed over the offloaded layers; None when nothing is offloaded."""
+        """Decode-step expert uses served from the device (hits), copied in first (misses) or run on the CPU (cpu),
+        and experts streamed for prefill-sized inputs, summed over the offloaded layers; None when nothing is
+        offloaded. hit_rate is the share served from the device."""
         moes = [layer.mlp for layer in self.layers if isinstance(layer.mlp, SparseMoE) and layer.mlp._host is not None]
         if not moes:
             return None
         hits, misses = sum(m.offload_hits for m in moes), sum(m.offload_misses for m in moes)
-        return {"slots_per_layer": moes[0].num_slots, "experts_per_layer": moes[0].num_experts, "hits": hits,
-                "misses": misses, "hit_rate": round(hits / (hits + misses), 4) if hits + misses else None,
+        cpu = sum(m.offload_cpu for m in moes)
+        return {"slots_per_layer": round(sum(m.num_slots for m in moes) / len(moes), 2),
+                "experts_per_layer": moes[0].num_experts, "hits": hits,
+                "misses": misses, "cpu": cpu, "cpu_seconds": round(sum(m.offload_cpu_s for m in moes), 3),
+                "hit_rate": round(hits / (hits + misses + cpu), 4) if hits + misses + cpu else None,
                 "streamed": sum(m.offload_streamed for m in moes)}
 
     def can_pack_prefill(self, caches: List[KVCache]) -> bool:
@@ -1015,6 +1424,7 @@ class SubspaceCausalLM(nn.Module):
             if seq_len == 1 and cache.length > 0 and cache.pool.device.type == "cuda":
                 step = [cache]  # a single decode token on CUDA takes the fused path too
         returned = past_key_values if cache is None else cache  # the list of caches, or the cache
+        timed = None  # set where a prefill's eager forward is timed for PrefillGraphs
         if step is not None:
             starts = row_starts(step)  # a cache listed more than once: consecutive positions (verify_in_step)
             if step[0].pool.track_pages and len({id(c) for c in step}) < len(step):
@@ -1030,11 +1440,19 @@ class SubspaceCausalLM(nn.Module):
             step = DecodeStep.of(step, input_ids.device, starts)
             start_pos = step.starts
         elif cache is not None:
+            if self._prefill_graphs.eligible(self, cache, seq_len, logits_to_keep, lora):
+                logits = self._prefill_graphs.run(self, input_ids, cache)
+                if logits is not None:
+                    cache.length += seq_len
+                    return logits, returned
+                timed = self._prefill_graphs.time_eager(seq_len)
             cache.reserve(cache.length + seq_len)
             start_pos = cache.length
         else:
             start_pos = 0
         logits = self._body(input_ids, start_pos, cache, step, logits_to_keep)
+        if timed is not None:
+            self._prefill_graphs.eager_took(seq_len, timed)
         if step is not None:
             for c in step.caches:
                 c.length += 1
@@ -1137,7 +1555,7 @@ class SubspaceCausalLM(nn.Module):
     @torch.no_grad()
     def select_kv_native_layers(self, threshold: float = 0.02, n: int = 4, tokens: int = 256, seed: int = 0) -> tuple:
         """Choose the layers a low-bit KV pool keeps in the model dtype: for each layer, the mean KL divergence of the
-        next-token distribution when only that layer's K and V take the pool's int8/int4 round trip, on the random
+        next-token distribution when only that layer's K and V take the pool's int8/int4/fp8 round trip, on the random
         token sequences calibrate_kv_smoothing uses; layers above `threshold` nats are kept (at most a quarter of the
         layers, worst first). Measured: Qwen2.5-1.5B int4 layer 0 0.13 (median layer 0.0006), and on WikiText-2 that
         layer alone cost +1.77 nats; no SmolLM2-360M layer above 0.002. Sets config.kv_native_layers."""
@@ -1152,7 +1570,7 @@ class SubspaceCausalLM(nn.Module):
             ref = logprobs()
             kls = []
             for a in attns:
-                a._kv_roundtrip = (8, a.head_dim) if cfg.kv_cache_dtype == "int8" else (4, INT4_GROUP)
+                a._kv_roundtrip = (cfg.kv_cache_dtype,)
                 try:
                     lp = logprobs()
                 finally:
@@ -1257,12 +1675,19 @@ class SubspaceCausalLM(nn.Module):
             # or the old pool outlives the calibration below and the new pool is sized from what it leaves
             self._kv_pool = pool = None
             self._graphs.graphs.clear()
+            self._prefill_graphs.graphs.clear()
             gc.collect()
             if w.device.type == "cuda":
                 torch.cuda.empty_cache()
             # int4 only: int8 needs no smoothing (+0.003 nats without it on Qwen2.5-1.5B-Instruct in bf16, +0.017 and
             # 16 GSM8K points lost with it)
             smooth = cfg.kv_cache_dtype == "int4" and cfg.kv_smoothing and not getattr(self, "_kv_smoothed", False)
+            if cfg.kv_cache_dtype != "int4" and getattr(self, "_kv_smoothed", False):
+                # a model that served int4 before: the other storages are calibrated, and stored, without smoothing
+                # (their calibration files do not record it)
+                for layer in self.layers:
+                    layer.self_attn.k_smooth = layer.self_attn.q_smooth = None
+                self._kv_smoothed = False
             choose = cfg.kv_cache_dtype != "native" and cfg.kv_native_layers is None
             if (smooth or choose) and not self._load_kv_calibration(smooth, choose):
                 if smooth:
@@ -1272,6 +1697,10 @@ class SubspaceCausalLM(nn.Module):
                 self._save_kv_calibration(smooth, choose)
             if w.device.type == "cuda":
                 self._prepare_marlin(w.dtype)  # before the pool takes the free memory
+                from .quant import _scratch
+                for m in self.modules():  # and the buffer an offloaded 4-bit layer dequantizes an expert into
+                    if isinstance(m, SparseMoE) and m._host is not None and m.gate_up is None:
+                        _scratch(m.dequant_numel(), w.device, w.dtype)
             pool = KVPool.for_model(cfg, w.dtype, w.device)
             self._kv_pool = pool
         return pool

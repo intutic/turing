@@ -50,6 +50,39 @@ def test_marlin_moe_matches_the_expert_loop(dtype, atol, T):
     torch.testing.assert_close(out.float(), ref.float(), atol=atol, rtol=0)
 
 
+@needs_marlin
+@torch.no_grad()
+def test_offloaded_layer_keeps_its_resident_experts_in_marlins_layout():
+    """An offloaded layer after use_marlin: the resident experts through Marlin, the others on the CPU for a few
+    tokens and through the device one at a time for a prefill chunk, with the all-resident layer's output; an expert
+    that becomes resident is converted on the way in."""
+    from turing.models import causal_lm
+    full, moe = _moe(shared=True, **SHAPE), _moe(shared=True, **SHAPE)
+    for m in (full, moe):
+        quantize_experts(m, "rtn")
+    moe.offload(5)
+    full, moe = full.to("cuda", torch.float16), moe.to("cuda", torch.float16)
+    assert moe.use_marlin(torch.float16) and all(moe._buffers[name] is None for name in moe._arrays())
+    assert not moe.graph_safe(torch.zeros(1, 256, device="cuda", dtype=torch.float16))
+    g = torch.Generator(device="cuda").manual_seed(5)
+    for T in (1, 2, 8, 40, 300):
+        x = torch.randn(T, 256, device="cuda", generator=g).half()
+        torch.testing.assert_close(moe(x).float(), full(x).float(), atol=3e-3, rtol=2e-2)
+    assert moe.offload_streamed > 0 and moe.offload_misses == 0 and moe._slot_expert == [0, 1, 2, 3, 4]
+    if causal_lm.w4_expert_cpu is None:
+        return
+    assert moe.offload_cpu > 0
+    moe.REBALANCE, moe._small_steps, moe._uses, cpu = 8, 0, [0] * 8, moe.offload_cpu  # the counts start over
+    weights = torch.tensor([[0.6, 0.4]], device="cuda")
+    for step in range(23):  # expert 7 in every step; expert 0 only once it has lost its slot to 7 (the 8th step)
+        experts = torch.tensor([[7, 0 if step >= 16 else 1 + step % 4]], device="cuda")
+        full.route = moe.route = lambda x, e=experts: (weights, e)
+        x = torch.randn(1, 256, device="cuda", generator=g).half()
+        torch.testing.assert_close(moe(x).float(), full(x).float(), atol=3e-3, rtol=2e-2)
+    assert moe._expert_slot[7] >= 0 and moe._expert_slot[0] == -1 and moe.offload_misses == 1
+    assert moe.offload_cpu - cpu == 7 + 7  # expert 7 before the swap, expert 0 from step 16 on
+
+
 # in inference mode, as DecodeGraphs captures (see tests/test_moe_w4.py)
 @needs_marlin
 @torch.inference_mode()
@@ -95,5 +128,48 @@ def test_a_quantized_moe_model_decodes_through_marlin_as_through_the_triton_kern
         outs.append([logits[:, -1]] + [s[:, -1] for s in steps])
         used = [layer.mlp._marlin is not None for layer in model.layers]
         assert used == [marlin, marlin]
+    for a, b in zip(*outs):
+        torch.testing.assert_close(a.float(), b.float(), atol=5e-3, rtol=0)
+
+
+@needs_marlin
+@torch.inference_mode()
+def test_an_offloaded_models_decode_step_is_a_chain_of_graphs_with_the_eager_logits():
+    """DecodeGraphs for a model whose 4-bit MoE layers are offloaded: the step is captured as graphs cut at every
+    layer (StepCuts), the host reads the routing between them and the CPU takes the experts that are not resident.
+    The eager step's logits, for batches with and without padding rows, and after the resident experts change."""
+    import copy
+    from turing.models import causal_lm
+    from turing.models.causal_lm import StepCuts
+    if causal_lm.w4_expert_cpu is None:
+        pytest.skip("the native extension is not built")
+    torch.manual_seed(0)
+    cfg = _cfg(layers=2, **SHAPE)
+    cfg.kv_pool_gib = 0.02
+    base = quantize_model(SubspaceCausalLM(cfg).eval(), "rtn")
+    base.offload_experts(5)
+    base = base.to("cuda", torch.float16)
+    prompts = [torch.randint(0, 128, (1, n), device="cuda") for n in (24, 9, 17)]
+    steps = [torch.randint(0, 128, (B, 1), device="cuda") for B in (1, 1, 1, 2, 2, 2, 3, 3, 3) for _ in range(2)]
+    outs = []
+    for graphs in (False, True):
+        model = copy.deepcopy(base)
+        model.config.cuda_graphs = graphs
+        caches = [model(p)[1] for p in prompts]
+        got = []
+        for n, ids in enumerate(steps):
+            if n == 3:  # expert 7 takes expert 0's slot in every layer: the graphs read the slots as they are now
+                for layer in model.layers:
+                    layer.mlp._load(7, 0)
+            got.append(model(ids, past_key_values=caches[:ids.shape[0]])[0][:, -1])
+        outs.append(got)
+        chains = [entry[1] for entry in model._graphs.graphs.values()]
+        if graphs:  # 1, 2 and 3 rows: three graph sizes (3 pads to 4), each cut twice per layer
+            assert len(chains) == 3 and all(isinstance(c, StepCuts) and len(c.sites) == 2 and len(c.graphs) == 5
+                                            for c in chains)
+        else:
+            assert not chains
+        assert all(layer.mlp._marlin is not None and layer.mlp._cuts is None for layer in model.layers)
+        assert model.expert_offload_stats()["cpu"] > 0
     for a, b in zip(*outs):
         torch.testing.assert_close(a.float(), b.float(), atol=5e-3, rtol=0)

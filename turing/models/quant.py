@@ -117,12 +117,15 @@ def _int4_max_rows() -> int:
 
 
 _SCRATCH: Dict[Tuple[torch.device, torch.dtype], torch.Tensor] = {}
+_RETIRED: List[torch.Tensor] = []  # buffers a larger one replaced: CUDA graphs captured with them still write there
 
 
 def _scratch(numel: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
     """One reusable buffer per device and dtype, as large as the largest layer dequantized so far."""
     buf = _SCRATCH.get((device, dtype))
     if buf is None or buf.numel() < numel:
+        if buf is not None:
+            _RETIRED.append(buf)
         with torch.inference_mode(False):  # a normal tensor: written both inside and outside inference mode
             buf = torch.empty(numel, device=device, dtype=dtype)
         _SCRATCH[(device, dtype)] = buf

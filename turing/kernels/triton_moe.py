@@ -187,11 +187,11 @@ GEMM_MIN_ROWS = 1024
 
 
 def gemm_moe(x: torch.Tensor, weights: torch.Tensor, experts: torch.Tensor, num_experts: int, expert_weights,
-             act) -> torch.Tensor:
+             act, only=None) -> torch.Tensor:
     """The same sum as fused_moe, as two GEMMs per expert on the rows routed to it: expert_weights(e) returns
     (gate_up [2F, H], down [H, F]) in x's dtype. cuBLAS reads an expert once however many rows it has, which is what
     prefill-sized inputs need. Runs on any device; one host sync (the experts' row counts). The top_k terms are
-    summed in fp32."""
+    summed in fp32. With `only` (expert ids), the terms of those experts alone."""
     top_k = experts.shape[1]
     flat = experts.reshape(-1)
     order = torch.argsort(flat, stable=True)  # pair ids, grouped by expert
@@ -200,13 +200,13 @@ def gemm_moe(x: torch.Tensor, weights: torch.Tensor, experts: torch.Tensor, num_
     out = torch.zeros(x.shape, dtype=torch.float32, device=x.device)
     start = 0
     for e, n in enumerate(counts):
-        if n:
+        if n and (only is None or e in only):
             rows = tok[start:start + n]  # distinct: a token is routed to an expert once
             gate_up, down = expert_weights(e)
             gate, up = torch.nn.functional.linear(x[rows], gate_up).chunk(2, dim=-1)
             y = torch.nn.functional.linear(act(gate) * up, down)
             out.index_add_(0, rows, y.float() * w[start:start + n, None])
-            start += n
+        start += n
     return out.to(x.dtype)
 
 

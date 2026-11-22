@@ -20,7 +20,8 @@ def _filled(pool, start, L, g):
     return cache
 
 
-@pytest.mark.parametrize("storage", ["native", "int8", "int4"])  # quantized layers: through temporary native pages
+# int8 and int4 layers: through temporary native pages; fp8: read in place, as the model dtype is
+@pytest.mark.parametrize("storage", ["native", "int8", "int4", "fp8"])
 @pytest.mark.parametrize("H,Hkv,D", [(12, 2, 128), (8, 8, 64)])
 @pytest.mark.parametrize("start,L", [(0, 50), (37, 70), (300, 600)])  # off page boundaries; a cached prefix
 def test_flashinfer_prefill_matches_gather_and_sdpa(H, Hkv, D, start, L, storage):
@@ -74,7 +75,7 @@ def test_packed_requests_share_one_call(storage):
 
 
 
-@pytest.mark.parametrize("storage", ["int8", "int4"])
+@pytest.mark.parametrize("storage", ["int8", "int4", "fp8"])
 @pytest.mark.parametrize("Hkv,D", [(2, 128), (8, 64)])
 def test_pool_dequant_kernel_matches_the_reference(storage, Hkv, D):
     """triton_pool_dequant (the temporary pages a low-bit layer hands FlashInfer) against KVPool._decode_field."""

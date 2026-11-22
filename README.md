@@ -11,7 +11,7 @@ in 4 bits too) is 1.05–1.27× faster than vLLM at batch sizes 1 to 64.
 [![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
 [![Release: v2.0.0](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 1239](https://img.shields.io/badge/Tests-1239-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 1321](https://img.shields.io/badge/Tests-1321-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 

@@ -73,7 +73,8 @@ once per step instead of once for the prompts and once for the decode. Around th
   The engine reserves a request's prompt pages at admission and the pages of its output as it decodes; when the
   pool runs out it preempts the newest request and recomputes its cache later (`_grow`, `_preempt` in `engine.py`).
 * **Storage** (`--kv-cache-dtype`; `auto` is int8 on CUDA and native elsewhere): `native`, `int8` (asymmetric per
-  token and KV head, fp16 scale and zero) or `int4` (per group of 32 values).
+  token and KV head, fp16 scale and zero), `int4` (per group of 32 values) or `fp8` (float8 E4M3 bytes, round to
+  nearest even, saturating at ±448: the format of vLLM's fp8 cache, which FlashInfer reads in place).
 * **Calibration**: when a low-bit pool is created, the model calibrates it on 4 × 256 random tokens.
   `select_kv_native_layers` stores in the model dtype (`k_hi`/`v_hi`) the layers whose K/V round trip moves the
   next-token distribution by more than 0.02 nats, at most a quarter of the layers. For int4,
@@ -94,7 +95,7 @@ The kernels on the serving path run on CUDA only; on MPS and CPU, attention and 
 | :--- | :--- | :--- |
 | Paged decode | `triton_kv_decode.py` | Fused quantize-and-append, split-K attention over each row's pages, reduction. In a prefill the same kernels serve the decode rows that ride along, quantize a chunk into an int8/int4 layer, and dequantize a low-bit prefix into pages FlashInfer reads |
 | Paged prefill | `triton_kv_prefill.py` | A prompt chunk attending over the request's cached prefix and itself, through the page table |
-| FlashInfer prefill | `flashinfer_prefill.py` | Optional (when `flashinfer` imports): chunks of at least 512 tokens without a sliding window or soft-capping. Layers stored in the model dtype are read in place, int8/int4 layers from temporary pages |
+| FlashInfer prefill | `flashinfer_prefill.py` | Optional (when `flashinfer` imports): chunks of at least 512 tokens without a sliding window or soft-capping. Layers stored in the model dtype or in fp8 are read in place, int8/int4 layers from temporary pages |
 | int4 GEMM | `triton_w4a16.py` | 4-bit weights, up to `INT4_MAX_ROWS` input rows (§4) |
 | Marlin | `marlin.py`, `marlin_moe.py` | Optional 4-bit GEMMs (vendored from vLLM) when built with `TURING_BUILD_MARLIN=1`: dense layers and MoE experts (§4) |
 | Sparse GEMV | `triton_sparse_gemv.py` | Activation sparsity on one-row inputs (§4) |
@@ -109,7 +110,15 @@ The kernels on the serving path run on CUDA only; on MPS and CPU, attention and 
 * **CUDA graphs** (`DecodeGraphs`): whole decode steps are captured per batch bucket and replayed; steps with Quest
   replay graphs captured per batch and page-table-width bucket, with page selection computed on the device. MoE
   layers on CUDA run as a grouped GEMM with no host sync (`triton_moe.py`), so they are captured too; steps with LoRA
-  adapters run eagerly, and so do the decode steps of a model with offloaded experts.
+  adapters run eagerly. A model with offloaded 4-bit experts needs the host at every layer (which experts are
+  missing), so its step is captured as a chain of graphs sharing one memory pool, cut twice per layer (`StepCuts`):
+  between two graphs the host reads the routing, launches the graph with the resident experts and computes the
+  others on the CPU.
+* **Prefill graphs** (`PrefillGraphs`): the first chunk of a prompt that arrives alone, up to 1,024 tokens on a pool
+  in the model dtype, is padded to a length bucket (steps of 32 tokens to 512, 64 above) and replayed from a graph
+  captured at the bucket's second use; the eager forward of a short prompt is bound by Python's launches, not by
+  the device. A bucket's graph is kept only if its first two replays took under 90% of the eager forward's time;
+  otherwise that length and every longer one stay eager on this model and GPU.
 * **MoE layers** (`SparseMoE`): routing (softmax, top-k, normalisation) is one kernel, token-expert pairs are
   grouped by expert on the device in three, and the grouped kernels then run one program per block of an expert's
   rows; from 1,024 rows per expert on average (a large prefill chunk) each expert runs as one cuBLAS GEMM pair on
@@ -118,7 +127,9 @@ The kernels on the serving path run on CUDA only; on MPS and CPU, attention and 
   run through int4 variants of the grouped kernels, which read 256 columns of each weight row per step and, when
   most experts get one row, skip the tensor-core tile; or, when the Marlin extension is built and the shapes fit its
   tiles, through the vendored Marlin MoE kernel at every input size (`marlin_moe.py`). In that case the experts are
-  on the GPU in Marlin's layout only and the packed buffers stay in host memory.
+  on the GPU in Marlin's layout only and the packed buffers stay in host memory. An offloaded layer keeps its
+  resident experts the same way and computes the others on the CPU for decode steps of up to 8 rows
+  (`csrc/turing_w4_expert_cpu.hpp`).
 * **Off CUDA** (MPS, CPU): a decode step appends and reads every row of the batch at once (one gather and one
   attention per layer), bit-identical to the per-request path in the tests.
 

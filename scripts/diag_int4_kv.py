@@ -198,7 +198,7 @@ def smooth_kl(name, T, device):
             ref = F.log_softmax(model._body(ids, 0, None, None).float(), -1)
             for bits in (4, 8):
                 for a in attns:
-                    a._kv_roundtrip = (bits, INT4_GROUP if bits == 4 else a.head_dim)
+                    a._kv_roundtrip = ("int4" if bits == 4 else "int8",)
                 lp = F.log_softmax(model._body(ids, 0, None, None).float(), -1)
                 out[f"{src}_int{bits}_{'smooth' if smoothed else 'raw'}"] = (ref.exp() * (ref - lp)).sum(-1).mean().item()
             for a in attns:
@@ -232,7 +232,7 @@ def smooth_rule(name, T, device, dtype, kv):
         for src, ids in (("random", rand), ("real", real)):
             ref = [F.log_softmax(model._body(ids[i:i + 1], 0, None, None).float(), -1) for i in range(len(ids))]
             for i, a in enumerate(attns):
-                a._kv_roundtrip = None if i in native else (bits, INT4_GROUP if bits == 4 else a.head_dim)
+                a._kv_roundtrip = None if i in native else ("int4" if bits == 4 else "int8",)
             lp = [F.log_softmax(model._body(ids[i:i + 1], 0, None, None).float(), -1) for i in range(len(ids))]
             for a in attns:
                 a._kv_roundtrip = None

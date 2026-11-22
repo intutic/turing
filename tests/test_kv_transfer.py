@@ -9,6 +9,7 @@ import torch
 from turing.config import TuringConfig
 from turing.serving.disagg_sidecar import PrefillWorker, add_remote_prefilled_request
 from turing.serving.engine import ContinuousBatchEngine
+from turing.core.kv_cache import KVCache, KVPool
 from turing.serving.kv_transfer import export_kv, import_kv
 
 
@@ -29,7 +30,7 @@ def _engine(kv_dtype):
 PROMPT = [int(t) for t in torch.randint(0, 128, (37,), generator=torch.Generator().manual_seed(3))]
 
 
-@pytest.mark.parametrize("kv_dtype", ["native", "int8", "int4"])
+@pytest.mark.parametrize("kv_dtype", ["native", "int8", "int4", "fp8"])
 @torch.no_grad()
 def test_exported_pages_import_into_another_pool_bit_exact(kv_dtype):
     src, dst = _model(kv_dtype), _model(kv_dtype)
@@ -62,6 +63,18 @@ def test_import_rejects_mismatched_or_malformed_payloads():
     with pytest.raises(ValueError):
         import_kv(src.kv_pool(), header, blob[:-1])                                    # truncated
     assert src.kv_pool().num_free_pages == free                                        # nothing leaked
+
+
+def test_import_rejects_fp8_pages_stored_with_other_scales():
+    pools = [KVPool(1, 2, 16, 8, torch.float32, "cpu", "fp8", fp8_scales=s) for s in ([(1.0, 1.0)], [(2.0, 1.0)])]
+    cache = KVCache(pools[0])
+    cache.reserve(20)
+    pools[0].append(0, cache, torch.randn(1, 2, 20, 16), torch.randn(1, 2, 20, 16))
+    cache.length = 20
+    header, blob = export_kv(cache)
+    assert import_kv(pools[0], header, blob).length == 20
+    with pytest.raises(ValueError, match="fp8 scales"):
+        import_kv(pools[1], header, blob)
 
 
 def _prefill_server(kv_dtype, port_q):

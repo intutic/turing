@@ -17,8 +17,19 @@ All notable changes to this project are documented here. The format follows
   64 with the Triton kernels to 107 / 338 / 604 / 797, and its first token at batch 64 from 4.7 s to 2.0 s; with
   the default 4-bit LM head it runs at 133 / 367 / 630 / 819 (vLLM on Qwen's GPTQ-Int4 checkpoint: 114 / 350 /
   621 / 817).
-- `--moe-expert-slots N`: MoE expert offload in the serving path. `N` experts per layer stay on the GPU, the rest in
-  host memory, copied in on demand; works with experts in the model dtype and in 4 bits.
+- `--moe-expert-slots N`: MoE expert offload in the serving path. `N` experts per layer stay on the GPU (a fraction
+  is an average over the layers), the rest in host memory; works with experts in the model dtype and in 4 bits.
+  A 4-bit expert that is not on the GPU is computed on the CPU for decode steps of up to 8 rows
+  (`csrc/turing_w4_expert_cpu.hpp`: AVX2, AVX-512 where the CPU has it, selected at run time) while the GPU runs
+  the resident ones, which are kept in Marlin's layout when that extension is built; the experts used most become
+  the resident ones. Such a model's decode step is captured as a chain of CUDA graphs with a stop for the host at
+  each layer (`StepCuts`). Experts in the model dtype are copied in on demand.
+- Prefill graphs (`PrefillGraphs`): the first chunk of a prompt that arrives alone, up to 1,024 tokens, is replayed
+  from a CUDA graph of its length bucket, captured at the bucket's second use and kept only if it beats the eager
+  forward on that model and GPU. `scripts/benchmark_first_token.py` measures it.
+- `--kv-cache-dtype fp8`: KV pages in float8 E4M3 (the format of vLLM's fp8 cache), read in place by FlashInfer's
+  prefill kernel and by the decode kernels, with the layer guard of the other low-bit formats. Opt-in; `auto`
+  remains int8.
 - `--draft-head`: speculative decoding with a published EAGLE-3 draft head (`turing/models/eagle3.py`). The head
   runs once per draft position for all drafting requests, and a request's chain is as long as its drafts are
   likely to be reached by the target. Qwen3-8B on an L4 with chains of up to 5: 48.0 / 83.8 / 141.1 tok/s on code
@@ -32,6 +43,14 @@ All notable changes to this project are documented here. The format follows
   1–64, with GSM8K unchanged (35.0% against 33.5%, ± 3.4, n = 200).
 
 ### Changed
+- The decode step merges its attention splits in one load per query head instead of a loop over the splits, which
+  took longer than the attention itself at batch 1.
+- A model with offloaded experts no longer launches its next decode step before reading the current one's tokens:
+  its step waits for the host at every layer, so the overlap only delayed each token by a step.
+- `turing serve` warns at startup when the weights leave less GPU memory than twice the usual working reserve, where
+  a long prompt can run out of memory mid-request.
+- `scripts/benchmark_speculation.py` draws its code prompts from Python's standard library instead of from this
+  repository's own source, so every engine run gets the same prompts whatever the checkout.
 - KV pages on demand: a request reserves the pages of its prompt at admission and takes the pages of its output as it
   decodes, instead of reserving prompt plus `max_tokens` up front, so a large `max_tokens` no longer limits how many
   requests run at once. When the pool runs out mid-decode the newest request is preempted and its cache recomputed
@@ -108,6 +127,11 @@ All notable changes to this project are documented here. The format follows
 - Package description corrected (it still advertised 70B models on one GPU).
 
 ### Fixed
+- A model switched from an int4 KV pool to another storage kept int4's key smoothing, and the layer guard for the
+  new storage was then measured, and cached on disk, with smoothed keys. Smoothing is now dropped when the storage
+  is not int4.
+- The shared buffer 4-bit layers are dequantized into was freed when a larger one replaced it, while CUDA graphs
+  captured with the old one still wrote there on replay.
 - Overlapped decode waited for the step in flight before launching the next one: the next step's rows were selected
   with an index built on the host, which PyTorch copies to the GPU with a blocking copy, and a request's new KV pages
   were written to the page table the same way. The GPU idled for the host's launch time every step. The index is

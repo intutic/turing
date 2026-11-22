@@ -25,6 +25,7 @@
 #include "turing_prefix_match.hpp"
 #include "turing_routing_history.hpp"
 #include "turing_gated_zero_identity.hpp"
+#include "turing_w4_expert_cpu.hpp"
 
 #include <pybind11/pybind11.h>
 
@@ -717,6 +718,28 @@ PYBIND11_MODULE(turing_csrc, m) {
         turing::gemv_fp32_tile(x.data(), w.data(), y.mutable_data(), static_cast<int>(w.shape(0)), static_cast<int>(w.shape(1)));
         return y;
     });
+    // One packed 4-bit MoE expert for a few rows (turing_w4_expert_cpu.hpp): arrays as turing/models/quant.py packs
+    // them, scales as the fp16 bits (numpy float16 viewed as uint16). The GIL is released while it runs.
+    using u16arr = py::array_t<uint16_t, py::array::c_style>;
+    using u8c = py::array_t<uint8_t, py::array::c_style>;
+    m.def("w4_expert_cpu", [](f32arr x, u8c gu_q, u16arr gu_s, u8c gu_z, u8c dn_q, u16arr dn_s, u8c dn_z,
+                              int group, int threads) {
+        if (x.ndim() != 2 || gu_q.ndim() != 2 || dn_q.ndim() != 2) throw std::invalid_argument("x [R, H], codes [N, K / 2]");
+        const size_t R = x.shape(0), H = x.shape(1), F = gu_q.shape(0) / 2, G = static_cast<size_t>(group);
+        if (R == 0 || R > turing::W4_MAX_ROWS) throw std::invalid_argument("x must have 1 to 8 rows");
+        if (G == 0 || G > 128 || G % 16 || gu_q.shape(1) * 2 != (py::ssize_t)H || dn_q.shape(0) != (py::ssize_t)H
+            || dn_q.shape(1) * 2 != (py::ssize_t)F || H % G || F % G
+            || gu_s.size() != (py::ssize_t)(2 * F * (H / G)) || gu_z.size() != gu_s.size()
+            || dn_s.size() != (py::ssize_t)(H * (F / G)) || dn_z.size() != dn_s.size())
+            throw std::invalid_argument("shapes do not describe one packed expert (gate_up [2F, H], down [H, F])");
+        f32arr out({R, H});
+        {
+            py::gil_scoped_release release;
+            turing::w4_expert_rows(gu_q.data(), gu_s.data(), gu_z.data(), dn_q.data(), dn_s.data(), dn_z.data(),
+                                   H, F, G, x.data(), R, out.mutable_data(), threads);
+        }
+        return out;
+    }, "y [R, H] = down @ (silu(gate @ x) * (up @ x)) for one packed 4-bit MoE expert, on the CPU");
     m.def("simd_gemv_int8_tile", [](u8arr x, py::array_t<int8_t, py::array::c_style | py::array::forcecast> w) {
         if (w.ndim() != 2 || w.shape(1) != x.size()) throw std::invalid_argument("w must be [M, K] with K == len(x)");
         py::array_t<int32_t> y(w.shape(0));

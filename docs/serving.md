@@ -35,7 +35,7 @@ a LoRA adapter (§8). The main flags by topic are below; `turing serve --help` l
 
 | Flag | Default | Effect |
 | :--- | :--- | :--- |
-| `--kv-cache-dtype` | `auto` | `native`, `int8` (per token and KV head) or `int4` (per 32 values); `auto` = `int8` on CUDA, `native` elsewhere. Layers the format damages are detected at startup and kept in the model dtype; int4 also scales down outlier key channels. Quality: [benchmarks §2](benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps) |
+| `--kv-cache-dtype` | `auto` | `native`, `int8` (per token and KV head), `int4` (per 32 values) or `fp8` (float8 E4M3, the format of vLLM's fp8 cache); `auto` = `int8` on CUDA, `native` elsewhere. Layers the format damages are detected at startup and kept in the model dtype; int4 also scales down outlier key channels. Quality: [benchmarks §2](benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps) |
 | `--no-kv-smoothing` | off | int4 KV: store keys without outlier-channel smoothing |
 | `--kv-page-budget` | `1.0` | Quest: share of 16-token pages each decode step reads, for requests of at least 8,192 tokens. Runs inside CUDA graphs. Off by default: it is slower than reading every page at every length up to 8K ([benchmarks §4](benchmarks.md#4-decode-throughput-against-huggingface-transformers)) |
 | `--kv-cache-memory-fraction` | all but a reserve | Share of free GPU memory, after the weights, for the paged KV pool. Unset, the pool takes all of it but a tenth of the GPU's memory (at least 1.5 GiB, at most half of what is free) |
@@ -44,7 +44,7 @@ a LoRA adapter (§8). The main flags by topic are below; `turing serve --help` l
 | `--no-prefix-caching` | off | Disable automatic prefix caching |
 | `--draft-tokens` | `8` | Speculative draft tokens per step, from prompt lookup or from `--draft-head` (`0` = off). A request stops drafting while its drafts do not pay for the rows they add to the decode step ([§5](#5-prefix-caching-and-speculative-decoding)) |
 | `--draft-head` | none | An EAGLE-3 draft head for the served model (a Hugging Face repository or a directory with `config.json` and its weights); it drafts instead of prompt lookup |
-| `--moe-expert-slots` | all | MoE models that do not fit the GPU: experts kept on it per layer. The others stay in host memory and are copied in when a token is routed to them ([§5a](#5a-moe-expert-offload)) |
+| `--moe-expert-slots` | all | MoE models that do not fit the GPU: experts kept on it per layer (`6.5` keeps 6 and 7 in turn). The others stay in host memory; a token routed to one is served from there ([§5a](#5a-moe-expert-offload)) |
 
 **API behaviour**
 
@@ -195,15 +195,26 @@ Generation responses report what the server did in these headers: `X-Turing-Mode
 ## 5a. MoE expert offload
 
 `--moe-expert-slots N` serves an MoE model whose experts do not all fit on the GPU. Every expert stays in host memory
-(pinned), `N` per layer are on the GPU, and when a decode step routes a token to an expert that is not there it is
-copied into the slot used least recently. The grouped MoE kernels read the slots, so a resident expert runs as fast
-as without offload. It works with experts in the model dtype and with 4-bit experts (`turing convert`), which are
-copied packed. The weights are loaded into host memory first, so the whole model never has to fit on the GPU.
+(pinned) and `N` per layer are on the GPU; a fraction is an average over the layers. The weights are loaded into
+host memory first, so the whole model never has to fit on the GPU. What happens when a token is routed to an expert
+that is not on the GPU depends on the experts:
 
-Limits: an offloaded model's decode steps are not captured in CUDA graphs (each layer asks the host which experts
-it needs), and a step that routes to more experts of a layer than there are slots, as large batches and prefill do,
-streams the missing experts through the GPU each time. It suits one or two concurrent requests. The engine's
-telemetry (`get_telemetry`) reports hits, misses and experts streamed under `moe_offload`.
+* **4-bit experts** (`turing convert`), decode steps of up to 8 rows: the missing experts are computed on the CPU
+  from the packed weights in host memory (`csrc/turing_w4_expert_cpu.hpp`: AVX2, AVX-512 where the CPU has it, a
+  thread pool that stays alive) while the GPU runs the resident ones, and nothing is copied. Which experts are
+  resident follows use: every 64 such steps a layer brings in the expert it missed most in place of the resident it
+  used least. With the Marlin extension built the resident experts are in Marlin's layout, and the decode step is
+  captured as a chain of CUDA graphs with a stop for the host at each layer (`StepCuts`), so only the routing and
+  the CPU's part run from Python.
+* **Experts in the model dtype**, and 4-bit experts without the native extension: the missing expert is copied into
+  the slot used least recently, and the grouped MoE kernels read the slots.
+* **Larger inputs** (prefill chunks, more than 8 rows): the missing experts pass through the GPU one at a time
+  without changing which ones are resident.
+
+Limits: the CPU path costs one pass over an expert's weights in host memory per missing expert and step, so it suits
+one or two concurrent requests, and a prefill streams every missing expert of every layer. The engine's telemetry
+(`get_telemetry`) reports under `moe_offload` the expert uses served from the GPU (`hits`), computed on the CPU
+(`cpu`, with `cpu_seconds`), copied in (`misses`) and streamed.
 
 ---
 
@@ -312,7 +323,7 @@ turing serve --model Qwen/Qwen2.5-0.5B-Instruct --prefill-server prefill-host:56
 ```
 
 The decode server sends each prompt to the prefill worker, which returns the first token and the request's KV pages
-in the pool's storage format (native, int8 or int4 with scales). In the tests, which run both sides as processes on
+in the pool's storage format (native, int8 or int4 with scales, or fp8). In the tests, which run both sides as processes on
 one CPU host, greedy output matches a single engine.
 
 ---

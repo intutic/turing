@@ -33,6 +33,7 @@ def export_kv(cache: KVCache) -> Tuple[dict, bytes]:
     tensors = [getattr(pool, n)[:, pages].contiguous().cpu() for n in names]
     header = {"length": cache.length, "kv_cache_dtype": pool.kv_cache_dtype, "num_layers": pool.num_layers,
               "native_layers": list(pool.native_layers),
+              "fp8_scales": [list(s) for s in pool.fp8_scales] if pool.kv_cache_dtype == "fp8" else None,
               "num_kv_heads": pool.num_kv_heads, "head_dim": pool.head_dim,
               "tensors": [[n, str(t.dtype).replace("torch.", ""), list(t.shape)] for n, t in zip(names, tensors)]}
     return header, b"".join(t.view(torch.uint8).numpy().tobytes() for t in tensors)
@@ -47,6 +48,8 @@ def import_kv(pool: KVPool, header: dict, blob: bytes) -> KVCache:
     for key in ("kv_cache_dtype", "num_layers", "num_kv_heads", "head_dim"):
         if header[key] != getattr(pool, key):
             raise ValueError(f"KV payload has {key}={header[key]!r}, this pool {getattr(pool, key)!r}")
+    if pool.kv_cache_dtype == "fp8" and header.get("fp8_scales") != [list(s) for s in pool.fp8_scales]:
+        raise ValueError("KV payload was stored with other fp8 scales than this pool's")
     if not isinstance(header["length"], int) or header["length"] < 0:
         raise ValueError(f"KV payload length {header['length']!r}")
     cache = KVCache(pool)
