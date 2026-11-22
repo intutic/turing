@@ -73,20 +73,27 @@ def run_turing(a, batches):
     rows = []
 
     async def batch(ps, new_tokens=None):
+        """(seconds, tokens, each request's seconds to its first token from the start of the batch, and from the
+        moment it was handed to the engine)."""
         t0 = time.perf_counter()
-        reqs = [await engine.add_request(prompt_tokens=p, max_new_tokens=new_tokens[i] if new_tokens else a.new_tokens,
-                                         temperature=0.0, stop_token_ids=set()) for i, p in enumerate(ps)]
-        ttft = []
+        reqs, handed = [], []
+        for i, p in enumerate(ps):
+            handed.append(time.perf_counter())
+            reqs.append(await engine.add_request(prompt_tokens=p, temperature=0.0, stop_token_ids=set(),
+                                                 max_new_tokens=new_tokens[i] if new_tokens else a.new_tokens))
+        ttft, own = [], []
 
-        async def drain(r):
+        async def drain(r, at):
             n = 0
             async for _ in engine.stream_request(r):
                 if n == 0:
-                    ttft.append(time.perf_counter() - t0)
+                    now = time.perf_counter()
+                    ttft.append(now - t0)
+                    own.append(now - at)
                 n += 1
             return n
-        counts = await asyncio.gather(*[drain(r) for r in reqs])
-        return time.perf_counter() - t0, sum(counts), ttft
+        counts = await asyncio.gather(*[drain(r, at) for r, at in zip(reqs, handed)])
+        return time.perf_counter() - t0, sum(counts), ttft, own
 
     async def main():
         await engine.start()
@@ -104,11 +111,16 @@ def run_turing(a, batches):
                 await batch(prompts(tok, 1, a.context, seed=97), [8])
             for B in batches:
                 preempted = engine.preemptions
-                secs, n, ttft = await batch(prompts(tok, B, a.context))
+                secs, n, ttft, own = await batch(prompts(tok, B, a.context))
                 pool = engine.kv_pool
                 rows.append(dict(engine="turing", model=a.model, batch=B, context=a.context, new_tokens=a.new_tokens,
                                  seconds=round(secs, 3), output_tok_per_s=round(n / secs, 1),
-                                 mean_ttft_s=round(sum(ttft) / len(ttft), 4), kv_cache_dtype=a.kv_cache_dtype,
+                                 mean_ttft_s=round(sum(ttft) / len(ttft), 4),  # from the start of the batch
+                                 # the two clocks a first token can be read on: started when the batch was submitted
+                                 # (what a caller of a batch sees), or when each request reached the engine
+                                 mean_ttft_from_submit_s=round(sum(ttft) / len(ttft), 4),
+                                 mean_ttft_from_arrival_s=round(sum(own) / len(own), 4),
+                                 kv_cache_dtype=a.kv_cache_dtype,
                                  kv_page_budget=a.kv_page_budget, kv_capacity_tokens=pool.num_pages * pool.page_size,
                                  kv_pool_gib=round(pool.num_pages * pool.page_bytes() / 2 ** 30, 3),
                                  kv_native_layers=list(pool.native_layers), quantization=a.quantization,
@@ -179,15 +191,22 @@ def run_vllm(a, batches):
     rows = []
     for B in batches:
         ps = prompts(tok, B, a.context)
-        t0 = time.perf_counter()
+        t0, wall0 = time.perf_counter(), time.time()
         outs = llm.generate([{"prompt_token_ids": p} for p in ps], sp, use_tqdm=False)
         secs = time.perf_counter() - t0
         n = sum(len(o.outputs[0].token_ids) for o in outs)
         ttft = [vllm_ttft(o) for o in outs]
         ttft = [t for t in ttft if t is not None]
+        # vLLM starts each request's clock at its arrival in the engine (a wall-clock stamp); the same first tokens
+        # on the clock started when the batch was submitted, as Turing's rows report them
+        submit = [o.metrics.arrival_time - wall0 + t for o in outs
+                  for t in [vllm_ttft(o)] if t is not None and getattr(o.metrics, "arrival_time", None)]
         rows.append(dict(engine="vllm", model=a.model, batch=B, context=a.context, new_tokens=a.new_tokens,
                          seconds=round(secs, 3), output_tok_per_s=round(n / secs, 1),
-                         mean_ttft_s=round(sum(ttft) / len(ttft), 4) if ttft else None, kv_cache_dtype=kv,
+                         mean_ttft_s=round(sum(ttft) / len(ttft), 4) if ttft else None,  # from each arrival
+                         mean_ttft_from_arrival_s=round(sum(ttft) / len(ttft), 4) if ttft else None,
+                         mean_ttft_from_submit_s=round(sum(submit) / len(submit), 4) if submit else None,
+                         kv_cache_dtype=kv,
                          kv_capacity_tokens=capacity, kv_pool_gib=kv_gib, kv_skip_layers=skip,
                          gpu_memory_utilization=a.gpu_memory_utilization,
                          max_num_batched_tokens=a.max_num_batched_tokens))
