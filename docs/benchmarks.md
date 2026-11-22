@@ -7,6 +7,13 @@ results against vLLM and llama.cpp are on the [comparison](comparison.md) page.
 **Hardware.** GPU numbers are from one NVIDIA L4 (24 GB) on a Google Cloud `g2-standard-16`; Mac numbers are from an
 Apple M4 Pro. ± is one standard error; n is given where it matters.
 
+**Sustained load on the L4.** The card caps its power near 72 W: under sustained compute its core clock falls from
+2,040 MHz to about 1,100–1,200 MHz within a tenth of a second (the memory clock does not move). One prefill graph
+(two 1,024-token prompts, SmolLM2-360M) replays in 33.6 ms after a pause of 50 ms or more, 39.5 ms after 10 ms and
+43.0 ms back to back; the eager forward takes 44.7 ms back to back (`results_l4_power_cap_cuda.json`). So a number
+from a run with idle gaps (one prompt at a time) is not the number a burst gets, a CUDA graph buys nothing for
+sustained GEMM-bound prefill, and engines are compared here under the same sustained load.
+
 **Results and reproduction.** The raw results live in `benchmarks/results/`. Every table on this page is generated
 from them by `scripts/make_doc_tables.py` (`--check` fails when a table and its file disagree), and
 `benchmarks/README.md` has the commands to reproduce them. Each table names its results file.

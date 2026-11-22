@@ -1,0 +1,1335 @@
+{
+ "note": "One prefill CUDA graph (two 1,024-token prompts, SmolLM2-360M, fp16) replayed on an L4 with the device drained before and after each replay, in milliseconds, back to back and with a pause before each; then the eager forward back to back. nvidia-smi sampled every 200 ms beside it (scripts: scratch diagnostic of 2026-11-22, session of the same date). clocks_event_reasons 0x4 is the software power cap.",
+ "gpu": "NVIDIA L4",
+ "model": "HuggingFaceTB/SmolLM2-360M",
+ "replay_ms": {
+  "after 3 s idle, 80 replays back to back": [
+   35.0,
+   40.1,
+   42.2,
+   42.2,
+   42.0,
+   42.6,
+   42.8,
+   42.8,
+   42.8,
+   42.5,
+   42.1,
+   42.0,
+   42.1,
+   42.3,
+   42.5,
+   42.9,
+   42.6,
+   42.5,
+   42.0,
+   43.0,
+   45.4,
+   45.6,
+   45.3,
+   45.1,
+   45.9,
+   44.7,
+   43.3,
+   42.9,
+   42.9,
+   43.3,
+   43.3,
+   42.9,
+   42.9,
+   42.9,
+   42.6,
+   42.2,
+   42.6,
+   43.2,
+   43.4,
+   42.6,
+   42.3,
+   42.6,
+   43.9,
+   44.4,
+   44.1,
+   44.3,
+   43.9,
+   43.7,
+   43.7,
+   43.4,
+   43.1,
+   43.0,
+   42.9,
+   42.9,
+   43.1,
+   43.3,
+   42.8,
+   42.4,
+   43.1,
+   43.2,
+   43.3,
+   42.9,
+   42.9,
+   43.2,
+   43.6,
+   43.5,
+   44.5,
+   44.8,
+   44.8,
+   44.4,
+   44.4,
+   45.0,
+   44.3,
+   43.7,
+   43.0,
+   43.5,
+   43.6,
+   43.2,
+   43.0,
+   43.2
+  ],
+  "a pause of 0.01 s before each replay": [
+   39.6,
+   39.3,
+   39.3,
+   39.6,
+   39.1,
+   39.7,
+   38.7,
+   40.1
+  ],
+  "a pause of 0.05 s before each replay": [
+   34.0,
+   33.6,
+   33.2,
+   33.4,
+   34.0,
+   34.0,
+   33.8,
+   33.4
+  ],
+  "a pause of 0.2 s before each replay": [
+   33.7,
+   34.0,
+   33.0,
+   33.5,
+   34.0,
+   33.3,
+   33.3,
+   33.9
+  ],
+  "a pause of 1.0 s before each replay": [
+   33.9,
+   33.3,
+   33.4,
+   33.9,
+   34.1,
+   33.5,
+   33.4,
+   33.7
+  ],
+  "back to back again": [
+   39.4,
+   42.9,
+   43.0,
+   42.9,
+   43.0,
+   43.0,
+   43.0,
+   42.8,
+   42.7,
+   42.7,
+   42.7,
+   42.6,
+   42.5,
+   43.0,
+   42.9,
+   43.0,
+   43.1,
+   43.0,
+   44.5,
+   46.2
+  ],
+  "eager, back to back": [
+   49.4,
+   46.3,
+   46.1,
+   46.3,
+   45.5,
+   44.5,
+   43.8,
+   44.9,
+   44.4,
+   44.2,
+   43.7,
+   43.6
+  ]
+ },
+ "nvidia_smi": [
+  {
+   "time": "01:57:57.325",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:57.539",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:57.739",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:57.941",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:58.142",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:58.342",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:58.542",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:58.742",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:58.942",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:59.143",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.01,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:59.343",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.09,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:59.543",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.07,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:59.743",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.05,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:57:59.943",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.03,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:00.144",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.02,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:00.344",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.02,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:00.544",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.02,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:00.744",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.02,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:00.944",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 19.02,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:01.145",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:01.345",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:01.545",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:01.745",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:01.945",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:02.145",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:02.346",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:02.546",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:02.746",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:02.946",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:03.146",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:03.347",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:03.547",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:03.747",
+   "sm_clock_mhz": 210,
+   "memory_clock_mhz": 405,
+   "power_w": 18.92,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000001"
+  },
+  {
+   "time": "01:58:03.947",
+   "sm_clock_mhz": 1920,
+   "memory_clock_mhz": 6251,
+   "power_w": 22.21,
+   "temperature_c": 57,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:04.147",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 22.83,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:04.347",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 27.75,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:04.548",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 28.3,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:04.748",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 28.85,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:04.948",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 29.15,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:05.148",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.11,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:05.348",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.77,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:05.548",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.78,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:05.749",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.67,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:05.949",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.73,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:06.149",
+   "sm_clock_mhz": 1860,
+   "memory_clock_mhz": 6251,
+   "power_w": 36.89,
+   "temperature_c": 58,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:06.349",
+   "sm_clock_mhz": 1170,
+   "memory_clock_mhz": 6251,
+   "power_w": 40.56,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:06.549",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 40.4,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:06.749",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 40.95,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:06.950",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 40.27,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:07.150",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 40.21,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:07.350",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.22,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:07.550",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.22,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:07.751",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.22,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:07.951",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.22,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:08.151",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.22,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:08.351",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.39,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:08.551",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.39,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:08.751",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.39,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:08.951",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.39,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:09.152",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.39,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:09.352",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 31.44,
+   "temperature_c": 59,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:09.552",
+   "sm_clock_mhz": 1200,
+   "memory_clock_mhz": 6251,
+   "power_w": 38.75,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:09.752",
+   "sm_clock_mhz": 1170,
+   "memory_clock_mhz": 6251,
+   "power_w": 43.47,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:09.952",
+   "sm_clock_mhz": 1185,
+   "memory_clock_mhz": 6251,
+   "power_w": 47.42,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:10.152",
+   "sm_clock_mhz": 1200,
+   "memory_clock_mhz": 6251,
+   "power_w": 50.27,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:10.353",
+   "sm_clock_mhz": 1065,
+   "memory_clock_mhz": 6251,
+   "power_w": 52.08,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:10.553",
+   "sm_clock_mhz": 1170,
+   "memory_clock_mhz": 6251,
+   "power_w": 72.23,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:10.753",
+   "sm_clock_mhz": 1155,
+   "memory_clock_mhz": 6251,
+   "power_w": 71.79,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:10.953",
+   "sm_clock_mhz": 1170,
+   "memory_clock_mhz": 6251,
+   "power_w": 72.0,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:11.153",
+   "sm_clock_mhz": 1185,
+   "memory_clock_mhz": 6251,
+   "power_w": 71.93,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:11.353",
+   "sm_clock_mhz": 1110,
+   "memory_clock_mhz": 6251,
+   "power_w": 71.24,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:11.553",
+   "sm_clock_mhz": 1170,
+   "memory_clock_mhz": 6251,
+   "power_w": 71.85,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:11.753",
+   "sm_clock_mhz": 1140,
+   "memory_clock_mhz": 6251,
+   "power_w": 71.77,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:11.954",
+   "sm_clock_mhz": 1170,
+   "memory_clock_mhz": 6251,
+   "power_w": 72.06,
+   "temperature_c": 65,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:12.154",
+   "sm_clock_mhz": 1140,
+   "memory_clock_mhz": 6251,
+   "power_w": 72.22,
+   "temperature_c": 65,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:12.354",
+   "sm_clock_mhz": 1095,
+   "memory_clock_mhz": 6251,
+   "power_w": 71.87,
+   "temperature_c": 65,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:12.554",
+   "sm_clock_mhz": 1140,
+   "memory_clock_mhz": 6251,
+   "power_w": 72.18,
+   "temperature_c": 65,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:12.754",
+   "sm_clock_mhz": 1155,
+   "memory_clock_mhz": 6251,
+   "power_w": 72.0,
+   "temperature_c": 65,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:12.954",
+   "sm_clock_mhz": 1305,
+   "memory_clock_mhz": 6251,
+   "power_w": 70.73,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:13.155",
+   "sm_clock_mhz": 1350,
+   "memory_clock_mhz": 6251,
+   "power_w": 70.58,
+   "temperature_c": 65,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:13.355",
+   "sm_clock_mhz": 1710,
+   "memory_clock_mhz": 6251,
+   "power_w": 63.33,
+   "temperature_c": 66,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:13.555",
+   "sm_clock_mhz": 1920,
+   "memory_clock_mhz": 6251,
+   "power_w": 64.5,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:13.755",
+   "sm_clock_mhz": 1410,
+   "memory_clock_mhz": 6251,
+   "power_w": 61.31,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:13.955",
+   "sm_clock_mhz": 1815,
+   "memory_clock_mhz": 6251,
+   "power_w": 54.58,
+   "temperature_c": 66,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:14.155",
+   "sm_clock_mhz": 1305,
+   "memory_clock_mhz": 6251,
+   "power_w": 48.64,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:14.355",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 50.3,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:14.556",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 48.29,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:14.756",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 38.77,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:14.956",
+   "sm_clock_mhz": 2010,
+   "memory_clock_mhz": 6251,
+   "power_w": 39.28,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:15.156",
+   "sm_clock_mhz": 1965,
+   "memory_clock_mhz": 6251,
+   "power_w": 44.62,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:15.356",
+   "sm_clock_mhz": 1770,
+   "memory_clock_mhz": 6251,
+   "power_w": 43.56,
+   "temperature_c": 66,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:15.556",
+   "sm_clock_mhz": 2010,
+   "memory_clock_mhz": 6251,
+   "power_w": 39.73,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:15.756",
+   "sm_clock_mhz": 1950,
+   "memory_clock_mhz": 6251,
+   "power_w": 44.47,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:15.957",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 43.47,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:16.157",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 38.36,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:16.357",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 38.58,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:16.571",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 37.03,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:16.771",
+   "sm_clock_mhz": 1755,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.13,
+   "temperature_c": 65,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:16.971",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.22,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:17.171",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.2,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:17.371",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.2,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:17.571",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.2,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:17.771",
+   "sm_clock_mhz": 1305,
+   "memory_clock_mhz": 6251,
+   "power_w": 34.63,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:17.972",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 34.72,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:18.172",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 34.75,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:18.372",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 34.77,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:18.572",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 34.77,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:18.772",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 38.14,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:18.972",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.62,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:19.172",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.62,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:19.373",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.63,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:19.573",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.61,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:19.773",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 35.61,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:19.973",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.23,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:20.173",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.25,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:20.373",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.27,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:20.573",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.27,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:20.774",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.27,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:20.974",
+   "sm_clock_mhz": 1995,
+   "memory_clock_mhz": 6251,
+   "power_w": 36.17,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:21.174",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 36.18,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:21.374",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 36.19,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:21.574",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 36.2,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:21.774",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 36.2,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:21.974",
+   "sm_clock_mhz": 1905,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.79,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:22.175",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.76,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:22.375",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.75,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:22.575",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.77,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:22.775",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.79,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:22.975",
+   "sm_clock_mhz": 1650,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.23,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:23.175",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.4,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:23.375",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.46,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:23.576",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.48,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:23.776",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 32.49,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:23.976",
+   "sm_clock_mhz": 1605,
+   "memory_clock_mhz": 6251,
+   "power_w": 38.57,
+   "temperature_c": 62,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:24.176",
+   "sm_clock_mhz": 1170,
+   "memory_clock_mhz": 6251,
+   "power_w": 45.97,
+   "temperature_c": 66,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:24.376",
+   "sm_clock_mhz": 1170,
+   "memory_clock_mhz": 6251,
+   "power_w": 53.26,
+   "temperature_c": 66,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:24.576",
+   "sm_clock_mhz": 1170,
+   "memory_clock_mhz": 6251,
+   "power_w": 60.44,
+   "temperature_c": 66,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:24.777",
+   "sm_clock_mhz": 1095,
+   "memory_clock_mhz": 6251,
+   "power_w": 67.68,
+   "temperature_c": 66,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:24.977",
+   "sm_clock_mhz": 1125,
+   "memory_clock_mhz": 6251,
+   "power_w": 74.58,
+   "temperature_c": 66,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:25.177",
+   "sm_clock_mhz": 1185,
+   "memory_clock_mhz": 6251,
+   "power_w": 71.53,
+   "temperature_c": 66,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:25.377",
+   "sm_clock_mhz": 1185,
+   "memory_clock_mhz": 6251,
+   "power_w": 71.79,
+   "temperature_c": 67,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:25.577",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 64.13,
+   "temperature_c": 64,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:25.777",
+   "sm_clock_mhz": 2025,
+   "memory_clock_mhz": 6251,
+   "power_w": 57.18,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000004"
+  },
+  {
+   "time": "01:58:25.977",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 50.26,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:26.178",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 43.63,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000000"
+  },
+  {
+   "time": "01:58:26.378",
+   "sm_clock_mhz": 2040,
+   "memory_clock_mhz": 6251,
+   "power_w": 36.54,
+   "temperature_c": 63,
+   "clocks_event_reasons": "0x0000000000000000"
+  }
+ ]
+}
