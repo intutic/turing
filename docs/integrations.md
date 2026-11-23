@@ -142,4 +142,20 @@ spec:
       storageUri: hf://Qwen/Qwen2.5-1.5B-Instruct
 ```
 
-`hf://` storage URIs need KServe 0.15 or later. These manifests have not been run on a real cluster.
+`hf://` storage URIs need KServe 0.15 or later.
+
+**Run on GKE on 2026-11-23** (`benchmarks/results/results_kserve_gke.json`): GKE 1.36.4 with one Spot L4 node
+(`g2-standard-8`), KServe v0.21.0 in Standard deployment mode, cert-manager v1.17.0.
+
+- **The `v2.0.0-cuda` image does not start on a GPU.** With the manifests as they are the pod restarts in a loop.
+  The image has no C compiler, which Triton needs at its first kernel (`Failed to find C compiler`), and it does
+  not set the library path where GKE mounts the NVIDIA driver (`Found no NVIDIA driver`). `deploy/Dockerfile` now
+  does both; the manifests need an image built from it, and none is published yet.
+- With those two things added to the same image at container start (a test-only override), the InferenceService was
+  Ready 57 s after `kubectl apply` with the image already on the node (pulling its 4.1 GB took 4 min 8 s; the
+  storage initializer's download 27 to 30 s). `/health`, `/v1/models`, a plain and a streamed chat completion and
+  `/metrics` answered through the predictor Service, and after `kubectl delete pod` the service was Ready again in
+  62 s. The server ran as the image's non-root user.
+- The first request after a start waited 17.4 s for its first token and the second 2.1 s. Triton compiles each
+  kernel at its first use; where the rest of the wait goes was not profiled. `/v1/models` lists the model as
+  `HF-/mnt/models`.

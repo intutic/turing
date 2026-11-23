@@ -38,7 +38,7 @@ a LoRA adapter (§8). The main flags by topic are below; `turing serve --help` l
 | `--kv-cache-dtype` | `auto` | `native`, `int8` (per token and KV head), `int4` (per 32 values) or `fp8` (float8 E4M3, the format of vLLM's fp8 cache); `auto` = `int8` on CUDA, `native` elsewhere. Layers the format damages are detected at startup and kept in the model dtype; int4 also scales down outlier key channels. Quality: [benchmarks §2](benchmarks.md#2-kv-cache-quality-and-the-layers-it-keeps) |
 | `--no-kv-smoothing` | off | int4 KV: store keys without outlier-channel smoothing |
 | `--kv-page-budget` | `1.0` | Quest: share of 16-token pages each decode step reads, for requests of at least 8,192 tokens. Runs inside CUDA graphs. Off by default: it is slower than reading every page at every length up to 8K ([benchmarks §4](benchmarks.md#4-decode-throughput-against-huggingface-transformers)) |
-| `--kv-cache-memory-fraction` | all but a reserve | Share of free GPU memory, after the weights, for the paged KV pool. Unset, the pool takes all of it but a tenth of the GPU's memory (at least 1.5 GiB, at most half of what is free) |
+| `--kv-cache-memory-fraction` | all but a reserve | Share of free GPU memory, after the weights, for the paged KV pool. Unset, the pool takes all of it but a tenth of the GPU's memory (at least 2 GiB, at most half of what is free) |
 | `--max-batch-size` | `64` | Requests running (prefilling or decoding) at once |
 | `--no-cuda-graphs` | off | Run decode steps eagerly instead of replaying captured CUDA graphs |
 | `--no-prefix-caching` | off | Disable automatic prefix caching |

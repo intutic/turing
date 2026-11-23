@@ -139,7 +139,7 @@ All notable changes to this project are documented here. The format follows
 - Replacing a model's KV pool (another `kv_cache_dtype` in the same process) frees the old pool before the new one
   is sized; it used to stay allocated until then, so the new pool got only what was left.
 - `turing serve` gives the KV pool all free GPU memory after the weights but a reserve (a tenth of the GPU's
-  memory, at least 1.5 GiB, at most half of what is free) instead of 60% of it, which left 4-7 GiB of an L4 unused.
+  memory, at least 2 GiB, at most half of what is free) instead of 60% of it, which left 4-7 GiB of an L4 unused.
   `--kv-cache-memory-fraction` still sets a share, and a model loaded through the library keeps 60%
   (`ModelConfig.kv_pool_fraction`).
 - A scheduler step that prefills no longer runs a second forward for the requests that are decoding: they ride in
@@ -187,6 +187,17 @@ All notable changes to this project are documented here. The format follows
 - Package description corrected (it still advertised 70B models on one GPU).
 
 ### Fixed
+- The CUDA image could not start on a GPU: it had no C compiler, which Triton needs at its first kernel, and no
+  library path for the NVIDIA driver where GKE mounts it. `deploy/Dockerfile` now installs `gcc` in the CUDA image
+  and sets `LD_LIBRARY_PATH=/usr/local/nvidia/lib64`. Found by running `integrations/kserve` on GKE with KServe
+  v0.21.0 (`benchmarks/results/results_kserve_gke.json`); with both added to the `v2.0.0-cuda` image at container
+  start, the InferenceService was Ready 57 s after apply and served requests. The published `v2.0.0-cuda` image
+  keeps the defect.
+- `turing doctor --tune` kept `int4_max_rows = 16` on a GPU where the fused int4 GEMM was slower at every row
+  count it measured (a Tesla T4): its grid now starts at 4 rows and it keeps 0 when the kernel never wins.
+- The KV pool's reserve of working memory has a floor of 2 GiB instead of 1.5: on a 15 GB T4 a 2,048-token
+  prefill of Qwen2.5-1.5B without FlashInfer ran out of memory. An L4's reserve (a tenth of its memory) does not
+  change.
 - With a draft head, the step times that decide whether drafting pays were wrong at both ends of a run of verify
   steps launched ahead: the first sample spanned two cycles and the one after the last about 0.1 ms. A run of
   more drafted rows than the largest decode graph holds (128) is no longer set up for a launch that is then

@@ -34,6 +34,12 @@ curl -s localhost:8000/v1/chat/completions -H 'content-type: application/json' \
 
 Needs an NVIDIA driver recent enough for CUDA 12.8 and the NVIDIA Container Toolkit on the host.
 
+!!! warning "The `v2.0.0-cuda` image does not start on a GPU"
+    It has no C compiler, which Triton needs at its first kernel (`Failed to find C compiler`; seen on GKE on
+    2026-11-23). `deploy/Dockerfile` now installs one and sets the library path GKE mounts the driver at. Until an
+    image built from it is published, build the CUDA image yourself:
+    `docker build -f deploy/Dockerfile --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu128 -t turing:cuda .`
+
 ```bash
 docker run --rm --gpus all -p 127.0.0.1:8000:8000 \
   -v ~/.cache/huggingface:/home/turing/.cache/huggingface \

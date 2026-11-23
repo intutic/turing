@@ -120,16 +120,17 @@ def save_tuning(values: dict) -> str:
 
 @torch.inference_mode()
 def tune_int4_max_rows(dev: torch.device, shapes=((2048, 2048), (8192, 2048), (2048, 8192)),
-                       rows=(16, 32, 64, 128, 256)) -> dict:
+                       rows=(4, 8, 16, 32, 64, 128, 256)) -> dict:
     """The largest row count at which the fused int4 GEMM is no slower than dequantizing into a buffer and calling
-    cuBLAS, summed over layer shapes (out x in). Returns {"int4_max_rows": M, "int4_crossover_us": {M: [int4, dense]}}."""
+    cuBLAS, summed over layer shapes (out x in); 0 if it is slower at every count measured.
+    Returns {"int4_max_rows": M, "int4_crossover_us": {M: [int4, dense]}}."""
     from ..kernels.triton_w4a16 import dequantize_cuda, w4a16_gemm
     from ..models.quant import GROUP, pack, rtn_quantize
     layers = []
     for n, k in shapes:
         c, s, z = rtn_quantize(torch.randn(n, k, device=dev) * 0.02)
         layers.append((pack(c), s, z, torch.empty(n, k, device=dev, dtype=torch.float16)))
-    table, best = {}, rows[0]
+    table, best = {}, 0
     for m in rows:
         int4 = dense = 0.0
         for q, s, z, buf in layers:

@@ -122,7 +122,7 @@ def main():
     serve_parser.add_argument("--no-kv-smoothing", action="store_true", help="int4 KV: store keys without outlier-channel smoothing")
     serve_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
     serve_parser.add_argument("--no-cuda-graphs", action="store_true", help="Run decode steps eagerly instead of replaying CUDA graphs")
-    serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=None, help="Share of free GPU memory (after the weights) for the paged KV pool (default: all of it but a reserve of a tenth of the GPU's memory, at least 1.5 GiB)")
+    serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=None, help="Share of free GPU memory (after the weights) for the paged KV pool (default: all of it but a reserve of a tenth of the GPU's memory, at least 2 GiB)")
     serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
     serve_parser.add_argument("--embedding-model", type=str, default=None, help="HF embedding model (e.g. BAAI/bge-small-en-v1.5) for /v1/embeddings; default: the served model's mean-pooled hidden states")
     serve_parser.add_argument("--rerank-model", type=str, default=None, help="HF cross-encoder (e.g. cross-encoder/ms-marco-MiniLM-L-6-v2) for /v1/rerank; default: the served model's yes/no likelihood")

@@ -67,7 +67,7 @@ once per step instead of once for the prompts and once for the decode. Around th
 ## 2. KV cache (`turing/core/kv_cache.py`)
 
 * **Pool**: one paged pool per model, 16-token pages, sized once from free GPU memory after the weights. `turing
-  serve` gives it all of that but a reserve of a tenth of the GPU's memory, at least 1.5 GiB (`KVPool.cuda_budget`),
+  serve` gives it all of that but a reserve of a tenth of the GPU's memory, at least 2 GiB (`KVPool.cuda_budget`),
   or the share `--kv-cache-memory-fraction` names; a model loaded through the library takes 60%
   (`ModelConfig.kv_pool_fraction`), which leaves room for another model in the process. Off CUDA: 4 GiB or what 64
   full-length requests need, whichever is less.

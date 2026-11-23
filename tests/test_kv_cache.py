@@ -427,7 +427,7 @@ def test_pool_off_cuda_is_sized_to_the_model():
 def test_cuda_budget_leaves_a_reserve_or_takes_the_share_asked_for():
     G = 2 ** 30
     assert KVPool.cuda_budget(18 * G, 22.5 * G) == pytest.approx(15.75 * G)  # a tenth of the device
-    assert KVPool.cuda_budget(6 * G, 8 * G) == pytest.approx(4.5 * G)  # at least 1.5 GiB
+    assert KVPool.cuda_budget(6 * G, 8 * G) == pytest.approx(4 * G)  # at least 2 GiB
     assert KVPool.cuda_budget(2 * G, 22.5 * G) == pytest.approx(1 * G)  # never more than half of what is free
     assert KVPool.cuda_budget(18 * G, 22.5 * G, 0.6) == pytest.approx(10.8 * G)
 

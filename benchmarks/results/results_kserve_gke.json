@@ -1,0 +1,52 @@
+{
+  "note": "integrations/kserve applied to a temporary GKE cluster on 2026-11-23 (commit 863cba0). Runs 1 and 2 show two defects of the published v2.0.0-cuda image; run 3 is a test-only override of the same image that adds what deploy/Dockerfile now adds. No image was built or published for this run.",
+  "env": {
+    "kubernetes": "GKE 1.36.4-gke.2377000, zonal, us-central1-a",
+    "nodes": "one e2-standard-4, one Spot g2-standard-8 with an NVIDIA L4 (driver 580.178.04, installed by GKE)",
+    "kserve": "v0.21.0, Standard deployment mode, no ingress (requests through a port-forward to the predictor Service)",
+    "cert_manager": "v1.17.0",
+    "image": "ghcr.io/intutic/turing:v2.0.0-cuda (4,145,036,857 bytes, torch 2.11.0+cu128)",
+    "inference_service": "integrations/kserve/inferenceservice.yaml, storageUri hf://Qwen/Qwen2.5-1.5B-Instruct"
+  },
+  "image_pull_s": 247.6,
+  "storage_initializer_download_s": [29.8, 27.1],
+  "runs": [
+    {
+      "run": 1,
+      "serving_runtime": "integrations/kserve/serving_runtime.yaml, unchanged",
+      "ready": false,
+      "pod": "CrashLoopBackOff, 9 restarts in 30 minutes",
+      "error": "Found no NVIDIA driver on your system",
+      "cause": "GKE mounts the driver libraries at /usr/local/nvidia/lib64 and the image sets no LD_LIBRARY_PATH: in a pod of the same image torch.cuda.is_available() is False as the image is and True with LD_LIBRARY_PATH=/usr/local/nvidia/lib64"
+    },
+    {
+      "run": 2,
+      "serving_runtime": "run 1 with LD_LIBRARY_PATH=/usr/local/nvidia/lib64",
+      "ready": false,
+      "pod": "Error, restarting",
+      "error": "RuntimeError: Failed to find C compiler. Please specify via CC environment variable or set triton.knobs.build.impl.",
+      "cause": "the weights load on the L4; the first Triton kernel (rms_norm, in the KV layer calibration at startup) needs a C compiler and the image has none"
+    },
+    {
+      "run": 3,
+      "serving_runtime": "run 2 with gcc and libc6-dev installed at container start as root, the server then started as the image's user turing (uid 1000); test-only",
+      "ready": true,
+      "apply_to_ready_s": 57,
+      "apply_to_ready_note": "image already on the node",
+      "requests": {
+        "GET /health": 200,
+        "GET /v1/models": 200,
+        "POST /v1/chat/completions": 200,
+        "POST /v1/chat/completions stream": "chunks received",
+        "GET /metrics": "turing_ gauges present"
+      },
+      "first_token_ms_first_two_requests": [17379.5, 2082.6],
+      "first_token_note": "from turing_ttft_p99_ms and turing_ttft_avg_ms after two requests; Triton compiles each kernel at its first use; not profiled further",
+      "gpu_memory_used_mib": 16014,
+      "gpu_memory_total_mib": 23034,
+      "pod_delete_to_ready_s": 62,
+      "request_after_restart": 200,
+      "served_model_id": "HF-/mnt/models"
+    }
+  ]
+}

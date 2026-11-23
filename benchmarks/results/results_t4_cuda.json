@@ -1,0 +1,202 @@
+{
+  "note": "Tesla T4 (15 GB) on a temporary Spot n1-standard-8, 2026-11-23: `turing doctor` (three runs), `turing doctor --model Qwen/Qwen2.5-1.5B-Instruct --tune` and scripts/benchmark_e2e_generation.py (512-token prompts, 256 new tokens, fp16, the default KV pool) with and without FlashInfer installed; the tests ran on commit 863cba0, the tuning and the speed rows on it with the tuner's row grid from 4 and the KV pool's reserve floor at 2 GiB (with the floor at 1.5 GiB the row without FlashInfer ran out of memory in its 2,048-token warm-up prefill)",
+  "env": {
+    "gpu": "Tesla T4, 15360 MiB, 580.178.04",
+    "python": "Python 3.10.12",
+    "torch_triton": "2.9.1+cu129 3.5.1"
+  },
+  "probe": [
+    {
+      "read_bandwidth_gb_s": 271.1,
+      "matmul_fp16_tflops": 20.89,
+      "matmul_bf16_tflops": 2.28
+    },
+    {
+      "read_bandwidth_gb_s": 271.1,
+      "matmul_fp16_tflops": 23.02,
+      "matmul_bf16_tflops": 2.25
+    },
+    {
+      "read_bandwidth_gb_s": 271.4,
+      "matmul_fp16_tflops": 22.46,
+      "matmul_bf16_tflops": 1.98
+    }
+  ],
+  "decode_floor": {
+    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "weights_gb": 3.09,
+    "floor_ms": 11.4
+  },
+  "tuning": {
+    "int4_max_rows": 0,
+    "int4_crossover_us": {
+      "4": [
+        1658.9,
+        1046.7
+      ],
+      "8": [
+        1697.7,
+        1050.5
+      ],
+      "16": [
+        1818.7,
+        1087.7
+      ],
+      "32": [
+        3710.4,
+        1127.4
+      ],
+      "64": [
+        6893.2,
+        1233.0
+      ],
+      "128": [
+        14290.7,
+        1425.0
+      ],
+      "256": [
+        28076.2,
+        2084.1
+      ]
+    }
+  },
+  "tests": {
+    "files": "tests/test_probe.py tests/test_triton_kv_decode.py tests/test_w4a16.py tests/test_engine_generation.py",
+    "passed": 236,
+    "skipped": 10,
+    "after_the_two_changes": {
+      "files": "tests/test_kv_cache.py tests/test_probe.py",
+      "passed": 38
+    }
+  },
+  "rows": [
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "batch": 1,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 5.362,
+      "output_tok_per_s": 47.7,
+      "mean_ttft_s": 0.101,
+      "mean_ttft_from_submit_s": 0.101,
+      "mean_ttft_from_arrival_s": 0.101,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 342576,
+      "kv_pool_gib": 9.148,
+      "kv_native_layers": [],
+      "quantization": "none",
+      "gpu_peak_gib": 13.055,
+      "prefill_chunk": 2048,
+      "ride_prefill": true,
+      "moe_expert_slots": null,
+      "moe_offload": null,
+      "preemptions": 0,
+      "engine_step_ms": {
+        "1": 20.077,
+        "8": 21.018,
+        "4": 37.894
+      },
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0,
+      "flashinfer": false
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "batch": 8,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 6.034,
+      "output_tok_per_s": 339.4,
+      "mean_ttft_s": 0.8574,
+      "mean_ttft_from_submit_s": 0.8574,
+      "mean_ttft_from_arrival_s": 0.8564,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 342576,
+      "kv_pool_gib": 9.148,
+      "kv_native_layers": [],
+      "quantization": "none",
+      "gpu_peak_gib": 13.055,
+      "prefill_chunk": 2048,
+      "ride_prefill": true,
+      "moe_expert_slots": null,
+      "moe_offload": null,
+      "preemptions": 0,
+      "engine_step_ms": {
+        "1": 20.077,
+        "8": 20.708,
+        "4": 37.894
+      },
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0,
+      "flashinfer": false
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "batch": 1,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 5.38,
+      "output_tok_per_s": 47.6,
+      "mean_ttft_s": 0.0981,
+      "mean_ttft_from_submit_s": 0.0981,
+      "mean_ttft_from_arrival_s": 0.0981,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 342576,
+      "kv_pool_gib": 9.148,
+      "kv_native_layers": [],
+      "quantization": "none",
+      "gpu_peak_gib": 12.923,
+      "prefill_chunk": 2048,
+      "ride_prefill": true,
+      "moe_expert_slots": null,
+      "moe_offload": null,
+      "preemptions": 0,
+      "engine_step_ms": {
+        "1": 20.153,
+        "8": 20.852,
+        "4": 39.016
+      },
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0,
+      "flashinfer": true
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen2.5-1.5B-Instruct",
+      "batch": 8,
+      "context": 512,
+      "new_tokens": 256,
+      "seconds": 5.803,
+      "output_tok_per_s": 352.9,
+      "mean_ttft_s": 0.5026,
+      "mean_ttft_from_submit_s": 0.5026,
+      "mean_ttft_from_arrival_s": 0.5016,
+      "kv_cache_dtype": "native",
+      "kv_page_budget": 1.0,
+      "kv_capacity_tokens": 342576,
+      "kv_pool_gib": 9.148,
+      "kv_native_layers": [],
+      "quantization": "none",
+      "gpu_peak_gib": 12.923,
+      "prefill_chunk": 2048,
+      "ride_prefill": true,
+      "moe_expert_slots": null,
+      "moe_offload": null,
+      "preemptions": 0,
+      "engine_step_ms": {
+        "1": 20.153,
+        "8": 20.685,
+        "4": 39.016
+      },
+      "quantize_lm_head": false,
+      "activation_sparsity": 0.0,
+      "flashinfer": true
+    }
+  ]
+}

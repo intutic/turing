@@ -32,3 +32,11 @@ def test_kserve_manifest_validity():
     assert c["args"][:2] == ["--model", "/mnt/models"]  # where KServe's storage initializer puts storageUri
     assert c["readinessProbe"]["httpGet"]["path"] == "/health"
     assert c["image"] == "ghcr.io/intutic/turing:v2.0.0-cuda"  # the release workflow's CUDA image
+
+def test_cuda_image_has_a_c_compiler_and_the_driver_path():
+    # the v2.0.0 CUDA image had neither and could not start on a GPU: Triton needs a C compiler at its first
+    # kernel, and GKE mounts the driver libraries at /usr/local/nvidia/lib64 (run on GKE, 2026-11-23)
+    with open(os.path.join(os.path.dirname(__file__), "..", "deploy", "Dockerfile")) as f:
+        text = f.read()
+    assert "install -y --no-install-recommends gcc libc6-dev" in text
+    assert "ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib64" in text

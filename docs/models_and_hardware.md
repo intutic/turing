@@ -162,7 +162,7 @@ that resolves to a model type outside the table above is refused at load. `SIZIN
 
 | Backend | Status |
 | :--- | :--- |
-| NVIDIA CUDA | Tested on NVIDIA L4: Triton decode kernels, CUDA graphs, int4 GEMM and input-sparse GEMV kernels ([benchmarks](benchmarks.md#3-4-bit-weights-and-activation-sparsity)) |
+| NVIDIA CUDA | Tested on NVIDIA L4: Triton decode kernels, CUDA graphs, int4 GEMM and input-sparse GEMV kernels ([benchmarks](benchmarks.md#3-4-bit-weights-and-activation-sparsity)). A T4 ran the probe, 236 kernel and engine tests and one speed row (below) |
 | Apple Silicon (MPS) | Tested on Apple M4 Pro. Attention uses an explicit path because PyTorch 2.9's MPS SDPA reuses one cached graph per shape with the first call's scale |
 | CPU | PyTorch on CPU; the C++ extension and `turing-cli` use AVX2/FMA (x86_64) or NEON (arm64) |
 | AMD ROCm | `--device rocm` uses PyTorch's HIP build (exposed as `cuda`); untested |
@@ -171,4 +171,20 @@ that resolves to a model type outside the table above is refused at load. `SIZIN
 ```bash
 turing info                      # detected devices and runtime
 turing serve --model smollm2 --device mps
+turing doctor --tune             # this GPU's read bandwidth and matmul rates; keeps its int4 kernel crossover
 ```
+
+**A second GPU type.** The kernels' crossovers and the serving defaults were set on an L4, so the probe, its tuning
+and the tests were also run on a Tesla T4 (15 GB, 2026-11-23; `benchmarks/results/results_t4_cuda.json`):
+
+* `turing doctor` measured 271 GB/s of read bandwidth, 21–23 TFLOP/s of fp16 matmul and 2.0–2.3 of bf16: a tenth
+  of fp16, so on that card a model belongs in fp16.
+* `--tune` found the fused int4 GEMM slower than dequantizing and calling cuBLAS at every row count from 4 to 256
+  (1.66 against 1.05 ms at 4 rows, over three layer shapes) and keeps `int4_max_rows = 0` for that GPU; an L4
+  keeps 32. The tuner's grid used to start at 16 rows and kept 16 where the int4 kernel never won.
+* 236 tests of the probe, the KV decode kernels, the int4 GEMM and the engine passed (10 skipped).
+* Qwen2.5-1.5B-Instruct in fp16, 512-token prompts and 256 new tokens: 48 tok/s at batch 1 and 339 at batch 8
+  (353 with FlashInfer installed). The batch-1 step takes 20.1 ms against the 11.4 ms that card's bandwidth
+  allows; on an L4 it is 12.9 against 11.8 ms. Where the T4's step spends the rest has not been profiled.
+* With the KV pool's reserve at its former floor of 1.5 GiB a 2,048-token prefill ran out of memory there when
+  FlashInfer was not installed; the floor is 2 GiB now (an L4's reserve, a tenth of its memory, is 2.25 GiB).
