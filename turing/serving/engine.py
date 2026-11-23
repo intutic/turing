@@ -734,8 +734,11 @@ class ContinuousBatchEngine:
                 self._decode_steps += 1
                 self._spec_hold = max(self._spec_hold - 1, 0)
                 if not work:  # a prefill in the same step would be timed with it
-                    self._last_step = (("drafts", _bucket(rows or flown)) if in_step or serial or flown
-                                       else _bucket(rows), now)
+                    key = ("drafts", _bucket(rows or flown)) if in_step or serial or flown else _bucket(rows)
+                    if self._verifying is None:  # after the last step launched ahead no forward is in flight to time
+                        self._last_step = None if flown else (key, now)
+                    else:  # the first step launched ahead follows this step's own forward: timed from its launch
+                        self._last_step = (key, now if flown else time.perf_counter())
 
         self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
 
@@ -1060,9 +1063,11 @@ class ContinuousBatchEngine:
     def _verifies_ahead(self, reqs: List[AsyncSequenceRequest]) -> bool:
         """The step that verifies the drafts the head is about to make for reqs can be launched before the host has
         read them: reqs are every request there is to serve (the next step is theirs alone, with no prompt to
-        prefill), all greedy, and their drafts are verified as rows of one decode step."""
+        prefill), all greedy, and their drafts are verified as rows of one decode step, which holds every chain at
+        its longest (else the drafts are read in one copy, as before a step could be launched ahead)."""
         if not (self.overlap_decode and self.draft_head.pool is not None) or self.waiting_queue \
-                or {id(r) for r in self.running_batch if r.state != RequestState.FINISHED} != {id(r) for r in reqs}:
+                or {id(r) for r in self.running_batch if r.state != RequestState.FINISHED} != {id(r) for r in reqs} \
+                or sum(self._draft_count(r) + 1 for r in reqs) > DecodeGraphs.BUCKETS[-1]:
             return False
         return all(r.state == RequestState.DECODING and r.temperature <= 1e-5 and self._verify_in_step(r)
                    and self._may_draft(r, len(reqs)) for r in reqs)

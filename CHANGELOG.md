@@ -14,9 +14,9 @@ All notable changes to this project are documented here. The format follows
   v0.31.0 like the dense one and built by the same `TURING_BUILD_MARLIN=1`). With it a layer keeps its experts on
   the GPU in Marlin's layout only (the packed buffers move to host memory) and runs every input size through it.
   Qwen1.5-MoE-A2.7B in 4 bits on an L4 (LM head in fp16) goes from 98 / 259 / 446 / 506 tok/s at batch 1 / 8 / 32 /
-  64 with the Triton kernels to 109 / 342 / 609 / 803, and its first token at batch 64 from 4.7 s to 1.9 s; with
-  the default 4-bit LM head it runs at 136 / 369 / 633 / 824 (vLLM on Qwen's GPTQ-Int4 checkpoint: 116 / 354 /
-  629 / 828).
+  64 with the Triton kernels to 116 / 348 / 615 / 814, and its first token at batch 64 from 4.7 s to 1.9 s; with
+  the default 4-bit LM head it runs at 146 / 376 / 638 / 830 (vLLM on Qwen's GPTQ-Int4 checkpoint: 114 / 353 /
+  625 / 824).
 - `--moe-expert-slots N`: MoE expert offload in the serving path. `N` experts per layer stay on the GPU (a fraction
   is an average over the layers), the rest in host memory; works with experts in the model dtype and in 4 bits.
   A 4-bit expert that is not on the GPU is computed on the CPU for decode steps of up to 8 rows
@@ -34,8 +34,8 @@ All notable changes to this project are documented here. The format follows
   remains int8.
 - `--draft-head`: speculative decoding with a published EAGLE-3 draft head (`turing/models/eagle3.py`). The head
   runs once per draft position for all drafting requests, and a request's chain is as long as its drafts are
-  likely to be reached by the target. Qwen3-8B on an L4 with chains of up to 5: 50.1 / 80.6 / 131.8 tok/s on code
-  prompts at 1 / 2 / 4 requests (16.5 / 26.5 / 46.3 without drafts; vLLM with the same head 50.6 / 82.3 / 134.9).
+  likely to be reached by the target. Qwen3-8B on an L4 with chains of up to 5: 50.9 / 81.8 / 132.2 tok/s on code
+  prompts at 1 / 2 / 4 requests (16.5 / 26.4 / 46.1 without drafts; vLLM with the same head 50.6 / 82.8 / 133.6).
 - Overlapped decode on CUDA: the next decode step is launched before the host has read the current step's tokens.
 - `turing bench-bw` (also `turing doctor`) reports the device's read bandwidth and matmul rates and, with `--model`,
   the least time a batch-1 decode step can take; `--tune` measures the int4 kernel crossover on the GPU present.
@@ -80,13 +80,16 @@ All notable changes to this project are documented here. The format follows
   avoided. The steps of the head's chain are queued one behind the other (the chain made three blocking copies a
   draft position), and when every request being served drafts, the step that verifies the drafts is launched
   behind the chain while they are still on the device (`ContinuousBatchEngine._verify_ahead`): the host reads the
-  drafts and the target's picks together when that step is done. The device idled 3.4% of such a cycle on
-  Qwen3-8B on an L4 before (vLLM: 0.3%).
+  drafts and the target's picks together when that step is done. On Qwen3-8B on an L4 the device idled 4.8% of
+  a run of one request and 5.0% of four before, 1.4% and 1.6% now (vLLM: 0.3% and 0.2%;
+  `results_device_time_cuda.json`).
 - A 4-bit MoE layer with a shared expert (Qwen2-MoE) served by the Marlin kernels: the shared expert's gate and up
   projections are fused like an MLP's (one kernel less a layer), and in a captured step of up to 128 rows the
   routing and the routed experts are launched on a second CUDA stream that joins the capture, so a replay runs
   them beside the shared expert (`SparseMoE._two_branches`). vLLM's step does the same, which is what its one-row
-  decode on Qwen1.5-MoE was faster by. The experts' Marlin kernels have a lock array of their own for it.
+  decode on Qwen1.5-MoE was faster by. The experts' Marlin kernels have a lock array of their own for it. With
+  the LM head in fp16 Qwen1.5-MoE went from 109 / 340 / 609 / 803 tok/s at batch 1 / 8 / 32 / 64 to 116 / 348 /
+  615 / 814 in one boot (vLLM: 114 / 353 / 625 / 824).
 - In a prefill forward over pages FlashInfer reads in place (the model dtype, fp8), the decode rows are requests of
   one query each in a FlashInfer call of their own instead of the decode kernel's three launches a layer. A burst
   of 32 prompts of 16K tokens on Qwen2.5-1.5B with an fp8 cache spent 51.6 s in its prefill steps before and 50.0
@@ -184,6 +187,10 @@ All notable changes to this project are documented here. The format follows
 - Package description corrected (it still advertised 70B models on one GPU).
 
 ### Fixed
+- With a draft head, the step times that decide whether drafting pays were wrong at both ends of a run of verify
+  steps launched ahead: the first sample spanned two cycles and the one after the last about 0.1 ms. A run of
+  more drafted rows than the largest decode graph holds (128) is no longer set up for a launch that is then
+  refused, which read each request's drafts in a copy of its own.
 - Once every prefill graph of a model had been dropped (none beat its eager forward), the next capture failed
   inside PyTorch's allocator (`use_count > 0`) and with it the request: the graphs' shared memory pool had been
   released with the last of them. A capture with no graph left now starts a new pool.

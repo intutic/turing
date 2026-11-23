@@ -14,9 +14,11 @@ python scripts/make_doc_tables.py --check  # fail if any table differs from the 
 GPU results (`*_cuda.json`) come from one NVIDIA L4 (24 GB) on a Google Cloud `g2-standard-16`, PyTorch 2.9 with
 CUDA 12.9; vLLM 0.31 and llama.cpp ran on the same machine. It is a Spot VM: it was restarted twice during the
 session of 2026-11-21 and twice on 2026-11-22 (02:42 and 10:48 UTC), so rows of one table can come from different
-physical GPUs, and each file's `note` names the session its rows are from. The short-prompt, 512-token, 16K and
-4-bit MoE comparisons were measured again in one boot, both engines, after the second restart of 2026-11-22. `results_4bit_speed_no_marlin_cuda.json` is the 4-bit main row in a build without the
-Marlin extension. `*_mps.json` files come from an Apple M4 Pro.
+physical GPUs, and each file's `note` names the session its rows are from. The comparisons with vLLM were measured
+again on a second VM (2026-11-22 and 23, restarted once at 00:44 UTC), each within one boot: the short-prompt,
+512-token and 1-byte 16K rows before the restart, the exact-cache 16K, 4-bit MoE and EAGLE-3 rows after it.
+llama.cpp's rows are from the first VM. `results_4bit_speed_no_marlin_cuda.json` is the 4-bit main row in a build
+without the Marlin extension. `*_mps.json` files come from an Apple M4 Pro.
 
 ## Reproducing the main comparison
 
@@ -89,6 +91,7 @@ python scripts/eval_vllm_quality.py --help        # the same checks for vLLM's c
 | `scripts/diag_int4_kv.py`, `scripts/diag_teal.py` | print per-layer int4 KV error and the cost of TEAL per projection | — |
 | `scripts/benchmark_moe_kernel.py` | `results_moe_kernel_*_cuda.json` (grouped MoE kernels by block and tile size, against one GEMM pair per expert; `--layers 16` reads the weights cold, `--w4` packs the experts in 4 bits) | Benchmarks |
 | `scripts/benchmark_speculation.py`, `scripts/diag_spec_divergence.py` | `results_speculation_cuda.json`, `results_speculation_repeat_cuda.json` (one cell four more times), `results_spec_divergence_cuda.json`; with `--draft-head RedHatAI/Qwen3-8B-speculator.eagle3 --model Qwen/Qwen3-8B --dtype bf16`: `results_eagle3_cuda.json`, `results_spec_divergence_eagle3_cuda.json` | Benchmarks |
+| `scripts/profile_device_time.py` (`--engine turing` or `vllm`, each under its own Python; `--batch` for a decode step, `--draft-head` for the EAGLE-3 code workload; `--code` records the commit of the tree that ran) | `results_device_time_cuda.json` (the time the GPU was busy and idle in one run, and the kernel time that ran beside another kernel) | Benchmarks |
 | `scripts/verify_model_resolutions.py` | checks every model alias against the Hugging Face Hub | — |
 | `scripts/eval_xkv_transfer.py`, `eval_lineage.py`, `eval_kslot.py`, `eval_debate.py` | `results_xkv_transfer_*`, `results_lineage_cuda`, `results_kslot_cuda`, `results_debate_cuda` | Experimental components |
 

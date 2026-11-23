@@ -358,10 +358,76 @@ def test_the_verify_step_is_launched_behind_the_chain_and_gives_the_same_tokens(
         return launched
     engine._verify_ahead = counted
     assert run(engine) == ref
-    pool = engine.kv_pool  # a padded decode step leaves the pool its scratch page
-    assert engine._verifying is None and pool.used_pages == (getattr(pool, "_scratch", None) is not None)
+    _all_pages_back(engine)
     assert engine.spec_drafted > 0
     assert len(waits) > 20 and sorted(waits)[len(waits) // 2] == 0, waits
+
+
+def _serve(engine, prompts, lens, late=0):
+    """Each request's tokens; the last `late` prompts are submitted once a verify step is in flight."""
+    async def collect(r):
+        return [t async for t in engine.stream_request(r)]
+
+    async def add(p, n):
+        r = await engine.add_request(prompt_tokens=p, max_new_tokens=n, temperature=0.0, stop_token_ids=set())
+        return asyncio.ensure_future(collect(r))
+
+    async def go():
+        await engine.start()
+        try:
+            first = len(prompts) - late
+            tasks = [await add(p, n) for p, n in zip(prompts[:first], lens)]
+            while late and engine._verifying is None and not all(t.done() for t in tasks):
+                await asyncio.sleep(0)  # the scheduler's turn
+            assert not late or engine._verifying is not None, "no verify step was launched ahead"
+            tasks += [await add(p, n) for p, n in zip(prompts[first:], lens[first:])]
+            return await asyncio.gather(*tasks)
+        finally:
+            await engine.stop()
+    return asyncio.run(go())
+
+
+def _all_pages_back(engine):
+    """No step in flight, and each pool has its pages again (but the scratch page of its padded decode steps)."""
+    assert engine._verifying is None
+    for pool in (engine.kv_pool, engine.draft_head.pool):
+        assert pool.used_pages == (getattr(pool, "_scratch", None) is not None)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="a verify step is launched ahead on CUDA only")
+def test_a_request_cancelled_while_its_verify_step_is_in_flight_costs_the_others_nothing():
+    """The step in flight still writes the cancelled request's rows: its pages are free by then, and the other
+    requests of that step get the tokens of plain greedy decoding."""
+    model = _target("cuda")
+    prompts, lens = (PROMPT, PROMPT[3:] + [44, 45], PROMPT[5:]), (48, 40, 33)
+    ref = _serve(_engine(model, device="cuda"), prompts, lens)
+    engine = _engine(model, _target_head(model), device="cuda", draft_tokens=3)
+    engine.SPEC_PROBE = 10 ** 9  # never judged: the head is never rested
+    launch, launched = engine._verify_ahead, []
+
+    def cancelling(reqs):
+        launched.append(launch(reqs))
+        if launched[-1] and sum(launched) == 3:
+            engine.cancel(reqs[0])  # seen at the next step, whose first act is to read this one
+        return launched[-1]
+    engine._verify_ahead = cancelling
+    out = _serve(engine, prompts, lens)
+    cut = [i for i in range(3) if out[i] != ref[i]]
+    assert len(cut) == 1 and len(out[cut[0]]) < lens[cut[0]] and out[cut[0]] == ref[cut[0]][:len(out[cut[0]])]
+    assert sum(launched) > 10  # the two others went on with steps launched ahead
+    _all_pages_back(engine)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="a verify step is launched ahead on CUDA only")
+def test_a_request_admitted_while_a_verify_step_is_in_flight_joins_without_changing_a_token():
+    model = _target("cuda")
+    prompts, lens = (PROMPT, PROMPT[3:] + [44, 45], PROMPT[5:]), (48, 40, 33)
+    ref = _serve(_engine(model, device="cuda"), prompts, lens)
+    engine = _engine(model, _target_head(model), device="cuda", draft_tokens=3)
+    engine.SPEC_PROBE = 10 ** 9
+    assert _serve(engine, prompts, lens, late=1) == ref
+    assert engine.spec_drafted > 0
+    _all_pages_back(engine)
 
 
 @pytest.mark.parametrize("overlap", [False, True])

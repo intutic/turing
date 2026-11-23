@@ -1,10 +1,10 @@
 {
-  "note": "L4 session of 2026-11-22 (temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129)",
+  "note": "L4 run of 2026-11-23 on the same VM, its second boot (from 00:44 UTC, both engines; temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129), commit 1434460",
   "rows": [
     {
       "n": 20,
       "accuracy": 1.0,
-      "wall_seconds": 31.08,
+      "wall_seconds": 29.82,
       "results": [
         {
           "context_length": 2048,
@@ -182,7 +182,7 @@
     {
       "n": 20,
       "accuracy": 1.0,
-      "wall_seconds": 30.9,
+      "wall_seconds": 29.01,
       "results": [
         {
           "context_length": 2048,
@@ -213,7 +213,7 @@
           "prompt_tokens": 1953,
           "depth": 0.75,
           "key": "43936",
-          "completion": " 43936. The",
+          "completion": " 43936. It",
           "found": true
         },
         {
@@ -229,7 +229,7 @@
           "prompt_tokens": 7857,
           "depth": 0.0,
           "key": "73691",
-          "completion": " 73691. The",
+          "completion": " 73691. Memor",
           "found": true
         },
         {
@@ -317,7 +317,7 @@
           "prompt_tokens": 31449,
           "depth": 0.25,
           "key": "22429",
-          "completion": " 22429. The",
+          "completion": " 22429. Remember",
           "found": true
         },
         {
@@ -341,7 +341,7 @@
           "prompt_tokens": 31449,
           "depth": 1.0,
           "key": "79804",
-          "completion": " 79804. This",
+          "completion": " 79804.",
           "found": true
         }
       ],
@@ -360,7 +360,7 @@
     {
       "n": 20,
       "accuracy": 1.0,
-      "wall_seconds": 30.81,
+      "wall_seconds": 30.43,
       "results": [
         {
           "context_length": 2048,
@@ -439,7 +439,7 @@
           "prompt_tokens": 7857,
           "depth": 1.0,
           "key": "56930",
-          "completion": " 56930. It",
+          "completion": " 56930. Remember",
           "found": true
         },
         {
@@ -447,7 +447,7 @@
           "prompt_tokens": 15729,
           "depth": 0.0,
           "key": "86465",
-          "completion": " 86465. The",
+          "completion": " 86465. Memor",
           "found": true
         },
         {
@@ -479,7 +479,7 @@
           "prompt_tokens": 15729,
           "depth": 1.0,
           "key": "46941",
-          "completion": " 46941. This",
+          "completion": " 46941.",
           "found": true
         },
         {
@@ -538,7 +538,7 @@
     {
       "n": 20,
       "accuracy": 1.0,
-      "wall_seconds": 30.72,
+      "wall_seconds": 29.55,
       "results": [
         {
           "context_length": 2048,
@@ -657,7 +657,7 @@
           "prompt_tokens": 15729,
           "depth": 1.0,
           "key": "46941",
-          "completion": " 46941. This",
+          "completion": " 46941. \n\n",
           "found": true
         },
         {
@@ -673,7 +673,7 @@
           "prompt_tokens": 31449,
           "depth": 0.25,
           "key": "22429",
-          "completion": " 22429. Remember",
+          "completion": " 22429. The",
           "found": true
         },
         {

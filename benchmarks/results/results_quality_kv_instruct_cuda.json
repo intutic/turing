@@ -12,122 +12,122 @@
     "decode": 256,
     "windows": 8,
     "device": "cuda",
-    "dtype": "bf16",
-    "out": "benchmarks/results/results_quality_kv_decode_instruct_bf16_cuda.json"
+    "dtype": null,
+    "out": "benchmarks/results/results_quality_kv_instruct_r15_cuda.json"
   },
   "text": "WikiText-2 raw test, consecutive windows",
-  "note": "L4 run of 2026-11-22 after the VM's restart at 10:48 UTC (temporary Spot g2-standard-16, torch 2.9.1+cu129), on the final session's code: the int8_decode and fp8_decode arms feed one token a step through the decode kernel",
+  "note": "L4 run of 2026-11-23 on the same VM, its second boot (from 00:44 UTC, both engines; temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129), commit 1434460",
   "rows": [
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "exact_forward",
       "mode": "forward",
       "metric": "nll",
-      "value": 2.0914467871189117,
-      "se": 0.21173773611486213,
+      "value": 2.089835539460182,
+      "se": 0.21154907140631116,
       "n": 8,
-      "seconds": 2.9752118039999687,
-      "dtype": "bfloat16"
+      "seconds": 6.537060870999994,
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "exact_decode",
       "mode": "decode",
       "metric": "nll",
-      "value": 2.091134637594223,
-      "se": 0.21223506195594785,
+      "value": 2.0901249796152115,
+      "se": 0.21163368335035282,
       "n": 8,
-      "seconds": 28.053741092999985,
-      "dtype": "bfloat16"
+      "seconds": 28.03228862700007,
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "int8",
       "mode": "chunk",
       "metric": "nll",
-      "value": 2.0919479429721832,
-      "se": 0.21102933864892712,
+      "value": 2.0903797298669815,
+      "se": 0.21118895683487596,
       "n": 8,
-      "seconds": 1.5699928200000386,
-      "dtype": "bfloat16"
+      "seconds": 9.35014553100018,
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "int8_decode",
       "mode": "decode",
       "metric": "nll",
-      "value": 2.0912584960460663,
-      "se": 0.2108871717292227,
+      "value": 2.091091677546501,
+      "se": 0.21139913820011508,
       "n": 8,
-      "seconds": 27.76235166999993,
-      "dtype": "bfloat16"
+      "seconds": 27.823540637000406,
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "fp8",
       "mode": "chunk",
       "metric": "nll",
-      "value": 2.102601870894432,
-      "se": 0.20692961744717353,
+      "value": 2.098513588309288,
+      "se": 0.20991137476194177,
       "n": 8,
-      "seconds": 1.5146898539999256,
-      "dtype": "bfloat16"
+      "seconds": 9.385215022000011,
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "fp8_decode",
       "mode": "decode",
       "metric": "nll",
-      "value": 2.10431706905365,
-      "se": 0.20741082950311418,
+      "value": 2.0976017117500305,
+      "se": 0.2092602532984092,
       "n": 8,
-      "seconds": 27.86309949400004,
-      "dtype": "bfloat16"
+      "seconds": 27.973962309999933,
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "exact_decode",
       "metric": "delta_nll_vs_exact_forward",
-      "value": -0.0003121495246887207,
-      "se": 0.0011653824225047252,
+      "value": 0.0002894401550292969,
+      "se": 0.00019555622155987174,
       "n": 8,
-      "dtype": "bfloat16"
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "int8",
       "metric": "delta_nll_vs_exact_forward",
-      "value": 0.0005011558532714844,
-      "se": 0.0013735562216318153,
+      "value": 0.0005441904067993164,
+      "se": 0.0010034840845275805,
       "n": 8,
-      "dtype": "bfloat16"
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "int8_decode",
       "metric": "delta_nll_vs_exact_forward",
-      "value": -0.00018829107284545898,
-      "se": 0.0011017865992916976,
+      "value": 0.0012561380863189697,
+      "se": 0.0008011913202851243,
       "n": 8,
-      "dtype": "bfloat16"
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "fp8",
       "metric": "delta_nll_vs_exact_forward",
-      "value": 0.011155083775520325,
-      "se": 0.005287068095670235,
+      "value": 0.008678048849105835,
+      "se": 0.002476119609817466,
       "n": 8,
-      "dtype": "bfloat16"
+      "dtype": "float16"
     },
     {
       "model": "Qwen/Qwen2.5-1.5B-Instruct",
       "arm": "fp8_decode",
       "metric": "delta_nll_vs_exact_forward",
-      "value": 0.01287028193473816,
-      "se": 0.0052391871225044165,
+      "value": 0.007766172289848328,
+      "se": 0.0030106630100018347,
       "n": 8,
-      "dtype": "bfloat16"
+      "dtype": "float16"
     }
   ]
 }

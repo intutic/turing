@@ -115,7 +115,7 @@ def _loads(*names):
 
 def _turing_kv_quality():
     """Qwen2.5-1.5B-Instruct in bf16 under each of Turing's caches. The 1-byte caches (int8, fp8) are the final
-    session's (2026-11-22); the reference and int4 are the speed plan's final session's."""
+    session's (2026-11-23); the reference and int4 are the speed plan's final session's."""
     bf16 = lambda rows: [r for r in rows if r["dtype"] in ("bf16", "bfloat16")]  # noqa: E731
     g = {r["kv_cache_dtype"]: r for r in bf16(_loads(
         "results_gsm8k_final_cuda.json", "results_gsm8k_int8_cuda.json", "results_gsm8k_fp8_cuda.json"))}
@@ -222,7 +222,7 @@ def t_longctx():
 # ---------------------------------------------------------------------------------------------- Turing quality
 
 def t_kv_quality():
-    """results_quality_kv_cuda.json is the final session's rerun of the 1-byte caches (2026-11-22); its int8 rows
+    """results_quality_kv_cuda.json is the final session's rerun of the 1-byte caches (2026-11-23); its int8 rows
     replace the earlier ones."""
     rows = list({(r["model"], r["arm"]): r for r in _loads("results_quality_cuda.json", "results_quality_kv_cuda.json")
                  if r["metric"] != "nll"}.values())
@@ -638,6 +638,34 @@ def t_step_budget():
                                 max(got), f"{r['output_tok_per_s']:,.0f}",
                                 f"{r['mean_ttft_s']:.2f} s" if r.get("mean_ttft_s") else "not recorded"])
     return table(["Workload", "Tokens per step", "Engine", "Requests at once", "Output tok/s", "Mean first token"], out)
+
+
+def _device_time(eagle, cells, header):
+    """scripts/profile_device_time.py rows of one workload, by requests at once: the tree before commit c5b08c6
+    (rows recorded with code 1434460), that commit, and vLLM."""
+    rows = [r for r in load("results_device_time_cuda.json") if bool(r["draft_tokens"]) == eagle]
+    order = ["Turing before", "Turing", "vLLM"]
+
+    def who(r):
+        return "vLLM" if r["engine"] == "vllm" else "Turing before" if r["code"] == "1434460" else "Turing"
+    out = []
+    for r in sorted(rows, key=lambda r: (r["requests"], order.index(who(r)))):
+        wall = sorted(r["wall_s"])[len(r["wall_s"]) // 2]
+        out.append([r["requests"], who(r), *cells(r, wall),
+                    f"{r['idle_ms']:,.0f} ms ({pct(r['idle_ms'] / r['span_ms'])})", pct(r["summed_ms"] / r["busy_ms"] - 1)])
+    return table(["Requests at once", "Engine", *header, "Device idle", "Kernel time beside another kernel"], out,
+                 [":---:"] * (len(header) + 4))
+
+
+def t_device_time_moe():
+    return _device_time(False, lambda r, wall: [f"{1e3 * wall / r['new_tokens']:.2f}",
+                                                f"{r['busy_ms'] / r['new_tokens']:.2f}"],
+                        ["ms a decode step", "Device busy, ms a step"])
+
+
+def t_device_time_eagle():
+    return _device_time(True, lambda r, wall: [f"{wall:.3f}", f"{r['output_tokens'] / wall:.1f}"],
+                        ["Seconds", "Output tok/s"])
 
 
 TABLES = {k[2:]: v for k, v in globals().items() if k.startswith("t_") and callable(v)}

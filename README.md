@@ -11,7 +11,7 @@ in 4 bits too) is 1.07–1.33× faster than vLLM at batch sizes 1 to 64.
 [![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
 [![Release: v2.0.0](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 1339](https://img.shields.io/badge/Tests-1339-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 1353](https://img.shields.io/badge/Tests-1353-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -68,16 +68,16 @@ OpenAI (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`), Anthropic 
 <!-- table:vs_kv_short -->
 | KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 1.93 |
-| Turing int8 | automatic | 55.2% | 100.0% | +0.001 ± 0.001 | 1.77 |
-| Turing fp8 | automatic | 56.4% | 100.0% | +0.011 ± 0.005 | 1.75 |
-| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.10 |
-| vLLM bf16 (reference) | — | 57.4% | 100.0% | — | 2.51 |
-| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.66 |
-| vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.72 |
+| Turing bf16 (reference) | — | 57.2% | 100.0% | — | 1.92 |
+| Turing int8 | automatic | 58.6% | 100.0% | -0.000 ± 0.002 | 1.73 |
+| Turing fp8 | automatic | 56.6% | 100.0% | +0.009 ± 0.005 | 1.70 |
+| Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.11 |
+| vLLM bf16 (reference) | — | 57.4% | 100.0% | — | 2.62 |
+| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.67 |
+| vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.73 |
 <!-- /table -->
 
-  vLLM fp8 with layer 0 skipped *by hand* matches Turing's quality at 0.82–0.98× Turing's time per request (int4
+  vLLM fp8 with layer 0 skipped *by hand* matches Turing's quality at 0.82–1.02× Turing's time per request (int4
   to fp8), which is the point: the calibration finds that layer automatically. vLLM's per-token int8 and int4
   caches are in the [full table](docs/comparison.md). It is also packaged on its own for vLLM users, under
   Apache-2.0: [`packages/kv-layer-guard`](packages/kv-layer-guard). Validated on six instruct models (Qwen2.5 1.5B
@@ -105,37 +105,38 @@ model and prompts (Qwen2.5-1.5B-Instruct, 512-token prompts, 256 new tokens):
 | Setting | Batch 1, tok/s | Batch 8, tok/s | Batch 64, tok/s | GSM8K (n=500) |
 | :--- | :---: | :---: | :---: | :---: |
 | llama.cpp Q4_K_M | 182 | 782 | 2,176 | 52.4% ± 2.2% |
-| vLLM GPTQ-Int4 (Qwen's checkpoint) | 173 | 1,109 | 3,150 | 50.2% ± 2.2% |
-| vLLM AWQ (Qwen's checkpoint) | 171 | 1,102 | 3,131 | — |
-| Turing GPTQ, fp16 LM head (`--no-quantize-lm-head`) | 174 | 1,092 | 3,064 | 50.4% ± 2.2% |
-| Turing GPTQ (4-bit LM head, the default) | 231 | 1,356 | 3,359 | 51.8% ± 2.2% |
+| vLLM GPTQ-Int4 (Qwen's checkpoint) | 174 | 1,116 | 3,185 | 50.2% ± 2.2% |
+| vLLM AWQ (Qwen's checkpoint) | 172 | 1,107 | 3,159 | — |
+| Turing GPTQ, fp16 LM head (`--no-quantize-lm-head`) | 175 | 1,129 | 3,135 | 50.4% ± 2.2% |
+| Turing GPTQ (4-bit LM head, the default) | 232 | 1,400 | 3,401 | 51.8% ± 2.2% |
 | Turing GPTQ, fp16 LM head, TEAL 25% | 107 | 953 | 2,600 | 46.2% ± 2.2% |
 | Turing GPTQ, fp16 LM head, TEAL 40% | 112 | 960 | 2,614 | 42.0% ± 2.2% |
-| vLLM fp16 (reference) | 75 | 538 | 2,236 | — |
-| Turing fp16 (reference) | 77 | 540 | 2,246 | — |
+| vLLM fp16 (reference) | 76 | 543 | 2,298 | — |
+| Turing fp16 (reference) | 78 | 549 | 2,287 | — |
 <!-- /table -->
 
-* **fp16:** Turing is at 100–103% of vLLM's throughput at batch 1–64 (repeated runs of one setting differ by up
-  to 3%), and at 101–111% on SmolLM2 at 1,024-token prompts.
-* **First token:** a prompt arriving alone gets its first token sooner than on vLLM (18 against 29 ms on
-  SmolLM2-360M, 27 against 32 ms on Qwen2.5-1.5B, 65 against 72 ms on SmolLM2-1.7B). In a burst of 32 or 64
-  SmolLM2 prompts the mean first token is 8–18% sooner than vLLM's when both engines take 8,192 tokens per step
-  and level to 5% later when both take 2,048.
-* **4 bits** (the LM head in 4 bits too, the default): Turing is 1.33 / 1.22 / 1.07× vLLM and 1.27 / 1.73 / 1.54×
-  llama.cpp at batch 1 / 8 / 64. This quantizes one more matrix than vLLM's GPTQ checkpoint does; GSM8K 51.8%
-  against vLLM's 50.2% (each ± 2.2%), and the 4-bit head adds 0.007–0.009 nats of next-token NLL on three models
-  (`results_quality_head_cuda.json`).
-* **4 bits with the LM head in fp16** (`--no-quantize-lm-head`): Turing is at 97–101% of vLLM. llama.cpp is 1.04×
-  faster at batch 1; Turing is faster than llama.cpp at batch 8 and 64 (1.40× and 1.41×).
-* **16K-token prompts, fp16 KV at equal memory:** Turing is 1.04–1.30× faster per request than vLLM, more at larger
-  batches. With one byte per value vLLM's fp8 cache is 1.03–1.06× faster than Turing's fp8 and int8 when both
-  engines take 2,048 tokens a step, and 1.05–1.09× at its own 8,192.
+* **fp16:** Turing is at 99.5–102% of vLLM's throughput at batch 1–64 (repeated runs of one setting differ by up
+  to 3%), and at 101–112% on SmolLM2 at 1,024-token prompts.
+* **First token:** a prompt arriving alone gets its first token sooner than on vLLM (17 against 30–32 ms on
+  SmolLM2-360M, 27 against 31–32 ms on Qwen2.5-1.5B, 64 against 68 ms on SmolLM2-1.7B). In a burst of 32 or 64
+  SmolLM2 prompts the mean first token is 10–16% sooner than vLLM's when both engines take 8,192 tokens per step
+  and from 4% sooner to 2% later when both take 2,048.
+* **4 bits** (the LM head in 4 bits too, the default): Turing is 1.33 / 1.25 / 1.07× vLLM and 1.28 / 1.79 / 1.56×
+  llama.cpp at batch 1 / 8 / 64 (llama.cpp measured on another L4). This quantizes one more matrix than vLLM's
+  GPTQ checkpoint does; GSM8K 51.8% against vLLM's 50.2% (each ± 2.2%), and the 4-bit head adds 0.007–0.009 nats
+  of next-token NLL on three models (`results_quality_head_cuda.json`).
+* **4 bits with the LM head in fp16** (`--no-quantize-lm-head`): Turing is at 98–101% of vLLM. llama.cpp is 1.04×
+  faster at batch 1; Turing is faster than llama.cpp at batch 8 and 64 (1.44× at both).
+* **16K-token prompts, fp16 KV at equal memory:** Turing is 1.03–1.37× faster per request than vLLM, more at larger
+  batches. With one byte per value vLLM's fp8 cache is 1.00–1.04× faster than Turing's fp8 and int8 when both
+  engines take 2,048 tokens a step, and 1.02–1.08× at its own 8,192.
 * **Speculative decoding:** with prompt lookup (8 drafts) Turing is at 100–121% of vLLM's n-gram speculator on code,
-  rewrite and chat prompts; with a published EAGLE-3 head on Qwen3-8B it is at 96–99% of vLLM with the same head.
+  rewrite and chat prompts; with a published EAGLE-3 head on Qwen3-8B it is at 98–101% of vLLM with the same head.
 * **MoE models:** OLMoE in bf16 is level with vLLM at batch 1 and 8 and 3% behind at batch 32; Qwen1.5-MoE in 4
-  bits is at 101–119% of vLLM on Qwen's GPTQ checkpoint. Mixtral-8x7B does not fit a 24 GB GPU in 4 bits: with two
-  of each layer's eight experts computed on the CPU (`--moe-expert-slots 6`) it runs at 13.7 / 16.5 tok/s at batch
-  1 / 2, against 13.2 / 14.0 for llama.cpp with 26 of its layers on the GPU.
+  bits is at 101–127% of vLLM on Qwen's GPTQ checkpoint (98–101% with its LM head in fp16, as in that checkpoint).
+  Mixtral-8x7B does not fit a 24 GB GPU in 4 bits: with two of each layer's eight experts computed on the CPU
+  (`--moe-expert-slots 6`) it runs at 13.7 / 16.5 tok/s at batch 1 / 2, against 13.2 / 14.0 for llama.cpp with 26
+  of its layers on the GPU.
 * **Cold start:** from process start to first token Turing takes 25.4 s from a cold page cache and 10.0 s warm,
   against vLLM's 51.7 s and 34.2 s (vLLM ran in an earlier run, alongside a Turing build that took 27.4 s and
   12.1 s: 1.9–2.8× sooner); llama.cpp with its 4-bit GGUF takes 7.1 s and 1.3 s.

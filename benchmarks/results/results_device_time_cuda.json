@@ -1,0 +1,2391 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "python": "3.10.12",
+    "torch": "2.13.0+cu130",
+    "gpu": "NVIDIA L4"
+  },
+  "versions": {
+    "turing": "2.9.1+cu129",
+    "vllm": "vllm 0.31.0"
+  },
+  "note": "L4 run of 2026-11-23 on the same VM, its second boot (from 00:44 UTC, both engines; temporary Spot g2-standard-16, vLLM 0.31.0, torch 2.9.1+cu129), commit c5b08c6; rows with code 1434460: the tree before that commit, in the same boot",
+  "rows": [
+    {
+      "engine": "turing",
+      "model": "Qwen1.5-MoE-A2.7B-Chat",
+      "dtype": "bf16",
+      "code": "1434460",
+      "workload": "decode",
+      "requests": 1,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 96,
+      "wall_s": [
+        0.8516,
+        0.8508,
+        0.8507
+      ],
+      "profiled_wall_s": 0.8569,
+      "span_ms": 856.1,
+      "busy_ms": 847.9,
+      "idle_ms": 8.3,
+      "summed_ms": 847.9,
+      "launches": 52281,
+      "streams": 1,
+      "top_kernels": [
+        [
+          308.7,
+          11520,
+          "marlin::Marlin<1125899906909960l, 1125899906843648l, 11258999069"
+        ],
+        [
+          248.92,
+          4680,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          209.51,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906909960l, 1125899906843648l, 1"
+        ],
+        [
+          16.67,
+          2280,
+          "_pool_decode_kernel"
+        ],
+        [
+          14.49,
+          2280,
+          "cublasLt::splitKreduce_kernel<32, 16, int, float, __nv_bfloat16,"
+        ],
+        [
+          10.45,
+          4704,
+          "_rms_norm_kernel"
+        ],
+        [
+          7.17,
+          4608,
+          "_silu_mul_kernel"
+        ],
+        [
+          5.19,
+          2304,
+          "_moe_route_kernel"
+        ],
+        [
+          4.7,
+          2280,
+          "_kv_reduce_kernel"
+        ],
+        [
+          3.89,
+          2376,
+          "unrolled_elementwise_kernel<direct_copy_kernel_cuda(at::TensorIt"
+        ],
+        [
+          3.85,
+          2304,
+          "_rope_kernel"
+        ],
+        [
+          3.72,
+          2304,
+          "_pool_append_kernel"
+        ]
+      ],
+      "top_gaps": [
+        [
+          1.32,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.9,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon"
+        ],
+        [
+          0.1,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.08,
+          2,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          0.08,
+          1,
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.04,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen1.5-MoE-A2.7B-Chat",
+      "dtype": "bf16",
+      "code": "c5b08c6",
+      "workload": "decode",
+      "requests": 1,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 96,
+      "wall_s": [
+        0.7935,
+        0.7928,
+        0.7915
+      ],
+      "profiled_wall_s": 0.7998,
+      "span_ms": 799.1,
+      "busy_ms": 792.6,
+      "idle_ms": 6.5,
+      "summed_ms": 1105.8,
+      "launches": 49977,
+      "streams": 49,
+      "top_kernels": [
+        [
+          419.67,
+          9216,
+          "marlin::Marlin<1125899906909960l, 1125899906843648l, 11258999069"
+        ],
+        [
+          265.11,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906909960l, 1125899906843648l, 1"
+        ],
+        [
+          253.78,
+          4680,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          50.39,
+          4608,
+          "_silu_mul_kernel"
+        ],
+        [
+          27.34,
+          2304,
+          "_moe_sum_kernel"
+        ],
+        [
+          26.69,
+          2280,
+          "cublasLt::splitKreduce_kernel<32, 16, int, float, __nv_bfloat16,"
+        ],
+        [
+          17.25,
+          2280,
+          "_pool_decode_kernel"
+        ],
+        [
+          10.88,
+          4704,
+          "_rms_norm_kernel"
+        ],
+        [
+          8.03,
+          2304,
+          "_moe_route_kernel"
+        ],
+        [
+          5.98,
+          2376,
+          "unrolled_elementwise_kernel<direct_copy_kernel_cuda(at::TensorIt"
+        ],
+        [
+          4.96,
+          2280,
+          "_kv_reduce_kernel"
+        ],
+        [
+          4.0,
+          2304,
+          "_rope_kernel"
+        ]
+      ],
+      "top_gaps": [
+        [
+          1.27,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.88,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon"
+        ],
+        [
+          0.09,
+          2,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          0.08,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.07,
+          1,
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.05,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke"
+        ]
+      ]
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen1.5-MoE-A2.7B-Chat-GPTQ-Int4",
+      "dtype": "fp16",
+      "code": null,
+      "workload": "decode",
+      "requests": 1,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 96,
+      "wall_s": [
+        0.7973,
+        0.7974,
+        0.799
+      ],
+      "profiled_wall_s": 0.8046,
+      "span_ms": 802.3,
+      "busy_ms": 793.4,
+      "idle_ms": 8.9,
+      "summed_ms": 1072.6,
+      "launches": 52915,
+      "streams": 50,
+      "top_kernels": [
+        [
+          326.99,
+          4680,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          298.59,
+          9216,
+          "marlin::Marlin<1125899906910725l, 1125899907892224l, 11258999069"
+        ],
+        [
+          237.34,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906910725l, 1125899907892224l, 1"
+        ],
+        [
+          38.68,
+          2304,
+          "elementwise_kernel<128, 4, gpu_kernel_impl_nocast<BinaryFunctor<"
+        ],
+        [
+          32.04,
+          2304,
+          "vllm::moe::moe_align_block_size_small_batch_expert_kernel<int, 2"
+        ],
+        [
+          24.68,
+          2304,
+          "vllm::moe::moeSoftmax<256, __half>(__half const*, bool const*, f"
+        ],
+        [
+          23.81,
+          2304,
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,"
+        ],
+        [
+          15.9,
+          2280,
+          "cublasLt::splitKreduce_kernel<32, 16, int, float, __half, float,"
+        ],
+        [
+          14.58,
+          2304,
+          "vllm::moe::moeTopK<256, int>(float const*, bool const*, float*, "
+        ],
+        [
+          10.13,
+          2304,
+          "vectorized_elementwise_kernel<4, sigmoid_kernel_cuda(at::TensorI"
+        ],
+        [
+          7.17,
+          2304,
+          "triton_red_fused_add_fused_add_rms_norm_1"
+        ],
+        [
+          7.11,
+          2304,
+          "vllm::act_and_mul_kernel<c10::Half, __half2, &(c10::Half vllm::s"
+        ]
+      ],
+      "top_gaps": [
+        [
+          0.94,
+          3,
+          "Memcpy HtoD (Pinned -> Device)",
+          "_apply_write_kernel"
+        ],
+        [
+          0.79,
+          1,
+          "_compute_slot_mappings_kernel",
+          "triton_red_fused__to_copy_embedding_rms_norm_0"
+        ],
+        [
+          0.48,
+          2,
+          "_apply_write_kernel",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.28,
+          1,
+          "vllm::reshape_and_cache_flash_kernel<unsigned short, unsigned sh",
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,"
+        ],
+        [
+          0.24,
+          1,
+          "_apply_write_kernel",
+          "vectorized_elementwise_kernel<4, FillFunctor<bool>, std::array<c"
+        ],
+        [
+          0.2,
+          1,
+          "_apply_write_kernel",
+          "_apply_write_kernel"
+        ],
+        [
+          0.14,
+          1,
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,",
+          "marlin::Marlin<1125899906910725l, 1125899907892224l, 11258999069"
+        ],
+        [
+          0.14,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "_prepare_prefill_inputs_kernel"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen1.5-MoE-A2.7B-Chat",
+      "dtype": "bf16",
+      "code": "1434460",
+      "workload": "decode",
+      "requests": 8,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 768,
+      "wall_s": [
+        1.6939,
+        1.6954,
+        1.6915
+      ],
+      "profiled_wall_s": 1.7015,
+      "span_ms": 1700.1,
+      "busy_ms": 1690.2,
+      "idle_ms": 9.9,
+      "summed_ms": 1690.7,
+      "launches": 56862,
+      "streams": 1,
+      "top_kernels": [
+        [
+          951.71,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906909960l, 1125899906843648l, 1"
+        ],
+        [
+          326.4,
+          11520,
+          "marlin::Marlin<1125899906909960l, 1125899906843648l, 11258999069"
+        ],
+        [
+          250.09,
+          2376,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          74.75,
+          2280,
+          "_pool_decode_kernel"
+        ],
+        [
+          11.3,
+          4704,
+          "_rms_norm_kernel"
+        ],
+        [
+          9.69,
+          4608,
+          "_silu_mul_kernel"
+        ],
+        [
+          8.37,
+          2304,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          7.43,
+          2304,
+          "_align_fill_kernel"
+        ],
+        [
+          6.77,
+          2304,
+          "_align_blocks_kernel"
+        ],
+        [
+          5.64,
+          2304,
+          "_moe_route_kernel"
+        ],
+        [
+          5.3,
+          2304,
+          "_rope_kernel"
+        ],
+        [
+          5.27,
+          2304,
+          "_pool_append_kernel"
+        ]
+      ],
+      "top_gaps": [
+        [
+          2.7,
+          8,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.92,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon"
+        ],
+        [
+          0.09,
+          2,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          0.09,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.07,
+          1,
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.04,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen1.5-MoE-A2.7B-Chat",
+      "dtype": "bf16",
+      "code": "c5b08c6",
+      "workload": "decode",
+      "requests": 8,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 768,
+      "wall_s": [
+        1.6016,
+        1.6046,
+        1.6073
+      ],
+      "profiled_wall_s": 1.6136,
+      "span_ms": 1612.6,
+      "busy_ms": 1604.1,
+      "idle_ms": 8.4,
+      "summed_ms": 1817.4,
+      "launches": 54558,
+      "streams": 25,
+      "top_kernels": [
+        [
+          939.99,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906909960l, 1125899906843648l, 1"
+        ],
+        [
+          381.06,
+          9216,
+          "marlin::Marlin<1125899906909960l, 1125899906843648l, 11258999069"
+        ],
+        [
+          250.65,
+          2376,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          76.48,
+          2280,
+          "_pool_decode_kernel"
+        ],
+        [
+          44.97,
+          4608,
+          "_silu_mul_kernel"
+        ],
+        [
+          28.99,
+          2304,
+          "_align_count_kernel"
+        ],
+        [
+          18.81,
+          2304,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          11.59,
+          4704,
+          "_rms_norm_kernel"
+        ],
+        [
+          10.3,
+          2304,
+          "_moe_route_kernel"
+        ],
+        [
+          9.47,
+          2304,
+          "_align_blocks_kernel"
+        ],
+        [
+          7.69,
+          2304,
+          "_align_fill_kernel"
+        ],
+        [
+          7.03,
+          2304,
+          "cublasLt::splitKreduce_kernel<32, 16, int, __nv_bfloat16, __nv_b"
+        ]
+      ],
+      "top_gaps": [
+        [
+          2.72,
+          8,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.89,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon"
+        ],
+        [
+          0.09,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.08,
+          2,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          0.08,
+          1,
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.04,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke"
+        ]
+      ]
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen1.5-MoE-A2.7B-Chat-GPTQ-Int4",
+      "dtype": "fp16",
+      "code": null,
+      "workload": "decode",
+      "requests": 8,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 768,
+      "wall_s": [
+        1.6874,
+        1.6875,
+        1.6697
+      ],
+      "profiled_wall_s": 1.6909,
+      "span_ms": 1686.2,
+      "busy_ms": 1677.5,
+      "idle_ms": 8.7,
+      "summed_ms": 1977.2,
+      "launches": 52939,
+      "streams": 26,
+      "top_kernels": [
+        [
+          999.53,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906910725l, 1125899907892224l, 1"
+        ],
+        [
+          320.54,
+          9216,
+          "marlin::Marlin<1125899906910725l, 1125899907892224l, 11258999069"
+        ],
+        [
+          239.87,
+          96,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_f16_s161616gemm_f16_16"
+        ],
+        [
+          88.6,
+          2304,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          88.34,
+          2304,
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,"
+        ],
+        [
+          41.76,
+          2304,
+          "elementwise_kernel<128, 4, gpu_kernel_impl_nocast<BinaryFunctor<"
+        ],
+        [
+          38.44,
+          2304,
+          "vectorized_elementwise_kernel<4, sigmoid_kernel_cuda(at::TensorI"
+        ],
+        [
+          37.05,
+          2280,
+          "vllm::moe::moe_align_block_size_small_batch_expert_kernel<int, 2"
+        ],
+        [
+          33.28,
+          2304,
+          "vllm::moe::moeSoftmax<256, __half>(__half const*, bool const*, f"
+        ],
+        [
+          14.38,
+          2304,
+          "vllm::moe::moeTopK<256, int>(float const*, bool const*, float*, "
+        ],
+        [
+          10.59,
+          2304,
+          "triton_red_fused_add_fused_add_rms_norm_1"
+        ],
+        [
+          10.02,
+          2280,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_f16_s161616gemm_f16_32"
+        ]
+      ],
+      "top_gaps": [
+        [
+          0.82,
+          1,
+          "_compute_slot_mappings_kernel",
+          "triton_red_fused__to_copy_embedding_rms_norm_0"
+        ],
+        [
+          0.49,
+          2,
+          "_apply_write_kernel",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.34,
+          3,
+          "Memcpy HtoD (Pinned -> Device)",
+          "_apply_write_kernel"
+        ],
+        [
+          0.27,
+          1,
+          "vllm::reshape_and_cache_flash_kernel<unsigned short, unsigned sh",
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,"
+        ],
+        [
+          0.24,
+          1,
+          "_apply_write_kernel",
+          "vectorized_elementwise_kernel<4, FillFunctor<bool>, std::array<c"
+        ],
+        [
+          0.16,
+          1,
+          "_apply_write_kernel",
+          "_apply_write_kernel"
+        ],
+        [
+          0.15,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "_prepare_prefill_inputs_kernel"
+        ],
+        [
+          0.13,
+          1,
+          "vectorized_elementwise_kernel<4, FillFunctor<int>, std::array<ch",
+          "Memcpy HtoD (Pinned -> Device)"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen1.5-MoE-A2.7B-Chat",
+      "dtype": "bf16",
+      "code": "1434460",
+      "workload": "decode",
+      "requests": 32,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 3072,
+      "wall_s": [
+        2.8928,
+        2.8957,
+        2.8989
+      ],
+      "profiled_wall_s": 2.9091,
+      "span_ms": 2907.2,
+      "busy_ms": 2891.6,
+      "idle_ms": 15.6,
+      "summed_ms": 2892.5,
+      "launches": 54726,
+      "streams": 1,
+      "top_kernels": [
+        [
+          1748.74,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906909960l, 1125899906843648l, 1"
+        ],
+        [
+          453.51,
+          11592,
+          "marlin::Marlin<1125899906909960l, 1125899906843648l, 11258999069"
+        ],
+        [
+          274.11,
+          2280,
+          "_pool_decode_kernel"
+        ],
+        [
+          270.11,
+          96,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          25.1,
+          4608,
+          "_silu_mul_kernel"
+        ],
+        [
+          16.1,
+          4704,
+          "_rms_norm_kernel"
+        ],
+        [
+          11.93,
+          2280,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          10.84,
+          2304,
+          "_rope_kernel"
+        ],
+        [
+          10.83,
+          2304,
+          "_pool_append_kernel"
+        ],
+        [
+          10.26,
+          2304,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          9.19,
+          2304,
+          "_align_fill_kernel"
+        ],
+        [
+          8.71,
+          2304,
+          "_moe_sum_kernel"
+        ]
+      ],
+      "top_gaps": [
+        [
+          7.41,
+          32,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          1.08,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon"
+        ],
+        [
+          0.1,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.09,
+          2,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          0.08,
+          1,
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.04,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen1.5-MoE-A2.7B-Chat",
+      "dtype": "bf16",
+      "code": "c5b08c6",
+      "workload": "decode",
+      "requests": 32,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 3072,
+      "wall_s": [
+        2.8112,
+        2.8106,
+        2.816
+      ],
+      "profiled_wall_s": 2.8255,
+      "span_ms": 2823.7,
+      "busy_ms": 2811.0,
+      "idle_ms": 12.7,
+      "summed_ms": 3268.8,
+      "launches": 52398,
+      "streams": 25,
+      "top_kernels": [
+        [
+          1765.85,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906909960l, 1125899906843648l, 1"
+        ],
+        [
+          568.46,
+          9264,
+          "marlin::Marlin<1125899906909960l, 1125899906843648l, 11258999069"
+        ],
+        [
+          276.67,
+          2280,
+          "_pool_decode_kernel"
+        ],
+        [
+          270.48,
+          96,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          143.07,
+          4608,
+          "_silu_mul_kernel"
+        ],
+        [
+          51.45,
+          2304,
+          "_align_fill_kernel"
+        ],
+        [
+          37.44,
+          2304,
+          "_moe_route_kernel"
+        ],
+        [
+          24.83,
+          2304,
+          "_align_count_kernel"
+        ],
+        [
+          20.96,
+          2304,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          18.48,
+          2304,
+          "_align_blocks_kernel"
+        ],
+        [
+          16.92,
+          4704,
+          "_rms_norm_kernel"
+        ],
+        [
+          12.98,
+          2280,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ]
+      ],
+      "top_gaps": [
+        [
+          7.02,
+          32,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          1.01,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon"
+        ],
+        [
+          0.1,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.09,
+          2,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          0.08,
+          1,
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.04,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke"
+        ]
+      ]
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen1.5-MoE-A2.7B-Chat-GPTQ-Int4",
+      "dtype": "fp16",
+      "code": null,
+      "workload": "decode",
+      "requests": 32,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 3072,
+      "wall_s": [
+        3.0217,
+        3.0252,
+        3.0433
+      ],
+      "profiled_wall_s": 3.0451,
+      "span_ms": 3028.5,
+      "busy_ms": 3018.3,
+      "idle_ms": 10.2,
+      "summed_ms": 3487.3,
+      "launches": 52987,
+      "streams": 26,
+      "top_kernels": [
+        [
+          1944.67,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906910725l, 1125899907892224l, 1"
+        ],
+        [
+          563.59,
+          9264,
+          "marlin::Marlin<1125899906910725l, 1125899907892224l, 11258999069"
+        ],
+        [
+          298.77,
+          2304,
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,"
+        ],
+        [
+          270.19,
+          96,
+          "cutlass::Kernel2<cutlass_80_tensorop_f16_s16816gemm_relu_f16_256"
+        ],
+        [
+          80.31,
+          2304,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          59.69,
+          2304,
+          "vllm::moe::moeSoftmax<256, __half>(__half const*, bool const*, f"
+        ],
+        [
+          48.83,
+          2304,
+          "vllm::act_and_mul_kernel<c10::Half, __half2, &(c10::Half vllm::s"
+        ],
+        [
+          46.35,
+          2304,
+          "vllm::moe::moeTopK<256, int>(float const*, bool const*, float*, "
+        ],
+        [
+          33.67,
+          2280,
+          "vllm::moe::moe_align_block_size_small_batch_expert_kernel<int, 2"
+        ],
+        [
+          24.96,
+          2304,
+          "triton_poi_fused_mul_silu_slice_0"
+        ],
+        [
+          15.53,
+          2304,
+          "vectorized_elementwise_kernel<4, sigmoid_kernel_cuda(at::TensorI"
+        ],
+        [
+          14.0,
+          2304,
+          "triton_red_fused_add_fused_add_rms_norm_1"
+        ]
+      ],
+      "top_gaps": [
+        [
+          1.1,
+          1,
+          "_compute_slot_mappings_kernel",
+          "triton_red_fused__to_copy_embedding_rms_norm_0"
+        ],
+        [
+          0.5,
+          2,
+          "_apply_write_kernel",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.33,
+          3,
+          "Memcpy HtoD (Pinned -> Device)",
+          "_apply_write_kernel"
+        ],
+        [
+          0.24,
+          1,
+          "cublasLt::splitKreduce_kernel<32, 16, int, __half, __half, float",
+          "marlin::Marlin<1125899906910725l, 1125899907892224l, 11258999069"
+        ],
+        [
+          0.24,
+          1,
+          "_apply_write_kernel",
+          "_apply_write_kernel"
+        ],
+        [
+          0.23,
+          1,
+          "triton_red_fused__to_copy_embedding_rms_norm_0",
+          "marlin::Marlin<1125899906910725l, 1125899907892224l, 11258999069"
+        ],
+        [
+          0.23,
+          1,
+          "_apply_write_kernel",
+          "vectorized_elementwise_kernel<4, FillFunctor<bool>, std::array<c"
+        ],
+        [
+          0.15,
+          1,
+          "vectorized_elementwise_kernel<4, FillFunctor<bool>, std::array<c",
+          "Memcpy HtoD (Pinned -> Device)"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen1.5-MoE-A2.7B-Chat",
+      "dtype": "bf16",
+      "code": "1434460",
+      "workload": "decode",
+      "requests": 64,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 6144,
+      "wall_s": [
+        4.0161,
+        4.0238,
+        4.0202
+      ],
+      "profiled_wall_s": 4.031,
+      "span_ms": 4028.9,
+      "busy_ms": 4005.5,
+      "idle_ms": 23.4,
+      "summed_ms": 4007.0,
+      "launches": 55698,
+      "streams": 1,
+      "top_kernels": [
+        [
+          2223.5,
+          4656,
+          "marlin_moe_wna16::Marlin<1125899906909960l, 1125899906843648l, 1"
+        ],
+        [
+          714.3,
+          11904,
+          "marlin::Marlin<1125899906909960l, 1125899906843648l, 11258999069"
+        ],
+        [
+          580.5,
+          2304,
+          "_pool_decode_kernel"
+        ],
+        [
+          278.65,
+          97,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          42.76,
+          4656,
+          "_silu_mul_kernel"
+        ],
+        [
+          23.26,
+          4753,
+          "_rms_norm_kernel"
+        ],
+        [
+          18.01,
+          2328,
+          "_rope_kernel"
+        ],
+        [
+          17.48,
+          2352,
+          "_pool_append_kernel"
+        ],
+        [
+          14.68,
+          2280,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          13.75,
+          2328,
+          "_moe_sum_kernel"
+        ],
+        [
+          12.27,
+          2328,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          10.42,
+          2328,
+          "_align_fill_kernel"
+        ]
+      ],
+      "top_gaps": [
+        [
+          12.07,
+          64,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          1.94,
+          2,
+          "Memcpy DtoD (Device -> Device)",
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon"
+        ],
+        [
+          0.47,
+          1,
+          "index_elementwise_kernel<128, 4, gpu_index_kernel<index_kernel_i",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.2,
+          3,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          0.12,
+          1,
+          "Memcpy HtoD (Pageable -> Device)",
+          "index_elementwise_kernel<128, 4, gpu_index_kernel<index_kernel_i"
+        ],
+        [
+          0.1,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.09,
+          1,
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.04,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen1.5-MoE-A2.7B-Chat",
+      "dtype": "bf16",
+      "code": "c5b08c6",
+      "workload": "decode",
+      "requests": 64,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 6144,
+      "wall_s": [
+        3.8607,
+        3.8767,
+        3.9035
+      ],
+      "profiled_wall_s": 3.9192,
+      "span_ms": 3917.1,
+      "busy_ms": 3894.6,
+      "idle_ms": 22.5,
+      "summed_ms": 4529.2,
+      "launches": 55048,
+      "streams": 49,
+      "top_kernels": [
+        [
+          2280.94,
+          4656,
+          "marlin_moe_wna16::Marlin<1125899906909960l, 1125899906843648l, 1"
+        ],
+        [
+          891.51,
+          9504,
+          "marlin::Marlin<1125899906909960l, 1125899906843648l, 11258999069"
+        ],
+        [
+          574.74,
+          2280,
+          "_pool_decode_kernel"
+        ],
+        [
+          279.27,
+          97,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          192.7,
+          4656,
+          "_silu_mul_kernel"
+        ],
+        [
+          54.78,
+          2328,
+          "_align_fill_kernel"
+        ],
+        [
+          47.64,
+          2328,
+          "_moe_route_kernel"
+        ],
+        [
+          24.51,
+          4753,
+          "_rms_norm_kernel"
+        ],
+        [
+          22.85,
+          2328,
+          "_align_count_kernel"
+        ],
+        [
+          22.67,
+          2328,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          20.1,
+          2328,
+          "_rope_kernel"
+        ],
+        [
+          17.6,
+          2280,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ]
+      ],
+      "top_gaps": [
+        [
+          12.43,
+          64,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          1.85,
+          2,
+          "Memcpy DtoD (Device -> Device)",
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon"
+        ],
+        [
+          0.47,
+          1,
+          "index_elementwise_kernel<128, 4, gpu_index_kernel<index_kernel_i",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.22,
+          3,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          0.13,
+          1,
+          "Memcpy HtoD (Pageable -> Device)",
+          "index_elementwise_kernel<128, 4, gpu_index_kernel<index_kernel_i"
+        ],
+        [
+          0.11,
+          1,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.09,
+          1,
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.05,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "elementwise_kernel<128, 2, gpu_kernel_impl_nocast<direct_copy_ke"
+        ]
+      ]
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen1.5-MoE-A2.7B-Chat-GPTQ-Int4",
+      "dtype": "fp16",
+      "code": null,
+      "workload": "decode",
+      "requests": 64,
+      "new_tokens": 96,
+      "draft_head": null,
+      "draft_tokens": 0,
+      "output_tokens": 6144,
+      "wall_s": [
+        4.0795,
+        4.1113,
+        4.1151
+      ],
+      "profiled_wall_s": 4.0997,
+      "span_ms": 4078.3,
+      "busy_ms": 4066.8,
+      "idle_ms": 11.6,
+      "summed_ms": 4816.5,
+      "launches": 53059,
+      "streams": 26,
+      "top_kernels": [
+        [
+          2396.07,
+          4608,
+          "marlin_moe_wna16::Marlin<1125899906910725l, 1125899907892224l, 1"
+        ],
+        [
+          903.05,
+          9360,
+          "marlin::Marlin<1125899906910725l, 1125899907892224l, 11258999069"
+        ],
+        [
+          621.69,
+          2304,
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,"
+        ],
+        [
+          277.68,
+          96,
+          "cutlass::Kernel2<cutlass_80_tensorop_f16_s16816gemm_relu_f16_256"
+        ],
+        [
+          187.88,
+          2304,
+          "triton_poi_fused_mul_silu_slice_0"
+        ],
+        [
+          77.8,
+          2304,
+          "vllm::act_and_mul_kernel<c10::Half, __half2, &(c10::Half vllm::s"
+        ],
+        [
+          55.6,
+          2304,
+          "vllm::moe::moeTopK<256, int>(float const*, bool const*, float*, "
+        ],
+        [
+          53.54,
+          2304,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          49.27,
+          2304,
+          "vllm::moe::moeSoftmax<256, __half>(__half const*, bool const*, f"
+        ],
+        [
+          36.56,
+          2280,
+          "vllm::moe::moe_align_block_size_small_batch_expert_kernel<int, 2"
+        ],
+        [
+          21.19,
+          2304,
+          "triton_red_fused_add_fused_add_rms_norm_1"
+        ],
+        [
+          20.26,
+          2304,
+          "vllm::moe::moe_sum_vec_kernel<c10::Half, int, 4, false>(c10::Hal"
+        ]
+      ],
+      "top_gaps": [
+        [
+          0.99,
+          1,
+          "_compute_slot_mappings_kernel",
+          "triton_red_fused__to_copy_embedding_rms_norm_0"
+        ],
+        [
+          0.5,
+          2,
+          "_apply_write_kernel",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.34,
+          3,
+          "Memcpy HtoD (Pinned -> Device)",
+          "_apply_write_kernel"
+        ],
+        [
+          0.32,
+          1,
+          "_apply_write_kernel",
+          "_apply_write_kernel"
+        ],
+        [
+          0.26,
+          1,
+          "_apply_write_kernel",
+          "vectorized_elementwise_kernel<4, FillFunctor<bool>, std::array<c"
+        ],
+        [
+          0.15,
+          1,
+          "triton_red_fused__to_copy_embedding_rms_norm_0",
+          "marlin::Marlin<1125899906910725l, 1125899907892224l, 11258999069"
+        ],
+        [
+          0.14,
+          1,
+          "vectorized_elementwise_kernel<4, FillFunctor<int>, std::array<ch",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.14,
+          1,
+          "_combine_sampled_and_draft_tokens_kernel",
+          "_gather_block_tables_kernel"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "code": "1434460",
+      "workload": "eagle3 code",
+      "requests": 1,
+      "new_tokens": 256,
+      "draft_head": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "draft_tokens": 5,
+      "output_tokens": 104,
+      "wall_s": [
+        2.7348,
+        2.7336,
+        2.7348
+      ],
+      "profiled_wall_s": 2.7893,
+      "span_ms": 2788.2,
+      "busy_ms": 2653.8,
+      "idle_ms": 134.5,
+      "summed_ms": 2654.6,
+      "launches": 27646,
+      "streams": 1,
+      "top_kernels": [
+        [
+          2100.14,
+          4953,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          414.06,
+          1178,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          36.28,
+          36,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          21.68,
+          39,
+          "ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_tn"
+        ],
+        [
+          14.17,
+          5590,
+          "_rms_norm_kernel"
+        ],
+        [
+          12.58,
+          1353,
+          "_pool_decode_kernel"
+        ],
+        [
+          9.79,
+          36,
+          "ampere_bf16_s1688gemm_bf16_128x128_ldg8_f2f_stages_32x1_tn"
+        ],
+        [
+          7.1,
+          39,
+          "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_32x6_tn"
+        ],
+        [
+          6.5,
+          2484,
+          "elementwise_kernel<128, 4, gpu_kernel_impl_nocast<direct_copy_ke"
+        ],
+        [
+          5.22,
+          1352,
+          "_kv_reduce_kernel"
+        ],
+        [
+          4.28,
+          1224,
+          "_silu_mul_kernel"
+        ],
+        [
+          2.67,
+          1224,
+          "_rope_kernel"
+        ]
+      ],
+      "top_gaps": [
+        [
+          26.82,
+          33,
+          "Memcpy DtoD (Device -> Device)",
+          "indexSelectSmallIndex<c10::BFloat16, long, unsigned int, 2, 2, -"
+        ],
+        [
+          21.69,
+          164,
+          "Memcpy DtoD (Device -> Device)",
+          "unrolled_elementwise_kernel<direct_copy_kernel_cuda(at::TensorIt"
+        ],
+        [
+          17.72,
+          64,
+          "Memcpy DtoH (Device -> Pageable)",
+          "Memcpy HtoD (Pageable -> Device)"
+        ],
+        [
+          10.72,
+          40,
+          "Memcpy HtoD (Pageable -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          10.07,
+          190,
+          "Memcpy HtoD (Pageable -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          7.77,
+          33,
+          "index_elementwise_kernel<128, 4, gpu_index_kernel<index_put_kern",
+          "_rms_norm_kernel"
+        ],
+        [
+          7.32,
+          165,
+          "Memcpy HtoD (Pageable -> Device)",
+          "index_elementwise_kernel<128, 4, gpu_index_kernel<index_put_kern"
+        ],
+        [
+          5.98,
+          99,
+          "index_elementwise_kernel<128, 4, gpu_index_kernel<index_put_kern",
+          "Memcpy HtoD (Pageable -> Device)"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "code": "c5b08c6",
+      "workload": "eagle3 code",
+      "requests": 1,
+      "new_tokens": 256,
+      "draft_head": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "draft_tokens": 5,
+      "output_tokens": 104,
+      "wall_s": [
+        2.6797,
+        2.6902,
+        2.6926
+      ],
+      "profiled_wall_s": 2.6987,
+      "span_ms": 2697.8,
+      "busy_ms": 2659.4,
+      "idle_ms": 38.4,
+      "summed_ms": 2660.2,
+      "launches": 27843,
+      "streams": 1,
+      "top_kernels": [
+        [
+          2101.96,
+          4953,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          414.2,
+          1178,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          36.51,
+          36,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          22.01,
+          39,
+          "ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_tn"
+        ],
+        [
+          14.73,
+          5590,
+          "_rms_norm_kernel"
+        ],
+        [
+          12.98,
+          1353,
+          "_pool_decode_kernel"
+        ],
+        [
+          9.99,
+          36,
+          "ampere_bf16_s1688gemm_bf16_128x128_ldg8_f2f_stages_32x1_tn"
+        ],
+        [
+          7.21,
+          39,
+          "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_32x6_tn"
+        ],
+        [
+          6.76,
+          2484,
+          "elementwise_kernel<128, 4, gpu_kernel_impl_nocast<direct_copy_ke"
+        ],
+        [
+          5.4,
+          1352,
+          "_kv_reduce_kernel"
+        ],
+        [
+          4.4,
+          1224,
+          "_silu_mul_kernel"
+        ],
+        [
+          2.8,
+          1224,
+          "_rope_kernel"
+        ]
+      ],
+      "top_gaps": [
+        [
+          10.83,
+          32,
+          "Memcpy DtoH (Device -> Pinned)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          6.67,
+          65,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          4.92,
+          32,
+          "Memcpy DtoD (Device -> Device)",
+          "unrolled_elementwise_kernel<direct_copy_kernel_cuda(at::TensorIt"
+        ],
+        [
+          3.5,
+          32,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          2.22,
+          66,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          1.64,
+          7,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          1.19,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pageable -> Device)"
+        ],
+        [
+          0.31,
+          1,
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon",
+          "_rms_norm_kernel"
+        ]
+      ]
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "code": null,
+      "workload": "eagle3 code",
+      "requests": 1,
+      "new_tokens": 256,
+      "draft_head": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "draft_tokens": 5,
+      "output_tokens": 105,
+      "wall_s": [
+        2.7347,
+        2.7344,
+        2.734
+      ],
+      "profiled_wall_s": 2.729,
+      "span_ms": 2727.9,
+      "busy_ms": 2720.2,
+      "idle_ms": 7.7,
+      "summed_ms": 2721.1,
+      "launches": 18364,
+      "streams": 2,
+      "top_kernels": [
+        [
+          2177.87,
+          5100,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          411.43,
+          736,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          40.91,
+          37,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          20.7,
+          1435,
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,"
+        ],
+        [
+          20.24,
+          38,
+          "ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_tn"
+        ],
+        [
+          9.36,
+          36,
+          "ampere_bf16_s1688gemm_bf16_128x128_ldg8_f2f_stages_32x1_tn"
+        ],
+        [
+          5.81,
+          37,
+          "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_32x6_tn"
+        ],
+        [
+          4.79,
+          1330,
+          "triton_red_fused_fused_add_rms_norm_2"
+        ],
+        [
+          4.42,
+          1435,
+          "triton_red_fused_fused_add_rms_norm_0"
+        ],
+        [
+          4.34,
+          1225,
+          "triton_red_fused_3"
+        ],
+        [
+          4.05,
+          1435,
+          "vllm::reshape_and_cache_flash_kernel<__nv_bfloat16, __nv_bfloat1"
+        ],
+        [
+          3.79,
+          1435,
+          "triton_poi_fused_mul_silu_slice_1"
+        ]
+      ],
+      "top_gaps": [
+        [
+          0.87,
+          1,
+          "_compute_slot_mappings_kernel",
+          "triton_red_fused__to_copy_embedding_rms_norm_0"
+        ],
+        [
+          0.45,
+          2,
+          "_apply_write_kernel",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.4,
+          1,
+          "vectorized_elementwise_kernel<2, FillFunctor<long>, std::array<c",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.33,
+          3,
+          "Memcpy HtoD (Pinned -> Device)",
+          "_apply_write_kernel"
+        ],
+        [
+          0.27,
+          1,
+          "vllm::reshape_and_cache_flash_kernel<__nv_bfloat16, __nv_bfloat1",
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,"
+        ],
+        [
+          0.23,
+          1,
+          "_apply_write_kernel",
+          "vectorized_elementwise_kernel<4, FillFunctor<bool>, std::array<c"
+        ],
+        [
+          0.15,
+          1,
+          "Memcpy HtoD (Pinned -> Device)",
+          "_prepare_prefill_inputs_kernel"
+        ],
+        [
+          0.13,
+          1,
+          "_apply_write_kernel",
+          "_apply_write_kernel"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "code": "1434460",
+      "workload": "eagle3 code",
+      "requests": 4,
+      "new_tokens": 256,
+      "draft_head": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "draft_tokens": 5,
+      "output_tokens": 623,
+      "wall_s": [
+        5.0308,
+        5.0361,
+        5.0394
+      ],
+      "profiled_wall_s": 5.1274,
+      "span_ms": 5126.4,
+      "busy_ms": 4872.2,
+      "idle_ms": 254.2,
+      "summed_ms": 4873.8,
+      "launches": 45363,
+      "streams": 1,
+      "top_kernels": [
+        [
+          2091.15,
+          5157,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          1125.84,
+          1229,
+          "ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_tn"
+        ],
+        [
+          585.11,
+          1212,
+          "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_64x3_tn"
+        ],
+        [
+          270.6,
+          1188,
+          "ampere_bf16_s16816gemm_bf16_128x128_ldg8_f2f_stages_64x3_tn"
+        ],
+        [
+          179.36,
+          1196,
+          "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_64x4_tn"
+        ],
+        [
+          177.93,
+          33,
+          "ampere_bf16_s16816gemm_bf16_64x128_ldg8_f2f_stages_32x6_tn"
+        ],
+        [
+          113.75,
+          38,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          93.15,
+          264,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          72.07,
+          2255,
+          "_pool_decode_kernel"
+        ],
+        [
+          50.85,
+          73,
+          "ampere_bf16_s1688gemm_bf16_128x128_ldg8_f2f_stages_32x1_tn"
+        ],
+        [
+          30.75,
+          9235,
+          "_rms_norm_kernel"
+        ],
+        [
+          14.37,
+          2016,
+          "_silu_mul_kernel"
+        ]
+      ],
+      "top_gaps": [
+        [
+          38.35,
+          274,
+          "Memcpy DtoD (Device -> Device)",
+          "unrolled_elementwise_kernel<direct_copy_kernel_cuda(at::TensorIt"
+        ],
+        [
+          37.61,
+          104,
+          "Memcpy DtoH (Device -> Pageable)",
+          "Memcpy HtoD (Pageable -> Device)"
+        ],
+        [
+          25.55,
+          33,
+          "Memcpy DtoD (Device -> Device)",
+          "vectorized_gather_kernel<16, long>(char*, char*, long*, int, lon"
+        ],
+        [
+          23.84,
+          88,
+          "Memcpy HtoD (Pageable -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          20.88,
+          22,
+          "Memcpy DtoD (Device -> Device)",
+          "indexSelectSmallIndex<c10::BFloat16, long, unsigned int, 2, 2, -"
+        ],
+        [
+          15.61,
+          70,
+          "index_elementwise_kernel<128, 4, gpu_index_kernel<index_put_kern",
+          "_rms_norm_kernel"
+        ],
+        [
+          13.91,
+          290,
+          "Memcpy HtoD (Pageable -> Device)",
+          "index_elementwise_kernel<128, 4, gpu_index_kernel<index_put_kern"
+        ],
+        [
+          11.32,
+          280,
+          "Memcpy HtoD (Pageable -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ]
+      ]
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "code": "c5b08c6",
+      "workload": "eagle3 code",
+      "requests": 4,
+      "new_tokens": 256,
+      "draft_head": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "draft_tokens": 5,
+      "output_tokens": 623,
+      "wall_s": [
+        4.9182,
+        4.9177,
+        4.9194
+      ],
+      "profiled_wall_s": 4.9394,
+      "span_ms": 4938.5,
+      "busy_ms": 4860.0,
+      "idle_ms": 78.5,
+      "summed_ms": 4861.6,
+      "launches": 45692,
+      "streams": 1,
+      "top_kernels": [
+        [
+          2090.57,
+          5157,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          1123.8,
+          1229,
+          "ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_tn"
+        ],
+        [
+          584.86,
+          1212,
+          "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_64x3_tn"
+        ],
+        [
+          270.49,
+          1188,
+          "ampere_bf16_s16816gemm_bf16_128x128_ldg8_f2f_stages_64x3_tn"
+        ],
+        [
+          179.26,
+          1196,
+          "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_64x4_tn"
+        ],
+        [
+          177.82,
+          33,
+          "ampere_bf16_s16816gemm_bf16_64x128_ldg8_f2f_stages_32x6_tn"
+        ],
+        [
+          109.19,
+          38,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          93.14,
+          264,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          71.63,
+          2255,
+          "_pool_decode_kernel"
+        ],
+        [
+          48.44,
+          73,
+          "ampere_bf16_s1688gemm_bf16_128x128_ldg8_f2f_stages_32x1_tn"
+        ],
+        [
+          30.22,
+          9235,
+          "_rms_norm_kernel"
+        ],
+        [
+          14.36,
+          2016,
+          "_silu_mul_kernel"
+        ]
+      ],
+      "top_gaps": [
+        [
+          25.03,
+          54,
+          "Memcpy DtoH (Device -> Pinned)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          11.23,
+          47,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          9.22,
+          54,
+          "Memcpy DtoD (Device -> Device)",
+          "unrolled_elementwise_kernel<direct_copy_kernel_cuda(at::TensorIt"
+        ],
+        [
+          6.38,
+          47,
+          "Memcpy HtoD (Pinned -> Device)",
+          "CatArrayBatchedCopy_alignedK_contig<OpaqueType<2u>, unsigned int"
+        ],
+        [
+          3.99,
+          33,
+          "CatArrayBatchedCopy_contig<OpaqueType<8u>, unsigned int, 1, 128,",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          3.49,
+          62,
+          "Memcpy HtoD (Pinned -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          2.14,
+          66,
+          "Memcpy DtoD (Device -> Device)",
+          "Memcpy DtoD (Device -> Device)"
+        ],
+        [
+          1.44,
+          13,
+          "CatArrayBatchedCopy_alignedK_contig<OpaqueType<8u>, unsigned int",
+          "Memcpy HtoD (Pinned -> Device)"
+        ]
+      ]
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "code": null,
+      "workload": "eagle3 code",
+      "requests": 4,
+      "new_tokens": 256,
+      "draft_head": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "draft_tokens": 5,
+      "output_tokens": 629,
+      "wall_s": [
+        4.9286,
+        4.935,
+        4.9391
+      ],
+      "profiled_wall_s": 4.9323,
+      "span_ms": 4930.2,
+      "busy_ms": 4919.6,
+      "idle_ms": 10.6,
+      "summed_ms": 4921.4,
+      "launches": 30127,
+      "streams": 2,
+      "top_kernels": [
+        [
+          1899.61,
+          4030,
+          "cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_"
+        ],
+        [
+          1239.51,
+          1370,
+          "ampere_bf16_s16816gemm_bf16_256x128_ldg8_f2f_stages_32x3_tn"
+        ],
+        [
+          671.08,
+          1404,
+          "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_64x3_tn"
+        ],
+        [
+          293.71,
+          1297,
+          "ampere_bf16_s16816gemm_bf16_128x128_ldg8_f2f_stages_64x3_tn"
+        ],
+        [
+          197.09,
+          1332,
+          "ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_64x4_tn"
+        ],
+        [
+          194.18,
+          36,
+          "ampere_bf16_s16816gemm_bf16_64x128_ldg8_f2f_stages_32x6_tn"
+        ],
+        [
+          110.72,
+          37,
+          "cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_2"
+        ],
+        [
+          98.6,
+          2337,
+          "flash::flash_fwd_splitkv_kernel<Flash_fwd_kernel_traits<128, 64,"
+        ],
+        [
+          92.92,
+          168,
+          "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+        ],
+        [
+          49.35,
+          73,
+          "ampere_bf16_s1688gemm_bf16_128x128_ldg8_f2f_stages_32x1_tn"
+        ],
+        [
+          14.37,
+          2337,
+          "triton_poi_fused_mul_silu_slice_1"
+        ],
+        [
+          11.22,
+          1995,
+          "triton_red_fused_3"
+        ]
+      ],
+      "top_gaps": [
+        [
+          1.25,
+          1,
+          "_compute_slot_mappings_kernel",
+          "triton_red_fused__to_copy_embedding_rms_norm_0"
+        ],
+        [
+          0.45,
+          2,
+          "_apply_write_kernel",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.31,
+          3,
+          "Memcpy HtoD (Pinned -> Device)",
+          "_apply_write_kernel"
+        ],
+        [
+          0.3,
+          1,
+          "vectorized_elementwise_kernel<2, FillFunctor<long>, std::array<c",
+          "Memcpy HtoD (Pinned -> Device)"
+        ],
+        [
+          0.21,
+          1,
+          "_apply_write_kernel",
+          "vectorized_elementwise_kernel<4, FillFunctor<bool>, std::array<c"
+        ],
+        [
+          0.19,
+          1,
+          "vectorized_elementwise_kernel<2, FillFunctor<long>, std::array<c",
+          "vectorized_elementwise_kernel<2, FillFunctor<long>, std::array<c"
+        ],
+        [
+          0.18,
+          1,
+          "_apply_write_kernel",
+          "_apply_write_kernel"
+        ],
+        [
+          0.14,
+          1,
+          "vectorized_elementwise_kernel<4, FillFunctor<bool>, std::array<c",
+          "Memcpy HtoD (Pinned -> Device)"
+        ]
+      ]
+    }
+  ]
+}
