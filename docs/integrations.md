@@ -150,12 +150,19 @@ spec:
 - **The `v2.0.0-cuda` image does not start on a GPU.** With the manifests as they are the pod restarts in a loop.
   The image has no C compiler, which Triton needs at its first kernel (`Failed to find C compiler`), and it does
   not set the library path where GKE mounts the NVIDIA driver (`Found no NVIDIA driver`). `deploy/Dockerfile` now
-  does both; the manifests need an image built from it, and none is published yet.
+  does both. An image built from it started on an L4 under `docker run --gpus all` and with the driver libraries
+  mounted the way GKE mounts them (healthy 80 to 84 s after `docker run`, the model's download included); the
+  published one failed both ways with the two errors above. The manifests need the rebuilt image, and none is
+  published yet.
 - With those two things added to the same image at container start (a test-only override), the InferenceService was
   Ready 57 s after `kubectl apply` with the image already on the node (pulling its 4.1 GB took 4 min 8 s; the
   storage initializer's download 27 to 30 s). `/health`, `/v1/models`, a plain and a streamed chat completion and
   `/metrics` answered through the predictor Service, and after `kubectl delete pod` the service was Ready again in
   62 s. The server ran as the image's non-root user.
-- The first request after a start waited 17.4 s for its first token and the second 2.1 s. Triton compiles each
-  kernel at its first use; where the rest of the wait goes was not profiled. `/v1/models` lists the model as
-  `HF-/mnt/models`.
+- In that run the first request waited 17.4 s for its first token and the second 2.1 s, and `/v1/models` listed
+  the model as `HF-/mnt/models`. Three changes since (`benchmarks/results/results_serve_first_token_cuda.json`):
+  `turing serve` warms up before it listens (24 s in the rebuilt image on an L4), so Triton's builds and tuning are
+  over when the pod turns Ready; a chat request no longer builds the tokenizer's vocabulary twice, and a short
+  prompt arriving alone is prefilled whole from a CUDA graph (0.26 s to 0.03 s to the first token of a 34-token
+  prompt, 0.06 s for the first request after a start); and `--served-model-name` sets the listed name. A
+  ServingRuntime can pass `--served-model-name={{.Name}}` (the InferenceService's name) once its image has the flag.

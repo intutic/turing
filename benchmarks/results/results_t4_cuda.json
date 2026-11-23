@@ -198,5 +198,460 @@
       "activation_sparsity": 0.0,
       "flashinfer": true
     }
-  ]
+  ],
+  "second_vm": {
+    "note": "A second Spot T4 VM (n1-standard-8, us-central1-a) on 2026-11-23, tree e1b5a19 plus the changes of that day. The same speed row gives 15.0 ms a step at batch 1 here against 20.1 on the first VM; with this card's power limit lowered from 70 to 60 W (nvidia-smi -pl 60) it gives the first VM's numbers. Logs: the session's t4_logs.",
+    "env": {
+      "gpu": "Tesla T4, 15360 MiB, driver 580.178.04, compute capability 7.5",
+      "cpu": "8 vCPUs, Intel Xeon 2.30 GHz",
+      "python": "3.10.12",
+      "torch": "2.9.1+cu129",
+      "triton": "3.5.1"
+    },
+    "probe": {
+      "read_bandwidth_gb_s": [
+        271.5,
+        271.4,
+        271.3
+      ],
+      "matmul_tflops": {
+        "fp16": 20.81,
+        "bf16": 2.28
+      }
+    },
+    "speed_rows_70w": [
+      {
+        "batch": 1,
+        "seconds": 3.94,
+        "output_tok_per_s": 65.0,
+        "mean_ttft_s": 0.0816,
+        "engine_step_ms": {
+          "1": 15.286
+        },
+        "kv_pool_gib": 9.148,
+        "gpu_peak_gib": 13.055
+      },
+      {
+        "batch": 2,
+        "seconds": 4.13,
+        "output_tok_per_s": 124.0,
+        "mean_ttft_s": 0.177,
+        "engine_step_ms": {
+          "2": 15.746
+        },
+        "kv_pool_gib": 9.148,
+        "gpu_peak_gib": 13.055
+      },
+      {
+        "batch": 4,
+        "seconds": 4.611,
+        "output_tok_per_s": 222.1,
+        "mean_ttft_s": 0.3661,
+        "engine_step_ms": {
+          "4": 16.869
+        },
+        "kv_pool_gib": 9.148,
+        "gpu_peak_gib": 13.055
+      },
+      {
+        "batch": 8,
+        "seconds": 5.541,
+        "output_tok_per_s": 369.6,
+        "mean_ttft_s": 0.6882,
+        "engine_step_ms": {
+          "8": 19.376
+        },
+        "kv_pool_gib": 9.148,
+        "gpu_peak_gib": 13.055
+      }
+    ],
+    "decode_step_by_kernel_70w": [
+      {
+        "requests": 1,
+        "context": 512,
+        "new_tokens": 256,
+        "decode_step_ms": 14.92,
+        "device_idle_ms_per_step": 0.22,
+        "kernels_ms_per_step": [
+          [
+            7.93,
+            "gemv2T_kernel_val<int, int, __half, __half, __half, float, 128, "
+          ],
+          [
+            3.194,
+            "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+          ],
+          [
+            2.261,
+            "std::enable_if<true, void>::type internal::gemvx::kernel<int, in"
+          ],
+          [
+            0.835,
+            "_pool_decode_kernel"
+          ],
+          [
+            0.214,
+            "_rms_norm_kernel"
+          ],
+          [
+            0.131,
+            "turing_fp16_s1688gemm_fp16_256x128_ldg8_f2f_tn"
+          ]
+        ]
+      },
+      {
+        "requests": 1,
+        "context": 64,
+        "new_tokens": 256,
+        "decode_step_ms": 14.61,
+        "device_idle_ms_per_step": 0.221,
+        "kernels_ms_per_step": [
+          [
+            7.948,
+            "gemv2T_kernel_val<int, int, __half, __half, __half, float, 128, "
+          ],
+          [
+            3.203,
+            "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+          ],
+          [
+            2.262,
+            "std::enable_if<true, void>::type internal::gemvx::kernel<int, in"
+          ],
+          [
+            0.446,
+            "_pool_decode_kernel"
+          ],
+          [
+            0.215,
+            "_rms_norm_kernel"
+          ],
+          [
+            0.106,
+            "_kv_reduce_kernel"
+          ]
+        ]
+      },
+      {
+        "requests": 8,
+        "context": 512,
+        "new_tokens": 256,
+        "decode_step_ms": 18.68,
+        "device_idle_ms_per_step": 0.197,
+        "kernels_ms_per_step": [
+          [
+            13.767,
+            "cutlass::Kernel2<cutlass_75_wmma_tensorop_f16_s161616gemm_f16_16"
+          ],
+          [
+            4.182,
+            "_pool_decode_kernel"
+          ],
+          [
+            1.003,
+            "turing_fp16_s1688gemm_fp16_256x128_ldg8_f2f_tn"
+          ],
+          [
+            0.525,
+            "turing_fp16_s1688gemm_fp16_128x128_ldg8_f2f_tn"
+          ],
+          [
+            0.231,
+            "_rms_norm_kernel"
+          ],
+          [
+            0.221,
+            "volta_sgemm_128x64_tn"
+          ]
+        ]
+      },
+      {
+        "requests": 1,
+        "context": 2048,
+        "new_tokens": 256,
+        "decode_step_ms": 16.64,
+        "device_idle_ms_per_step": 0.216,
+        "kernels_ms_per_step": [
+          [
+            7.902,
+            "gemv2T_kernel_val<int, int, __half, __half, __half, float, 128, "
+          ],
+          [
+            3.181,
+            "std::enable_if<!(false), void>::type internal::gemvx::kernel<int"
+          ],
+          [
+            2.597,
+            "_pool_decode_kernel"
+          ],
+          [
+            2.255,
+            "std::enable_if<true, void>::type internal::gemvx::kernel<int, in"
+          ],
+          [
+            0.402,
+            "turing_fp16_s1688gemm_fp16_256x128_ldg8_f2f_tn"
+          ],
+          [
+            0.37,
+            "volta_sgemm_128x64_tn"
+          ]
+        ]
+      }
+    ],
+    "one_pass_over_the_weights_ms": {
+      "note": "every 2-D weight read once in model order (3.55 GB: the tied embedding counts twice), median of 7 passes; fp16 at 70 W, bf16 at 70 W, fp16 at 60 W",
+      "fp16_70w": {
+        "F.linear, 1 rows": 21.29,
+        "F.linear, 8 rows": 15.99,
+        "sum (read only), 1 rows": 15.0,
+        "triton gemv 8x1024 w8, 1 rows": 13.84,
+        "triton gemv 8x256 w4, 1 rows": 14.84
+      },
+      "bf16_70w": {
+        "F.linear, 1 rows": 20.62,
+        "F.linear, 8 rows": 115.07
+      },
+      "fp16_60w": {
+        "F.linear, 1 rows": 20.45,
+        "F.linear, 8 rows": 16.53,
+        "triton gemv 8x1024 w8, 1 rows": 14.5,
+        "triton gemv 8x256 w4, 1 rows": 14.49
+      },
+      "fp16_70w_sustained_6s": [
+        15.82,
+        16.11
+      ],
+      "fp16_60w_sustained_6s": [
+        16.05,
+        27.78
+      ]
+    },
+    "power_limit": {
+      "note": "scripts/benchmark_e2e_generation.py as in the speed rows; decode_min_rows 1 runs a one-row step as one row (cuBLAS gemv), 2 pads it to two (a tensor-core GEMM). sm_clock_mhz: the median of nvidia-smi's samples at 100% utilization.",
+      "70w_one_row": {
+        "rows": [
+          {
+            "batch": 1,
+            "seconds": 4.015,
+            "output_tok_per_s": 63.8,
+            "mean_ttft_s": 0.126,
+            "engine_step_ms": {
+              "1": 15.304
+            },
+            "kv_pool_gib": 9.148,
+            "gpu_peak_gib": 13.055
+          },
+          {
+            "batch": 8,
+            "seconds": 5.545,
+            "output_tok_per_s": 369.3,
+            "mean_ttft_s": 0.6919,
+            "engine_step_ms": {
+              "8": 19.481
+            },
+            "kv_pool_gib": 9.148,
+            "gpu_peak_gib": 13.055
+          }
+        ],
+        "sm_clock_mhz": 1260
+      },
+      "70w_two_rows": {
+        "rows": [
+          {
+            "batch": 1,
+            "seconds": 3.976,
+            "output_tok_per_s": 64.4,
+            "mean_ttft_s": 0.0825,
+            "engine_step_ms": {
+              "1": 15.273
+            },
+            "kv_pool_gib": 9.148,
+            "gpu_peak_gib": 13.046
+          },
+          {
+            "batch": 8,
+            "seconds": 5.548,
+            "output_tok_per_s": 369.1,
+            "mean_ttft_s": 0.6929,
+            "engine_step_ms": {
+              "8": 19.476
+            },
+            "kv_pool_gib": 9.148,
+            "gpu_peak_gib": 13.046
+          }
+        ],
+        "sm_clock_mhz": 1275
+      },
+      "60w_one_row": {
+        "rows": [
+          {
+            "batch": 1,
+            "seconds": 5.506,
+            "output_tok_per_s": 46.5,
+            "mean_ttft_s": 0.0922,
+            "engine_step_ms": {
+              "1": 20.028
+            },
+            "kv_pool_gib": 9.148,
+            "gpu_peak_gib": 13.055
+          },
+          {
+            "batch": 8,
+            "seconds": 6.071,
+            "output_tok_per_s": 337.4,
+            "mean_ttft_s": 0.8438,
+            "engine_step_ms": {
+              "8": 21.168
+            },
+            "kv_pool_gib": 9.148,
+            "gpu_peak_gib": 13.055
+          }
+        ],
+        "sm_clock_mhz": 720
+      },
+      "60w_two_rows": {
+        "rows": [
+          {
+            "batch": 1,
+            "seconds": 4.295,
+            "output_tok_per_s": 59.6,
+            "mean_ttft_s": 0.0928,
+            "engine_step_ms": {
+              "1": 15.803
+            },
+            "kv_pool_gib": 9.148,
+            "gpu_peak_gib": 13.046
+          },
+          {
+            "batch": 8,
+            "seconds": 6.048,
+            "output_tok_per_s": 338.6,
+            "mean_ttft_s": 0.829,
+            "engine_step_ms": {
+              "8": 20.9
+            },
+            "kv_pool_gib": 9.148,
+            "gpu_peak_gib": 13.046
+          }
+        ],
+        "sm_clock_mhz": 1050
+      },
+      "doctor_tune": {
+        "70w": {
+          "decode_rows_ms": {
+            "1": 4.99,
+            "2": 4.79
+          },
+          "decode_min_rows": 2
+        },
+        "60w": {
+          "decode_rows_ms": {
+            "1": 8.37,
+            "2": 5.32
+          },
+          "decode_min_rows": 2
+        }
+      }
+    },
+    "cold_start": {
+      "note": "seconds for a request of 16 new tokens (the slowest of the first three of each kind, in this order) through an engine built as `turing serve` builds it, with Triton's cache empty (a new container), fp16; the same after engine.warm_up(), which `turing serve` now runs before it listens; and the third request of each kind after the warm-up (steady). 'shared start': the prompt begins with 20 tokens an earlier prompt had, so it continues from cached pages.",
+      "kinds": [
+        "24 tokens",
+        "24 tokens, shared start",
+        "600 tokens",
+        "5000 tokens",
+        "8 x 24 tokens",
+        "8 x 1100 tokens"
+      ],
+      "without_warm_up_s": [
+        7.336,
+        39.149,
+        0.587,
+        52.378,
+        2.651,
+        5.217
+      ],
+      "after_warm_up_s": [
+        0.246,
+        0.235,
+        0.43,
+        3.137,
+        0.378,
+        5.068
+      ],
+      "steady_s": [
+        0.246,
+        0.235,
+        0.277,
+        3.137,
+        0.284,
+        2.407
+      ],
+      "warm_up_s": {
+        "triton_cache_empty": 67.91,
+        "triton_cache_kept": 10.75
+      },
+      "builds_without_warm_up": {
+        "24 tokens": [
+          "_kv_reduce_kernel",
+          "_pool_append_kernel",
+          "_pool_decode_kernel",
+          "_rms_norm_kernel",
+          "_rope_kernel",
+          "_silu_mul_kernel"
+        ],
+        "24 tokens, shared start": [
+          "_pool_prefill_kernel"
+        ],
+        "5000 tokens": [
+          "_pool_prefill_kernel"
+        ],
+        "8 x 1100 tokens": [
+          "_pool_decode_kernel"
+        ]
+      },
+      "after_warm_up_note": "'8 x 1100 tokens' still built the decode kernel three times (2.7 s): decode rows riding in a graph-replayed prefill step took a split count per row count. Changed after this run (PackedPrefill.fresh)."
+    },
+    "paged_prefill_kernel_builds": {
+      "note": "_pool_prefill_kernel built four ways, each from an empty Triton cache; seconds to the first token of a prompt of N tokens (the last of four). A prompt's second chunk of 2,048 tokens (a multiple of 16) rebuilt all 8 tuning configurations in the original build: 51.9 s at its first use against 14.4.",
+      "tokens": [
+        2348,
+        3000,
+        5000,
+        9000
+      ],
+      "as_before": [
+        0.764,
+        1.146,
+        2.852,
+        8.587
+      ],
+      "per_call_integers_unspecialized": [
+        0.787,
+        1.187,
+        2.941,
+        8.854
+      ],
+      "pointers_unaligned_too": [
+        0.927,
+        1.613,
+        4.823,
+        15.612
+      ],
+      "nothing_specialized": [
+        0.925,
+        1.631,
+        4.838,
+        15.631
+      ],
+      "first_use_of_5000_tokens_s": {
+        "as_before": 51.891,
+        "per_call_integers_unspecialized": 14.429
+      }
+    },
+    "tests": {
+      "note": "tests/test_triton_kv_prefill.py::test_decode_rows_ride_in_a_packed_prefill: 5 of its 6 cases pass; gemma2-native misses the tolerance on this GPU (greatest absolute difference 0.00142 against 0.001 allowed, 1 of 128 values), with the kernels as before and as changed"
+    }
+  }
 }

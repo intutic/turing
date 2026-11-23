@@ -48,11 +48,13 @@ def flashinfer_prefill(pool: KVPool, layer: int, q: torch.Tensor, slots: List[in
     _, H, T, D = q.shape
     storage = pool.layer_fields(layer, "k")[3]
     in_place = storage in ("native", "fp8")
-    kind = (storage if in_place else "temporary") + tag  # each kind of pages has its own plan (and fp8 its own kernel)
+    big = T > 2048  # a forward of a larger step budget (the engine's long prompts): a wrapper with more workspace
+    # each kind of pages has its own plan (and fp8 its own kernel)
+    kind = (storage if in_place else "temporary") + tag + ("+" if big else "")
     st = _STATE.get((q.device, kind))
     if st is None:
         with torch.inference_mode(False):  # normal tensors: plan() writes them in place, in and out of inference mode
-            ws = torch.empty((64 if tag else 128) << 20, dtype=torch.uint8, device=q.device)
+            ws = torch.empty((64 if tag else 256 if big else 128) << 20, dtype=torch.uint8, device=q.device)
             st = _STATE[(q.device, kind)] = [flashinfer.BatchPrefillWithPagedKVCacheWrapper(ws, "HND"), None, None,
                                              None, None]
     totals = [s + n for s, n in zip(starts, lens)]

@@ -38,13 +38,45 @@ All notable changes to this project are documented here. The format follows
   prompts at 1 / 2 / 4 requests (16.5 / 26.4 / 46.1 without drafts; vLLM with the same head 50.6 / 82.8 / 133.6).
 - Overlapped decode on CUDA: the next decode step is launched before the host has read the current step's tokens.
 - `turing bench-bw` (also `turing doctor`) reports the device's read bandwidth and matmul rates and, with `--model`,
-  the least time a batch-1 decode step can take; `--tune` measures the int4 kernel crossover on the GPU present.
+  the least time a batch-1 decode step can take; `--tune` measures the int4 kernel crossover on the GPU present,
+  and whether its dense decode GEMMs run faster with two rows than with one (`decode_min_rows`): a one-row decode
+  step of a model with plain dense weights is then padded to two. cuBLAS runs one row as a gemv without tensor
+  cores; a Tesla T4 at a 60 W power limit ran it at about 500 MHz against 920 for two rows, and Qwen2.5-1.5B went
+  from 46.5 to 59.6 tok/s at batch 1 with the padding (at the default 70 W: 63.8 and 64.4).
+- `turing serve` warms up before it listens: a few requests through the engine at startup (a prompt alone, a chunk
+  of each tuning bucket after cached pages, every batch bucket, a decode row riding in a prefill step), so Triton's
+  builds, the paged prefill kernel's tuning and the CUDA graph captures no longer happen inside the first requests
+  of each shape, where every running request waited for them. On a Tesla T4 with an empty Triton cache the first
+  request took 7.3 s, the first prompt continuing from cached pages 39 s and the first 5,000-token prompt 52 s;
+  after the warm-up (68 s there with an empty cache, 11 s with a kept one) they take their steady 0.2, 0.2 and
+  3.1 s. `--no-warmup` skips it; off CUDA there is none.
+- `turing serve --served-model-name NAME`: the model id `/v1/models`, `/health` and `/api/tags` report. A model
+  loaded from a directory was listed by its path (`HF-/mnt/models` under KServe).
 - Grouped-GEMM MoE kernels (`turing/kernels/triton_moe.py`): on CUDA, `SparseMoE` sorts token-expert pairs by expert
   on the GPU and runs all experts in two Triton kernels instead of looping over them on the host, so MoE models
   (Mixtral, Qwen MoE, OLMoE) now decode under CUDA graphs. OLMoE-1B-7B on an L4 decodes 4.9–6.4× faster at batch
   1–64, with GSM8K unchanged (35.0% against 33.5%, ± 3.4, n = 200).
 
 ### Changed
+- Triton built the paged prefill, decode and RoPE kernels again for each per-call integer that was 1 or changed
+  between a multiple of 16 and not (a chunk's length, its start, a cache's slot): a prompt whose second chunk had
+  2,048 tokens rebuilt all 8 tuning configurations of the prefill kernel, 52 s at its first use on a Tesla T4
+  against 14 s without. Those arguments are no longer specialized (`do_not_specialize`); strides and pointers
+  still are, since their alignment is what gives the kernels vector loads (with nothing specialized, a
+  9,000-token prompt's prefill took 15.6 s against 8.6). Decode rows riding in a graph-replayed prefill step take
+  the split count of their batch bucket, as the other riders do, instead of one kernel build per row count.
+- A prompt arriving alone that a kept CUDA graph prefills whole in less time than any eager forward takes gets no
+  cached prefix: continuing one is an eager forward, which the host bounds whatever its length. Through
+  `turing serve` on an L4 a 34-token chat prompt that shares its template's first tokens with the request before
+  got its first token in 54 ms continuing them and gets it in 33 ms prefilled whole (the warm-up captures the
+  graphs of prompts up to 256 tokens). Its output is then that of a server without a prefix cache.
+- A prompt longer than one prefill forward (2,048 tokens), or in the middle of its prefill, takes a step budget
+  above 2,048 (`prefill_chunk_size`; `turing serve` uses 2,048) in one forward instead of several of 2,048: no
+  graph replays such a forward, and FlashInfer's prefill kernel costs less per token with more queries in a call.
+  16 prompts of 16K tokens with a 1-byte KV cache at 8,192 tokens a step on an L4: 30.2 to 29.6 s (vLLM 28.7 s),
+  the device idle 0.29 to 0.06 s.
+- On a GPU without bf16 matmul (compute capability below 8.0, a Tesla T4) the loader says once that a bf16
+  checkpoint's prefill and multi-row decode steps run 7 to 10 times slower than in fp16. The dtype is not changed.
 - The decode step merges its attention splits in one load per query head instead of a loop over the splits, which
   took longer than the attention itself at batch 1.
 - A prompt that fits one prefill forward's budget is no longer split over two forwards: it starts the next one
@@ -187,6 +219,12 @@ All notable changes to this project are documented here. The format follows
 - Package description corrected (it still advertised 70B models on one GPU).
 
 ### Fixed
+- Every chat request built the tokenizer's whole vocabulary twice to look for `<think>` tags (`get_vocab()`: a new
+  dict of 151,936 entries each time for Qwen2.5), on the server's event loop: 205 ms before the request's first
+  scheduler step on an L4 VM, during which no other request's tokens were sent either. The tags are looked up
+  once per tokenizer, at startup. Through `turing serve` the first token of a 34-token chat prompt went from
+  0.26 s to 0.055 s (Qwen2.5-1.5B on an L4); the engine's own first-token time was never affected, which is why
+  no benchmark row showed it.
 - The CUDA image could not start on a GPU: it had no C compiler, which Triton needs at its first kernel, and no
   library path for the NVIDIA driver where GKE mounts it. `deploy/Dockerfile` now installs `gcc` in the CUDA image
   and sets `LD_LIBRARY_PATH=/usr/local/nvidia/lib64`. Found by running `integrations/kserve` on GKE with KServe

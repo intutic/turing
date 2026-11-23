@@ -9,7 +9,10 @@
     "inference_service": "integrations/kserve/inferenceservice.yaml, storageUri hf://Qwen/Qwen2.5-1.5B-Instruct"
   },
   "image_pull_s": 247.6,
-  "storage_initializer_download_s": [29.8, 27.1],
+  "storage_initializer_download_s": [
+    29.8,
+    27.1
+  ],
   "runs": [
     {
       "run": 1,
@@ -40,7 +43,10 @@
         "POST /v1/chat/completions stream": "chunks received",
         "GET /metrics": "turing_ gauges present"
       },
-      "first_token_ms_first_two_requests": [17379.5, 2082.6],
+      "first_token_ms_first_two_requests": [
+        17379.5,
+        2082.6
+      ],
       "first_token_note": "from turing_ttft_p99_ms and turing_ttft_avg_ms after two requests; Triton compiles each kernel at its first use; not profiled further",
       "gpu_memory_used_mib": 16014,
       "gpu_memory_total_mib": 23034,
@@ -48,5 +54,44 @@
       "request_after_restart": 200,
       "served_model_id": "HF-/mnt/models"
     }
-  ]
+  ],
+  "docker_2026-11-23": {
+    "note": "The published image and one built from this tree's deploy/Dockerfile (docker build on the VM, nothing published) under Docker 29.1.3 with the NVIDIA Container Toolkit 1.20.1 on an NVIDIA L4 (a temporary Spot g2-standard-16), 2026-11-23. 'gke style': no `--gpus`, the GPU's device files passed with --device and a directory of the host's driver libraries mounted at /usr/local/nvidia/lib64, as GKE's device plugin does it. Served model: Qwen/Qwen2.5-1.5B-Instruct (bf16), downloaded inside the container.",
+    "published_v2.0.0-cuda": {
+      "docker_run_gpus_all": {
+        "exit": 1,
+        "error": "RuntimeError: Failed to find C compiler. Please specify via CC environment variable or set triton.knobs.build.impl.",
+        "after": "the weights loaded on the L4"
+      },
+      "gke_style": {
+        "exit": 1,
+        "error": "Found no NVIDIA driver on your system"
+      }
+    },
+    "built_from_this_tree": {
+      "image": {
+        "size": "12 GB (the published one: 11.6 GB)",
+        "user": "uid 1000 (turing)",
+        "gcc": "14.2.0",
+        "torch": "2.11.0+cu128",
+        "triton": "3.6.0",
+        "LD_LIBRARY_PATH": "/usr/local/nvidia/lib64"
+      },
+      "docker_run_gpus_all": {
+        "seconds_until_health": 84.2,
+        "warm_up_s": 20.7,
+        "models": [
+          "qwen25-1-5b-instruct"
+        ]
+      },
+      "gke_style": {
+        "seconds_until_health": 80.2,
+        "warm_up_s": 21.0,
+        "models": [
+          "qwen25-1-5b-instruct"
+        ]
+      },
+      "note": "started with --served-model-name qwen25-1-5b-instruct; the seconds until /health answers include the model's download, its load, the KV calibration and the warm-up. Request timings: results_serve_first_token_cuda.json."
+    }
+  }
 }

@@ -8,6 +8,7 @@ import logging
 import uuid
 import statistics
 import math
+import random
 import time
 from enum import Enum
 from typing import List, Dict, Tuple, Optional, AsyncGenerator, Deque, Any, Callable, Set
@@ -263,6 +264,53 @@ class ContinuousBatchEngine:
             except asyncio.CancelledError:
                 pass
 
+    async def warm_up(self) -> float:
+        """Send the requests a fresh process would otherwise make its first clients wait for, and return the seconds
+        it took: Triton compiles each kernel at its first use and tunes the paged prefill kernel per chunk-length
+        bucket, and a CUDA graph is captured at a step shape's first or second use. On a Tesla T4 with an empty
+        Triton cache that was 7 s at the first request, 39 s at the first chunk after cached pages (the prefill
+        kernel's 8 tuning builds) and 2.7 s at the first 8 requests at once, during which every running request
+        waits. The counters, the prefix cache and the KV pool are left as on a new engine."""
+        t0 = time.time()
+        rng, vocab = random.Random(0), self.model_config.vocab_size
+        chunk, limit = self.prefill_chunk_size, self.model_config.max_position_embeddings
+
+        def tokens(n: int) -> List[int]:
+            return [rng.randrange(vocab // 8, vocab // 2) for _ in range(n)]
+
+        # a prompt alone three times (kernels, then its graph: captured at the shape's second use, judged at its
+        # third) and so for each longer bucket up to 256 tokens, the prompts a kept graph prefills whole instead of
+        # continuing a cached prefix (_try_reserve); a chunk of each tuning bucket after cached pages: two pages of
+        # the prefix cache, or without it a first chunk
+        head = tokens(2 * PAGE if self.prefix_cache is not None else chunk)
+        bursts = [[tokens(n)] for n in (24, *range(56, 257, 32)) for _ in range(3)] + [[head]]
+        bursts += [[head + tokens(n)] for n in (300, 1000, chunk - 48)]
+        # every batch bucket (its decode graph, and the kernels built per number of splits), then a decode row
+        # riding in a step that prefills
+        bursts += [[tokens(24) for _ in range(b)] for b in DecodeGraphs.BUCKETS if 1 < b <= self.max_batch_size]
+        bursts += [[tokens(24), tokens(chunk + 64)] for _ in range(2)]
+
+        async def one(prompt: List[int]):
+            try:
+                req = await self.add_request(prompt_tokens=prompt, max_new_tokens=8, temperature=0.0,
+                                             stop_token_ids=set())
+            except RequestRejected:  # a pool too small for it: a real request of this shape is refused too
+                return
+            async for _ in self.stream_request(req):
+                pass
+
+        for burst in bursts:
+            await asyncio.gather(*[one(p) for p in burst if len(p) + 8 <= limit])
+        if self.prefix_cache is not None:
+            self.prefix_cache.clear()
+            self.prefix_cache.hits = self.prefix_cache.queries = 0
+        self.total_tokens_generated = self.total_requests_completed = 0
+        self.spec_drafted = self.spec_accepted = self.preemptions = 0
+        self.recent_ttft.clear()
+        self.recent_itl.clear()
+        self.start_time = time.time()
+        return self.start_time - t0
+
     async def add_request(
         self,
         prompt_tokens: List[int],
@@ -377,11 +425,15 @@ class ContinuousBatchEngine:
         return req
 
     GROW = 32  # tokens of KV pages a decoding request takes at a time
-    # Prompt tokens in one prefill forward. A larger forward costs more per token (SmolLM2-360M on an L4, 1,024-token
-    # prompts: 21.5 ms a prompt two at a time, 25 eight at a time), needs working memory beyond the pool's reserve
-    # and cannot be replayed from a CUDA graph, so a larger step budget (--prefill-chunk) is spent in several
-    # forwards, one a scheduler step. The decode rows riding in a forward come on top of it, or count in it where
-    # the model's forward measured cheaper that way (_row_target).
+    # Prompt tokens in one prefill forward of prompts that fit one. A larger forward of such prompts costs more per
+    # token (SmolLM2-360M on an L4, 1,024-token prompts: 21.5 ms a prompt two at a time, 25 eight at a time) and
+    # cannot be replayed from a CUDA graph, so a larger step budget (prefill_chunk_size) is spent on them in several
+    # forwards, one a scheduler step. A prompt longer than this, or one in mid-prefill, takes the whole budget in
+    # one forward: no graph serves it, and attention over its cached pages costs less per token with more queries
+    # in a call (16 prompts of 16K tokens on an L4, fp8 pages, 8,192 tokens a step: FlashInfer's prefill kernel
+    # took 8.7 s in forwards of 2,048 tokens, and about 7.3 s of vLLM's 11.5 s in forwards of 8,192). The decode
+    # rows riding in a forward come on top of it, or count in it where the model's forward measured cheaper that
+    # way (_row_target).
     FORWARD_TOKENS = 2048
 
     def _try_reserve(self, req: AsyncSequenceRequest) -> bool:
@@ -391,7 +443,13 @@ class ContinuousBatchEngine:
         tokens = req.prefill_tokens
         holders = len(self.running_batch) + sum(1 for r in self.waiting_queue if r.past_kv is not None)
         spare = -(-self.GROW // PAGE) * (holders + 1) if holders else 0
-        if self.prefix_cache is not None:  # at least one token is prefilled
+        # A prompt arriving alone that its CUDA graph prefills whole in less time than any eager forward takes gets
+        # no cached prefix: continuing one is an eager forward (through `turing serve` on an L4, 38 ms for a chat
+        # prompt that shares its template's first tokens with the one before, against 16 ms from the graph)
+        graphs = getattr(self.model, "_prefill_graphs", None)
+        whole = (graphs is not None and tokens is req.prompt_tokens and req.adapter is None
+                 and not self.running_batch and not self.waiting_queue and graphs.beats_any_eager(len(tokens)))
+        if self.prefix_cache is not None and not whole:  # at least one token is prefilled
             req.past_kv = self.prefix_cache.attach(tokens, self._prefix_key(req.adapter, len(tokens)),
                                                    limit=len(tokens) - 1)
             req.prefill_offset = req.past_kv.length
@@ -588,16 +646,18 @@ class ContinuousBatchEngine:
             flown, flew = self._verify_settle()
             # Prefill: chunks of the prefilling requests, in priority order, until this forward's token budget is
             # spent (compute-bound); a request's chunk is its remaining prompt, capped by what is left of the budget.
-            # A step budget above FORWARD_TOKENS is spent over several steps of one forward each: a request gets its
-            # first token after the forward that ends its prompt, and the decoding requests take their next token
-            # with the last forward of the budget only.
+            # A step budget above FORWARD_TOKENS is spent over several steps of one forward each while the prompts
+            # fit a forward: a request gets its first token after the forward that ends its prompt, and the decoding
+            # requests take their next token with the last forward of the budget only. A prompt longer than a
+            # forward (or in the middle of its prefill) takes the budget in one.
             prefill = [r for r in self.running_batch if r.state == RequestState.PREFILLING]
             budget, work, more = 0, [], False
             if prefill:
                 if self._prefill_left <= 0:
                     self._prefill_left = self.lane_policy.prefill_chunk_budget(prefill[0].lane) \
                         if (self.lane_policy and prefill[0].lane) else self.prefill_chunk_size
-                budget = forward = min(self._prefill_left, self.FORWARD_TOKENS)
+                long = prefill[0].prefill_offset > 0 or len(prefill[0].prefill_tokens) > self.FORWARD_TOKENS
+                budget = forward = self._prefill_left if long else min(self._prefill_left, self.FORWARD_TOKENS)
                 self._prefill_left -= forward
             for req in prefill:
                 if budget <= 0:
@@ -828,6 +888,9 @@ class ContinuousBatchEngine:
         and more). A forward of whole new prompts keeps them whole, with the decode rows on top, unless rows past
         FORWARD_TOKENS cost this model over 5% more (SmolLM2-1.7B: 13%) and no CUDA graph serves the step."""
         none = self.FORWARD_TOKENS + len(riders)
+        took = sum(e - r.prefill_offset for r, e in work)
+        if took > self.FORWARD_TOKENS:  # a long prompt's forward of a larger budget: measured near 2,048 rows only
+            return took + len(riders)
         plan = getattr(self.model, "forward_rows", None)
         if plan is None or not all(isinstance(c, KVCache) for c in caches):
             return none

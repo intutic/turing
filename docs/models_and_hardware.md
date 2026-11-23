@@ -171,20 +171,38 @@ that resolves to a model type outside the table above is refused at load. `SIZIN
 ```bash
 turing info                      # detected devices and runtime
 turing serve --model smollm2 --device mps
-turing doctor --tune             # this GPU's read bandwidth and matmul rates; keeps its int4 kernel crossover
+turing doctor --tune             # this GPU's read bandwidth and matmul rates; keeps its kernel crossovers
 ```
 
 **A second GPU type.** The kernels' crossovers and the serving defaults were set on an L4, so the probe, its tuning
 and the tests were also run on a Tesla T4 (15 GB, 2026-11-23; `benchmarks/results/results_t4_cuda.json`):
 
-* `turing doctor` measured 271 GB/s of read bandwidth, 21–23 TFLOP/s of fp16 matmul and 2.0–2.3 of bf16: a tenth
-  of fp16, so on that card a model belongs in fp16.
+* `turing doctor` measured 271 GB/s of read bandwidth, 21–23 TFLOP/s of fp16 matmul and 2.0–2.3 of bf16. A pass
+  of 8 rows over Qwen2.5-1.5B's weights took 115 ms in bf16 against 16 in fp16 (one row costs the same in both),
+  so on that card a model belongs in fp16. The loader keeps a bf16 checkpoint's dtype (fp16 is not safe for
+  every one) and now says so at load on a GPU without bf16 matmul; pass `--dtype fp16`.
 * `--tune` found the fused int4 GEMM slower than dequantizing and calling cuBLAS at every row count from 4 to 256
   (1.66 against 1.05 ms at 4 rows, over three layer shapes) and keeps `int4_max_rows = 0` for that GPU; an L4
   keeps 32. The tuner's grid used to start at 16 rows and kept 16 where the int4 kernel never won.
-* 236 tests of the probe, the KV decode kernels, the int4 GEMM and the engine passed (10 skipped).
-* Qwen2.5-1.5B-Instruct in fp16, 512-token prompts and 256 new tokens: 48 tok/s at batch 1 and 339 at batch 8
-  (353 with FlashInfer installed). The batch-1 step takes 20.1 ms against the 11.4 ms that card's bandwidth
-  allows; on an L4 it is 12.9 against 11.8 ms. Where the T4's step spends the rest has not been profiled.
+* 236 tests of the probe, the KV decode kernels, the int4 GEMM and the engine passed (10 skipped). One parity case
+  outside that set misses its tolerance on a T4: `test_decode_rows_ride_in_a_packed_prefill[gemma2-native]`,
+  0.0014 against the 0.001 allowed in 1 of 128 values.
+* Qwen2.5-1.5B-Instruct in fp16, 512-token prompts and 256 new tokens, on two VMs:
+
+    | | Batch 1 | Batch 8 | A one-row step |
+    |---|:---:|:---:|:---:|
+    | First VM | 48 tok/s | 339 tok/s | 20.1 ms |
+    | Second VM, power limit 70 W (the default) | 65 tok/s | 370 tok/s | 15.3 ms |
+    | Second VM, limit lowered to 60 W | 46.5 tok/s | 337 tok/s | 20.0 ms |
+    | Second VM at 60 W, one-row steps padded to two rows | 59.6 tok/s | 339 tok/s | 15.8 ms |
+
+    The card's bandwidth allows 11.4 ms a step. Profiled on the second VM at 70 W, the step is 14.9 ms: 13.4 ms
+    in cuBLAS's gemv kernels reading the weights at 231 GB/s, 0.8 ms in the KV decode kernel, 0.2 ms idle. cuBLAS
+    runs one row as a gemv without tensor cores, and at its power limit the card gave that kernel a far lower
+    clock than a two-row GEMM: about 500 against 920 MHz at 60 W. The first VM's card behaved as the second does at
+    60 W. `turing doctor --tune` now times dense decode GEMMs with one and with two rows for 3 s each and keeps
+    `decode_min_rows = 2` where two rows are over 3% faster (4.99 against 4.79 ms a pass at 70 W, 8.37 against
+    5.32 at 60 W); a one-row decode step of a model with plain dense weights is then run with a padding row. At
+    70 W the padding cost nothing (63.8 and 64.4 tok/s). Not tuned, a GPU runs one row as before.
 * With the KV pool's reserve at its former floor of 1.5 GiB a 2,048-token prefill ran out of memory there when
   FlashInfer was not installed; the floor is 2 GiB now (an L4's reserve, a tenth of its memory, is 2.25 GiB).

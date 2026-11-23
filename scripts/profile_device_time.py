@@ -9,8 +9,9 @@ during one run under torch.profiler (device activity only), as
 
 with the kernels and the idle gaps that take most. The wall time is measured first, without the profiler.
 
-Two workloads: B requests of a 64-token prompt decoding N tokens each (a model's decode step), or, with --draft-head,
-C requests of scripts/benchmark_speculation.py's code workload at once with an EAGLE-3 head.
+Two workloads: B requests of a --context-token prompt (64: a model's decode step; longer: a burst that prefills)
+decoding N tokens each, or, with --draft-head, C requests of scripts/benchmark_speculation.py's code workload at once
+with an EAGLE-3 head.
 
 python scripts/profile_device_time.py --engine turing --model ~/tgate4/Qwen1.5-MoE-A2.7B-Chat --batch 1
 python scripts/profile_device_time.py --engine vllm --model Qwen/Qwen3-8B --draft-head RedHatAI/Qwen3-8B-speculator.eagle3
@@ -39,13 +40,17 @@ def turing_run(a, prompts, tok):
     else:
         model, _ = RealHuggingFaceLoader.load_hf_model_into_turing(a.model, device="cuda", dtype=a.dtype)
     model.config.kv_pool_fraction = None  # as turing serve: all free memory but a reserve
+    model.config.kv_cache_dtype = a.kv_cache_dtype
+    if a.kv_pool_gib:
+        model.config.kv_pool_gib = a.kv_pool_gib
     head = None
     if a.draft_head:
         from turing.models.eagle3 import load_eagle3
         head = load_eagle3(a.draft_head, model.config.hidden_dim, model.config.num_layers)
     engine = ContinuousBatchEngine(model.config, TuringConfig(device="cuda", max_batch_size=len(prompts)), model=model,
                                    tokenizer=tok, prefix_caching=False, draft_tokens=0,
-                                   spec_gate=SpeculationGatePolicy(), prefill_chunk_size=2048, draft_head=head)
+                                   spec_gate=SpeculationGatePolicy(), prefill_chunk_size=a.step_tokens or 2048,
+                                   draft_head=head)
 
     async def cell():
         async def one(p):
@@ -65,13 +70,16 @@ def vllm_run(a, prompts, tok):
     spec = dict(speculative_config={"method": "eagle3", "model": a.draft_head,
                                     "num_speculative_tokens": a.draft_tokens}) if a.draft_head else {}
     llm = LLM(a.model, dtype={"fp16": "float16", "bf16": "bfloat16"}[a.dtype], enable_prefix_caching=False,
-              max_model_len=4096, gpu_memory_utilization=a.gpu_memory_utilization, **spec)
+              kv_cache_dtype={"native": "auto", "int8": "fp8", "fp8": "fp8"}[a.kv_cache_dtype],
+              **({"max_num_batched_tokens": a.step_tokens} if a.step_tokens else {}),
+              max_model_len=max(4096, a.context + a.new_tokens + 16),
+              gpu_memory_utilization=a.gpu_memory_utilization, **spec)
     sp = SamplingParams(temperature=0.0, max_tokens=a.new_tokens, ignore_eos=not a.draft_head)
     return lambda: sum(len(o.outputs[0].token_ids)
                        for o in llm.generate([{"prompt_token_ids": p} for p in prompts], sp, use_tqdm=False))
 
 
-def device_time(events):
+def device_time(events, top_n=12):
     """events: the device's kernels and copies as (start us, duration us, stream, name), sorted by start."""
     busy, end, last, gaps, kernels, streams = 0.0, None, "", {}, {}, set()
     for start, dur, stream, name in events:
@@ -96,7 +104,7 @@ def device_time(events):
                                for k, (c, ms) in d.items()), reverse=True)[:n]
     return dict(span_ms=round(span / 1e3, 1), busy_ms=round(busy / 1e3, 1), idle_ms=round((span - busy) / 1e3, 1),
                 summed_ms=round(sum(v[1] for v in kernels.values()) / 1e3, 1), launches=len(events),
-                streams=len(streams), top_kernels=top(kernels, 12), top_gaps=top(gaps, 8))
+                streams=len(streams), top_kernels=top(kernels, top_n), top_gaps=top(gaps, 8))
 
 
 def main():
@@ -106,6 +114,14 @@ def main():
     ap.add_argument("--dtype", default="bf16", choices=["fp16", "bf16"])
     ap.add_argument("--batch", type=int, default=1, help="requests at once (the decode workload)")
     ap.add_argument("--new-tokens", type=int, default=None, help="default: 96, or 256 with a draft head")
+    ap.add_argument("--context", type=int, default=64, help="prompt tokens of each request (the decode workload)")
+    ap.add_argument("--kv-cache-dtype", default="native", choices=["native", "int8", "fp8"],
+                    help="KV storage (vLLM has fp8 for both 1-byte ones)")
+    ap.add_argument("--step-tokens", type=int, default=None,
+                    help="prompt tokens a scheduler step takes: Turing's prefill chunk (default 2,048), vLLM's "
+                         "max_num_batched_tokens (default: its own, 8,192 on an L4)")
+    ap.add_argument("--kv-pool-gib", type=float, default=None, help="Turing only: the KV pool's size")
+    ap.add_argument("--top", type=int, default=12, help="kernels listed")
     ap.add_argument("--draft-head", default=None, help="an EAGLE-3 head: the code workload instead")
     ap.add_argument("--draft-tokens", type=int, default=5)
     ap.add_argument("--concurrency", type=int, default=4, help="requests at once (with a draft head)")
@@ -124,7 +140,7 @@ def main():
         prompts = spec.tokenized(tok, spec.code_prompts(24))[:a.concurrency]
     else:
         g = torch.Generator().manual_seed(0)
-        prompts = torch.randint(1000, 30000, (a.batch, 64), generator=g).tolist()
+        prompts = torch.randint(1000, 30000, (a.batch, a.context), generator=g).tolist()
     run = (turing_run if a.engine == "turing" else vllm_run)(a, prompts, tok)
     for _ in range(3):  # CUDA graphs and kernels built
         tokens = run()
@@ -149,10 +165,11 @@ def main():
                     for e in trace if e.get("ph") == "X" and e.get("cat") in ("kernel", "gpu_memcpy", "gpu_memset"))
     name = os.path.basename(os.path.normpath(a.model)) if os.path.isdir(a.model) else a.model
     row = dict(engine=a.engine, model=name, dtype=a.dtype, code=a.code,
-               workload="eagle3 code" if a.draft_head else "decode",
+               workload="eagle3 code" if a.draft_head else "decode" if a.context == 64 else
+               f"{a.context}-token prompts, {a.kv_cache_dtype} KV, {a.step_tokens or 'default'} tokens a step",
                requests=len(prompts), new_tokens=a.new_tokens, draft_head=a.draft_head,
                draft_tokens=a.draft_tokens if a.draft_head else 0, output_tokens=tokens, wall_s=walls,
-               profiled_wall_s=round(profiled, 4), **device_time(events))
+               profiled_wall_s=round(profiled, 4), **device_time(events, a.top))
     print(json.dumps({k: v for k, v in row.items() if not k.startswith("top_")}), flush=True)
     old = json.load(open(a.out)) if os.path.exists(a.out) else {}
     key = lambda r: (r["engine"], r["model"], r["code"], r["workload"], r["requests"], r["draft_tokens"])  # noqa: E731

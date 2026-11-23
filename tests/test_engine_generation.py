@@ -75,6 +75,68 @@ def test_prefix_cache_reuses_pages_and_gives_identical_output():
     assert engine.kv_pool.used_pages == 0
 
 
+def test_a_prompt_arriving_alone_is_prefilled_whole_where_its_graph_beats_any_eager_forward():
+    """Continuing a cached prefix is an eager forward, which the host bounds whatever its length (38 ms for a chat
+    prompt on an L4 through `turing serve`); a kept CUDA graph replays the whole of a short prompt in less (16 ms).
+    Where the model's prefill graphs measured that, a prompt arriving alone takes no cached prefix."""
+    engine = _engine()
+    prompt = list(range(1, 50))  # 3 full pages + 1
+    (_, ), (first,) = _run(engine, dict(prompt_tokens=prompt, max_new_tokens=6, temperature=0.0))
+    graphs = engine.model._prefill_graphs
+    assert not graphs.beats_any_eager(len(prompt))  # nothing measured: the cache is used, as before
+    graphs.host_ms, graphs.replay_ms = 34.0, {64: 16.0, 512: 40.0}  # as measured for buckets of 64 and 512 tokens
+    assert graphs.beats_any_eager(49) and not graphs.beats_any_eager(500) and not graphs.beats_any_eager(100)
+    (req,), (second,) = _run(engine, dict(prompt_tokens=prompt, max_new_tokens=6, temperature=0.0))
+    assert req.cached_prompt_tokens == 0 and second == first
+    # a prompt that arrives while another waits or runs is not alone: it continues the cached prefix
+    reqs, outs = _run(engine, dict(prompt_tokens=prompt, max_new_tokens=6, temperature=0.0),
+                      dict(prompt_tokens=prompt[:40] + [99, 98, 97], max_new_tokens=2, temperature=0.0))
+    assert [r.cached_prompt_tokens for r in reqs] == [0, 32] and outs[0] == first
+    # a graph that is dropped takes its measurement with it
+    graphs._drop((1, 64, 0))
+    assert not graphs.beats_any_eager(49)
+
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_a_long_prompt_takes_a_larger_step_budget_in_one_forward_and_gives_the_same_tokens(device):
+    """With a step budget above one forward (prefill_chunk_size 96, forwards of 32 here), a prompt longer than a
+    forward is prefilled in forwards of the whole budget once it is under way; its tokens are those of plain
+    decoding, with and without a request decoding beside it."""
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("no CUDA")
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    g = torch.Generator().manual_seed(3)
+    long = torch.randint(0, 128, (150,), generator=g).tolist()
+
+    def engine(chunk):
+        model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device=device)
+        model.config.kv_pool_gib = 0.01
+        e = ContinuousBatchEngine(model.config, TuringConfig(device=device, max_batch_size=8), model=model,
+                                  prefix_caching=False, draft_tokens=0, prefill_chunk_size=chunk)
+        e.FORWARD_TOKENS = 32
+        return e
+    ref = engine(32)
+    want = [_greedy(ref, p, 6) for p in (PROMPT, long)] if device == "cpu" else \
+        _run(ref, *[dict(prompt_tokens=p, max_new_tokens=6, temperature=0.0) for p in (PROMPT, long)])[1]
+    big = engine(96)
+    sizes, packed, forward = [], big.model.prefill_packed, big._forward
+
+    def spy_packed(chunks, *a, **kw):
+        sizes.append(sum(len(c) for c in chunks if len(c) > 1))
+        return packed(chunks, *a, **kw)
+
+    def spy_forward(ids, *a, **kw):
+        sizes.append(ids.shape[1])
+        return forward(ids, *a, **kw)
+    big.model.prefill_packed, big._forward = spy_packed, spy_forward
+    _, got = _run(big, *[dict(prompt_tokens=p, max_new_tokens=6, temperature=0.0) for p in (PROMPT, long)])
+    assert got == want
+    assert max(sizes) > 32  # a forward of more than FORWARD_TOKENS prompt tokens ran
+    (_,), (alone,) = _run(engine(96), dict(prompt_tokens=long, max_new_tokens=6, temperature=0.0))
+    assert alone == want[1]
+
+
 def test_stop_tokens_top_k_and_logits_processor():
     engine = _engine()
     ref = _greedy(engine, PROMPT, 8)

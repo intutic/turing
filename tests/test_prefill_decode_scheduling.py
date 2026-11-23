@@ -85,9 +85,11 @@ def test_a_prompt_that_fits_a_step_is_not_split_over_two():
 
 
 def test_a_step_budget_above_one_forward_is_spent_over_several_steps():
-    """Forwards of 16 prompt tokens: with 16 a step the request already decoding takes a token beside every forward
-    of the long prompt; with 32 a step the prompt still moves 16 tokens a scheduler step and that request takes a
-    token with every second forward (the last of each budget)."""
+    """Forwards of 16 prompt tokens, a 64-token prompt behind a request that is decoding. With 16 a step that
+    request takes a token beside every forward of the long prompt. With 32 a step the prompt, longer than a forward,
+    takes what is left of each budget in one forward once it is under way (nothing replays such a forward from a
+    graph, and attention over its cached pages costs less per token with more queries in a call): 16 after the
+    forward that began it, then 32, with 64 a step 48. The decoding request takes a token beside each."""
     async def _run(chunk):
         engine = _create_mini_engine(chunk_size=chunk)
         engine.FORWARD_TOKENS = 16
@@ -109,7 +111,8 @@ def test_a_step_budget_above_one_forward_is_spent_over_several_steps():
         return log
 
     assert asyncio.run(_run(16))[:9] == [3, 13, 16, "d", 16, "d", 16, "d", 3]
-    assert asyncio.run(_run(32))[:9] == [3, 13, 16, "d", 16, 16, "d", 3, "d"]
+    assert asyncio.run(_run(32))[:8] == [3, 13, 16, "d", 32, "d", 3, "d"]
+    assert asyncio.run(_run(64))[:5] == [3, 13, 48, "d", 3]
 
 
 def test_interleaved_prefill_decode_scheduling():

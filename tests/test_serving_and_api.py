@@ -109,3 +109,94 @@ def test_rejections_return_400_429_503_with_retry_after():
         r = client.post("/v1/completions", json={"model": "m", "prompt": "hi", "max_tokens": 4})
         assert r.status_code == 429 and r.headers["retry-after"] == "2"
         assert r.json()["error"]["type"] == "rate_limit_exceeded"
+
+
+def test_serve_lists_the_served_model_name(monkeypatch):
+    """`turing serve --served-model-name`: the id /v1/models lists and /health reports. KServe passes the
+    InferenceService's name; without it a model loaded from a directory was listed as its path ('HF-/mnt/models')."""
+    import sys
+    import turing.cli as cli
+    apps = []
+    monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: apps.append(app))
+    monkeypatch.setattr(sys, "argv", ["turing", "serve", "--model", "test-tiny", "--device", "cpu",
+                                      "--served-model-name", "my-model"])
+    cli.main()
+    with TestClient(apps[0]) as client:
+        assert [m["id"] for m in client.get("/v1/models").json()["data"]] == ["my-model"]
+        assert client.get("/health").json()["model"] == "my-model"
+    assert get_model_config("test-tiny").name != "my-model"  # the preset is a shared object
+
+
+def test_engine_warm_up_leaves_no_trace():
+    """warm_up() sends the requests a fresh process would otherwise make its first clients wait for (first kernels,
+    each tuning bucket of the paged prefill kernel, each batch bucket, a decode row riding in a prefill step) and
+    leaves the counters, the prefix cache and the KV pool as on a new engine."""
+    import dataclasses
+
+    async def _run(context):
+        cfg = dataclasses.replace(get_model_config("test-tiny"), max_position_embeddings=context)
+        engine = ContinuousBatchEngine(cfg, TuringConfig(device="cpu", max_batch_size=8))
+        lengths, add = [], engine.add_request
+
+        async def spy(prompt_tokens, **kw):
+            lengths.append(len(prompt_tokens))
+            return await add(prompt_tokens=prompt_tokens, **kw)
+        engine.add_request = spy
+        await engine.start()
+        try:
+            assert await engine.warm_up() > 0
+            assert lengths.count(24) >= 3 + 2 + 4 + 8  # alone three times, then each batch bucket
+            assert all(lengths.count(n) == 3 for n in range(56, 257, 32))  # each short bucket's graph
+            for n in (300, 1000, 2000):  # a chunk in each tuning bucket, after two cached pages
+                assert 32 + n in lengths
+            if context > 4096:  # the prompt whose second step carries a decode row
+                assert max(lengths) > engine.prefill_chunk_size
+            assert max(lengths) + 8 <= context  # nothing the model's context cannot hold
+            assert engine.total_tokens_generated == engine.total_requests_completed == 0
+            assert not engine.recent_ttft and not engine.recent_itl
+            assert engine.prefix_cache.stats() == {"cached_pages": 0, "hit_tokens": 0, "queried_tokens": 0,
+                                                   "hit_rate": None}
+            assert engine.kv_pool.get_stats()["used_pages"] == 0
+            tokens = [t async for t in engine.stream_generate([5, 10, 15], max_new_tokens=4, temperature=0.0)]
+            assert len(tokens) == 4 and engine.total_requests_completed == 1
+        finally:
+            await engine.stop()
+
+    asyncio.run(_run(8192))
+    asyncio.run(_run(2048))
+
+
+def test_serve_warms_up_before_it_listens(monkeypatch):
+    """create_app(warmup=True) runs the engine's warm-up in the app's startup, before a request is served."""
+    cfg = get_model_config("test-tiny")
+    engine = ContinuousBatchEngine(cfg, TuringConfig(device="cpu"))
+    calls = []
+
+    async def warm_up():
+        calls.append(engine.is_running)
+        return 0.0
+    monkeypatch.setattr(engine, "warm_up", warm_up)
+    with TestClient(create_app(engine, warmup=True)) as client:
+        assert calls == [True]
+        assert client.get("/health").status_code == 200
+    with TestClient(create_app(engine)):
+        assert calls == [True]  # off unless asked for
+
+
+def test_the_app_reads_the_vocabulary_at_startup_not_in_a_request():
+    """create_app asks for the thinking tags once, so the tokenizer's vocabulary dict (0.1 s to build for a
+    150K-token vocabulary) is not built inside the first chat request, where every running request would wait."""
+    class Tok:
+        eos_token_id = None
+        calls = 0
+
+        def get_vocab(self):
+            Tok.calls += 1
+            return {"a": 1}
+
+    tok = Tok()
+    engine = ContinuousBatchEngine(get_model_config("test-tiny"), TuringConfig(device="cpu"), tokenizer=tok)
+    create_app(engine)
+    assert Tok.calls == 1
+    from turing.serving.reasoning import think_token_ids
+    assert think_token_ids(tok) is None and Tok.calls == 1

@@ -118,7 +118,7 @@ if HAS_TRITON:
             x = c * sc + z
         return x
 
-    @triton.jit
+    @triton.jit(do_not_specialize=["n_sel", "window"])  # no build per value of these (1, a multiple of 16)
     def _pool_decode_kernel(Q, PT, SLOTS, STARTS, SEL, K, V, KS, KZ, VS, VZ, ACC, M, L, OUT,
                             s_qb, s_qh, pt_stride, s_sel_b, s_sel_h, n_sel, sm_scale, softcap, window,
                             G: tl.constexpr, BLOCK_G: tl.constexpr, D: tl.constexpr, BLOCK_N: tl.constexpr,

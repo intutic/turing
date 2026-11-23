@@ -102,6 +102,38 @@ def _tuning() -> Dict[str, dict]:
         return {}
 
 
+def tune_decode_min_rows(dev: torch.device, gib: float = 1.0, seconds: float = 3.0,
+                         shapes=((2048, 2048), (8192, 2048), (2048, 8192))) -> dict:
+    """Whether a decode step's dense GEMMs run faster with two rows than with one. cuBLAS runs one row as a gemv
+    without tensor cores, and a GPU at its power limit can run that at a fraction of the clock it keeps for a
+    two-row GEMM (a Tesla T4 limited to 60 W: 500 against 920 MHz). Each count replays a CUDA graph of one pass
+    over `gib` GiB of fp16 matrices of layer shapes for `seconds`, so the limit has set in, and is timed over the
+    second half. Returns {"decode_min_rows": 2 if two rows are over 3% faster, else 1, "decode_rows_ms": {1:, 2:}}."""
+    copies = max(1, int(gib * 2 ** 30 / (2 * sum(n * k for n, k in shapes))))
+    ws = [torch.randn(n, k, device=dev, dtype=torch.float16) for _ in range(copies) for n, k in shapes]
+    ms = {}
+    for rows in (1, 2):
+        xs = {k: torch.randn(rows, k, device=dev, dtype=torch.float16) for _, k in shapes}
+
+        def one_pass():
+            for w in ws:
+                torch.nn.functional.linear(xs[w.shape[1]], w)
+        one_pass()
+        torch.cuda.synchronize()
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            one_pass()
+        ts, end = [], time.perf_counter() + seconds
+        while time.perf_counter() < end:
+            torch.cuda.synchronize()
+            t = time.perf_counter()
+            g.replay()
+            torch.cuda.synchronize()
+            ts.append(time.perf_counter() - t)
+        ms[rows] = round(statistics.median(ts[len(ts) // 2:]) * 1e3, 2)
+    return {"decode_min_rows": 2 if ms[2] < 0.97 * ms[1] else 1, "decode_rows_ms": ms}
+
+
 def tuned(name: str, default):
     """The value `turing bench-bw --tune` measured for this GPU model, or default when it was never tuned."""
     return _tuning().get(_gpu_key(), {}).get(name, default)

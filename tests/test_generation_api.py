@@ -481,3 +481,29 @@ def test_api_key():
                            headers={"Authorization": "Bearer sk-test"}).status_code == 200
         assert client.post("/v1/messages", json=body, headers={"x-api-key": "sk-test"}).status_code == 200
         assert client.get("/api/tags", headers={"x-api-key": "sk-test"}).status_code == 200
+
+
+def test_think_token_ids_reads_the_vocabulary_once_per_tokenizer():
+    """Every chat request asked the tokenizer for its whole vocabulary twice (a new 151,936-entry dict each time for
+    Qwen2.5: 205 ms a request on an L4 VM, during which the engine's event loop ran nothing else)."""
+    from turing.serving.reasoning import think_token_ids
+
+    class Tok:
+        calls = 0
+
+        def __init__(self, vocab):
+            self.vocab = vocab
+
+        def get_vocab(self):
+            Tok.calls += 1
+            return dict(self.vocab)
+
+    thinker, plain = Tok({"<think>": 7, "</think>": 9, "a": 1}), Tok({"a": 1})
+    for _ in range(3):
+        assert think_token_ids(thinker) == ([7], [9])
+        assert think_token_ids(plain) is None
+    assert Tok.calls == 2
+    got = think_token_ids(thinker)
+    got[0].append(0)  # a caller's list is its own
+    assert think_token_ids(thinker) == ([7], [9])
+    assert think_token_ids(None) is None

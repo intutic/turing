@@ -41,7 +41,7 @@ if HAS_TRITON:
 
     @triton.autotune(configs=_PREFILL_CONFIGS, key=["LB", "G", "D", "MODE", "WINDOW", "SOFTCAP", "IEEE"],
                      prune_configs_by={"early_config_prune": _prefill_prune}, **_TUNE_CACHE)
-    @triton.jit
+    @triton.jit(do_not_specialize=["slot", "start", "L", "LB", "window"])  # no build per value of these
     def _pool_prefill_kernel(Q, PT, K, V, KS, KZ, VS, VZ, OUT, slot, start, L, LB, s_qh, s_ql, pt_stride,
                              sm_scale, softcap, window,
                              G: tl.constexpr, D: tl.constexpr, HKV: tl.constexpr, BLOCK_M: tl.constexpr,

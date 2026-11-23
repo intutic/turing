@@ -54,7 +54,7 @@ if HAS_TRITON:
         a = (gf / (1.0 + tl.exp(-gf))).to(g.dtype)  # F.silu rounds to the dtype, then the product rounds again
         tl.store(Y + row * s_y + cols, (a.to(tl.float32) * u.to(tl.float32)).to(Y.dtype.element_ty), mask=mask)
 
-    @triton.jit
+    @triton.jit(do_not_specialize=["L", "n_q"])  # no build per value of these (1, a multiple of 16)
     def _rope_kernel(X, XK, C, Sn, Y, YK, H, HK, L, n_q, s_xb, s_xh, s_xl, s_kb, s_kh, s_kl, s_cb, s_cl,
                      s_yb, s_yh, s_yl, s_zb, s_zh, s_zl, D: tl.constexpr, R: tl.constexpr, BLOCK_D: tl.constexpr,
                      BLOCK_L: tl.constexpr):

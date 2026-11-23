@@ -672,7 +672,9 @@ class PackedPrefill:
         self.riders = 0 if rows is None else rows.shape[1]
         if self.riders:
             self.rider_slots, self.rider_starts = rows[0], rows[1]
-            self.rider_splits = max(1, min(32, 256 // (self.riders * pool.num_kv_heads)))
+            # as above: 5, 6 and 7 rows otherwise each built the decode kernel anew at their first use (2.7 s on a T4)
+            size = next((b for b in DecodeGraphs.BUCKETS if b >= self.riders), self.riders)
+            self.rider_splits = max(1, min(32, 256 // (size * pool.num_kv_heads)))
         return self
 
     def freqs(self, rope) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -1073,12 +1075,28 @@ class DecodeGraphs:
         # holds no reference to its model (the model passes itself in): no model <-> graphs cycle, so a dropped model
         # frees its KV pool at once, and a deep-copied model gets graphs of its own
         self.graphs = {}  # (batch bucket, Quest width) -> (key, graph, ids, rows, logits, host rows, turn, aux)
+        self._min_rows: Optional[int] = None
+
+    def bucket(self, model: "SubspaceCausalLM", rows: int) -> int:
+        """The batch bucket a step of `rows` rows is padded to (0: more than the largest holds). A one-row step takes
+        two rows where `turing doctor --tune` measured that faster on this GPU (decode_min_rows): cuBLAS runs one
+        row as a gemv without tensor cores, and a GPU at its power limit can run that far below the clock it keeps
+        for a GEMM (a Tesla T4 limited to 60 W: 21.3 ms a step of Qwen2.5-1.5B with one row, 15.5 with two). Only
+        for plain dense weights: 4-bit, input-sparse and MoE layers have one-row paths of their own."""
+        if self._min_rows is None:
+            from ..core.probe import tuned
+            from .activation_sparsity import SparseInputLinear
+            from .quant import QuantLinear
+            plain = not any(isinstance(m, (QuantLinear, SparseInputLinear, SparseMoE)) for m in model.modules())
+            self._min_rows = int(tuned("decode_min_rows", 1)) if plain else 1
+        rows = max(rows, self._min_rows)
+        return next((b for b in self.BUCKETS if b >= rows), 0)
 
     def eligible(self, model: "SubspaceCausalLM", caches: List[KVCache], lora: bool,
                  starts: Optional[List[int]] = None) -> bool:
         cfg, pool, w = model.config, caches[0].pool, model.embed_tokens.weight
         longest = max(starts if starts is not None else [c.length for c in caches]) + 1
-        bucket = next((b for b in self.BUCKETS if b >= len(caches)), 0)
+        bucket = self.bucket(model, len(caches))
         return (cfg.cuda_graphs and pool.device.type == "cuda" and len(caches) <= self.BUCKETS[-1]
                 and not lora and not torch.is_grad_enabled()
                 and (not pool.track_pages or longest <= self.CONTEXT_BUCKETS[-1] * 16)
@@ -1094,7 +1112,7 @@ class DecodeGraphs:
     def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, caches: List[KVCache],
             starts: Optional[List[int]] = None) -> torch.Tensor:
         B, pool, cfg = len(caches), caches[0].pool, model.config
-        bucket = next(b for b in self.BUCKETS if b >= B)
+        bucket = self.bucket(model, B)
         width = None
         starts = row_starts(caches) if starts is None else starts
         longest = max(starts) + 1
@@ -1218,6 +1236,10 @@ class PrefillGraphs:
         self.trial = {}  # step shape -> [eager ms, replay ms, ...] until judged
         self.limit = self.MAX_TOKENS
         self.dead = set()
+        # For beats_any_eager: a kept lone-prompt graph's faster replay by bucket, and the fastest eager forward of a
+        # lone prompt timed so far (what the host needs to launch an eager forward of any length), in ms
+        self.replay_ms = {}
+        self.host_ms: Optional[float] = None
 
     @staticmethod
     def bucket(tokens: int) -> int:
@@ -1339,7 +1361,17 @@ class PrefillGraphs:
             del self.trial[key]
             if min(trial[1:]) > self.KEEP * trial[0]:
                 self._drop(key)
+            elif (n, r) == (1, 0):
+                self.replay_ms[b] = min(trial[1:])
         return out
+
+    def beats_any_eager(self, tokens: int) -> bool:
+        """Whether a lone prompt of `tokens` tokens is replayed from its kept graph in less time than the fastest
+        eager forward of a lone prompt took here. An eager forward is bound by the host's launches whatever its
+        length (Qwen2.5-1.5B on an L4: 34 ms for 64 tokens and for 512), so a prompt this short is prefilled whole
+        sooner than a cached prefix of it is continued (replays: 16 ms for 64 tokens, 30 for 512)."""
+        ms = self.replay_ms.get(self.bucket(tokens))
+        return ms is not None and self.host_ms is not None and ms < self.host_ms
 
     def _drop(self, key: tuple) -> None:
         n, b, r = key
@@ -1349,6 +1381,8 @@ class PrefillGraphs:
             self.dead.add(key)
         for gone in [k for k in self.graphs if k == key or (n, r) == (1, 0) and k[1] >= b]:
             del self.graphs[gone]
+        if (n, r) == (1, 0):
+            self.replay_ms = {k: v for k, v in self.replay_ms.items() if k < b}
 
     def time_eager(self, key: tuple) -> Optional[float]:
         """Called before the eager forward of a step run() declined: the start time if this is its shape's first
@@ -1360,7 +1394,10 @@ class PrefillGraphs:
 
     def eager_took(self, key: tuple, since: float) -> None:
         torch.cuda.synchronize()
-        self.trial[key] = [(time.perf_counter() - since) * 1e3]
+        ms = (time.perf_counter() - since) * 1e3
+        self.trial[key] = [ms]
+        if (key[0], key[2]) == (1, 0):
+            self.host_ms = ms if self.host_ms is None else min(self.host_ms, ms)
 
     @staticmethod
     def _inputs(key: tuple, device):

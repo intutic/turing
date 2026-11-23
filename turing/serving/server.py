@@ -167,6 +167,7 @@ def create_app(
     reasoning_effort: Optional[str] = None,
     admission: bool = True,
     lanes: bool = True,
+    warmup: bool = False,
 ) -> FastAPI:
     """embedding_model / rerank_model: HuggingFace ids or local paths of a BERT-style embedding model and a
     cross-encoder for /v1/embeddings, /api/embed and /v1/rerank; without them the served LLM does both. A
@@ -174,7 +175,8 @@ def create_app(
     api_key: when set, every endpoint but /health needs `Authorization: Bearer <key>` or `x-api-key: <key>`.
     reasoning_effort: the thinking budget for requests that do not set one (none, low, medium, high).
     admission / lanes: build an AdmissionController sized to the engine's KV pool and the 3-lane LanePolicy when
-    the engine has none and none is passed (False leaves them off)."""
+    the engine has none and none is passed (False leaves them off).
+    warmup: run engine.warm_up() in the app's startup, so the server listens only once its kernels are compiled."""
     if admission_controller is not None:
         engine.admission = admission_controller
     elif admission and engine.admission is None:
@@ -186,12 +188,15 @@ def create_app(
         engine.lane_policy = LanePolicy()
     if reasoning_effort is not None:
         effort_budget(reasoning_effort)  # refuse a bad default at startup, not on every request
+    generation.think_token_ids(engine.tokenizer)  # the vocabulary is read here once, not in the first request
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await engine.start()
         if kv_publisher is not None:
             kv_publisher.start()
+        if warmup:
+            print(f"[+] Warm-up took {await engine.warm_up():.1f} s", flush=True)
         try:
             yield
         finally:

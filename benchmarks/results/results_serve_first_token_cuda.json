@@ -1,0 +1,575 @@
+{
+  "note": "Time to the first streamed content of ten chat requests sent one after the other to `turing serve` (Qwen2.5-1.5B-Instruct, bf16, the server's defaults) on an NVIDIA L4 on 2026-11-23, by scratch client diag_http.py over HTTP on the same machine, at three stages of that day's tree; and a trace of the server's stages for the same requests (serve_traced.py: generation.start's own time, the engine's time from admission to the first token, the prefill step's time on the host, the cached prefix each request took). All runs in one boot of the VM. 'again' requests repeat the one before with another first word. The trace's prefill_step_host_ms is the time the scheduler step took on the host: with a step launched from a CUDA graph it returns before the device has finished.",
+  "env": {
+    "gpu": "NVIDIA L4, 23034 MiB, driver 580.178.04",
+    "machine": "g2-standard-16 (Spot), us-central1-b",
+    "python": "3.10.12",
+    "torch": "2.9.1+cu129",
+    "image_torch": "2.11.0+cu128",
+    "image_triton": "3.6.0",
+    "boot": "2026-11-23T14:33:29Z"
+  },
+  "before": {
+    "tree": "e1b5a19 plus the warm-up",
+    "requests": [
+      {
+        "request": "short",
+        "first_token_s": 0.313,
+        "total_s": 0.45
+      },
+      {
+        "request": "short, other text",
+        "first_token_s": 0.258,
+        "total_s": 0.556
+      },
+      {
+        "request": "short again",
+        "first_token_s": 0.261,
+        "total_s": 0.398
+      },
+      {
+        "request": "about 300 tokens",
+        "first_token_s": 0.271,
+        "total_s": 0.502
+      },
+      {
+        "request": "about 300 tokens again",
+        "first_token_s": 0.26,
+        "total_s": 0.289
+      },
+      {
+        "request": "about 1,200 tokens",
+        "first_token_s": 0.279,
+        "total_s": 0.514
+      },
+      {
+        "request": "about 1,200 tokens again",
+        "first_token_s": 0.28,
+        "total_s": 0.311
+      },
+      {
+        "request": "about 3,000 tokens",
+        "first_token_s": 0.337,
+        "total_s": 0.577
+      },
+      {
+        "request": "about 3,000 tokens again",
+        "first_token_s": 0.339,
+        "total_s": 0.371
+      },
+      {
+        "request": "short, last",
+        "first_token_s": 0.263,
+        "total_s": 0.37
+      }
+    ],
+    "metrics": [
+      "turing_total_tokens_generated 157",
+      "turing_ttft_avg_ms 160.72",
+      "turing_ttft_p99_ms 210.16",
+      "turing_itl_avg_ms 10.42"
+    ],
+    "trace": {
+      "generation_start_ms": [
+        213.15,
+        210.31,
+        205.7,
+        209.05,
+        203.73,
+        209.76,
+        209.07,
+        204.49,
+        203.16,
+        211.29
+      ],
+      "engine_first_token_ms": [
+        152.79,
+        146.69,
+        142.89,
+        143.17,
+        142.22,
+        156.51,
+        157.82,
+        210.8,
+        211.96,
+        147.58
+      ],
+      "prefill_step_host_ms": [
+        39.54,
+        37.73,
+        37.69,
+        38.87,
+        38.71,
+        43.13,
+        43.25,
+        44.11,
+        43.62,
+        37.91
+      ],
+      "cached_prefix_tokens": [
+        0,
+        16,
+        32,
+        16,
+        16,
+        320,
+        320,
+        1216,
+        1216,
+        16
+      ]
+    },
+    "variants_first_token_s_of_the_third_request": {
+      "defaults": 0.261,
+      "--draft-tokens 0": 0.247,
+      "--no-prefix-caching": 0.242,
+      "--kv-cache-dtype native": 0.256,
+      "all three and --no-lanes --no-admission-control": 0.226
+    }
+  },
+  "after": {
+    "tree": "the same with think_token_ids cached per tokenizer (its first call still inside the first request)",
+    "requests": [
+      {
+        "request": "short",
+        "first_token_s": 0.211,
+        "total_s": 0.348
+      },
+      {
+        "request": "short, other text",
+        "first_token_s": 0.054,
+        "total_s": 0.356
+      },
+      {
+        "request": "short again",
+        "first_token_s": 0.054,
+        "total_s": 0.195
+      },
+      {
+        "request": "about 300 tokens",
+        "first_token_s": 0.059,
+        "total_s": 0.291
+      },
+      {
+        "request": "about 300 tokens again",
+        "first_token_s": 0.057,
+        "total_s": 0.086
+      },
+      {
+        "request": "about 1,200 tokens",
+        "first_token_s": 0.076,
+        "total_s": 0.312
+      },
+      {
+        "request": "about 1,200 tokens again",
+        "first_token_s": 0.076,
+        "total_s": 0.107
+      },
+      {
+        "request": "about 3,000 tokens",
+        "first_token_s": 0.141,
+        "total_s": 0.383
+      },
+      {
+        "request": "about 3,000 tokens again",
+        "first_token_s": 0.135,
+        "total_s": 0.167
+      },
+      {
+        "request": "short, last",
+        "first_token_s": 0.054,
+        "total_s": 0.162
+      }
+    ],
+    "metrics": [
+      "turing_total_tokens_generated 157",
+      "turing_ttft_avg_ms 58.9",
+      "turing_ttft_p99_ms 113.94",
+      "turing_itl_avg_ms 10.49"
+    ],
+    "trace": {
+      "generation_start_ms": [
+        117.16,
+        0.48,
+        0.49,
+        0.54,
+        0.54,
+        0.67,
+        0.72,
+        1.02,
+        1.03,
+        0.42
+      ],
+      "engine_first_token_ms": [
+        53.37,
+        40.54,
+        39.86,
+        42.45,
+        41.73,
+        51.65,
+        56.27,
+        118.06,
+        112.91,
+        38.3
+      ],
+      "prefill_step_host_ms": [
+        40.04,
+        38.16,
+        37.46,
+        40.0,
+        39.26,
+        43.68,
+        43.31,
+        43.15,
+        43.21,
+        35.9
+      ],
+      "cached_prefix_tokens": [
+        0,
+        16,
+        32,
+        16,
+        16,
+        320,
+        320,
+        1216,
+        1216,
+        16
+      ]
+    }
+  },
+  "docker_image": {
+    "note": "the image built from deploy/Dockerfile on the VM at each stage, `docker run --gpus all`, the same client; the seconds until /health include the model's download inside the container",
+    "before": {
+      "seconds_until_health": 84.2,
+      "requests": [
+        {
+          "request": "short",
+          "first_token_s": 0.313,
+          "total_s": 0.449
+        },
+        {
+          "request": "short, other text",
+          "first_token_s": 0.271,
+          "total_s": 0.568
+        },
+        {
+          "request": "short again",
+          "first_token_s": 0.265,
+          "total_s": 0.401
+        },
+        {
+          "request": "about 300 tokens",
+          "first_token_s": 0.269,
+          "total_s": 0.499
+        },
+        {
+          "request": "about 300 tokens again",
+          "first_token_s": 0.269,
+          "total_s": 0.297
+        },
+        {
+          "request": "about 1,200 tokens",
+          "first_token_s": 0.294,
+          "total_s": 0.528
+        },
+        {
+          "request": "about 1,200 tokens again",
+          "first_token_s": 0.29,
+          "total_s": 0.321
+        },
+        {
+          "request": "about 3,000 tokens",
+          "first_token_s": 0.363,
+          "total_s": 0.602
+        },
+        {
+          "request": "about 3,000 tokens again",
+          "first_token_s": 0.358,
+          "total_s": 0.389
+        },
+        {
+          "request": "short, last",
+          "first_token_s": 0.268,
+          "total_s": 0.375
+        }
+      ]
+    },
+    "after": {
+      "seconds_until_health": 80.2,
+      "requests": [
+        {
+          "request": "short",
+          "first_token_s": 0.202,
+          "total_s": 0.338
+        },
+        {
+          "request": "short, other text",
+          "first_token_s": 0.05,
+          "total_s": 0.349
+        },
+        {
+          "request": "short again",
+          "first_token_s": 0.05,
+          "total_s": 0.187
+        },
+        {
+          "request": "about 300 tokens",
+          "first_token_s": 0.053,
+          "total_s": 0.286
+        },
+        {
+          "request": "about 300 tokens again",
+          "first_token_s": 0.053,
+          "total_s": 0.082
+        },
+        {
+          "request": "about 1,200 tokens",
+          "first_token_s": 0.077,
+          "total_s": 0.313
+        },
+        {
+          "request": "about 1,200 tokens again",
+          "first_token_s": 0.077,
+          "total_s": 0.108
+        },
+        {
+          "request": "about 3,000 tokens",
+          "first_token_s": 0.15,
+          "total_s": 0.391
+        },
+        {
+          "request": "about 3,000 tokens again",
+          "first_token_s": 0.143,
+          "total_s": 0.175
+        },
+        {
+          "request": "short, last",
+          "first_token_s": 0.05,
+          "total_s": 0.157
+        }
+      ]
+    },
+    "final": {
+      "seconds_until_health": 84.2,
+      "warm_up_s": 23.8,
+      "requests": [
+        {
+          "request": "short",
+          "first_token_s": 0.063,
+          "total_s": 0.2
+        },
+        {
+          "request": "short, other text",
+          "first_token_s": 0.034,
+          "total_s": 0.225
+        },
+        {
+          "request": "short again",
+          "first_token_s": 0.034,
+          "total_s": 0.17
+        },
+        {
+          "request": "about 300 tokens",
+          "first_token_s": 0.054,
+          "total_s": 0.285
+        },
+        {
+          "request": "about 300 tokens again",
+          "first_token_s": 0.054,
+          "total_s": 0.083
+        },
+        {
+          "request": "about 1,200 tokens",
+          "first_token_s": 0.079,
+          "total_s": 0.315
+        },
+        {
+          "request": "about 1,200 tokens again",
+          "first_token_s": 0.074,
+          "total_s": 0.104
+        },
+        {
+          "request": "about 3,000 tokens",
+          "first_token_s": 0.153,
+          "total_s": 0.392
+        },
+        {
+          "request": "about 3,000 tokens again",
+          "first_token_s": 0.149,
+          "total_s": 0.18
+        },
+        {
+          "request": "short, last",
+          "first_token_s": 0.033,
+          "total_s": 0.14
+        }
+      ]
+    }
+  },
+  "final": {
+    "tree": "the same with the vocabulary read at startup and a prompt arriving alone prefilled whole from its CUDA graph where that beats any eager forward (the warm-up captures the graphs of prompts up to 256 tokens)",
+    "requests": [
+      {
+        "request": "short",
+        "first_token_s": 0.062,
+        "total_s": 0.199
+      },
+      {
+        "request": "short, other text",
+        "first_token_s": 0.034,
+        "total_s": 0.224
+      },
+      {
+        "request": "short again",
+        "first_token_s": 0.033,
+        "total_s": 0.17
+      },
+      {
+        "request": "about 300 tokens",
+        "first_token_s": 0.057,
+        "total_s": 0.289
+      },
+      {
+        "request": "about 300 tokens again",
+        "first_token_s": 0.056,
+        "total_s": 0.086
+      },
+      {
+        "request": "about 1,200 tokens",
+        "first_token_s": 0.077,
+        "total_s": 0.314
+      },
+      {
+        "request": "about 1,200 tokens again",
+        "first_token_s": 0.075,
+        "total_s": 0.106
+      },
+      {
+        "request": "about 3,000 tokens",
+        "first_token_s": 0.142,
+        "total_s": 0.383
+      },
+      {
+        "request": "about 3,000 tokens again",
+        "first_token_s": 0.141,
+        "total_s": 0.173
+      },
+      {
+        "request": "short, last",
+        "first_token_s": 0.033,
+        "total_s": 0.141
+      }
+    ],
+    "metrics": [
+      "turing_total_tokens_generated 148",
+      "turing_ttft_avg_ms 50.53",
+      "turing_ttft_p99_ms 114.44",
+      "turing_itl_avg_ms 10.26"
+    ],
+    "seconds_until_health_with_caches_kept": 19.0,
+    "trace": {
+      "generation_start_ms": [
+        0.49,
+        0.4,
+        0.41,
+        0.5,
+        0.51,
+        0.65,
+        0.7,
+        0.99,
+        1.04,
+        0.36
+      ],
+      "engine_first_token_ms": [
+        28.98,
+        18.37,
+        18.49,
+        41.26,
+        40.52,
+        56.85,
+        55.6,
+        114.8,
+        115.58,
+        17.97
+      ],
+      "prefill_step_host_ms": [
+        1.51,
+        1.34,
+        1.4,
+        38.82,
+        38.0,
+        42.58,
+        42.73,
+        42.56,
+        43.62,
+        1.27
+      ],
+      "cached_prefix_tokens": [
+        0,
+        0,
+        0,
+        16,
+        16,
+        320,
+        320,
+        1216,
+        1216,
+        0
+      ]
+    },
+    "without_prefix_cache": [
+      {
+        "request": "short",
+        "first_token_s": 0.061,
+        "total_s": 0.198
+      },
+      {
+        "request": "short, other text",
+        "first_token_s": 0.033,
+        "total_s": 0.224
+      },
+      {
+        "request": "short again",
+        "first_token_s": 0.033,
+        "total_s": 0.171
+      },
+      {
+        "request": "about 300 tokens",
+        "first_token_s": 0.058,
+        "total_s": 0.29
+      },
+      {
+        "request": "about 300 tokens again",
+        "first_token_s": 0.16,
+        "total_s": 0.189
+      },
+      {
+        "request": "about 1,200 tokens",
+        "first_token_s": 0.092,
+        "total_s": 0.328
+      },
+      {
+        "request": "about 1,200 tokens again",
+        "first_token_s": 0.092,
+        "total_s": 0.123
+      },
+      {
+        "request": "about 3,000 tokens",
+        "first_token_s": 0.21,
+        "total_s": 0.451
+      },
+      {
+        "request": "about 3,000 tokens again",
+        "first_token_s": 0.214,
+        "total_s": 0.246
+      },
+      {
+        "request": "short, last",
+        "first_token_s": 0.033,
+        "total_s": 0.141
+      }
+    ],
+    "outputs_note": "the greedy text of 2 of the 10 requests differs from the stage before and equals that of --no-prefix-caching: a short prompt prefilled whole does not read the int8 pages of a cached prefix"
+  }
+}

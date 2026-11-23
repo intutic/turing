@@ -22,6 +22,7 @@ a LoRA adapter (§8). The main flags by topic are below; `turing serve --help` l
 | :--- | :--- | :--- |
 | `--model` | `smollm2` | HuggingFace repo id, local directory, `.gguf` file, `.tgate4` directory or alias |
 | `--device` | `auto` | `auto` picks CUDA, then XPU, then MPS, then Vulkan, then CPU; `rocm` needs PyTorch's HIP build |
+| `--served-model-name` | `HF-<--model>` | The model id `/v1/models`, `/health` and `/api/tags` report. A request may name any model |
 | `--dtype` | checkpoint | `bf16`/`fp16`/`fp32`; default: the checkpoint's half type on CUDA, fp32 on CPU and MPS |
 | `--quantization` | `none` | `w4a16-rtn` or `w4a16-gptq`: 4-bit weights at load (GPTQ calibrates on WikiText-2; `turing convert` does it once) |
 | `--no-quantize-lm-head` | off | With `--quantization`, keep the LM head in the model dtype (it is quantized to 4 bits by default) |
@@ -42,6 +43,7 @@ a LoRA adapter (§8). The main flags by topic are below; `turing serve --help` l
 | `--max-batch-size` | `64` | Requests running (prefilling or decoding) at once |
 | `--no-cuda-graphs` | off | Run decode steps eagerly instead of replaying captured CUDA graphs |
 | `--no-prefix-caching` | off | Disable automatic prefix caching |
+| `--no-warmup` | off | CUDA: listen before the warm-up requests have run. By default the server sends itself a few requests at startup, so Triton's compiles, the paged prefill kernel's tuning and the CUDA graph captures happen before it accepts connections instead of inside the first requests of each shape |
 | `--draft-tokens` | `8` | Speculative draft tokens per step, from prompt lookup or from `--draft-head` (`0` = off). A request stops drafting while its drafts do not pay for the rows they add to the decode step ([§5](#5-prefix-caching-and-speculative-decoding)) |
 | `--draft-head` | none | An EAGLE-3 draft head for the served model (a Hugging Face repository or a directory with `config.json` and its weights); it drafts instead of prompt lookup |
 | `--moe-expert-slots` | all | MoE models that do not fit the GPU: experts kept on it per layer (`6.5` keeps 6 and 7 in turn). The others stay in host memory; a token routed to one is served from there ([§5a](#5a-moe-expert-offload)) |

@@ -3,6 +3,7 @@ Turing Engine Master Command-Line Interface (CLI).
 """
 
 import argparse
+import copy
 import os
 import sys
 import json
@@ -111,6 +112,7 @@ def main():
     serve_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, rocm, cpu, mps)")
+    serve_parser.add_argument("--served-model-name", type=str, default=None, help="The model id /v1/models, /health and /api/tags report (default: HF-<--model>; a request may name any model)")
     serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
     serve_parser.add_argument("--quantize-lm-head", action=argparse.BooleanOptionalAction, default=True, help="with --quantization, the LM head in 4 bits too (the largest single read per token); --no-quantize-lm-head keeps it in the model dtype")
@@ -135,6 +137,7 @@ def main():
     serve_parser.add_argument("--prefill-server", type=str, default=None, metavar="HOST:PORT", help="Prefill/decode disaggregation: prefill every prompt on this --prefill-worker and decode here")
     serve_parser.add_argument("--kv-port", type=int, default=5600, help="TCP port of --prefill-worker (default 5600)")
     serve_parser.add_argument("--no-prefix-caching", action="store_true", help="Disable automatic prefix caching")
+    serve_parser.add_argument("--no-warmup", action="store_true", help="CUDA: listen before the kernels are compiled and tuned; the first requests of each shape then wait for that, and so does every request running beside them")
     serve_parser.add_argument("--lora", action="append", default=[], metavar="NAME=PATH", help="Load a PEFT LoRA adapter (repeatable); select it per request with model 'base:NAME' or X-Turing-Adapter")
     serve_parser.add_argument("--enable-kv-events", action="store_true", help="Enable ZeroMQ KV block event publisher for llm-d EPP prefix cache routing")
     serve_parser.add_argument("--kv-events-pub-port", type=int, default=5556, help="ZeroMQ PUB port for live KV cache block events (default: 5556)")
@@ -328,6 +331,10 @@ def main():
         else:
             model_inst, tokenizer_inst = _load_weights(args, dev)
             cfg = model_inst.config
+        if args.served_model_name:
+            if model_inst is None:
+                cfg = copy.copy(cfg)  # a preset is a shared object
+            cfg.name = args.served_model_name
 
         # Multi-GPU / Multi-Node Distributed Driver setup
         # Under torchrun every rank runs this command with the same model; rank 0 serves HTTP, the others run steps.
@@ -397,9 +404,14 @@ def main():
             )
             print(f"[+] Initialized llm-d KVBlockEventPublisher on {kv_pub.pub_endpoint} (topic: {kv_pub.topic})")
 
+        # CUDA: the kernels are compiled, tuned and captured by a few requests before the server listens
+        warm = (dev.type == "cuda" and model_inst is not None and dist_driver is None and not args.prefill_server
+                and not args.no_warmup)
         app = create_app(engine, kv_publisher=kv_pub, embedding_model=args.embedding_model, rerank_model=args.rerank_model,
                          api_key=args.api_key, reasoning_effort=args.reasoning_effort,
-                         admission=not args.no_admission_control, lanes=not args.no_lanes)
+                         admission=not args.no_admission_control, lanes=not args.no_lanes, warmup=warm)
+        if warm:
+            print("[*] Warming up: compiling and tuning kernels before listening (--no-warmup skips this)")
         print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} (Model: {cfg.name}, Device: {dev})")
         uvicorn.run(app, host=args.host, port=args.port)
         if dist_driver is not None:
@@ -470,7 +482,10 @@ def main():
                 raise SystemExit("[!] --tune measures CUDA kernels")
             values = probe.tune_int4_max_rows(dev)
             print(f"    int4 GEMM against dequantize + cuBLAS, microseconds by rows: {values['int4_crossover_us']}")
-            print(f"[+] int4_max_rows = {values['int4_max_rows']} kept in {probe.save_tuning(values)}")
+            values.update(probe.tune_decode_min_rows(dev))
+            print(f"    dense decode GEMMs, milliseconds a pass by rows: {values['decode_rows_ms']}")
+            print(f"[+] int4_max_rows = {values['int4_max_rows']} and decode_min_rows = {values['decode_min_rows']} "
+                  f"kept in {probe.save_tuning(values)}")
 
     elif args.command == "info":
         jcfg = TuringConfig(device=args.device)

@@ -3,6 +3,7 @@ Reasoning (thinking) support for models that emit <think>...</think> (Qwen3, Dee
 splitting the text stream into reasoning and content, and a thinking-token budget enforced while decoding.
 """
 
+import functools
 from typing import Optional, Tuple, List
 
 import torch
@@ -109,17 +110,23 @@ class ReasoningStreamFilter:
         return text
 
 
-def think_token_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:
-    """(<think> ids, </think> ids) when the tokenizer has both tags as tokens (a reasoning model), else None."""
-    if tokenizer is None:
-        return None
+@functools.lru_cache(maxsize=8)
+def _think_ids(tokenizer) -> Optional[Tuple[int, int]]:
     try:
         vocab = tokenizer.get_vocab()
     except Exception:
         return None
     if OPEN not in vocab or CLOSE not in vocab:
         return None
-    return [vocab[OPEN]], [vocab[CLOSE]]
+    return vocab[OPEN], vocab[CLOSE]
+
+
+def think_token_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:
+    """(<think> ids, </think> ids) when the tokenizer has both tags as tokens (a reasoning model), else None. The
+    vocabulary is read once per tokenizer: get_vocab() builds a new dict of every token (0.1 s for Qwen2.5's
+    151,936), and a chat request asks twice."""
+    ids = _think_ids(tokenizer) if tokenizer is not None else None
+    return ([ids[0]], [ids[1]]) if ids else None
 
 
 class ThinkingBudget:

@@ -36,6 +36,23 @@ _DTYPES = {"float16": torch.float16, "fp16": torch.float16, "bfloat16": torch.bf
            "float32": torch.float32, "fp32": torch.float32}
 
 
+_bf16_announced = False
+
+
+def _announce_slow_bf16(dtype: torch.dtype, device: torch.device) -> torch.dtype:
+    """Says once when bf16 goes to a GPU that multiplies it without tensor cores (before Ampere). On a Tesla T4 that
+    is 2.3 against 23 TFLOP/s in fp16, and 115 against 16 ms for 8 rows through Qwen2.5-1.5B's weights; one row
+    costs the same in both. The dtype stays: fp16 is not safe for every bf16 checkpoint."""
+    global _bf16_announced
+    if (dtype == torch.bfloat16 and device.type == "cuda" and not _bf16_announced
+            and torch.cuda.get_device_capability(device) < (8, 0)):
+        _bf16_announced = True
+        print("[!] This GPU has no bf16 matmul (compute capability below 8.0): prefill and decode steps of more than "
+              "one row run about 7 to 10 times slower in bf16 than in fp16. Pass --dtype fp16 unless the model "
+              "overflows in fp16 (Gemma does).")
+    return dtype
+
+
 def resolve_dtype(dtype, device: torch.device, checkpoint_dtype=None) -> torch.dtype:
     """None picks the default: on CUDA the checkpoint's half-precision type (bf16 checkpoints such as Gemma overflow in
     fp16) or fp16; fp32 on CPU and MPS."""
@@ -44,9 +61,9 @@ def resolve_dtype(dtype, device: torch.device, checkpoint_dtype=None) -> torch.d
     if dtype is not None:
         if dtype not in _DTYPES:
             raise ValueError(f"dtype '{dtype}' is not one of {sorted(_DTYPES)}")
-        return _DTYPES[dtype]
+        return _announce_slow_bf16(_DTYPES[dtype], device)
     if device.type == "cuda":
-        return torch.bfloat16 if checkpoint_dtype == torch.bfloat16 else torch.float16
+        return _announce_slow_bf16(torch.bfloat16 if checkpoint_dtype == torch.bfloat16 else torch.float16, device)
     return torch.float32
 
 
