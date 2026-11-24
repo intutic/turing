@@ -176,6 +176,7 @@ def main():
     conv_parser.add_argument("--calib-windows", type=int, default=128, help="GPTQ calibration windows (default 128)")
     conv_parser.add_argument("--calib-tokens", type=int, default=2048, help="Tokens per calibration window (default 2048)")
     conv_parser.add_argument("--quantize-lm-head", action=argparse.BooleanOptionalAction, default=True, help="the LM head in 4 bits too; --no-quantize-lm-head keeps it in the model dtype")
+    conv_parser.add_argument("--symmetric", action="store_true", help="every group's zero point at 8 (GPTQ's sym=true, as Qwen's GPTQ-Int4 checkpoints): the Marlin kernels then read no zero points, at the cost of the levels an asymmetric grid would not waste on a one-sided group")
 
     # 5. Eval NIAH
     niah_parser = subparsers.add_parser("eval-niah", help="Pass-key needle-in-a-haystack retrieval through the engine on real weights")
@@ -442,8 +443,10 @@ def main():
     elif args.command == "convert":
         from turing.models.converter import convert_checkpoint
         dev = TuringConfig(device=args.device).resolve_device()
-        res = convert_checkpoint(args.model, args.output, args.method, str(dev), args.calib_windows, args.calib_tokens,
-                                 lm_head=args.quantize_lm_head)
+        from turing.models.quant import symmetric
+        with symmetric(args.symmetric):
+            res = convert_checkpoint(args.model, args.output, args.method, str(dev), args.calib_windows,
+                                     args.calib_tokens, lm_head=args.quantize_lm_head)
         print(json.dumps(res, indent=2))
 
     elif args.command == "eval-niah":

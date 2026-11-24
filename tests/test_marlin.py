@@ -70,10 +70,31 @@ def test_marlin_layout_matches_vllm_reference(N, K, group, dtype):
     assert torch.equal(nib, codes.t().to(torch.int64))
 
 
-def _case(N, K, group, dtype, seed=0):
+def _case(N, K, group, dtype, seed=0, sym=False):
+    from turing.models.quant import symmetric
     torch.manual_seed(seed)
-    codes, scales, zeros = rtn_quantize(torch.randn(N, K), group=group)
+    with symmetric(sym):
+        codes, scales, zeros = rtn_quantize(torch.randn(N, K), group=group)
     return pack(codes).cuda(), scales.cuda(), zeros.cuda()
+
+
+def test_a_symmetric_grid_has_every_zero_point_at_eight_and_is_packed_without_them():
+    """quant.symmetric: the zero point of every group is 8 and the range its largest magnitude on both sides; the
+    Marlin layout of such a matrix carries no zero points (the kernel that reads none), and a matrix with other
+    zero points cannot be packed that way."""
+    from turing.models.quant import symmetric
+    torch.manual_seed(0)
+    W = torch.randn(64, 256) * 3
+    with symmetric():
+        codes, scales, zeros = rtn_quantize(W, group=64)
+    assert (zeros == 8).all()
+    w = dequantize(pack(codes), scales, zeros, torch.float32)
+    assert (w - W).abs().max() <= 0.51 * scales.float().max() + 1e-3 + (W.abs().amax() / 15)  # a step, and the clipped top level
+    assert marlin_layout(pack(codes), scales, zeros, torch.float16)[2].numel() == 0
+    codes, scales, zeros = rtn_quantize(W, group=64)
+    assert (zeros != 8).any() and marlin_layout(pack(codes), scales, zeros, torch.float16)[2].numel() > 0
+    with pytest.raises(ValueError, match="other than 8"):
+        marlin_layout(pack(codes), scales, zeros, torch.float16, symmetric=True)
 
 
 @needs_marlin
@@ -81,10 +102,12 @@ def _case(N, K, group, dtype, seed=0):
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("N,K", [(2048, 1536), (1536, 1536), (17920, 1536), (1536, 8960)])
 @pytest.mark.parametrize("group", [64, 128])
-def test_marlin_gemm_matches_reference(M, dtype, N, K, group):
+@pytest.mark.parametrize("sym", [False, True])  # with zero points (AWQ's kernel) and without (GPTQ's)
+def test_marlin_gemm_matches_reference(M, dtype, N, K, group, sym):
     from turing.kernels.marlin import marlin_gemm, marlin_pack, marlin_supported
-    q, s, z = _case(N, K, group, dtype)
+    q, s, z = _case(N, K, group, dtype, sym=sym)
     assert marlin_supported(N, K, group, dtype, q.device)
+    assert (marlin_pack(q, s, z, dtype).zeros.numel() == 0) == sym
     x = torch.randn(M, K, device="cuda", dtype=dtype)
     bias = torch.randn(N, device="cuda", dtype=dtype)
     ref = x.float() @ dequantize(q, s, z, torch.float32).T

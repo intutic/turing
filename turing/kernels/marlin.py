@@ -24,6 +24,7 @@ except ImportError:
 
 GROUPS = (64, 128)  # group_blocks 4 and 8: the kernels this build instantiates (csrc/marlin/kernel_configs.h)
 MAX_BLOCKS_PER_SM = 4  # vLLM's MARLIN_MAX_BLOCKS_PER_SM: lock ints per SM in the workspace
+SYMMETRIC_ZERO = 8  # the zero point of every group of a symmetric 4-bit grid (GPTQ's sym=true)
 # vLLM marlin_utils.get_scale_perms()
 SCALE_PERM = [i + 8 * j for i in range(8) for j in range(8)]
 SCALE_PERM_SINGLE = [2 * i + j for i in range(4) for j in (0, 1, 8, 9, 16, 17, 24, 25)]
@@ -57,14 +58,23 @@ def _pack8(x: torch.Tensor) -> torch.Tensor:
 
 
 def marlin_layout(qweight: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor, dtype: torch.dtype,
-                  bias: Optional[torch.Tensor] = None
+                  bias: Optional[torch.Tensor] = None, symmetric: Optional[bool] = None
                   ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """The device-independent part of marlin_pack: (AWQ int32 weight [K, N / 8], Marlin scales [K / group, N],
-    Marlin zero points int32 [K / group, N / 8], Marlin bias [N] or None)."""
+    Marlin zero points int32 [K / group, N / 8], Marlin bias [N] or None). symmetric (default: whether every zero
+    point is 8, as quant.symmetric gives them): no zero points are passed on, and Marlin runs its kernel without
+    them (b_type kU4B8, what a symmetric GPTQ checkpoint takes in vLLM), which reads and subtracts none."""
     from ..models.quant import unpack
     N, G = scales.shape
     awq = _pack8(unpack(qweight).t())  # AWQ: K rows, 8 output columns per int32
     s = scales.t().to(dtype).reshape(-1, len(SCALE_PERM))[:, SCALE_PERM].reshape(G, N).contiguous()
+    every_eight = bool((zeros == SYMMETRIC_ZERO).all())
+    if symmetric and not every_eight:
+        raise ValueError("a matrix with zero points other than 8 cannot be packed as symmetric")
+    if every_eight if symmetric is None else symmetric:
+        b = None if bias is None else \
+            bias.to(dtype).reshape(-1, len(SCALE_PERM_SINGLE))[:, SCALE_PERM_SINGLE].reshape(N).contiguous()
+        return awq, s, torch.empty(0, dtype=torch.int32, device=qweight.device), b
     z = _pack8(zeros.t().reshape(-1, len(SCALE_PERM))[:, SCALE_PERM].reshape(G, N))  # marlin_zero_points
     b = None if bias is None else \
         bias.to(dtype).reshape(-1, len(SCALE_PERM_SINGLE))[:, SCALE_PERM_SINGLE].reshape(N).contiguous()
@@ -81,12 +91,12 @@ def _workspace(index: int, user: str = "") -> torch.Tensor:
 
 
 def marlin_pack(qweight: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor, dtype: torch.dtype,
-                bias: Optional[torch.Tensor] = None) -> MarlinWeights:
+                bias: Optional[torch.Tensor] = None, symmetric: Optional[bool] = None) -> MarlinWeights:
     """A QuantLinear's buffers (on a CUDA device) -> Marlin's copy for activations of `dtype`; check
-    marlin_supported first. The inputs are left as they are."""
+    marlin_supported first. The inputs are left as they are. symmetric: as marlin_layout."""
     N, K = qweight.shape[0], qweight.shape[1] * 2
     with torch.inference_mode(False), torch.no_grad():  # normal tensors: used in and out of inference mode
-        awq, s, z, b = marlin_layout(qweight, scales, zeros, dtype, bias)
+        awq, s, z, b = marlin_layout(qweight, scales, zeros, dtype, bias, symmetric)
         q = _C.awq_marlin_repack(awq, K, N)
     return MarlinWeights(q, s, z, b, _workspace(qweight.device.index or 0), N, K)
 

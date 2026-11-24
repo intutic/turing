@@ -121,6 +121,9 @@ def main():
                     help="prompt tokens a scheduler step takes: Turing's prefill chunk (default 2,048), vLLM's "
                          "max_num_batched_tokens (default: its own, 8,192 on an L4)")
     ap.add_argument("--kv-pool-gib", type=float, default=None, help="Turing only: the KV pool's size")
+    ap.add_argument("--prompts", default="random", choices=["random", "wikitext"],
+                    help="the decode workload's prompts: random token ids, or WikiText windows as the benchmark's "
+                         "(two engines with different quantized weights continue random ids differently)")
     ap.add_argument("--top", type=int, default=12, help="kernels listed")
     ap.add_argument("--draft-head", default=None, help="an EAGLE-3 head: the code workload instead")
     ap.add_argument("--draft-tokens", type=int, default=5)
@@ -138,6 +141,11 @@ def main():
         from transformers import AutoTokenizer
         tok = AutoTokenizer.from_pretrained(a.model)
         prompts = spec.tokenized(tok, spec.code_prompts(24))[:a.concurrency]
+    elif a.prompts == "wikitext":  # benchmark_e2e_generation.py's prompts: text both engines continue alike
+        import benchmark_e2e_generation as bench
+        from transformers import AutoTokenizer
+        tok = AutoTokenizer.from_pretrained(a.model)
+        prompts = bench.prompts(tok, a.batch, a.context, seed=0)
     else:
         g = torch.Generator().manual_seed(0)
         prompts = torch.randint(1000, 30000, (a.batch, a.context), generator=g).tolist()

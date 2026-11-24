@@ -139,13 +139,15 @@ def silu_mul(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
     return y.view(gate.shape)
 
 
-def _rope_both(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
-    """q and k in one launch (k's programs follow q's)."""
+def _rope_both(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, tokens_first: bool = False):
+    """q and k in one launch (k's programs follow q's). tokens_first: the rotated q's memory is [B, L, H, D] (the
+    shape returned is [B, H, L, D] all the same), as a kernel that takes queries token by token reads them."""
     q = q if q.stride(-1) == 1 else q.contiguous()
     k = k if k.stride(-1) == 1 else k.contiguous()
     B, H, L, D = q.shape
     HK = k.shape[1]
-    yq = torch.empty(q.shape, device=q.device, dtype=q.dtype)
+    yq = torch.empty((B, L, H, D) if tokens_first else q.shape, device=q.device, dtype=q.dtype)
+    yq = yq.transpose(1, 2) if tokens_first else yq
     yk = torch.empty(k.shape, device=k.device, dtype=k.dtype)
     s_cb = cos.stride(0) if cos.dim() == 4 else 0
     BLOCK_D = triton.next_power_of_2(D)
@@ -159,11 +161,11 @@ def _rope_both(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.T
     return yq, yk
 
 
-def rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
+def rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, tokens_first: bool = False):
     """apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype)) for q [B, H, L, D], k [B, Hkv, L, D] and cos, sin
     [L, R] or [B, 1, L, R] (R <= D, even; cast to q's dtype in the kernel)."""
     if cos.stride(-1) != 1:
         cos, sin = cos.contiguous(), sin.contiguous()
     if sin.stride() != cos.stride():
         cos, sin = cos.contiguous(), sin.contiguous()
-    return _rope_both(q, k, cos, sin)
+    return _rope_both(q, k, cos, sin, tokens_first)

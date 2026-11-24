@@ -1,5 +1,6 @@
 // Turing Engine: the Marlin kernels this build instantiates, replacing vLLM v0.31.0's generate_kernels.py (jinja2).
-// Only its AWQ-INT4 entry (b_type kU4, integer zero points) for a_type = c_type = s_type in {kFloat16, kBFloat16},
+// Only its two INT4 entries, AWQ (b_type kU4, integer zero points) and GPTQ (kU4B8: every zero point is 8, and the
+// kernel reads none), for a_type = c_type = s_type in {kFloat16, kBFloat16},
 // group_blocks in {4, 8} (groups of 64 and 128), 4 pipeline stages (sm_80+). Per (a_type, group_blocks) these are
 // exactly the kernels generate_kernels.py emits: THREAD_CONFIGS x THREAD_M_BLOCKS {0.5, 1, 2, 3, 4} after its
 // 256-thread filter ((128, 128, 256) only for m_blocks <= 1, (64, 256, 256) only for m_blocks > 1).
@@ -29,8 +30,12 @@
   TURING_MARLIN_SHAPES(X, kBFloat16, 4)   \
   TURING_MARLIN_SHAPES(X, kBFloat16, 8)
 
-#define TURING_MARLIN_KERNEL(AT, GB, TH, MB, NB, KB, M8)                                              \
-  Marlin<vllm::AT.id(), vllm::kU4.id(), vllm::AT.id(), vllm::AT.id(), TH, MB, NB, KB, M8, 4, GB, false>
+#define TURING_MARLIN_KERNEL_OF(BT, AT, GB, TH, MB, NB, KB, M8)                                       \
+  Marlin<vllm::AT.id(), vllm::BT.id(), vllm::AT.id(), vllm::AT.id(), TH, MB, NB, KB, M8, 4, GB, false>
+#define TURING_MARLIN_KERNEL(AT, GB, TH, MB, NB, KB, M8) TURING_MARLIN_KERNEL_OF(kU4, AT, GB, TH, MB, NB, KB, M8)
+#define TURING_MARLIN_KERNEL_B8(AT, GB, TH, MB, NB, KB, M8) \
+  TURING_MARLIN_KERNEL_OF(kU4B8, AT, GB, TH, MB, NB, KB, M8)
 
-#define TURING_MARLIN_INSTANTIATE(AT, GB, TH, MB, NB, KB, M8) \
-  template __global__ void TURING_MARLIN_KERNEL(AT, GB, TH, MB, NB, KB, M8)(MARLIN_KERNEL_PARAMS);
+#define TURING_MARLIN_INSTANTIATE(AT, GB, TH, MB, NB, KB, M8)                                      \
+  template __global__ void TURING_MARLIN_KERNEL(AT, GB, TH, MB, NB, KB, M8)(MARLIN_KERNEL_PARAMS); \
+  template __global__ void TURING_MARLIN_KERNEL_B8(AT, GB, TH, MB, NB, KB, M8)(MARLIN_KERNEL_PARAMS);

@@ -20,7 +20,7 @@ from typing import NamedTuple, Tuple
 
 import torch
 
-from .marlin import GROUPS, HAS_MARLIN, _workspace, marlin_pack
+from .marlin import GROUPS, HAS_MARLIN, SYMMETRIC_ZERO, _workspace, marlin_pack
 from .triton_moe import moe_align, moe_sum
 
 try:
@@ -55,8 +55,9 @@ def _pack(packed: Packed, dtype: torch.dtype) -> Tuple[torch.Tensor, torch.Tenso
     """One matrix of every expert, expert by expert (a layer's worth at once would hold its unpacked codes)."""
     q, s, z = packed
     out = None
+    symmetric = bool((z == SYMMETRIC_ZERO).all())  # one kernel for every expert of the matrix
     for e in range(q.shape[0]):
-        w = marlin_pack(q[e], s[e], z[e], dtype)
+        w = marlin_pack(q[e], s[e], z[e], dtype, symmetric=symmetric)
         if out is None:
             out = tuple(torch.empty((q.shape[0], *t.shape), dtype=t.dtype, device=t.device)
                         for t in (w.qweight, w.scales, w.zeros))
@@ -79,7 +80,9 @@ def marlin_moe_pack(gate_up: Packed, down: Packed, dtype: torch.dtype) -> Marlin
 def marlin_moe_store(w: MarlinExperts, slot: int, gate_up: Packed, down: Packed, dtype: torch.dtype) -> None:
     """One expert's packed matrices (on the device, without the expert dimension) into slot `slot` of w: how an
     offloaded layer replaces a resident expert (SparseMoE._load)."""
-    packed = [marlin_pack(q, s, z, dtype) for q, s, z in (gate_up, down)]  # both before the slot changes
+    # both before the slot changes; with zero points if the layer's other experts have them
+    packed = [marlin_pack(q, s, z, dtype, symmetric=dst[2].numel() == 0)
+              for (q, s, z), dst in zip((gate_up, down), (w.gate_up, w.down))]
     for dst, m in zip((w.gate_up, w.down), packed):
         for d, src in zip(dst, (m.qweight, m.scales, m.zeros)):
             d[slot].copy_(src)

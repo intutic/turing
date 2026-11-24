@@ -322,8 +322,10 @@ def test_draft_head_on_cuda_with_concurrent_requests_keeps_greedy_output():
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="a verify step is launched ahead on CUDA only")
 def test_the_verify_step_is_launched_behind_the_chain_and_gives_the_same_tokens():
     """With a draft head on CUDA the step that verifies a chain's drafts is queued before the host has read them
-    (_verify_ahead): the same tokens as plain greedy decoding for requests that end one after the other (a step
-    in flight when one leaves), and a launch does not wait for the device (but for the ones that capture a graph)."""
+    (_verify_ahead), and while several requests draft the whole next cycle is queued behind it from the accept
+    counts on the device (_chain_ahead): the same tokens as plain greedy decoding for requests that end one after
+    the other (a step in flight when one leaves), and a launch does not wait for the device (but for the ones that
+    capture a graph)."""
     model = _target("cuda")
     prompts, lens = (PROMPT, PROMPT[3:] + [44, 45], PROMPT[5:]), (48, 21, 33)
 
@@ -357,10 +359,25 @@ def test_the_verify_step_is_launched_behind_the_chain_and_gives_the_same_tokens(
             waits.append(len(seen))
         return launched
     engine._verify_ahead = counted
+    chain, chained = engine._chain_ahead, []
+
+    def chain_counted():
+        torch.cuda.set_sync_debug_mode("warn")
+        try:
+            with warnings.catch_warnings(record=True) as seen:
+                warnings.simplefilter("always")
+                chain()
+        finally:
+            torch.cuda.set_sync_debug_mode("default")
+        if engine._chained is not None:
+            chained.append(len(seen))
+    engine._chain_ahead = chain_counted
     assert run(engine) == ref
     _all_pages_back(engine)
     assert engine.spec_drafted > 0
-    assert len(waits) > 20 and sorted(waits)[len(waits) // 2] == 0, waits
+    both = sorted(waits + chained)
+    assert len(both) > 20 and both[len(both) // 2] == 0, (waits, chained)
+    assert len(chained) > 5 and sorted(chained)[len(chained) // 2] == 0, chained  # cycles launched a cycle ahead
 
 
 def _serve(engine, prompts, lens, late=0):
@@ -389,7 +406,7 @@ def _serve(engine, prompts, lens, late=0):
 
 def _all_pages_back(engine):
     """No step in flight, and each pool has its pages again (but the scratch page of its padded decode steps)."""
-    assert engine._verifying is None
+    assert engine._verifying is None and engine._chained is None
     for pool in (engine.kv_pool, engine.draft_head.pool):
         assert pool.used_pages == (getattr(pool, "_scratch", None) is not None)
 
@@ -411,10 +428,12 @@ def test_a_request_cancelled_while_its_verify_step_is_in_flight_costs_the_others
             engine.cancel(reqs[0])  # seen at the next step, whose first act is to read this one
         return launched[-1]
     engine._verify_ahead = cancelling
+    chain, chained = engine._chain_ahead, []
+    engine._chain_ahead = lambda: chained.append(chain() or engine._chained is not None)  # cycles queued a cycle ahead
     out = _serve(engine, prompts, lens)
     cut = [i for i in range(3) if out[i] != ref[i]]
     assert len(cut) == 1 and len(out[cut[0]]) < lens[cut[0]] and out[cut[0]] == ref[cut[0]][:len(out[cut[0]])]
-    assert sum(launched) > 10  # the two others went on with steps launched ahead
+    assert sum(launched) + sum(chained) > 10  # the two others went on with steps launched ahead
     _all_pages_back(engine)
 
 

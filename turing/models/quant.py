@@ -18,6 +18,7 @@ multiplied by cuBLAS. Off CUDA it dequantizes and multiplies. Where the optional
 (turing.kernels.marlin), MARLIN_MIN_ROWS to MARLIN_MAX_ROWS rows go to Marlin first, from a repacked copy of the layer.
 """
 
+import contextlib
 import functools
 import math
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -40,8 +41,29 @@ INT4_MAX_ROWS = 64  # on another GPU, `turing bench-bw --tune` measures it (turi
 MARLIN_MIN_ROWS, MARLIN_MAX_ROWS = 1, 4096
 
 
+_SYMMETRIC = False  # set by symmetric(): every group's zero point is 8
+
+
+@contextlib.contextmanager
+def symmetric(on: bool = True):
+    """Within the block, rtn_quantize and gptq_quantize give every group the zero point 8 and a range of its largest
+    magnitude on both sides (GPTQ's sym=true, as in Qwen's GPTQ-Int4 checkpoints) instead of the group's own
+    minimum and maximum. The format is the same, and Marlin then runs its kernel without zero points
+    (kernels.marlin.marlin_layout). An asymmetric grid wastes none of its 16 levels on a one-sided group."""
+    global _SYMMETRIC
+    before, _SYMMETRIC = _SYMMETRIC, on
+    try:
+        yield
+    finally:
+        _SYMMETRIC = before
+
+
 def _grid(w: torch.Tensor, qmax: int = QMAX) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Asymmetric grid of groups w [..., GROUP]: fp16-rounded scale and integer zero point, as cift E10/E11."""
+    """Asymmetric grid of groups w [..., GROUP]: fp16-rounded scale and integer zero point, as cift E10/E11. Within
+    symmetric(): the zero point (qmax + 1) / 2 and the scale that puts the largest magnitude at qmax / 2 steps."""
+    if _SYMMETRIC:
+        scale = (2 * w.abs().amax(-1, keepdim=True) / qmax).clamp_min(1e-8).half().to(w.dtype)
+        return scale, torch.full_like(scale, (qmax + 1) // 2)
     lo, hi = w.amin(-1, keepdim=True), w.amax(-1, keepdim=True)
     scale = ((hi - lo) / qmax).clamp_min(1e-8).half().to(w.dtype)
     return scale, (-lo / scale).round().clamp(0, qmax)

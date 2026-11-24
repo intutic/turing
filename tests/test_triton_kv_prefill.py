@@ -184,8 +184,8 @@ def test_decoding_requests_ride_in_the_prefill_forwards_of_a_burst(draft):
 @pytest.mark.parametrize("storage", ["native", "fp8", "int8"])
 @torch.no_grad()
 def test_decode_rows_through_flashinfer(storage, monkeypatch):
-    """Where FlashInfer reads a layer's pages in place (model dtype, fp8), the decode rows of a packed prefill are
-    requests of one query each in a call of their own; an int8 layer's rows keep the decode kernel. Either way the
+    """Where FlashInfer reads a layer's pages in place (model dtype, fp8), the decode rows of a packed prefill go
+    through its decode wrapper in a call of their own; an int8 layer's rows keep the decode kernel. Either way the
     logits and caches are those of the decode kernel's path (a cache listed twice: a draft row)."""
     from turing.config import ModelConfig
     from turing.kernels import flashinfer_prefill as fi
@@ -208,7 +208,8 @@ def test_decode_rows_through_flashinfer(storage, monkeypatch):
             monkeypatch.setattr(causal_lm, "flashinfer_prefill_supported",
                                 lambda *a, **kw: "min_chunk" not in kw and real_ok(*a, **kw))
         calls = {"flashinfer": 0, "decode": 0}
-        for name, key in (("flashinfer_prefill", "flashinfer"), ("triton_pool_decode", "decode")):
+        for name, key in (("flashinfer_prefill", "flashinfer"), ("flashinfer_rows", "flashinfer"),
+                          ("triton_pool_decode", "decode")):
             real = getattr(causal_lm, name)
             monkeypatch.setattr(causal_lm, name, lambda *a, _r=real, _k=key, **kw: calls.__setitem__(_k, calls[_k] + 1) or _r(*a, **kw))
         riders = []
@@ -272,6 +273,39 @@ def test_a_forward_keeps_to_the_rows_the_model_measured(plan, graphs):
     assert packed[1:] == {(64, False): [[b, 29, 1], [64, 1, 1], [27, 1, 1]],  # 65 and 66 rows: nothing to gain
                           (64, True): [[b, 28, 1], [62, 1, 1], [30, 1, 1]],
                           (56, False): [[b, 20, 1], [54, 1, 1], [46, 1, 1]]}[plan]
+    assert outs == ref
+
+
+def test_a_long_prompts_forward_of_a_larger_budget_holds_the_decode_rows_within_the_budget():
+    """A prompt longer than a forward takes a larger step budget in one forward (here FORWARD_TOKENS is 32 and the
+    budget 96). The decode rows riding in it count in the budget's rows, as in a step of vLLM's: the tokens they
+    displace go first in the next forward, and the forward that ends the burst runs as it is."""
+    from tests.test_engine_generation import _run
+    from tests.test_hf_parity import _tiny
+    from turing.config import TuringConfig
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    from turing.serving.engine import ContinuousBatchEngine
+    g = torch.Generator().manual_seed(11)
+    short, long = (torch.randint(0, 128, (n,), generator=g).tolist() for n in (20, 250))
+
+    def run(ride):
+        model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), device="cuda")
+        model.config.kv_pool_gib, model.config.cuda_graphs = 0.01, False
+        model.forward_rows = lambda: (32, False)
+        engine = ContinuousBatchEngine(model.config, TuringConfig(device="cuda", max_batch_size=8), model=model,
+                                       prefix_caching=False, draft_tokens=0, prefill_chunk_size=96)
+        engine.ride_prefill, engine.FORWARD_TOKENS = ride, 32
+        packed, pack = [], model.prefill_packed
+        model.prefill_packed = lambda chunks, *x, **kw: packed.append([len(c) for c in chunks]) or pack(chunks, *x, **kw)
+        _, outs = _run(engine, dict(prompt_tokens=short, max_new_tokens=30, temperature=0.0, stop_token_ids=set()),
+                       dict(prompt_tokens=long, max_new_tokens=6, temperature=0.0, stop_token_ids=set()))
+        return outs, packed
+
+    ref, _ = run(False)
+    outs, packed = run(True)
+    # the short prompt and what is left of its forward; then the long one: the rest of that budget (64), a whole
+    # budget, and the end of the burst, each with the short request's decode row
+    assert packed == [[20, 12], [63, 1], [95, 1], [80, 1]]
     assert outs == ref
 
 

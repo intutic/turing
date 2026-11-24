@@ -169,7 +169,9 @@ bool is_valid_config(thread_config_t const& th_config, bool m_block_size_8,
   if (a_type == vllm::AT && group_blocks == GB && threads == TH &&           \
       thread_m_blocks == MB && thread_n_blocks == NB &&                      \
       thread_k_blocks == KB && m_block_size_8 == M8)                         \
-    return TURING_MARLIN_KERNEL(AT, GB, TH, MB, NB, KB, M8);
+    return b_type == vllm::kU4B8                                             \
+               ? TURING_MARLIN_KERNEL_B8(AT, GB, TH, MB, NB, KB, M8)         \
+               : TURING_MARLIN_KERNEL(AT, GB, TH, MB, NB, KB, M8);
 
 MarlinFuncPtr get_marlin_kernel(const vllm::ScalarType a_type,
                                 const vllm::ScalarType b_type,
@@ -181,8 +183,8 @@ MarlinFuncPtr get_marlin_kernel(const vllm::ScalarType a_type,
                                 bool is_zp_float, int stages) {
   // Only the instantiations in csrc/marlin/kernel_configs.h exist; anything else is MarlinDefault (skipped or
   // rejected).
-  if (!(b_type == vllm::kU4 && has_zp && !is_zp_float && stages == 4 &&
-        c_type == a_type && s_type == a_type))
+  if (!(((b_type == vllm::kU4 && has_zp) || (b_type == vllm::kU4B8 && !has_zp)) &&
+        !is_zp_float && stages == 4 && c_type == a_type && s_type == a_type))
     return MarlinDefault;
   TURING_MARLIN_ALL(TURING_MARLIN_SELECT)
   return MarlinDefault;
@@ -417,7 +419,9 @@ at::Tensor moe_wna16_marlin_gemm(
   vllm::ScalarType a_type = a.scalar_type() == at::ScalarType::Half
                                 ? vllm::kFloat16
                                 : vllm::kBFloat16;
-  vllm::ScalarType b_type = vllm::kU4;
+  // no zero points given: every one is 8, the kernel without them (kU4B8, as for a symmetric GPTQ checkpoint)
+  bool has_zp = b_zeros.numel() > 0;
+  vllm::ScalarType b_type = has_zp ? vllm::kU4 : vllm::kU4B8;
   vllm::ScalarType c_type = a_type;
   vllm::ScalarType s_type = a_type;
   bool const is_zp_float = false;
@@ -519,18 +523,19 @@ at::Tensor moe_wna16_marlin_gemm(
   }
 
   // Verify b_zeros (packed kU4 zero points, (E, num_groups, size_n / 8) int32)
-  TORCH_CHECK(b_zeros.is_cuda(), "b_zeros is not on GPU");
-  TORCH_CHECK(b_zeros.is_contiguous(), "b_zeros is not contiguous");
-  TORCH_CHECK(b_zeros.scalar_type() == at::ScalarType::Int,
-              "b_zeros must be int32");
-  TORCH_CHECK(b_zeros.dim() == 3, "b_zeros rank = ", b_zeros.dim(),
-              " is not 3");
-  TORCH_CHECK(b_zeros.size(1) == num_groups, "b_zeros dim 1 = ",
-              b_zeros.size(1), " is not num_groups = ", num_groups);
-  TORCH_CHECK(b_zeros.size(2) == size_n / pack_factor, "b_zeros dim 2 = ",
-              b_zeros.size(2), " is not size_n / pack_factor = ",
-              size_n / pack_factor);
-  bool has_zp = true;
+  if (has_zp) {
+    TORCH_CHECK(b_zeros.is_cuda(), "b_zeros is not on GPU");
+    TORCH_CHECK(b_zeros.is_contiguous(), "b_zeros is not contiguous");
+    TORCH_CHECK(b_zeros.scalar_type() == at::ScalarType::Int,
+                "b_zeros must be int32");
+    TORCH_CHECK(b_zeros.dim() == 3, "b_zeros rank = ", b_zeros.dim(),
+                " is not 3");
+    TORCH_CHECK(b_zeros.size(1) == num_groups, "b_zeros dim 1 = ",
+                b_zeros.size(1), " is not num_groups = ", num_groups);
+    TORCH_CHECK(b_zeros.size(2) == size_n / pack_factor, "b_zeros dim 2 = ",
+                b_zeros.size(2), " is not size_n / pack_factor = ",
+                size_n / pack_factor);
+  }
   bool has_bias = false;
   at::Tensor b_bias = at::empty({0}, a.options());
   at::Tensor a_scales = at::empty({0}, f32);

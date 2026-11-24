@@ -171,6 +171,36 @@ def test_ten_requests_decode_in_the_twelve_row_graph():
         torch.testing.assert_close(graphed, eager, atol=1e-4, rtol=0)
 
 
+@torch.no_grad()
+def test_one_byte_pages_decode_with_twice_the_splits_and_the_same_logits():
+    """A graph's decode kernel splits each row's context twice as often over 1-byte pages (where that is more than
+    one split) as over pages in the model dtype: the logits are those of the eager step, which keeps the kernel's
+    own count."""
+    import copy
+    from tests.test_hf_parity import _tiny
+    import turing.models.causal_lm as clm
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    base = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"), sparsity_ratio=0.0, device="cpu", enable_recirculation=False)
+    base.config.kv_pool_gib = 0.05
+    g = torch.Generator().manual_seed(9)
+    prompts = [torch.randint(0, 128, (1, 5 + 20 * i), generator=g).cuda() for i in range(3)]  # 5, 25 and 45 tokens
+    nxt = torch.randint(0, 128, (3, 4), generator=g).cuda()
+    for kv in ("int8", "native"):
+        outs = []
+        for graphs in (False, True):
+            model = copy.deepcopy(base).cuda()
+            model.config.cuda_graphs, model.config.kv_cache_dtype = graphs, kv
+            caches = [model(p)[1] for p in prompts]
+            pool = caches[0].pool
+            usual = 256 // (16 * pool.num_kv_heads)
+            assert clm.decode_splits(pool, 16) == (2 * usual if kv == "int8" and usual > 1 else usual)
+            assert clm.decode_splits(pool, 256) == 1  # one split stays one: no reduction launch is added
+            outs.append([model(nxt[:, t:t + 1], past_key_values=caches)[0] for t in range(4)])
+        for eager, graphed in zip(*outs):
+            torch.testing.assert_close(graphed, eager, atol=1e-4, rtol=0)
+
+
+
 @pytest.mark.parametrize("window,softcap,scale", [(6, 0.0, None), (0, 5.0, 24 ** -0.5), (40, 5.0, 0.1)])
 def test_fused_decode_window_softcap_and_scale_match_reference(window, softcap, scale):
     from turing.kernels.triton_kv_decode import triton_pool_decode

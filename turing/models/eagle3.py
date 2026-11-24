@@ -68,12 +68,16 @@ class _StepGraph:
             self.tok, self.out = step()
 
     def run(self, feat: torch.Tensor, positions: List[int], slots: List[int], starts: List[int],
-            tokens: Optional[torch.Tensor] = None) -> Tuple[Optional[torch.Tensor], torch.Tensor]:
+            tokens: Optional[torch.Tensor] = None, shift: Optional[torch.Tensor] = None
+            ) -> Tuple[Optional[torch.Tensor], torch.Tensor]:
         R, pad = len(positions), self.rows - len(positions)
         # through pinned memory: a plain copy waits for the head step still running, and a chain of k drafts is k
         # steps the host can queue one behind the other
         self.meta.copy_(host_tensor([positions + [0] * pad, slots + [self.scratch] * pad, starts + [0] * pad],
                                     self.meta.dtype, self.meta.device))
+        if shift is not None:  # long [R] on the device: added to the rows' positions and cache positions
+            self.meta[0, :R] += shift
+            self.meta[2, :R] += shift
         self.feat[:R].copy_(feat)
         if tokens is not None:
             self.tokens[:R].copy_(tokens)
@@ -172,18 +176,18 @@ class Eagle3Head(nn.Module):
     BUCKETS = (1, 2, 4, 8, 12, 16, 24, 32, 48, 64, 96, 128)  # rows of a captured step, as the target's decode graphs
 
     def _run(self, embed: nn.Module, first: bool, feat: torch.Tensor, positions: List[int], slots: List[int],
-             starts: List[int], tokens: Optional[torch.Tensor] = None):
+             starts: List[int], tokens: Optional[torch.Tensor] = None, shift: Optional[torch.Tensor] = None):
         """One step of the pool path, (draft tokens of a chain step or None, layer outputs [R, H]): a replay of the
-        step's CUDA graph when graphs are on and the rows fit one, else the kernels launched one by one."""
+        step's CUDA graph when graphs are on and the rows fit one, else the kernels launched one by one. shift: long
+        [R] on the device, added to positions and starts (rows whose place only the device knows yet)."""
         R = len(positions)
         if self.graphs is not None and R <= self.BUCKETS[-1] and not torch.is_grad_enabled():
             rows = next(b for b in self.BUCKETS if b >= R)
             graph = self.graphs.get((first, rows))
             if graph is None or graph.key != (id(embed), self.pool.page_table.data_ptr()):
                 graph = self.graphs[(first, rows)] = _StepGraph(self, embed, rows, first)
-            return graph.run(feat, positions, slots, starts, tokens)
+            return graph.run(feat, positions, slots, starts, tokens, shift)
         dev = feat.device
-        ints = lambda x: host_tensor(x, torch.int32, dev)  # noqa: E731
         tok = None
         if first:
             emb, feat = embed(tokens), self.fc(feat)
@@ -191,7 +195,10 @@ class Eagle3Head(nn.Module):
             tok = self.lm_head(self.norm(feat)).argmax(-1)
             tok = tok + self.d2t[tok]
             emb = embed(tok)
-        return tok, self._step(emb, feat, host_tensor(positions, torch.long, dev), ints(slots), ints(starts))
+        positions, starts = host_tensor(positions, torch.long, dev), host_tensor(starts, torch.long, dev)
+        if shift is not None:
+            positions, starts = positions + shift, starts + shift
+        return tok, self._step(emb, feat, positions, host_tensor(slots, torch.int32, dev), starts.to(torch.int32))
 
     def _step(self, emb: torch.Tensor, feat: torch.Tensor, positions: torch.Tensor, slots: torch.Tensor,
               starts: torch.Tensor) -> torch.Tensor:
@@ -204,7 +211,13 @@ class Eagle3Head(nn.Module):
         return self._out(attn.reshape(emb.shape[0], -1), residual)
 
     @torch.inference_mode()
-    def _draft_many_pool(self, embed: nn.Module, work: list, host: bool = True) -> list:
+    def _draft_many_pool(self, embed: nn.Module, work: list, host: bool = True,
+                         accepted: Optional[torch.Tensor] = None) -> Optional[list]:
+        """accepted (long [len(work)] on the device): the rows of each request are every position of a verify step
+        that is still in flight, of which the first accepted[r] + 1 turn out verified. All of them are taken in
+        (a row reads up to its own position, and those past the verified ones are written over by what follows);
+        the chain starts from row accepted[r], one position after it. The caches' lengths are left for the caller
+        to set when it has read the step. None, with nothing launched, if a request's cache has no room."""
         dev, lens, ks, caches = work[0][0].device, [w[0].shape[0] for w in work], [w[3] for w in work], []
         for (_, _, _, n, cache), T in zip(work, lens):
             cache = cache if isinstance(cache, KVCache) else KVCache(self.pool)
@@ -216,6 +229,8 @@ class Eagle3Head(nn.Module):
             caches.append(cache)
         live = [r for r, c in enumerate(caches) if c is not None]
         results = [([], None)] * len(work)
+        if accepted is not None and len(live) < len(work):
+            return None
         if not live:
             return results
         _, out = self._run(embed, True, torch.cat([work[r][0] for r in live]),
@@ -223,18 +238,28 @@ class Eagle3Head(nn.Module):
                            [caches[r].slot for r in live for _ in range(lens[r])],
                            [caches[r].length + j for r in live for j in range(lens[r])],
                            torch.cat([work[r][1] for r in live]))
-        last, at = {}, 0
+        last, base, at = {}, {}, 0
         for r in live:
-            caches[r].length += lens[r]  # the verified positions stay; drafted ones are written past the length
+            if accepted is None:
+                caches[r].length += lens[r]  # the verified positions stay; drafted ones are written past the length
             at += lens[r]
-            last[r] = at - 1
+            # the row the chain starts from and the positions after it, in the request and in its cache: the last
+            # row, or the first one with accepted[r] added on the device
+            last[r] = at - 1 if accepted is None else at - lens[r]
+            base[r] = (work[r][2] + lens[r], caches[r].length) if accepted is None else \
+                (work[r][2] + 1, caches[r].length + 1)
         rows = [r for r in live if ks[r] > 0]  # the requests still drafting; `out` holds their last outputs
         drafts = torch.zeros(len(work), max(ks), dtype=torch.long, device=dev)
         # no index made from a host list below (it is copied to the device with a wait for the head step in flight):
         # the chain's steps are queued one behind the other, and the drafts are read once at the end
         rowsel = lambda x: host_tensor(x, torch.long, dev)  # noqa: E731
+        shift = None
         if rows:
-            out = out.index_select(0, rowsel([last[r] for r in rows]))
+            first = rowsel([last[r] for r in rows])
+            if accepted is not None:
+                shift = accepted.index_select(0, rowsel(rows))
+                first = first + shift
+            out = out.index_select(0, first)
         for i in range(max(ks) if rows else 0):
             keep = [j for j, r in enumerate(rows) if ks[r] > i + 1]  # they feed this draft back for another
             if len(keep) < len(rows):  # the others take their last draft from `out` and leave
@@ -243,9 +268,10 @@ class Eagle3Head(nn.Module):
                 if not keep:
                     break
                 out = out.index_select(0, rowsel(keep))
+                shift = shift if shift is None else shift.index_select(0, rowsel(keep))
                 rows = [rows[j] for j in keep]
-            tok, out = self._run(embed, False, out, [work[r][2] + lens[r] + i for r in rows],
-                                 [caches[r].slot for r in rows], [caches[r].length + i for r in rows])
+            tok, out = self._run(embed, False, out, [base[r][0] + i for r in rows],
+                                 [caches[r].slot for r in rows], [base[r][1] + i for r in rows], shift=shift)
             drafts[:, i].index_copy_(0, rowsel(rows), tok)  # the same draft the leavers' pick gave for these rows
         if host:
             drafts = drafts.tolist()
@@ -261,7 +287,7 @@ class Eagle3Head(nn.Module):
 
     @torch.inference_mode()
     def draft_many(self, embed: nn.Module, work: List[Tuple[torch.Tensor, torch.Tensor, int, int, HeadCache]],
-                   host: bool = True) -> List[Tuple[List[int], HeadCache]]:
+                   host: bool = True, accepted: Optional[torch.Tensor] = None) -> List[Tuple[List[int], HeadCache]]:
         """draft for several requests at once: work holds (aux, next_tokens, start, k, cache) per request (k = 0:
         take the positions in without drafting). Every linear layer runs once per draft position over the rows of
         all requests (a head step costs about one read of the head's weights, however many requests draft);
@@ -269,7 +295,7 @@ class Eagle3Head(nn.Module):
         host=False (with a pool): the drafts stay on the device, one tensor per request, and nothing here waits for
         them, so the caller can queue the step that verifies them behind the chain."""
         if self.pool is not None:
-            return self._draft_many_pool(embed, work, host)
+            return self._draft_many_pool(embed, work, host, accepted)
         dev, kv = work[0][0].device, self.num_kv_heads
         lens = [w[0].shape[0] for w in work]
         positions = torch.cat([w[2] + torch.arange(T, device=dev) for w, T in zip(work, lens)])

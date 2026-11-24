@@ -40,21 +40,22 @@ def flashinfer_prefill_supported(pool: KVPool, layer: int, q: torch.Tensor, wind
 
 
 def flashinfer_prefill(pool: KVPool, layer: int, q: torch.Tensor, slots: List[int], starts: List[int],
-                       lens: List[int], scale: Optional[float] = None, tag: str = "") -> torch.Tensor:
+                       lens: List[int], scale: Optional[float] = None,
+                       out: Optional[torch.Tensor] = None) -> torch.Tensor:
     """As triton_pool_prefill (no window or soft-cap), for one or more requests packed in one row: q [1, H, T, D] holds
     request i's lens[i] queries at positions starts[i] .. over page-table row slots[i] (its chunk's K/V already
-    appended), T = sum(lens) -> [1, T, H * D]. One plan per forward serves every layer and every request. A second
-    set of requests in the same forward (its decode rows) takes a tag: a plan of its own."""
+    appended), T = sum(lens) -> [1, T, H * D]. One plan per forward serves every layer and every request. out: a
+    contiguous [T, H * D] buffer to write to (the caller's, where the rows of another call follow these)."""
     _, H, T, D = q.shape
     storage = pool.layer_fields(layer, "k")[3]
     in_place = storage in ("native", "fp8")
     big = T > 2048  # a forward of a larger step budget (the engine's long prompts): a wrapper with more workspace
     # each kind of pages has its own plan (and fp8 its own kernel)
-    kind = (storage if in_place else "temporary") + tag + ("+" if big else "")
+    kind = (storage if in_place else "temporary") + ("+" if big else "")
     st = _STATE.get((q.device, kind))
     if st is None:
         with torch.inference_mode(False):  # normal tensors: plan() writes them in place, in and out of inference mode
-            ws = torch.empty((64 if tag else 256 if big else 128) << 20, dtype=torch.uint8, device=q.device)
+            ws = torch.empty((256 if big else 128) << 20, dtype=torch.uint8, device=q.device)
             st = _STATE[(q.device, kind)] = [flashinfer.BatchPrefillWithPagedKVCacheWrapper(ws, "HND"), None, None,
                                              None, None]
     totals = [s + n for s, n in zip(starts, lens)]
@@ -96,5 +97,51 @@ def flashinfer_prefill(pool: KVPool, layer: int, q: torch.Tensor, slots: List[in
     else:  # [Hkv, pages * 16, D] in the model dtype -> [pages, Hkv, 16, D]
         kc, vc = (pool._decode_field(layer, st[3].long(), w).unflatten(1, (-1, 16)).transpose(0, 1).contiguous()
                   for w in ("k", "v"))
-    out = st[0].run(q[0].transpose(0, 1).contiguous(), (kc, vc), **scales)  # [T, H, D]
-    return out.reshape(1, T, H * D)
+    # [T, H, D] queries: no copy where RoPE laid them out so (tokens_first). FlashInfer zero-fills an output of its
+    # own, so it gets one that is not filled; it writes every row
+    out = torch.empty(T, H * D, dtype=q.dtype, device=q.device) if out is None else out
+    st[0].run(q[0].transpose(0, 1).contiguous(), (kc, vc), **scales, out=out.view(T, H, D))
+    return out.view(1, T, H * D)
+
+
+def flashinfer_rows(pool: KVPool, layer: int, q: torch.Tensor, slots: List[int], starts: List[int],
+                    scale: Optional[float] = None, out: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """One query a request over pages FlashInfer reads in place (native or fp8): the decode rows riding in a prefill
+    forward, q [1, H, R, D] with request i's query at position starts[i] (its K/V already appended) -> [1, R, H * D].
+    FlashInfer's decode wrapper on tensor cores plans such rows better than its prefill wrapper does requests of one
+    query: one layer of 16 rows at 16K tokens of fp8 pages (Qwen2.5-1.5B's shape) on an L4 took 0.54 ms against
+    0.71, and 0.67 from the Triton decode kernel; of 64 rows 2.34 against 2.45 and 2.68. One plan per forward."""
+    _, H, R, D = q.shape
+    storage = pool.layer_fields(layer, "k")[3]
+    st = _STATE.get((q.device, storage + "decode"))
+    if st is None:
+        with torch.inference_mode(False):  # as the prefill wrapper's: plan() writes these in place
+            ws = torch.empty(64 << 20, dtype=torch.uint8, device=q.device)
+            st = _STATE[(q.device, storage + "decode")] = [
+                flashinfer.BatchDecodeWithPagedKVCacheWrapper(ws, "HND", use_tensor_cores=True), None, None, None, None]
+    pages = [s // 16 + 1 for s in starts]
+    key = (id(pool), pool.page_table.data_ptr(), tuple(slots), tuple(starts), H, D, scale, q.dtype)
+    if st[1] != key or layer <= st[2]:
+        if st[4] is not None:
+            st[4].synchronize()  # the plan before this one has been copied from the wrapper's pinned buffer
+        indptr = [0]
+        for p in pages:
+            indptr.append(indptr[-1] + p)
+        i32 = dict(dtype=torch.int32)
+        indices = torch.cat([pool.page_table[s, :p] for s, p in zip(slots, pages)]).to(torch.int32)
+        last = torch.tensor([s + 1 - (p - 1) * 16 for s, p in zip(starts, pages)], **i32)
+        st[0].plan(torch.tensor(indptr, **i32), indices, last, H, pool.num_kv_heads, D, 16,
+                   sm_scale=scale if scale is not None else D ** -0.5, q_data_type=q.dtype,
+                   kv_data_type=torch.float8_e4m3fn if storage == "fp8" else q.dtype)
+        st[1] = key
+        st[4] = torch.cuda.Event()
+        st[4].record()
+    st[2] = layer
+    kc, vc = pool.layer_fields(layer, "k")[0], pool.layer_fields(layer, "v")[0]
+    scales = {}
+    if storage == "fp8":
+        kc, vc = kc.view(torch.float8_e4m3fn), vc.view(torch.float8_e4m3fn)
+        scales = dict(zip(("k_scale", "v_scale"), pool.fp8_scales[layer]))
+    out = torch.empty(R, H * D, dtype=q.dtype, device=q.device) if out is None else out
+    st[0].run(q[0].transpose(0, 1).contiguous(), (kc, vc), **scales, out=out.view(R, H, D))
+    return out.view(1, R, H * D)

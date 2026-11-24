@@ -26,7 +26,7 @@ from ..kernels.triton_kv_decode import (pool_append_supported, pool_decode_suppo
                                         triton_pool_decode)
 from ..kernels import triton_fused_ops as fused_ops
 from ..kernels.triton_kv_prefill import pool_prefill_preferred, pool_prefill_supported, triton_pool_prefill
-from ..kernels.flashinfer_prefill import flashinfer_prefill, flashinfer_prefill_supported
+from ..kernels.flashinfer_prefill import flashinfer_prefill, flashinfer_prefill_supported, flashinfer_rows
 from ..kernels.triton_moe import HAS_TRITON as HAS_MOE_KERNELS
 from ..kernels.triton_moe import (GEMM_MIN_ROWS, fused_moe, fused_moe_supported, fused_moe_w4,
                                   fused_moe_w4_supported, gated_add, gemm_moe, moe_route)
@@ -602,6 +602,16 @@ def row_starts(caches: List[KVCache]) -> List[int]:
     return starts
 
 
+def decode_splits(pool: KVPool, rows: int) -> int:
+    """The decode kernel's splits of each row's context for a step of `rows` rows: 256 programs a layer, and 512 over
+    1-byte pages where that is more than one split. One layer on an L4, 16 and 64 rows, 256 against 512 programs: at
+    16K tokens fp8 pages 0.67 and 0.64 ms, 2.68 and 2.56, int8 pages 0.61 and 0.60, 2.33 and 2.22; at 8K, fp8 0.36
+    and 0.35, int8 0.33 and 0.32, 1.19 and 1.15; at 2K and under within 1.5% either way. Pages in the model dtype
+    are read at the device's bandwidth with 256."""
+    n = max(1, min(32, 256 // (rows * pool.num_kv_heads)))
+    return n if n == 1 or pool.kv_cache_dtype == "native" else min(32, 2 * n)
+
+
 class DecodeStep:
     """One batched decode step: the pool, each row's page-table slot and length before the step (device int32
     tensors), and, outside CUDA graphs, the rows' caches and host lengths. RoPE for the rows is computed once on the
@@ -613,6 +623,7 @@ class DecodeStep:
         self._freqs = {}  # per RoPE configuration (Gemma 3's local and global layers differ)
         self.quest_plan = None
         self.quest_width: Optional[int] = None  # in a CUDA graph: the context bucket's page-table width for Quest
+        self.splits: Optional[int] = None  # the decode kernel's split count (None: its own, 256 programs a layer)
 
     @classmethod
     def of(cls, caches: List[KVCache], device, starts: Optional[List[int]] = None) -> "DecodeStep":
@@ -656,7 +667,7 @@ class PackedPrefill:
                 [[c.slot for c in caches[-riders:]], self.starts[-riders:]], torch.int32, device)
             # splits as a decode step of the next graph size up: no kernel build of its own for each row count
             size = next((b for b in DecodeGraphs.BUCKETS if b >= riders), riders)
-            self.rider_splits = max(1, min(32, 256 // (size * self.pool.num_kv_heads)))
+            self.rider_splits = decode_splits(self.pool, size)
 
     @classmethod
     def fresh(cls, pool: KVPool, n: int, b: int, slots: torch.Tensor, positions: torch.Tensor, last: torch.Tensor,
@@ -674,7 +685,7 @@ class PackedPrefill:
             self.rider_slots, self.rider_starts = rows[0], rows[1]
             # as above: 5, 6 and 7 rows otherwise each built the decode kernel anew at their first use (2.7 s on a T4)
             size = next((b for b in DecodeGraphs.BUCKETS if b >= self.riders), self.riders)
-            self.rider_splits = max(1, min(32, 256 // (size * pool.num_kv_heads)))
+            self.rider_splits = decode_splits(pool, size)
         return self
 
     def freqs(self, rope) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -773,7 +784,8 @@ class SubspaceAttention(nn.Module):
                 cos, sin = self.rope.compute_freqs(start_pos + seq_len, device=hidden_states.device, start=start_pos,
                                                    select_len=cache.rope_len if cache is not None else 0)
             if fused_ops.fused_ops_supported(q) and cos.shape[-1] % 2 == 0:
-                q, k = fused_ops.rope(q, k, cos, sin)  # one pass per tensor, the cast to q's dtype inside
+                # one pass per tensor, the cast to q's dtype inside
+                q, k = fused_ops.rope(q, k, cos, sin, self._to_flashinfer(q, cache, packed))
             else:
                 q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
         if self._k_absmax is not None:
@@ -831,14 +843,31 @@ class SubspaceAttention(nn.Module):
         p = F.softmax(s, dim=-1, dtype=torch.float32).to(q.dtype)
         return torch.matmul(p, v)
 
+    def _plain_causal(self, cache: KVCache, seq_len: int) -> bool:
+        """Whether a chunk at cache.length needs no paged kernel: no cached prefix, and what it computed is what
+        the layer stores."""
+        return (cache.length == 0 and 1 < seq_len <= 2048 and self.window is None and self.softcap is None
+                and cache.pool.layer_fields(self.layer_idx, "k")[3] == "native")
+
+    def _to_flashinfer(self, q, cache: Optional[KVCache], packed: Optional["PackedPrefill"]) -> bool:
+        """Whether this forward's queries go to FlashInfer's prefill kernel, which reads them token by token: RoPE
+        then writes them in that order, and the call makes no copy of them (25 MB a layer for 8,192 tokens of
+        Qwen2.5-1.5B)."""
+        if packed is not None:
+            T = q.shape[2] - packed.riders
+            return packed.solo is None and T > 0 and flashinfer_prefill_supported(
+                packed.pool, self.layer_idx, q[:, :, :T], self.window, self.softcap)
+        return (cache is not None and q.shape[2] > 1 and not self._plain_causal(cache, q.shape[2])
+                and flashinfer_prefill_supported(cache.pool, self.layer_idx, q, self.window, self.softcap))
+
     def _attend_one(self, q, k, v, cache: KVCache) -> torch.Tensor:
         """One request: append k, v at cache.length, then attend q over its cache: [1, H, L, D] -> [1, L, H * D]."""
         batch, _, seq_len, _ = q.shape
         pool, layer, cfg = cache.pool, self.layer_idx, self.config
         start, total = cache.length, cache.length + seq_len
+        plain = self._plain_causal(cache, seq_len)
         append_chunk(pool, layer, cache, k, v)
-        if (start == 0 and 1 < seq_len <= 2048 and self.window is None and self.softcap is None
-                and pool.layer_fields(layer, "k")[3] == "native"):
+        if plain:
             # no cached prefix, and the layer stores what the chunk just computed: plain causal attention over its
             # own keys and values. One call instead of a paged kernel's plan and wrapper, which cost the host 3 ms
             # of a 512-token prompt's first token on an L4 for the same device time (measured up to 2,048 tokens,
@@ -891,27 +920,37 @@ class SubspaceAttention(nn.Module):
         n = len(packed.caches) - R
         caches, offsets, lens, starts = packed.caches[:n], packed.offsets[:n], packed.lens[:n], packed.starts[:n]
         outs = []
+        T = q.shape[2] - R
+        fi = n and flashinfer_prefill_supported(pool, layer, q[:, :, :T], self.window, self.softcap)
+        # FlashInfer writes the chunks' output where the decode rows' follows it: no copy to join the two
+        whole = torch.empty(1, T + R, self.num_heads * self.head_dim, dtype=q.dtype, device=q.device) \
+            if fi and R else None
         if R:
-            T = q.shape[2] - R
             if pool.layer_fields(layer, "k")[3] in ("native", "fp8") \
                     and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap, min_chunk=1):
-                # pages FlashInfer reads in place: the decode rows as requests of one query each, in a call of
-                # their own (in the chunks' call they would set its tile size: 1.66 ms a row at 16K tokens on
+                # pages FlashInfer reads in place: the decode rows through its decode wrapper, in a call of their
+                # own (in the chunks' call they would set its tile size: 1.66 ms a row at 16K tokens on
                 # Qwen2.5-1.5B, against 1.05 from the decode kernel)
                 triton_pool_append(pool, layer, None, k[:, :, T:], v[:, :, T:], packed.rider_slots, packed.rider_starts)
-                rode = flashinfer_prefill(pool, layer, q[:, :, T:], [c.slot for c in packed.caches[n:]],
-                                          packed.starts[n:], [1] * R, self.scale, tag="rows")
+                rode = flashinfer_rows(pool, layer, q[:, :, T:], [c.slot for c in packed.caches[n:]],
+                                       packed.starts[n:], self.scale, out=None if whole is None else whole[0, T:])
             else:
                 qr, kr, vr = (x[0, :, T:].transpose(0, 1)[:, :, None] for x in (q, k, v))  # [R, heads, 1, D]
                 rode = triton_pool_decode(pool, layer, qr, kr, vr, packed.rider_slots, packed.rider_starts,
                                           scale=self.scale, window=self.window or 0, softcap=self.softcap or 0.0,
                                           n_splits=packed.rider_splits).transpose(1, 2).reshape(
                                               1, R, self.num_heads * self.head_dim)
+                if whole is not None:
+                    whole[:, T:] = rode
             q, k, v = q[:, :, :T], k[:, :, :T], v[:, :, :T]
-        if n and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap):  # every request in one call
+        if fi:  # every request in one call
             for c, off, m in zip(caches, offsets, lens):
                 append_chunk(pool, layer, c, k[:, :, off:off + m], v[:, :, off:off + m])
-            outs.append(flashinfer_prefill(pool, layer, q, [c.slot for c in caches], starts, lens, self.scale))
+            out = flashinfer_prefill(pool, layer, q, [c.slot for c in caches], starts, lens, self.scale,
+                                     out=None if whole is None else whole[0, :T])
+            if whole is not None:
+                return whole
+            outs.append(out)
         else:
             for c, off, m in zip(caches, offsets, lens):  # starts[i] is c.length
                 sl = slice(off, off + m)
@@ -955,7 +994,7 @@ class SubspaceAttention(nn.Module):
                                                           cfg.kv_page_budget, cfg.kv_select_min_tokens)
                 sel = pool.select_pages_planned(layer, q, step.quest_plan)
         out = triton_pool_decode(pool, layer, q, k, v, step.slots, step.starts_t, sel, scale=self.scale,
-                                 window=self.window or 0, softcap=self.softcap or 0.0)
+                                 window=self.window or 0, softcap=self.softcap or 0.0, n_splits=step.splits)
         return out.transpose(1, 2).reshape(batch, 1, self.num_heads * self.head_dim)
 
 
@@ -1110,7 +1149,7 @@ class DecodeGraphs:
     # inference mode) fails mid-capture and leaves the generator unusable.
     @torch.inference_mode()
     def run(self, model: "SubspaceCausalLM", input_ids: torch.Tensor, caches: List[KVCache],
-            starts: Optional[List[int]] = None) -> torch.Tensor:
+            starts: Optional[List[int]] = None, shift: Optional[torch.Tensor] = None) -> torch.Tensor:
         B, pool, cfg = len(caches), caches[0].pool, model.config
         bucket = self.bucket(model, B)
         width = None
@@ -1139,6 +1178,8 @@ class DecodeGraphs:
                                  starts + [0] * (bucket - B)], dtype=torch.int32))
         rows.copy_(host, non_blocking=True)
         slot[1].record()
+        if shift is not None:  # positions only the device knows yet: the host's are those of every draft accepted
+            rows[1, :B] += shift
         ids[:B].copy_(input_ids)
         if isinstance(graph, StepCuts):  # graphs 2i and 2i + 1 end at offloaded layer i's two cuts; then the rest
             for i, site in enumerate(graph.sites):
@@ -1160,6 +1201,7 @@ class DecodeGraphs:
         rows[0] = pool.scratch_slot()
         step = DecodeStep(pool, rows[0], rows[1])
         step.quest_width = width
+        step.splits = decode_splits(pool, bucket)
         # offloaded MoE layers (eligible only when cut_safe): the step becomes a chain of graphs, and their forward
         # takes the path without host syncs from the warm-up on
         offloaded = [layer.mlp for layer in model.layers
@@ -1473,17 +1515,20 @@ class SubspaceCausalLM(nn.Module):
         start_pos: int = 0,
         adapters: Optional[List[Optional[str]]] = None,
         logits_to_keep: int = 0,
+        start_shift: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Union[KVCache, List[KVCache]]]:
         """past_key_values: None or a KVCache (filled in place and returned), or a list of KVCache, one per row of a
         [B, 1] decode step (batched decode across requests, returned as given). start_pos is taken from the cache.
         logits_to_keep > 0 computes logits for the last that many positions only (a prefill needs one).
-        adapters: a LoRA adapter name (or None for the base model) per row of input_ids."""
+        adapters: a LoRA adapter name (or None for the base model) per row of input_ids.
+        start_shift: int32 [B] on the device, added to the positions of a decode step's rows (which the caches give)
+        where only the device knows them yet: how many drafts a step still in flight accepted (CUDA graphs only)."""
         lora = adapters is not None and any(adapters)
         if lora:
             from .adapters import set_active_adapters
             set_active_adapters(self, list(adapters))
         try:
-            return self._forward(input_ids, past_key_values, logits_to_keep, lora)
+            return self._forward(input_ids, past_key_values, logits_to_keep, lora, start_shift)
         finally:
             if lora:
                 set_active_adapters(self, None)
@@ -1701,7 +1746,7 @@ class SubspaceCausalLM(nn.Module):
         self.__dict__["_projections_fused"] = True
         return n
 
-    def _forward(self, input_ids, past_key_values, logits_to_keep, lora):
+    def _forward(self, input_ids, past_key_values, logits_to_keep, lora, start_shift=None):
         if input_ids.is_cuda and not self.__dict__.get("_projections_fused") \
                 and not torch.cuda.is_current_stream_capturing():
             self.fuse_projections()  # one GEMM per shared input on CUDA, where a launch costs as much as a small GEMM
@@ -1731,10 +1776,12 @@ class SubspaceCausalLM(nn.Module):
             for c, s in zip(step, starts):
                 c.reserve(s + 1)
             if self._graphs.eligible(self, step, lora, starts):
-                logits = self._graphs.run(self, input_ids, step, starts)
+                logits = self._graphs.run(self, input_ids, step, starts, start_shift)
                 for c in step:
                     c.length += 1
                 return logits, returned
+            if start_shift is not None:
+                raise ValueError("start_shift needs a decode step that runs from a CUDA graph")
             step = DecodeStep.of(step, input_ids.device, starts)
             start_pos = step.starts
         elif cache is not None:

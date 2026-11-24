@@ -101,9 +101,12 @@ def run_turing(a, work):
             return [t async for t in engine.stream_request(r)]
         d0, a0 = engine.spec_drafted, engine.spec_accepted
         t0 = time.perf_counter()
-        outs = []
+        outs, groups = [], []
         for i in range(0, len(prompts), c):  # c requests at a time, the next c when all of them are done: as for vLLM
+            t = time.perf_counter()
             outs += await asyncio.gather(*[one(p) for p in prompts[i:i + c]])
+            groups.append(round(time.perf_counter() - t, 4))
+        cell.groups = groups
         return time.perf_counter() - t0, outs, engine.spec_drafted - d0, engine.spec_accepted - a0
 
     async def main():
@@ -125,14 +128,18 @@ def run_turing(a, work):
                 for c in a.concurrency:
                     plain = None
                     for k in a.draft_tokens:
-                        secs, outs, drafted, accepted = await cell(prompts, k, c)
+                        runs = [await cell(prompts, k, c) for _ in range(a.passes)]  # the last pass is the row
+                        secs, outs, drafted, accepted = runs[-1]
                         n = sum(len(o) for o in outs)
                         plain = outs if k == 0 else plain
                         rows.append(dict(
                             engine="turing", model=a.model, dtype=a.dtype, drafter=a.draft_head or "prompt lookup",
                             workload=name, requests=len(prompts),
                             concurrency=c, draft_tokens=k, max_new_tokens=a.new_tokens, output_tokens=n,
-                            seconds=round(secs, 3), output_tok_per_s=round(n / secs, 1), drafted_tokens=drafted,
+                            seconds=round(secs, 3), pass_seconds=[round(r[0], 3) for r in runs],
+                            group_seconds=cell.groups, group_tokens=[sum(len(o) for o in outs[i:i + c])
+                                                                     for i in range(0, len(outs), c)],
+                            output_tok_per_s=round(n / secs, 1), drafted_tokens=drafted,
                             accepted_tokens=accepted, acceptance_rate=round(accepted / drafted, 4) if drafted else None,
                             tokens_per_pass=round(n / (n - accepted), 3),
                             same_tokens_as_no_draft=sum(o == p for o, p in zip(outs, plain)) if k and plain else None))
@@ -145,7 +152,7 @@ def run_turing(a, work):
 
 def run_vllm(a, work):
     from vllm import LLM, SamplingParams
-    from transformers import AutoTokenizer
+    from transformers import AutoTokenizer, GenerationConfig
     assert len(a.draft_tokens) == 1, "vLLM: one --draft-tokens value per run (the drafter is fixed at load)"
     k = a.draft_tokens[0]
     tok = AutoTokenizer.from_pretrained(a.model)
@@ -158,20 +165,39 @@ def run_vllm(a, work):
     llm = LLM(a.model, dtype={"fp16": "float16", "bf16": "bfloat16"}[a.dtype], enable_prefix_caching=False,
               max_model_len=4096, gpu_memory_utilization=a.gpu_memory_utilization, **spec)
     sp = SamplingParams(temperature=0.0, max_tokens=a.new_tokens)
+    # vLLM's token_ids end with the stop token of a request that stopped on one; Turing's stream leaves it out (a
+    # stop token is not output). Counted the same way for both: without it (24 tokens of 4,274 on the code workload)
+    eos = GenerationConfig.from_pretrained(a.model).eos_token_id
+    stops = set(eos if isinstance(eos, list) else [eos]) | {tok.eos_token_id}
+
+    def output_tokens(o):
+        ids = o.outputs[0].token_ids
+        return len(ids) - bool(ids and o.outputs[0].finish_reason == "stop" and ids[-1] in stops)
     rows = []
     for name, contents in work.items():
         prompts = [{"prompt_token_ids": p} for p in tokenized(tok, contents)]
         llm.generate(prompts[:4], sp, use_tqdm=False)
         for c in a.concurrency:
-            t0 = time.perf_counter()
-            n = 0
-            for i in range(0, len(prompts), c):  # c requests at a time, the next c when all of them are done
-                n += sum(len(o.outputs[0].token_ids) for o in llm.generate(prompts[i:i + c], sp, use_tqdm=False))
-            secs = time.perf_counter() - t0
+            passes = []
+            for _ in range(a.passes):  # the last pass is the row
+                t0 = time.perf_counter()
+                n = dropped = 0
+                groups, group_tokens = [], []
+                for i in range(0, len(prompts), c):  # c requests at a time, the next c when all of them are done
+                    t = time.perf_counter()
+                    outs = llm.generate(prompts[i:i + c], sp, use_tqdm=False)
+                    groups.append(round(time.perf_counter() - t, 4))
+                    group_tokens.append(sum(output_tokens(o) for o in outs))
+                    n += group_tokens[-1]
+                    dropped += sum(len(o.outputs[0].token_ids) - output_tokens(o) for o in outs)
+                passes.append(time.perf_counter() - t0)
+            secs = passes[-1]
             rows.append(dict(engine="vllm", model=a.model, dtype=a.dtype,
                              drafter=a.draft_head or "n-gram", workload=name, requests=len(prompts),
                              concurrency=c, draft_tokens=k, max_new_tokens=a.new_tokens, output_tokens=n,
-                             seconds=round(secs, 3), output_tok_per_s=round(n / secs, 1)))
+                             stop_tokens_not_counted=dropped, seconds=round(secs, 3),
+                             pass_seconds=[round(x, 3) for x in passes], group_seconds=groups,
+                             group_tokens=group_tokens, output_tok_per_s=round(n / secs, 1)))
             print(json.dumps(rows[-1]), flush=True)
     import vllm
     return rows, f"vllm {vllm.__version__}"
@@ -190,6 +216,9 @@ def main():
     ap.add_argument("--draft-head", default=None,
                     help="an EAGLE-3 head for the model (repository or directory): it drafts instead of prompt lookup")
     ap.add_argument("--concurrency", default="1,2", help="requests in flight at a time")
+    ap.add_argument("--passes", type=int, default=1,
+                    help="passes over the prompts per cell; the last is reported (pass_seconds holds all): with 2, "
+                         "what an engine builds at a shape's first use (a graph, a kernel) is outside the row")
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.85)
     ap.add_argument("--no-ride-prefill", action="store_true",
                     help="turing: decode steps of their own while prompts are prefilled (the engine before riders)")

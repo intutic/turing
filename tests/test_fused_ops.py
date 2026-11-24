@@ -70,3 +70,5 @@ def test_rope_matches_apply_rotary_pos_emb(dtype, rot, decode):
     for f, r in ((fq, rq), (fk, rk)):  # within one rounding step of the dtype at the output's magnitude
         torch.testing.assert_close(f.float(), r.float(), rtol=0,
                                    atol=torch.finfo(dtype).eps * max(1.0, r.abs().max().item()))
+    tq, tk = rope(q, k, cos, sin, tokens_first=True)  # the same values, q's memory token by token
+    assert torch.equal(tq, fq) and torch.equal(tk, fk) and tq.transpose(1, 2).is_contiguous()

@@ -34,6 +34,12 @@ def test_flashinfer_prefill_matches_gather_and_sdpa(H, Hkv, D, start, L, storage
     out = flashinfer_prefill(pool, 0, q, [cache.slot], [start], [L], D ** -0.5)
     ref = _reference(pool, 0, cache, q, start, L, D ** -0.5, 0, 0.0)
     torch.testing.assert_close(out.float(), ref, atol=1e-3, rtol=1e-2)
+    # the caller's buffer, and queries whose memory is token by token (no copy of them): the same rows, nothing
+    # written past them
+    buf = torch.full((L + 3, H * D), float("nan"), device="cuda", dtype=torch.float16)
+    qt = q.transpose(1, 2).contiguous().transpose(1, 2)
+    again = flashinfer_prefill(pool, 0, qt, [cache.slot], [start], [L], D ** -0.5, out=buf[:L])
+    assert torch.equal(again, out) and torch.equal(buf[:L], out[0]) and buf[L:].isnan().all()
 
 
 def test_a_reused_slot_with_other_pages_is_planned_again():
@@ -54,6 +60,26 @@ def test_a_reused_slot_with_other_pages_is_planned_again():
     out = flashinfer_prefill(pool, 0, q, [second.slot], [0], [64])
     torch.testing.assert_close(out.float(), _reference(pool, 0, second, q, 0, 64, 128 ** -0.5, 0, 0.0),
                                atol=1e-3, rtol=1e-2)
+
+
+@pytest.mark.parametrize("storage", ["native", "fp8"])
+@pytest.mark.parametrize("scale", [None, 0.05])
+def test_decode_rows_through_the_decode_wrapper_match_the_reference(storage, scale):
+    """One query a request, each the last position of a cache of another length (page boundaries among them), into
+    the caller's buffer: every row matches its reference, and nothing is written past the rows."""
+    from tests.test_triton_kv_prefill import _reference
+    from turing.kernels.flashinfer_prefill import flashinfer_rows
+    g = torch.Generator(device="cuda").manual_seed(0)
+    pool = KVPool(1, 2, 128, 256, torch.float16, "cuda", storage)
+    lens = [1, 16, 17, 600, 333]
+    caches = [_filled(pool, n - 1, 1, g) for n in lens]
+    q = torch.randn(1, 12, len(lens), 128, device="cuda", generator=g).half()
+    buf = torch.full((len(lens) + 2, 12 * 128), float("nan"), device="cuda", dtype=torch.float16)
+    out = flashinfer_rows(pool, 0, q, [c.slot for c in caches], [n - 1 for n in lens], scale, out=buf[:len(lens)])
+    for i, (c, n) in enumerate(zip(caches, lens)):
+        ref = _reference(pool, 0, c, q[:, :, i:i + 1], n - 1, 1, scale or 128 ** -0.5, 0, 0.0)
+        torch.testing.assert_close(out[:, i:i + 1].float(), ref, atol=1e-3, rtol=1e-2)
+    assert buf[len(lens):].isnan().all()
 
 
 @pytest.mark.parametrize("storage", ["native", "int8"])

@@ -30,10 +30,13 @@ def test_shapes_outside_marlins_tiles_are_refused():
 @torch.no_grad()
 @pytest.mark.parametrize("dtype,atol", [(torch.bfloat16, 2e-2), (torch.float16, 2e-3)])
 @pytest.mark.parametrize("T", [1, 3, 64, 700])  # blocks of 8 rows up to 700 tokens x 2 / 8 experts: 64-row blocks
-def test_marlin_moe_matches_the_expert_loop(dtype, atol, T):
+@pytest.mark.parametrize("sym", [False, True])  # with zero points and without (every one 8: the kernel reads none)
+def test_marlin_moe_matches_the_expert_loop(dtype, atol, T, sym):
     from turing.kernels.marlin_moe import marlin_moe, marlin_moe_pack
+    from turing.models.quant import symmetric
     moe = _moe(**SHAPE)
-    quantize_experts(moe, "rtn")
+    with symmetric(sym):
+        quantize_experts(moe, "rtn")
     twin = _dequantized_twin(moe, **SHAPE).to("cuda", dtype)
     moe = moe.to("cuda", dtype)
     x = torch.randn(T, 256, device="cuda", dtype=dtype)
@@ -46,6 +49,7 @@ def test_marlin_moe_matches_the_expert_loop(dtype, atol, T):
         ref.index_add_(0, token, (y * weights[token, slot, None]).to(ref.dtype))
     w = marlin_moe_pack((moe.gate_up_q, moe.gate_up_scales, moe.gate_up_zeros),
                         (moe.down_q, moe.down_scales, moe.down_zeros), dtype)
+    assert (w.gate_up[2].numel() == 0) == sym and (w.down[2].numel() == 0) == sym
     out = marlin_moe(x, w, weights, experts, moe.act)
     torch.testing.assert_close(out.float(), ref.float(), atol=atol, rtol=0)
 

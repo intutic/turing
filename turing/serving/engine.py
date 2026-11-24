@@ -17,7 +17,7 @@ import torch
 import torch.nn.functional as F
 
 from ..config import ModelConfig, TuringConfig
-from ..models.causal_lm import DecodeGraphs, SubspaceCausalLM, host_tensor
+from ..models.causal_lm import DecodeGraphs, SubspaceCausalLM, host_tensor, row_starts
 from ..core.kv_cache import PAGE, KVCache, KVPoolExhausted, kv_bytes_per_token
 from .traffic import (
     AdmissionController, AdmissionDecision,
@@ -158,6 +158,9 @@ class ContinuousBatchEngine:
         self.device = self.turing_config.resolve_device()
         self.prefill_chunk_size = prefill_chunk_size
         self._prefill_left = 0  # prompt tokens of the current step budget not yet prefilled (see _step_batch)
+        self._whole_budget = True  # a long prompt's forward takes a budget above FORWARD_TOKENS whole (until one OOMs)
+        self._forward_tokens = 0  # prompt tokens the step in progress put in its forward
+        self._one_forward = False  # whether that step runs them in one forward (packed, or one chunk)
         self.tokenizer = tokenizer
         self.admission = admission
         self.lane_policy = lane_policy
@@ -204,6 +207,7 @@ class ContinuousBatchEngine:
         # read them (_verify_ahead): (its _flight entry, each request's drafts, their cache lengths before, the
         # step's logits, its tapped states).
         self._verifying: Optional[tuple] = None
+        self._chained: Optional[tuple] = None  # the cycle launched behind _verifying (_chain_ahead)
         self.ride_prefill = True  # decoding requests take their token in a step's packed prefill forward (_riders)
         # Seconds per step (moving averages, _timed): a request keeps drafting only while its tokens per step exceed
         # what the step's extra rows cost against a plain step of the same requests (_speculation_pays). While
@@ -428,12 +432,13 @@ class ContinuousBatchEngine:
     # Prompt tokens in one prefill forward of prompts that fit one. A larger forward of such prompts costs more per
     # token (SmolLM2-360M on an L4, 1,024-token prompts: 21.5 ms a prompt two at a time, 25 eight at a time) and
     # cannot be replayed from a CUDA graph, so a larger step budget (prefill_chunk_size) is spent on them in several
-    # forwards, one a scheduler step. A prompt longer than this, or one in mid-prefill, takes the whole budget in
-    # one forward: no graph serves it, and attention over its cached pages costs less per token with more queries
-    # in a call (16 prompts of 16K tokens on an L4, fp8 pages, 8,192 tokens a step: FlashInfer's prefill kernel
-    # took 8.7 s in forwards of 2,048 tokens, and about 7.3 s of vLLM's 11.5 s in forwards of 8,192). The decode
-    # rows riding in a forward come on top of it, or count in it where the model's forward measured cheaper that
-    # way (_row_target).
+    # forwards, one a scheduler step. A prompt longer than this takes the whole budget in one forward: no graph
+    # serves it, and attention over its cached pages costs less per token with more queries in a call (16 prompts
+    # of 16K tokens on an L4, fp8 pages, 8,192 tokens a step: FlashInfer's prefill kernel took 8.7 s in forwards of
+    # 2,048 tokens, and about 7.3 s of vLLM's 11.5 s in forwards of 8,192). Such a forward needs working memory in
+    # proportion: the first one that runs out of it is run again in forwards of this size, and so is every later
+    # one (_whole_budget). The decode rows riding in a forward come on top of it, or count in it where the model's
+    # forward measured cheaper that way (_row_target).
     FORWARD_TOKENS = 2048
 
     def _try_reserve(self, req: AsyncSequenceRequest) -> bool:
@@ -615,6 +620,16 @@ class ContinuousBatchEngine:
             try:
                 self._step_batch()
             except Exception as e:  # fail this step's requests; a dead loop would leave every caller waiting forever
+                if isinstance(e, torch.OutOfMemoryError) and self._whole_budget and self._one_forward \
+                        and self._forward_tokens > self.FORWARD_TOKENS:
+                    # a forward of a whole larger budget found no working memory. Nothing of it is kept (a cache's
+                    # length moves when its forward is done, and this step had one forward), so the step runs
+                    # again in forwards of the usual size, as every later one does
+                    logger.warning("a prefill forward of %d tokens ran out of memory: forwards of %d from now on",
+                                   self._forward_tokens, self.FORWARD_TOKENS)
+                    self._whole_budget, self._prefill_left = False, 0
+                    torch.cuda.empty_cache()
+                    continue
                 logger.exception("scheduler step failed; finishing %d requests with an error", len(self.running_batch))
                 now = time.time()
                 for req in self.running_batch:
@@ -622,15 +637,17 @@ class ContinuousBatchEngine:
                         req.error, req.uncacheable = e, True  # its cache may be half-written: never index it
                         self._finish_request(req, now, "error")
                 self.running_batch = []
-                self._ahead = self._verifying = None
+                self._ahead = self._verifying = self._chained = None
             await asyncio.sleep(0)
 
     # ------------------------------------------------------------------ one scheduler step
 
-    def _forward(self, ids: torch.Tensor, caches, adapters=None, logits_to_keep: int = 0):
+    def _forward(self, ids: torch.Tensor, caches, adapters=None, logits_to_keep: int = 0, start_shift=None):
         if self.dist_driver is not None:
             return self.dist_driver.forward_distributed(ids, past_key_values=caches)
         kw = {"adapters": adapters} if adapters is not None and any(adapters) else {}
+        if start_shift is not None:
+            kw["start_shift"] = start_shift
         return self.model(ids, past_key_values=caches, logits_to_keep=logits_to_keep, **kw)
 
     def _step_batch(self):
@@ -649,16 +666,17 @@ class ContinuousBatchEngine:
             # A step budget above FORWARD_TOKENS is spent over several steps of one forward each while the prompts
             # fit a forward: a request gets its first token after the forward that ends its prompt, and the decoding
             # requests take their next token with the last forward of the budget only. A prompt longer than a
-            # forward (or in the middle of its prefill) takes the budget in one.
+            # forward takes the budget in one.
             prefill = [r for r in self.running_batch if r.state == RequestState.PREFILLING]
-            budget, work, more = 0, [], False
+            budget, work, more, self._forward_tokens = 0, [], False, 0
             if prefill:
                 if self._prefill_left <= 0:
                     self._prefill_left = self.lane_policy.prefill_chunk_budget(prefill[0].lane) \
                         if (self.lane_policy and prefill[0].lane) else self.prefill_chunk_size
-                long = prefill[0].prefill_offset > 0 or len(prefill[0].prefill_tokens) > self.FORWARD_TOKENS
+                long = self._whole_budget and len(prefill[0].prefill_tokens) > self.FORWARD_TOKENS
                 budget = forward = self._prefill_left if long else min(self._prefill_left, self.FORWARD_TOKENS)
                 self._prefill_left -= forward
+                self._forward_tokens = forward
             for req in prefill:
                 if budget <= 0:
                     break
@@ -680,6 +698,7 @@ class ContinuousBatchEngine:
             packs = (bool(work) and self.dist_driver is None and not any(r.adapter for r, _ in work)
                      and all(isinstance(c, KVCache) for c in caches)
                      and getattr(self.model, "can_pack_prefill", lambda _: False)(caches))
+            self._one_forward = packs or len(work) <= 1
             if packs and not more and self._ride_ahead(prefill, work):
                 self.running_batch = [r for r in self.running_batch if r.state != RequestState.FINISHED]
                 return
@@ -889,8 +908,11 @@ class ContinuousBatchEngine:
         FORWARD_TOKENS cost this model over 5% more (SmolLM2-1.7B: 13%) and no CUDA graph serves the step."""
         none = self.FORWARD_TOKENS + len(riders)
         took = sum(e - r.prefill_offset for r, e in work)
-        if took > self.FORWARD_TOKENS:  # a long prompt's forward of a larger budget: measured near 2,048 rows only
-            return took + len(riders)
+        if took > self.FORWARD_TOKENS:
+            # a long prompt's forward of a larger budget keeps to the budget's rows, the decode rows among them (as
+            # a step of vLLM's does): with 8,192 prompt tokens and decode rows on top cuBLAS ran Qwen2.5-1.5B's
+            # q/k/v projection 19% slower on an L4 than at 8,192 rows (forward_rows measures near 2,048 only)
+            return max(took, self._forward_tokens)
         plan = getattr(self.model, "forward_rows", None)
         if plan is None or not all(isinstance(c, KVCache) for c in caches):
             return none
@@ -1159,13 +1181,83 @@ class ContinuousBatchEngine:
             r.head_drafts = []
         self._verifying = (self._flight(reqs, torch.cat([ids, logits.argmax(-1)])), [len(d) for d in drafts], starts,
                            logits, self.model.last_aux[:, 0])
+        self._chain_ahead()
         return True
+
+    def _chain_ahead(self) -> None:
+        """Launch the cycle after the verify step in flight (_verifying) behind it: the head's next chain and the
+        step that verifies it, from the drafts that step accepts, which are counted on the device. The host then
+        reads a cycle while the next one runs, and the device does not wait for the host between a target step and
+        the head's next chain (1.5% of a cycle on Qwen3-8B with an EAGLE-3 head on an L4: the read of the picks,
+        the accept, the chain's inputs and their launches). The host knows a row's position only as if every draft
+        in flight were accepted, which is how far its pages reach; the device takes back the drafts that are not.
+        Nothing is launched where a step could not be launched ahead, a request may reach its output limit within
+        the cycle in flight, or a pool has no room: the host then drafts when it has read that cycle. Nor for a
+        request drafting alone: where it ends on a stop token, which the host learns one cycle late, that whole
+        cycle is computed for nothing (among several requests the rows of one that ended cost little)."""
+        (reqs, tokens, _, _), ks, starts, _, aux = self._verifying
+        if len(reqs) < 2 or any(r.state != RequestState.DECODING for r in reqs) or not self._verifies_ahead(reqs):
+            return
+        nexts = []
+        for r, k in zip(reqs, ks):
+            left = r.max_new_tokens - len(r.generated_tokens) - (k + 1)  # at the least, after the cycle in flight
+            k2 = min(self._draft_count(r), r.head_len or self._draft_count(r), left - 1)
+            if k2 < 1 or not isinstance(r.head_cache, KVCache):
+                return
+            nexts.append(k2)
+        caches = [r.past_kv for r, k2 in zip(reqs, nexts) for _ in range(k2 + 1)]
+        graphs = getattr(self.model, "_graphs", None)
+        if graphs is None or len(caches) > DecodeGraphs.BUCKETS[-1] or not self._top_up(reqs) \
+                or not graphs.eligible(self.model, caches, False, row_starts(caches)):
+            return
+        rows, offs = sum(k + 1 for k in ks), [sum(k + 1 for k in ks[:i]) for i in range(len(ks))]
+        ids, picks = tokens[:rows], tokens[rows:]
+        # the drafts each request's rows accept: the leading rows whose pick is the draft that follows
+        acc = torch.stack([(picks[o:o + k] == ids[o + 1:o + k + 1]).long().cumprod(0).sum()
+                           for o, k in zip(offs, ks)])
+        # every row of the step in flight goes to the head with the target's pick after it (the tokens emitted, for
+        # the rows that turn out verified)
+        drafted = self.draft_head.draft_many(
+            self.model.embed_tokens, [(aux[o:o + k + 1], picks[o:o + k + 1], start, k2, r.head_cache)
+                                      for r, o, k, k2, start in zip(reqs, offs, ks, nexts, starts)],
+            host=False, accepted=acc)
+        if drafted is None:
+            return
+        last = picks.index_select(0, host_tensor(offs, torch.long, self.device) + acc)  # each request's last pick
+        ids = torch.cat([t for i, (d, _) in enumerate(drafted) for t in (last[i:i + 1], d)])
+        back = (acc - host_tensor(ks, torch.long, self.device)).to(torch.int32).index_select(
+            0, host_tensor([i for i, k2 in enumerate(nexts) for _ in range(k2 + 1)], torch.long, self.device))
+        logits, _ = self._forward(ids[:, None], caches, start_shift=back)
+        logits = logits[:, -1]
+        self._chained = (self._flight(reqs, torch.cat([ids, logits.argmax(-1)])), nexts, None, logits,
+                         self.model.last_aux[:, 0])
+
+    def _promote(self, chained: tuple, work: list) -> None:
+        """The cycle launched behind the one just read is now the one in flight. work: (request, aux, emitted,
+        start) of the requests that go on. The head's cache keeps the positions that turned out verified, and the
+        target's cache is as the model left it when that cycle's rows were launched: every draft of it counted."""
+        flight, ks, _, logits, aux = chained
+        went = {id(req): (emitted, start) for req, _, emitted, start in work}
+        starts = []
+        for r, k in zip(flight[0], ks):
+            if id(r) in went:
+                emitted, start = went[id(r)]
+                r.head_cache.length += len(emitted)
+                r.head_next = start + len(emitted)
+                starts.append(r.past_kv.length)  # where the cycle in flight starts (_verified has set it)
+                r.past_kv.length += k + 1
+            else:  # finished with the cycle just read: its rows of the one in flight are computed for nothing
+                starts.append(0)
+        if went:  # else every request has ended: nothing of the cycle in flight is read
+            self._verifying = (flight, ks, starts, logits, aux)
+            self._chain_ahead()
 
     def _verify_settle(self) -> tuple:
         """Read the step _verify_ahead launched (its drafts and the target's picks: one wait, for that step) and do
         with them what a decode step does: accept, emit, and draft again. Returns the step's rows (0: there was
         none) and the ids of its requests, which have had this scheduler step's tokens."""
         ahead, self._verifying = self._verifying, None
+        chained, self._chained = self._chained, None
         if ahead is None:
             return 0, ()
         (reqs, _, host, event), ks, starts, logits, aux = ahead
@@ -1176,7 +1268,7 @@ class ContinuousBatchEngine:
             at += k + 1
         rows = [(r, None) for r, k in zip(reqs, ks) for _ in range(k + 1)]
         self._decoded([], spec, rows, starts, logits, sum(r.state == RequestState.DECODING for r in reqs),
-                      tops=vals[at:], aux=aux)
+                      tops=vals[at:], aux=aux, chained=chained)
         return at, {id(r) for r in reqs}
 
     # verify passes before judging (and the span of the moving average); plain tokens of rest; steps with no draft
@@ -1365,10 +1457,11 @@ class ContinuousBatchEngine:
 
     def _decoded(self, plain: List[AsyncSequenceRequest], spec: list, rows: list, starts: List[int],
                  logits: torch.Tensor, n: int, tops: Optional[List[int]] = None,
-                 aux: Optional[torch.Tensor] = None) -> None:
+                 aux: Optional[torch.Tensor] = None, chained: Optional[tuple] = None) -> None:
         """Sample, verify and emit after the forward that gave `rows` their logits [len(rows), V] (a decode step, or
         a packed prefill they rode in). tops, aux: the rows' argmax and tapped states, from a step that was launched
-        ahead (_verify_settle); a request of such a step may have been cancelled or preempted since."""
+        ahead (_verify_settle); a request of such a step may have been cancelled or preempted since. chained: the
+        cycle already launched behind that step (_chain_ahead), which then needs no drafting here."""
         if aux is None and self.draft_head is not None:
             aux = self.model.last_aux[:, 0]  # each row's tapped states
         if tops is None and all(r.temperature <= 1e-5 and r.logits_processor is None for r, _ in rows):
@@ -1386,7 +1479,9 @@ class ContinuousBatchEngine:
             self._emit(r, t, now)
         work = [self._verified(r, drafts, emitted, start, a, len(rows), n) for r, drafts, emitted, start, a in verified]
         work = [w for w in work if w is not None]
-        if work:
+        if chained is not None:
+            self._promote(chained, work)
+        elif work:
             self._head_draft(work)  # every request's next drafts in one pass of the head
 
     def _finish_request(self, req: AsyncSequenceRequest, finished_time: float, reason: str = "length"):

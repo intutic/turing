@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 ## Unreleased
 
 ### Added
+- `turing convert --symmetric` (`turing.models.quant.symmetric`): every group's zero point at 8 and a range of
+  its largest magnitude on both sides, the grid of GPTQ checkpoints with `sym=true` such as Qwen's GPTQ-Int4
+  ones. The `.tgate4` format is unchanged. The vendored Marlin kernels gain their variant without zero points
+  (dense and MoE, fp16 and bf16, groups of 64 and 128), which a matrix whose zero points are all 8 now takes: it
+  reads and subtracts none. Qwen1.5-MoE-A2.7B-Chat with its LM head in fp16 on an L4, against vLLM on Qwen's
+  checkpoint in one boot: 101.6 / 99.4 / 99.3 / 99.7% at batch 1 / 8 / 32 / 64 converted this way, 100.8 / 98.3 /
+  98.3 / 98.7% with zero points (the routed experts' kernel took 251 against vLLM's 237 µs a call at batch 8);
+  GSM8K 44.4% ± 2.2 against 46.0% ± 2.2 with zero points (n=500). A grid with zero points wastes none of its 16
+  levels on a group whose weights lie to one side, and remains the default.
 - 4-bit MoE experts: `--quantization` and `turing convert` now pack the stacked experts of an MoE layer too (GPTQ with
   each expert's own Gram matrices), read by int4 variants of the grouped MoE kernels. `.tgate4` files written before
   still load with their experts in the model dtype.
@@ -70,11 +79,47 @@ All notable changes to this project are documented here. The format follows
   `turing serve` on an L4 a 34-token chat prompt that shares its template's first tokens with the request before
   got its first token in 54 ms continuing them and gets it in 33 ms prefilled whole (the warm-up captures the
   graphs of prompts up to 256 tokens). Its output is then that of a server without a prefix cache.
-- A prompt longer than one prefill forward (2,048 tokens), or in the middle of its prefill, takes a step budget
-  above 2,048 (`prefill_chunk_size`; `turing serve` uses 2,048) in one forward instead of several of 2,048: no
-  graph replays such a forward, and FlashInfer's prefill kernel costs less per token with more queries in a call.
-  16 prompts of 16K tokens with a 1-byte KV cache at 8,192 tokens a step on an L4: 30.2 to 29.6 s (vLLM 28.7 s),
-  the device idle 0.29 to 0.06 s.
+- A prompt longer than one prefill forward (2,048 tokens) takes a step budget above 2,048 (`prefill_chunk_size`;
+  `turing serve` uses 2,048) in one forward instead of several of 2,048: no graph replays such a forward, and
+  FlashInfer's prefill kernel costs less per token with more queries in a call. 16 prompts of 16K tokens with a
+  1-byte KV cache at 8,192 tokens a step on an L4: 30.2 to 29.6 s (vLLM 28.7 s), the device idle 0.29 to 0.06 s.
+  Shorter prompts keep to forwards of 2,048 (a burst of 64 prompts of 1,024 tokens in forwards of 8,192 ran
+  SmolLM2-1.7B out of the L4's memory), and if a forward above 2,048 does run out of memory the engine runs the
+  step again and keeps to 2,048 from then on.
+- 16K-token prompts with a 1-byte KV cache, from the device-time profiles of both engines (16 requests on an L4):
+  - FlashInfer's prefill call makes no copies around it: RoPE writes the queries in the order FlashInfer reads
+    them, FlashInfer writes into the layer's output where the decode rows' follow, and it no longer zero-fills an
+    output of its own (three copies of 25 MB a layer for 8,192 tokens of Qwen2.5-1.5B; 0.23 s of a 30 s burst at
+    2,048 tokens a step). With it Turing's fp8 took 30.64 s against vLLM's 30.48 in one boot (before: 30.20
+    against 29.92 in another).
+  - A long prompt's forward of a larger step budget holds the decode rows riding in it within the budget's rows,
+    as a step of vLLM's does: with 8,192 prompt tokens and decode rows on top cuBLAS ran Qwen2.5-1.5B's q/k/v
+    projection 19% slower than at 8,192 rows.
+  - Decode rows riding in a prefill forward over fp8 or native pages go through FlashInfer's decode wrapper
+    instead of its prefill wrapper with requests of one query (one layer, eight layers a plan: 1 to 7% less time
+    at 512 to 2,048 tokens, level at 8K and more).
+  - A decode graph's kernel splits each row's context twice as often over 1-byte pages (512 programs a layer
+    where that is more than one split): 2 to 5% less time in the kernel at 8K and 16K tokens for int8 and fp8
+    pages, within 1.5% either way at 2K and under. Pages in the model dtype keep 256.
+  - Together, against vLLM's fp8 cache in one boot at batch 16 to 128: at 2,048 tokens a step Turing's fp8 takes
+    1.00× its time per request (before 1.00 to 1.01×) and its int8 1.01 to 1.03× (1.01 to 1.05×); at 8,192
+    1.01 to 1.03× and 1.02 to 1.04× (both 1.03 to 1.05×).
+- With a draft head and at least two requests drafting, the cycle after the verify step in flight is launched
+  behind it: the head's next chain and the step that verifies it start from the drafts that step accepts,
+  counted on the device, and the host reads a cycle while the next one runs (the model's decode graph and the
+  head's step graphs take positions shifted on the device; the host knows a row's position as if every draft in
+  flight were accepted, which is how far its pages reach). On Qwen3-8B with an EAGLE-3 head on an L4 the device
+  idled 1.6% of a cycle at 2 requests and 1.5% at 4 before, and 0.7% and 0.5% now; in one process with it off
+  and on: 82.2 to 82.7 tok/s at 2 requests, 133.2 to 133.8 at 4, the same tokens. A request drafting alone
+  keeps the cycle read first: where it ends on a stop token the cycle launched ahead would be computed for
+  nothing. Against vLLM with the same head, both engines warmed at each concurrency and their output counted
+  alike: 101.0 / 99.9 / 99.8% at 1 / 2 / 4 requests (before: 100.8 to 101.0 / 99.3 to 99.8 / 99.4 to 99.5%).
+- `scripts/benchmark_speculation.py` counts output tokens the same way for both engines: vLLM's `token_ids` end
+  with the stop token of a request that stopped on one, which Turing's stream leaves out (24 tokens of 4,274 on
+  the code workload, so vLLM's rows of earlier runs read 0.6% high). `--passes 2` reports the second pass over
+  the prompts and keeps both passes' seconds, so what an engine builds at a shape's first use is outside the row
+  (Turing built a kernel in the first group of two requests: 1.6 s of a 52 s cell). Each row also holds every
+  group's seconds and tokens.
 - On a GPU without bf16 matmul (compute capability below 8.0, a Tesla T4) the loader says once that a bf16
   checkpoint's prefill and multi-row decode steps run 7 to 10 times slower than in fp16. The dtype is not changed.
 - The decode step merges its attention splits in one load per query head instead of a loop over the splits, which

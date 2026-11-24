@@ -137,6 +137,47 @@ def test_a_long_prompt_takes_a_larger_step_budget_in_one_forward_and_gives_the_s
     assert alone == want[1]
 
 
+def test_a_whole_budget_forward_that_runs_out_of_memory_is_run_again_in_forwards_of_the_usual_size():
+    """The forward of a long prompt under a larger step budget needs working memory in proportion. The first one
+    that finds none costs no request: its step runs again in forwards of FORWARD_TOKENS, as every later step does."""
+    from tests.test_hf_parity import _tiny
+    from turing.models.hf_loader import RealHuggingFaceLoader
+    long = torch.randint(0, 128, (150,), generator=torch.Generator().manual_seed(3)).tolist()
+
+    def engine(chunk):
+        model = RealHuggingFaceLoader.convert_hf_model(_tiny("llama"))
+        model.config.kv_pool_gib = 0.01
+        e = ContinuousBatchEngine(model.config, TuringConfig(device="cpu", max_batch_size=8), model=model,
+                                  prefix_caching=False, draft_tokens=0, prefill_chunk_size=chunk)
+        e.FORWARD_TOKENS = 32
+        return e
+    want = _greedy(engine(32), long, 6)
+    big = engine(96)
+    sizes, forward = [], big._forward
+
+    def short_of_memory(ids, *a, **kw):
+        sizes.append(ids.shape[1])
+        if ids.shape[1] > 32:
+            raise torch.OutOfMemoryError("CUDA out of memory (test)")
+        return forward(ids, *a, **kw)
+    big._forward = short_of_memory
+    (req,), (got,) = _run(big, dict(prompt_tokens=long, max_new_tokens=6, temperature=0.0))
+    assert got == want and req.error is None
+    assert sizes[0] == 96 and max(sizes[1:]) == 32 and not big._whole_budget
+    # a decode step that runs out of memory is a failed step as before, whatever the forward before it was
+    late = engine(96)
+    whole = late._forward
+
+    def decode_short_of_memory(ids, *a, **kw):
+        if ids.shape[1] == 1:
+            raise torch.OutOfMemoryError("CUDA out of memory (test)")
+        return whole(ids, *a, **kw)
+    late._forward = decode_short_of_memory
+    with pytest.raises(RuntimeError, match="failed in the engine"):
+        _run(late, dict(prompt_tokens=long, max_new_tokens=6, temperature=0.0))
+    assert late._whole_budget
+
+
 def test_stop_tokens_top_k_and_logits_processor():
     engine = _engine()
     ref = _greedy(engine, PROMPT, 8)

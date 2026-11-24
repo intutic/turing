@@ -135,7 +135,10 @@ Source: `benchmarks/results/results_gguf_parity_mps.json`.
 - **Weights:** 2 bytes per parameter in fp16/bf16, 4 in fp32 (the default on CPU and MPS).
 - **4-bit weights** (`turing convert` or `--quantization`): attention and dense-MLP projections and MoE experts take
   half a byte per weight plus an fp16 scale and a uint8 zero per 64 weights, and so does the LM head unless
-  `--no-quantize-lm-head` is given. Embeddings and routers stay in the model dtype.
+  `--no-quantize-lm-head` is given. Embeddings and routers stay in the model dtype. `turing convert --symmetric` puts every
+  group's zero point at 8 (the grid of GPTQ checkpoints with `sym=true`): the Marlin kernels then read no zero
+  points, which on Qwen1.5-MoE is 1% more throughput at batch 8 to 64 for 1.6 points of GSM8K (within its
+  ± 2.2; [benchmarks §7](benchmarks.md#7-moe-decode-and-expert-offload)).
 - **MoE models larger than the GPU:** `--moe-expert-slots N` keeps `N` experts per layer on the GPU and the rest in
   host memory ([serving §5a](serving.md#5a-moe-expert-offload)).
 - **KV cache:** the pool takes `--kv-cache-memory-fraction` (default 0.6) of the GPU memory left after the weights.
