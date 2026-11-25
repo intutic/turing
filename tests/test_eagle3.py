@@ -449,6 +449,38 @@ def test_a_request_admitted_while_a_verify_step_is_in_flight_joins_without_chang
     _all_pages_back(engine)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="a verify step is launched ahead on CUDA only")
+def test_a_lone_requests_next_chain_is_launched_ahead_and_a_stop_token_costs_only_that_chain():
+    """A request drafting alone has the head's next chain queued behind its verify step (_chain_ahead), and the step
+    that verifies it launched once the host has read the one in flight (_promote): the tokens of plain greedy
+    decoding, also where it ends on a stop token with a chain in flight, and every page back."""
+    model = _target("cuda")
+    ref = _generate(_engine(model, device="cuda"), 48)[0]
+    stop = next(t for i, t in enumerate(ref) if i >= 20 and t not in ref[:i])  # first seen late in the output
+
+    async def go(engine):
+        await engine.start()
+        try:
+            r = await engine.add_request(prompt_tokens=PROMPT, max_new_tokens=48, temperature=0.0,
+                                         stop_token_ids={stop})
+            return [t async for t in engine.stream_request(r)]
+        finally:
+            await engine.stop()
+    want = ref[:ref.index(stop)]
+    assert asyncio.run(go(_engine(model, device="cuda"))) == want
+    engine = _engine(model, _target_head(model), device="cuda", draft_tokens=3)
+    engine.SPEC_PROBE = 10 ** 9  # never judged: the head is never rested
+    chain, alone = engine._chain_ahead, []
+
+    def counted():
+        chain()
+        alone.append(engine._chained is not None and engine._chained[0] is None)  # a chain with no verify step
+    engine._chain_ahead = counted
+    assert asyncio.run(go(engine)) == want
+    assert sum(alone) > 3 and engine.spec_drafted > 0
+    _all_pages_back(engine)
+
+
 @pytest.mark.parametrize("overlap", [False, True])
 def test_drafts_made_before_a_stretch_of_plain_decoding_are_not_verified_after_it(overlap):
     """A head that is always right for the position it drafted at: a rejected draft can only be a stale one."""

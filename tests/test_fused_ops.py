@@ -72,3 +72,36 @@ def test_rope_matches_apply_rotary_pos_emb(dtype, rot, decode):
                                    atol=torch.finfo(dtype).eps * max(1.0, r.abs().max().item()))
     tq, tk = rope(q, k, cos, sin, tokens_first=True)  # the same values, q's memory token by token
     assert torch.equal(tq, fq) and torch.equal(tk, fk) and tq.transpose(1, 2).is_contiguous()
+
+
+@cuda
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("offset", [0.0, 1.0])  # Qwen3's q_norm and k_norm, Gemma 3's
+@pytest.mark.parametrize("rot", [128, 64])
+@pytest.mark.parametrize("decode", [False, True])
+def test_rope_with_the_heads_norms_matches_the_norms_then_rope(dtype, offset, rot, decode):
+    from turing.kernels.triton_fused_ops import rope
+    from turing.models.causal_lm import RMSNorm
+    torch.manual_seed(0)
+    B, H, Hkv, D = 3, 12, 2, 128
+    L = 1 if decode else 37
+    fused = torch.randn(B, L, (H + 2 * Hkv) * D, device="cuda", dtype=dtype) * 8
+    q = fused[..., :H * D].view(B, L, H, D).transpose(1, 2)
+    k = fused[..., H * D:(H + Hkv) * D].view(B, L, Hkv, D).transpose(1, 2)
+    nq, nk = (RMSNorm(D, 1e-6, offset).cuda().to(dtype) for _ in range(2))
+    for n in (nq, nk):
+        n.weight.data.normal_(0, 0.5).add_(0 if offset else 1)
+    if decode:
+        ang = torch.rand(B, rot, device="cuda") * 100
+        cos, sin = ang.cos().view(B, 1, 1, rot), ang.sin().view(B, 1, 1, rot)
+    else:
+        ang = torch.rand(L, rot, device="cuda") * 100
+        cos, sin = ang.cos(), ang.sin()
+    with torch.no_grad():
+        rq, rk = rope(nq(q), nk(k), cos, sin)  # two launches of the norm, then the rotary one
+        fq, fk = rope(q, k, cos, sin, norms=(nq.weight, nk.weight, 1e-6, offset))
+    for f, r in ((fq, rq), (fk, rk)):  # within one rounding step of the dtype at the output's magnitude
+        torch.testing.assert_close(f.float(), r.float(), rtol=0,
+                                   atol=2 * torch.finfo(dtype).eps * max(1.0, r.abs().max().item()))
+    tq, _ = rope(q, k, cos, sin, tokens_first=True, norms=(nq.weight, nk.weight, 1e-6, offset))
+    assert torch.equal(tq, fq)

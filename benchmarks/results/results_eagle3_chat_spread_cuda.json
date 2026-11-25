@@ -1,0 +1,244 @@
+{
+  "env": {
+    "platform": "Linux-6.8.0-1074-gcp-x86_64-with-glibc2.35",
+    "python": "3.10.12",
+    "torch": "2.9.1+cu129",
+    "gpu": "NVIDIA L4"
+  },
+  "versions": {
+    "vllm": "vllm 0.31.0",
+    "turing": "2.9.1+cu129"
+  },
+  "note": "L4 run of 2026-11-25 (temporary Spot g2-standard-16 in us-central1-a, vLLM 0.31.0), one boot, the tree of the commit these results come with: chat with chains of 5 at 4 requests, three processes of vLLM and two of Turing one after another (field process: v1, t1, v2, t2, v3), each the second of two passes; vLLM's outputs differ between its processes, Turing's do not",
+  "rows": [
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "drafter": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "head_reach": 0.15,
+      "workload": "chat",
+      "requests": 24,
+      "concurrency": 4,
+      "draft_tokens": 5,
+      "max_new_tokens": 256,
+      "output_tokens": 5883,
+      "seconds": 54.085,
+      "pass_seconds": [
+        54.34,
+        54.085
+      ],
+      "group_seconds": [
+        8.7106,
+        9.0076,
+        9.5841,
+        10.0256,
+        8.5838,
+        8.1736
+      ],
+      "group_tokens": [
+        897,
+        995,
+        1024,
+        1024,
+        1003,
+        940
+      ],
+      "output_tok_per_s": 108.8,
+      "drafted_tokens": 10810,
+      "accepted_tokens": 3675,
+      "acceptance_rate": 0.34,
+      "tokens_per_pass": 2.663,
+      "verify_steps": 2200,
+      "same_tokens_as_no_draft": null,
+      "block": "chatrep",
+      "boot": "2026-11-25T15:06:22Z",
+      "process": "t1"
+    },
+    {
+      "engine": "turing",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "drafter": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "head_reach": 0.15,
+      "workload": "chat",
+      "requests": 24,
+      "concurrency": 4,
+      "draft_tokens": 5,
+      "max_new_tokens": 256,
+      "output_tokens": 5883,
+      "seconds": 54.087,
+      "pass_seconds": [
+        54.439,
+        54.087
+      ],
+      "group_seconds": [
+        8.7117,
+        9.0071,
+        9.5794,
+        10.0255,
+        8.5858,
+        8.1773
+      ],
+      "group_tokens": [
+        897,
+        995,
+        1024,
+        1024,
+        1003,
+        940
+      ],
+      "output_tok_per_s": 108.8,
+      "drafted_tokens": 10810,
+      "accepted_tokens": 3675,
+      "acceptance_rate": 0.34,
+      "tokens_per_pass": 2.663,
+      "verify_steps": 2200,
+      "same_tokens_as_no_draft": null,
+      "block": "chatrep",
+      "boot": "2026-11-25T15:06:22Z",
+      "process": "t2"
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "drafter": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "workload": "chat",
+      "requests": 24,
+      "concurrency": 4,
+      "draft_tokens": 5,
+      "max_new_tokens": 256,
+      "output_tokens": 5865,
+      "stop_tokens_not_counted": 9,
+      "seconds": 53.977,
+      "pass_seconds": [
+        53.943,
+        53.977
+      ],
+      "group_seconds": [
+        8.4632,
+        9.1632,
+        9.4492,
+        9.9794,
+        8.6942,
+        8.2276
+      ],
+      "group_tokens": [
+        871,
+        1014,
+        1024,
+        1024,
+        1003,
+        929
+      ],
+      "output_tok_per_s": 108.7,
+      "spec_decode": {
+        "spec_decode_num_drafts": 2219,
+        "spec_decode_num_draft_tokens": 11095,
+        "spec_decode_num_accepted_tokens": 3660
+      },
+      "drafted_tokens": 11095,
+      "accepted_tokens": 3660,
+      "acceptance_rate": 0.3299,
+      "tokens_per_pass": 2.636,
+      "block": "chatrep",
+      "boot": "2026-11-25T15:06:22Z",
+      "process": "v1"
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "drafter": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "workload": "chat",
+      "requests": 24,
+      "concurrency": 4,
+      "draft_tokens": 5,
+      "max_new_tokens": 256,
+      "output_tokens": 5823,
+      "stop_tokens_not_counted": 8,
+      "seconds": 54.266,
+      "pass_seconds": [
+        54.068,
+        54.266
+      ],
+      "group_seconds": [
+        8.7662,
+        9.0968,
+        9.3607,
+        10.1465,
+        8.6875,
+        8.2085
+      ],
+      "group_tokens": [
+        857,
+        1014,
+        1024,
+        1024,
+        1008,
+        896
+      ],
+      "output_tok_per_s": 107.3,
+      "spec_decode": {
+        "spec_decode_num_drafts": 2210,
+        "spec_decode_num_draft_tokens": 11050,
+        "spec_decode_num_accepted_tokens": 3637
+      },
+      "drafted_tokens": 11050,
+      "accepted_tokens": 3637,
+      "acceptance_rate": 0.3291,
+      "tokens_per_pass": 2.628,
+      "block": "chatrep",
+      "boot": "2026-11-25T15:06:22Z",
+      "process": "v2"
+    },
+    {
+      "engine": "vllm",
+      "model": "Qwen/Qwen3-8B",
+      "dtype": "bf16",
+      "drafter": "RedHatAI/Qwen3-8B-speculator.eagle3",
+      "workload": "chat",
+      "requests": 24,
+      "concurrency": 4,
+      "draft_tokens": 5,
+      "max_new_tokens": 256,
+      "output_tokens": 5866,
+      "stop_tokens_not_counted": 9,
+      "seconds": 54.438,
+      "pass_seconds": [
+        54.356,
+        54.438
+      ],
+      "group_seconds": [
+        8.7661,
+        9.0912,
+        9.3608,
+        10.1493,
+        8.7534,
+        8.3167
+      ],
+      "group_tokens": [
+        857,
+        1014,
+        1024,
+        1024,
+        1003,
+        944
+      ],
+      "output_tok_per_s": 107.8,
+      "spec_decode": {
+        "spec_decode_num_drafts": 2240,
+        "spec_decode_num_draft_tokens": 11200,
+        "spec_decode_num_accepted_tokens": 3647
+      },
+      "drafted_tokens": 11200,
+      "accepted_tokens": 3647,
+      "acceptance_rate": 0.3256,
+      "tokens_per_pass": 2.612,
+      "block": "chatrep",
+      "boot": "2026-11-25T15:06:22Z",
+      "process": "v3"
+    }
+  ]
+}

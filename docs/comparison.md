@@ -37,12 +37,13 @@ the [benchmarks](benchmarks.md) page.
   Qwen's symmetric GPTQ checkpoint through (in the 4-bit table below vLLM's own AWQ rows, with zero points, are
   1.2% under its GPTQ rows). Converted with `turing convert --symmetric` the model takes that kernel and is at
   100.0–102.6% (GSM8K 44.4% in bf16 and 42.8% in fp16 against 46.0% with zero points, each ± 2.2%; vLLM 40.6%).
-  An EAGLE-3 head is 0.9% behind on chat at 1 request and 0.7% on code with chains of 7 at 4 requests, and at
-  100.3–101.9% in the other 13 cells. The mean first token of a burst of 8 on SmolLM2-1.7B with both engines at 2,048 tokens
+  An EAGLE-3 head is at 101.0–102.4% in 13 of 15 cells; code with chains of 7 at 4 requests is 0.2–0.7% behind in
+  two measurements of one boot, and chat at 4 requests 1.7% behind vLLM's fastest of four processes and 0.2% ahead
+  of their mean (vLLM's outputs, and with them its speed, change between processes; Turing's do not). The mean first token of a burst of 8 on SmolLM2-1.7B with both engines at 2,048 tokens
   a step is within 3% either way from boot to boot. vLLM 0.31 schedules its next step while the current one runs
   (`async_scheduling`, its default), so the host's work between steps costs it no GPU time; Turing's engine
-  launches its decode steps, its steps that prefill, a draft head's verify step and, with two or more requests
-  drafting, the whole cycle after it ahead in the same way.
+  launches its decode steps, its steps that prefill, a draft head's verify step and the cycle after it (with two or
+  more requests drafting the whole cycle, for a lone request the head's next chain) ahead in the same way.
 * **Differences of a few percent are within the spread between runs.** One prompt-lookup cell measured four times
   back to back gave 448.8–449.6 tok/s without drafts and 1,573–1,585 with 8, and 439 and 1,626 an hour earlier
   (session of 2026-11-21; `results_speculation_repeat_cuda.json`). A Spot VM is also restarted now and then and

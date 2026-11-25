@@ -11,7 +11,7 @@ in 4 bits too) is 1.07–1.33× faster than vLLM at batch sizes 1 to 64.
 [![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
 [![Release: v2.0.0](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 1479](https://img.shields.io/badge/Tests-1479-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 1498](https://img.shields.io/badge/Tests-1498-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -133,8 +133,10 @@ model and prompts (Qwen2.5-1.5B-Instruct, 512-token prompts, 256 new tokens):
   and its int8 at 97.0–99.0%; vLLM's fp8 keeps no layer in fp16 and wrecks this model's output (above), and with
   layer 0 kept in fp16 as Turing keeps it Turing's fp8 is at 103.5–106.2% and its int8 at 100.7–103.8%.
 * **Speculative decoding:** with prompt lookup (8 drafts) Turing is at 100–121% of vLLM's n-gram speculator on code,
-  rewrite and chat prompts; with a published EAGLE-3 head on Qwen3-8B it is at 99.1–101.9% of vLLM with the same
-  head (13 of 15 cells at 100.3% or more).
+  rewrite and chat prompts; with a published EAGLE-3 head on Qwen3-8B it is at 101.0–102.4% of vLLM with the same
+  head in 13 of 15 cells. The other two are within the spread of vLLM's own runs: code with chains of 7 at 4
+  requests at 99.3–99.8%, and chat at 4 requests at 98.3% of vLLM's fastest of four processes and 100.2% of their
+  mean (vLLM's outputs, and with them its speed, change from one process to the next).
 * **MoE models:** OLMoE in bf16 is level with vLLM at batch 1 and 8 and 3% behind at batch 32; Qwen1.5-MoE in 4
   bits is at 101–127% of vLLM on Qwen's GPTQ checkpoint (99.1–101.5% with its LM head in fp16, as in that
   checkpoint; 100.0–102.6% converted with `--symmetric`, the grid of that checkpoint).

@@ -770,8 +770,13 @@ class SubspaceAttention(nn.Module):
         q = q.view(batch, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch, seq_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        norms = None  # per-head q and k norms (Qwen3, Gemma 3) in the rotary kernel's launch where it runs
         if cfg.qk_norm and not cfg.qk_norm_full:
-            q, k = self.q_norm(q), self.k_norm(k)
+            if self.rope is not None and all(isinstance(n, RMSNorm) and n.fusable(t) for n, t in
+                                             ((self.q_norm, q), (self.k_norm, k))):
+                norms = (self.q_norm.weight, self.k_norm.weight, self.q_norm.eps, self.q_norm.offset)
+            else:
+                q, k = self.q_norm(q), self.k_norm(k)
 
         if self.rope is not None:
             if step is not None:  # one position per row, on the device
@@ -785,8 +790,10 @@ class SubspaceAttention(nn.Module):
                                                    select_len=cache.rope_len if cache is not None else 0)
             if fused_ops.fused_ops_supported(q) and cos.shape[-1] % 2 == 0:
                 # one pass per tensor, the cast to q's dtype inside
-                q, k = fused_ops.rope(q, k, cos, sin, self._to_flashinfer(q, cache, packed))
+                q, k = fused_ops.rope(q, k, cos, sin, self._to_flashinfer(q, cache, packed), norms)
             else:
+                if norms is not None:
+                    q, k = self.q_norm(q), self.k_norm(k)
                 q, k = apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype))
         if self._k_absmax is not None:
             m = k.detach().abs().float().amax(dim=(0, 2))

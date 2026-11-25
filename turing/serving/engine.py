@@ -193,7 +193,7 @@ class ContinuousBatchEngine:
         self.prefix_cache = PrefixCache(self.kv_pool) if prefix_caching and dist_driver is None else None
         self.eos_token_ids = set(eos_token_ids) if eos_token_ids is not None else _eos_ids(tokenizer)
         self.default_draft_tokens = draft_tokens  # drafts per step when the gate allows (0 = off)
-        self.spec_drafted = self.spec_accepted = 0
+        self.spec_drafted = self.spec_accepted = self.spec_verifies = 0  # spec_verifies: a request's verify steps
         self.remote_prefill = remote_prefill  # (host, port) of a PrefillWorker: prompts are prefilled there
         self.max_waiting = max_waiting  # requests that may wait for KV pages before new ones get 503
 
@@ -309,7 +309,7 @@ class ContinuousBatchEngine:
             self.prefix_cache.clear()
             self.prefix_cache.hits = self.prefix_cache.queries = 0
         self.total_tokens_generated = self.total_requests_completed = 0
-        self.spec_drafted = self.spec_accepted = self.preemptions = 0
+        self.spec_drafted = self.spec_accepted = self.spec_verifies = self.preemptions = 0
         self.recent_ttft.clear()
         self.recent_itl.clear()
         self.start_time = time.time()
@@ -1213,12 +1213,14 @@ class ContinuousBatchEngine:
         the accept, the chain's inputs and their launches). The host knows a row's position only as if every draft
         in flight were accepted, which is how far its pages reach; the device takes back the drafts that are not.
         Nothing is launched where a step could not be launched ahead, a request may reach its output limit within
-        the cycle in flight, or a pool has no room: the host then drafts when it has read that cycle. Nor for a
-        request drafting alone: where it ends on a stop token, which the host learns one cycle late, that whole
-        cycle is computed for nothing (among several requests the rows of one that ended cost little)."""
+        the cycle in flight, or a pool has no room: the host then drafts when it has read that cycle. For a request
+        drafting alone only the head's chain is launched ahead, and the step that verifies it once the host has read
+        the cycle in flight (_promote): where it ends on a stop token, which the host learns one cycle late, that
+        costs the chain, not a whole cycle (among several requests the rows of one that ended cost little)."""
         (reqs, tokens, _, _), ks, starts, _, aux = self._verifying
-        if len(reqs) < 2 or any(r.state != RequestState.DECODING for r in reqs) or not self._verifies_ahead(reqs):
+        if any(r.state != RequestState.DECODING for r in reqs) or not self._verifies_ahead(reqs):
             return
+        alone = len(reqs) == 1
         # at the least, after the cycle in flight: each request's tokens left but one
         caps = [min(self._draft_count(r), r.max_new_tokens - len(r.generated_tokens) - (k + 1) - 1)
                 for r, k in zip(reqs, ks)]
@@ -1227,8 +1229,8 @@ class ContinuousBatchEngine:
             return
         caches = [r.past_kv for r, k2 in zip(reqs, nexts) for _ in range(k2 + 1)]
         graphs = getattr(self.model, "_graphs", None)
-        if graphs is None or len(caches) > DecodeGraphs.BUCKETS[-1] or not self._top_up(reqs) \
-                or not graphs.eligible(self.model, caches, False, row_starts(caches)):
+        if not alone and (graphs is None or len(caches) > DecodeGraphs.BUCKETS[-1] or not self._top_up(reqs)
+                          or not graphs.eligible(self.model, caches, False, row_starts(caches))):
             return
         rows, offs = sum(k + 1 for k in ks), [sum(k + 1 for k in ks[:i]) for i in range(len(ks))]
         ids, picks = tokens[:rows], tokens[rows:]
@@ -1243,6 +1245,9 @@ class ContinuousBatchEngine:
             host=False, accepted=acc)
         if drafted is None:
             return
+        if alone:  # the chain alone: no flight, the drafts on the device
+            self._chained = (None, nexts, drafted[0][0], None, None)
+            return
         last = picks.index_select(0, host_tensor(offs, torch.long, self.device) + acc)  # each request's last pick
         ids = torch.cat([t for i, (d, _) in enumerate(drafted) for t in (last[i:i + 1], d)])
         back = (acc - host_tensor(ks, torch.long, self.device)).to(torch.int32).index_select(
@@ -1255,8 +1260,16 @@ class ContinuousBatchEngine:
     def _promote(self, chained: tuple, work: list) -> None:
         """The cycle launched behind the one just read is now the one in flight. work: (request, aux, emitted,
         start) of the requests that go on. The head's cache keeps the positions that turned out verified, and the
-        target's cache is as the model left it when that cycle's rows were launched: every draft of it counted."""
-        flight, ks, _, logits, aux = chained
+        target's cache is as the model left it when that cycle's rows were launched: every draft of it counted. A
+        lone request's chain (no flight) gets its verify step launched here, as _head_draft would."""
+        flight, ks, drafts, logits, aux = chained
+        if flight is None:
+            for req, _, emitted, start in work:  # one request, or none: it ended with the cycle just read
+                req.head_cache.length += len(emitted)
+                req.head_next, req.head_drafts = start + len(emitted), drafts
+                if not (self._verifies_ahead([req]) and self._verify_ahead([req])):
+                    req.head_drafts = drafts.tolist()  # the usual way: on the host, for the next step to verify
+            return
         went = {id(req): (emitted, start) for req, _, emitted, start in work}
         starts = []
         for r, k in zip(flight[0], ks):
@@ -1431,6 +1444,7 @@ class ContinuousBatchEngine:
         req.past_kv.length = start + len(emitted)
         self.spec_drafted += len(drafts)
         self.spec_accepted += len(emitted) - 1
+        self.spec_verifies += bool(drafts)
         now = time.time()
         for t in emitted:
             if not self._emit(req, t, now):

@@ -4,7 +4,8 @@ Fused small operations of a decoder step, one launch each where PyTorch takes se
 - rms_norm: RMSNorm in fp32 (Llama's offset 0, Gemma's offset 1), optionally after a residual add whose sum it also
   returns (x + r, then the norm of that sum: the residual stream and the next sublayer's input in one pass).
 - silu_mul: SiLU(gate) * up (the gated MLP), reading gate and up through strides (views of one fused projection).
-- rope: rotary embedding of q and k together, full or partial (the leading dims rotate, the rest pass through).
+- rope: rotary embedding of q and k together, full or partial (the leading dims rotate, the rest pass through),
+  optionally after an RMSNorm of each head (Qwen3's and Gemma 3's q_norm and k_norm in the same launch).
 
 Each rounds where the PyTorch code it replaces rounds (an fp16/bf16 op computes in fp32 and rounds its result), so the
 outputs match the eager path bit for bit or within one rounding; tests/test_fused_ops.py checks them against it.
@@ -56,10 +57,11 @@ if HAS_TRITON:
 
     @triton.jit(do_not_specialize=["L", "n_q"])  # no build per value of these (1, a multiple of 16)
     def _rope_kernel(X, XK, C, Sn, Y, YK, H, HK, L, n_q, s_xb, s_xh, s_xl, s_kb, s_kh, s_kl, s_cb, s_cl,
-                     s_yb, s_yh, s_yl, s_zb, s_zh, s_zl, D: tl.constexpr, R: tl.constexpr, BLOCK_D: tl.constexpr,
-                     BLOCK_L: tl.constexpr):
+                     s_yb, s_yh, s_yl, s_zb, s_zh, s_zl, WQ, WK, eps, offset, D: tl.constexpr, R: tl.constexpr,
+                     BLOCK_D: tl.constexpr, BLOCK_L: tl.constexpr, NORM: tl.constexpr, OFFSET: tl.constexpr):
         """BLOCK_L consecutive positions of one (b, h) of q (the first n_q programs) or of k (the rest):
-        y[:R] = x*cos + rotate_half(x)*sin (each product rounded, then the sum), y[R:] = x. One vector a program
+        y[:R] = x*cos + rotate_half(x)*sin (each product rounded, then the sum), y[R:] = x; with NORM, x is first
+        each position's RMSNorm by WQ (q) or WK (k), rounded as _rms_norm_kernel rounds. One vector a program
         (BLOCK_L 1, a decode step's rows) is 131,072 programs for a 2,048-token step of SmolLM2-1.7B (64 q and k
         heads): 0.60 ms a layer on an L4, against 0.12 in tiles of 2,048 elements."""
         pid = tl.program_id(0).to(tl.int64)
@@ -72,6 +74,7 @@ if HAS_TRITON:
             y_row = Y + b * s_yb + h * s_yh
             s_x = pid * 0 + s_xl  # int64 in both branches
             s_y = pid * 0 + s_yl
+            w_row = WQ
         else:
             p = pid - n_q
             t = p % tiles
@@ -81,6 +84,7 @@ if HAS_TRITON:
             y_row = YK + b * s_zb + h * s_zh
             s_x = pid * 0 + s_kl
             s_y = pid * 0 + s_zl
+            w_row = WK
         l = (t * BLOCK_L + tl.arange(0, BLOCK_L))[:, None]
         d = tl.arange(0, BLOCK_D)[None, :]
         live = l < L
@@ -89,6 +93,17 @@ if HAS_TRITON:
         rot_mask = d < R
         partner = tl.where(d < half, d + half, d - half)
         xp = tl.load(x_row + l * s_x + partner, mask=live & rot_mask, other=0.0).to(tl.float32)
+        if NORM:  # every position's head normalised first, its partner's value by the same factor
+            xf = x.to(tl.float32)
+            rstd = 1.0 / tl.sqrt(tl.sum(xf * xf, axis=1) / D + eps)[:, None]
+            w = tl.load(w_row + d, mask=d < D, other=0.0).to(tl.float32)
+            wp = tl.load(w_row + partner, mask=rot_mask, other=0.0).to(tl.float32)
+            if OFFSET:  # Gemma: (normed * (offset + w)) in fp32, then cast
+                x = (xf * rstd * (offset + w)).to(x.dtype)
+                xp = (xp * rstd * (offset + wp)).to(x.dtype).to(tl.float32)
+            else:  # Llama: cast the normed value, then multiply by the weight in the dtype
+                x = ((xf * rstd).to(x.dtype).to(tl.float32) * w).to(x.dtype)
+                xp = ((xp * rstd).to(x.dtype).to(tl.float32) * wp).to(x.dtype).to(tl.float32)
         xp = tl.where(d < half, -xp, xp).to(x.dtype)  # rotate_half: (-x2, x1)
         c = tl.load(C + b * s_cb + l * s_cl + d, mask=live & rot_mask, other=0.0).to(x.dtype)
         s = tl.load(Sn + b * s_cb + l * s_cl + d, mask=live & rot_mask, other=0.0).to(x.dtype)
@@ -139,9 +154,11 @@ def silu_mul(gate: torch.Tensor, up: torch.Tensor) -> torch.Tensor:
     return y.view(gate.shape)
 
 
-def _rope_both(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, tokens_first: bool = False):
+def _rope_both(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, tokens_first: bool = False,
+               norms: tuple = None):
     """q and k in one launch (k's programs follow q's). tokens_first: the rotated q's memory is [B, L, H, D] (the
-    shape returned is [B, H, L, D] all the same), as a kernel that takes queries token by token reads them."""
+    shape returned is [B, H, L, D] all the same), as a kernel that takes queries token by token reads them. norms:
+    (q's weight, k's weight, eps, offset) of an RMSNorm over each head applied first."""
     q = q if q.stride(-1) == 1 else q.contiguous()
     k = k if k.stride(-1) == 1 else k.contiguous()
     B, H, L, D = q.shape
@@ -153,19 +170,23 @@ def _rope_both(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.T
     BLOCK_D = triton.next_power_of_2(D)
     BLOCK_L = 1 if L == 1 else max(1, 2048 // BLOCK_D)  # two builds: a decode step's rows, and tiles of positions
     tiles = triton.cdiv(L, BLOCK_L)
+    wq, wk, eps, offset = norms if norms is not None else (q, k, 0.0, 0.0)
     _rope_kernel[(B * (H + HK) * tiles,)](q, k, cos, sin, yq, yk, H, HK, L, B * H * tiles,
                                           q.stride(0), q.stride(1), q.stride(2), k.stride(0), k.stride(1), k.stride(2),
                                           s_cb, cos.stride(-2), yq.stride(0), yq.stride(1), yq.stride(2),
-                                          yk.stride(0), yk.stride(1), yk.stride(2), D=D, R=cos.shape[-1],
-                                          BLOCK_D=BLOCK_D, BLOCK_L=BLOCK_L)
+                                          yk.stride(0), yk.stride(1), yk.stride(2), wq, wk, float(eps), float(offset),
+                                          D=D, R=cos.shape[-1], BLOCK_D=BLOCK_D, BLOCK_L=BLOCK_L,
+                                          NORM=norms is not None, OFFSET=bool(offset))
     return yq, yk
 
 
-def rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, tokens_first: bool = False):
+def rope(q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor, tokens_first: bool = False,
+         norms: tuple = None):
     """apply_rotary_pos_emb(q, k, cos.to(q.dtype), sin.to(q.dtype)) for q [B, H, L, D], k [B, Hkv, L, D] and cos, sin
-    [L, R] or [B, 1, L, R] (R <= D, even; cast to q's dtype in the kernel)."""
+    [L, R] or [B, 1, L, R] (R <= D, even; cast to q's dtype in the kernel). norms: (q_norm's weight, k_norm's weight,
+    eps, offset): each head RMSNormed first, as rms_norm does it."""
     if cos.stride(-1) != 1:
         cos, sin = cos.contiguous(), sin.contiguous()
     if sin.stride() != cos.stride():
         cos, sin = cos.contiguous(), sin.contiguous()
-    return _rope_both(q, k, cos, sin, tokens_first)
+    return _rope_both(q, k, cos, sin, tokens_first, norms)

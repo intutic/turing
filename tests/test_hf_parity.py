@@ -255,3 +255,21 @@ def test_engine_prefills_a_long_longrope_prompt_as_hf_does_and_keeps_its_prefix_
         got_short, got_long = asyncio.run(run([short, long]))
         assert got_short == hf_greedy(short, 8)
         assert got_long == hf_greedy(long, 8)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="the fused rotary kernel with the heads' norms needs CUDA")
+@pytest.mark.parametrize("arch", ["qwen3_qk_norm", "gemma3"])  # q_norm and k_norm per head: Llama's and Gemma's
+@torch.no_grad()
+def test_per_head_qk_norms_inside_the_rotary_kernel_match_hf_through_prefill_and_decode(arch):
+    hf = _tiny(arch)
+    ids = torch.randint(0, V, (1, T), generator=torch.Generator().manual_seed(1))
+    ref = hf(ids).logits
+    model = RealHuggingFaceLoader.convert_hf_model(hf, sparsity_ratio=0.0, device="cuda", enable_recirculation=False,
+                                                   dtype=torch.float32)  # CUDA's default is fp16; HF's reference is fp32
+    ids = ids.cuda()
+    logits, past = model(ids[:, :8])
+    outs = [logits]
+    for t in range(8, T):
+        logits, past = model(ids[:, t:t + 1], past_key_values=past)
+        outs.append(logits)
+    torch.testing.assert_close(torch.cat(outs, dim=1).cpu(), ref, atol=1e-3, rtol=0)

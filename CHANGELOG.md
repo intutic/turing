@@ -67,6 +67,25 @@ All notable changes to this project are documented here. The format follows
   1–64, with GSM8K unchanged (35.0% against 33.5%, ± 3.4, n = 200).
 
 ### Changed
+- A request drafting alone with a draft head has the head's next chain launched behind its verify step, from the
+  accept count on the device, and the step that verifies that chain once the host has read the one in flight
+  (`ContinuousBatchEngine._chain_ahead`, `_promote`): the device no longer waits for the host between a target step
+  and the next chain, and a request that ends on a stop token, which the host learns a cycle late, costs that
+  chain rather than a whole cycle. Qwen3-8B with an EAGLE-3 head on an L4, chat at 1 request: the device idled
+  1.16 ms of each 77.7 ms target pass before, 0.18 ms after; 100.0 to 100.6% of vLLM in one boot, code and rewrite
+  at 1 request −0.2 to +0.7%.
+- Per-head q and k norms (Qwen3, Gemma 3) run inside the rotary kernel's launch (`triton_fused_ops.rope(...,
+  norms=)`), rounded as the norm kernel rounds: 72 fewer launches a forward on Qwen3-8B. With the EAGLE-3 head on
+  an L4, in one boot: +0.2 to +1.6% in 14 of the table's 15 drafted cells (chat at 4 requests −0.8%, with other
+  bf16 outputs). Against vLLM with the same head that boot: 101.0–102.4% in 13 of the 15 cells, code with chains
+  of 7 at 4 requests 99.3% (99.8% in a second measurement), chat at 4 requests 98.3% of the vLLM row, whose
+  outputs and speed change between its processes (107.3 to 110.6 tok/s in four; Turing 108.7 to 108.8 in three,
+  100.2% of vLLM's mean). Draft acceptance by position is the same in both engines
+  (`results_eagle3_acceptance_by_position_cuda.json`).
+- `scripts/benchmark_speculation.py`: Turing's tokens a target pass are its output after each request's first token
+  over its steps that verified a request's drafts (`verify_steps`, the engine's `spec_verifies`), as vLLM's are
+  counted; its accepted count also holds tokens emitted after a stop token. `scripts/profile_device_time.py` takes
+  `--workload`, `--groups` and `--head-reach` with a draft head and records each engine's count of drafting steps.
 - Triton built the paged prefill, decode and RoPE kernels again for each per-call integer that was 1 or changed
   between a multiple of 16 and not (a chunk's length, its start, a cache's slot): a prompt whose second chunk had
   2,048 tokens rebuilt all 8 tuning configurations of the prefill kernel, 52 s at its first use on a Tesla T4
@@ -122,8 +141,8 @@ All notable changes to this project are documented here. The format follows
   flight were accepted, which is how far its pages reach). On Qwen3-8B with an EAGLE-3 head on an L4 the device
   idled 1.6% of a cycle at 2 requests and 1.5% at 4 before, and 0.7% and 0.5% now; in one process with it off
   and on: 82.2 to 82.7 tok/s at 2 requests, 133.2 to 133.8 at 4, the same tokens. A request drafting alone
-  keeps the cycle read first: where it ends on a stop token the cycle launched ahead would be computed for
-  nothing. Against vLLM with the same head, both engines warmed at each concurrency and their output counted
+  kept the cycle read first then (where it ends on a stop token a whole cycle launched ahead is computed for
+  nothing); it now has only the head's next chain launched ahead (below). Against vLLM with the same head, both engines warmed at each concurrency and their output counted
   alike: 101.0 / 99.9 / 99.8% at 1 / 2 / 4 requests (before: 100.8 to 101.0 / 99.3 to 99.8 / 99.4 to 99.5%).
 - The draft chains of requests whose drafts one verify step takes alone are drawn out to the batch's longest
   (`ContinuousBatchEngine._even_chains`): the head drafts a position for every chain in one pass over its weights,

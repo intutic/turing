@@ -101,14 +101,14 @@ def run_turing(a, work):
         async def one(p):
             r = await engine.add_request(prompt_tokens=p, max_new_tokens=a.new_tokens, temperature=0.0, draft_tokens=k)
             return [t async for t in engine.stream_request(r)]
-        d0, a0 = engine.spec_drafted, engine.spec_accepted
+        d0, a0, v0 = engine.spec_drafted, engine.spec_accepted, engine.spec_verifies
         t0 = time.perf_counter()
         outs, groups = [], []
         for i in range(0, len(prompts), c):  # c requests at a time, the next c when all of them are done: as for vLLM
             t = time.perf_counter()
             outs += await asyncio.gather(*[one(p) for p in prompts[i:i + c]])
             groups.append(round(time.perf_counter() - t, 4))
-        cell.groups = groups
+        cell.groups, cell.verifies = groups, engine.spec_verifies - v0
         return time.perf_counter() - t0, outs, engine.spec_drafted - d0, engine.spec_accepted - a0
 
     async def main():
@@ -144,7 +144,10 @@ def run_turing(a, work):
                                                                      for i in range(0, len(outs), c)],
                             output_tok_per_s=round(n / secs, 1), drafted_tokens=drafted,
                             accepted_tokens=accepted, acceptance_rate=round(accepted / drafted, 4) if drafted else None,
-                            tokens_per_pass=round(n / (n - accepted), 3),
+                            # tokens a target pass as vLLM's row counts them, by the steps that verified a request's
+                            # drafts (its accepted count holds tokens past a stop token); a stop token is not output
+                            tokens_per_pass=round((n - len(prompts)) / cell.verifies, 3) if cell.verifies else None,
+                            verify_steps=cell.verifies,
                             same_tokens_as_no_draft=sum(o == p for o, p in zip(outs, plain)) if k and plain else None))
                         print(json.dumps(rows[-1]), flush=True)
         finally:

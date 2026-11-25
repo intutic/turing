@@ -28,7 +28,8 @@ from them by `scripts/make_doc_tables.py` (`--check` fails when a table and its 
   faster per request, and with one byte per value Turing's fp8 is at 99.0–101.3% of vLLM's fp8 at the same step
   budget (its int8 at 97.0–99.0%; against vLLM's fp8 with layer 0 kept in fp16, as Turing keeps it, 103.5–106.2%
   and 100.7–103.8%). With prompt lookup Turing is at 100–121% of vLLM's n-gram speculator, with an EAGLE-3 head at
-  99.1–101.9%, and on MoE models at 97–127% below the batch size where vLLM's KV budget runs out (99.1–101.5% on
+  101.0–102.4% in 13 of 15 cells (the other two, 99.3% and 98.3%, within the spread of vLLM's own runs), and on MoE
+  models at 97–127% below the batch size where vLLM's KV budget runs out (99.1–101.5% on
   Qwen1.5-MoE with its LM head in fp16, 100.0–102.6% converted with `--symmetric`). Mixtral-8x7B with
   two of each layer's eight experts on the CPU runs at 13.7 / 16.5 tok/s at batch 1 / 2 against llama.cpp's
   13.2 / 14.0.
@@ -663,35 +664,45 @@ head, 24 requests per workload in waves of 1, 2 or 4, both engines with chains o
 <!-- table:eagle3 -->
 | Workload | Requests in flight | Turing, no drafts | Turing, 5 drafts | Drafts accepted | Tokens per target pass | vLLM, no drafts | vLLM, 5 drafts |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| code | 1 | 16.5 | 50.7 | 64.1% | 4.25 | 16.4 | 50.1 |
-| code | 2 | 26.4 | 82.3 | 63.5% | 4.25 | 26.3 | 81.9 |
-| code | 4 | 46.0 | 133.0 | 63.2% | 4.24 | 45.9 | 132.5 |
-| rewrite | 1 | 16.4 | 50.9 | 65.2% | 4.38 | 16.3 | 50.5 |
-| rewrite | 2 | 28.3 | 89.9 | 64.8% | 4.42 | 28.3 | 88.2 |
-| rewrite | 4 | 51.0 | 149.5 | 64.7% | 4.41 | 50.9 | 147.7 |
-| chat | 1 | 16.7 | 33.6 | 37.0% | 2.60 | 16.6 | 33.9 |
-| chat | 2 | 30.5 | 62.4 | 34.2% | 2.65 | 30.6 | 62.2 |
-| chat | 4 | 60.5 | 108.9 | 34.4% | 2.68 | 60.7 | 107.7 |
+| code | 1 | 16.5 | 51.5 | 64.2% | 4.12 | 16.4 | 50.3 |
+| code | 2 | 26.4 | 83.4 | 63.8% | 4.13 | 26.3 | 82.2 |
+| code | 4 | 46.0 | 135.4 | 63.8% | 4.13 | 45.9 | 134.1 |
+| rewrite | 1 | 16.4 | 51.5 | 65.1% | 4.12 | 16.3 | 50.6 |
+| rewrite | 2 | 28.3 | 90.7 | 64.7% | 4.16 | 28.3 | 88.8 |
+| rewrite | 4 | 51.0 | 151.2 | 64.6% | 4.15 | 50.9 | 149.1 |
+| chat | 1 | 16.7 | 34.2 | 37.2% | 2.62 | 16.6 | 33.7 |
+| chat | 2 | 30.5 | 63.8 | 34.5% | 2.67 | 30.6 | 62.3 |
+| chat | 4 | 60.5 | 108.7 | 34.0% | 2.66 | 60.7 | 110.6 |
 <!-- /table -->
 
 * The head runs once per draft position for every drafting request, from a paged pool of its own and under CUDA
-  graphs. At equal chain length Turing is at 99.1–101.9% of vLLM over the table's nine cells and the six below,
-  13 of the 15 at 100.3% or more; under 100: chat at 1 request (99.1%; 99.4% in another boot) and code with chains
-  of 7 at 4 requests (99.3% in both). Without drafts the two engines are within 0.6% of each other. Run of
-  2026-11-25: the drafted rows of both engines in one boot, the second of two passes over the prompts (both
-  engines warmed at each concurrency), and the rows without drafts one block per workload; both engines count
-  output without the stop token.
-* Tokens per target pass: Turing's is its output over its output less its accepted drafts. vLLM's is its output
-  after each request's first token over its own count of drafting steps, since its accepted count also holds
-  drafts accepted past a request's last token (30 to 64 a cell), which put the first formula 2–6% high for it. On
-  code with chains of up to 5 vLLM makes 4.11 / 4.15 / 4.15 tokens a step at 1 / 2 / 4 requests, and Turing with
-  every chain drawn out to 5 4.13 / 4.13 / 4.11 (its drafted tokens over 5; `results_eagle3_chain_reach_cuda.json`).
+  graphs. At equal chain length Turing is at 101.0–102.4% of vLLM in 13 of the table's nine cells and the six below.
+  Under 100: code with chains of 7 at 4 requests, 99.3% (99.8% in a second measurement of that boot; vLLM's own two
+  passes in its row differ by 0.7%), and chat at 4 requests, 98.3% of a vLLM row whose outputs, and speed, change
+  between its processes: 107.3, 107.8, 108.7 and 110.6 tok/s in four processes of the boot (the row is the 110.6), and
+  Turing 108.7, 108.8 and 108.8 in three with the same outputs each time, 100.2% of vLLM's mean
+  (`results_eagle3_chat_spread_cuda.json`). Without drafts the two engines are within 0.6% of each other (the run
+  before, on commit 7554bc7). Run of 2026-11-25: the drafted rows of both engines in one boot, the second of two
+  passes over the prompts, both engines warmed at each concurrency; both count output without the stop token.
+* Tokens per target pass: each engine's output after each request's first token over its own count of a request's
+  drafting steps (vLLM's `spec_decode_num_drafts`, Turing's verify steps; vLLM's output there includes its stop
+  tokens). vLLM's accepted count also holds drafts accepted past a request's last token (30 to 64 a cell), which put
+  n / (n − accepted) 2–6% high for it. By position the two heads accept alike: on code with chains of 7 at 1 request
+  the share of drafts accepted where the one before was is 0.872 / 0.884 / 0.835 / 0.800 / 0.776 / 0.754 / 0.746 for
+  Turing and 0.869 / 0.875 / 0.843 / 0.802 / 0.781 / 0.750 / 0.739 for vLLM, and with every chain at 7 Turing makes
+  4.650 tokens a pass to vLLM's 4.649 (`results_eagle3_acceptance_by_position_cuda.json`).
 * A request's chain is as long as its drafts are likely to be reached, and the chains of requests verified
-  together are drawn out to the batch's longest (chat at 4 requests: 2.64 to 2.68 tokens a target pass). On the
-  code workload chains of up to 3 / 5 / 7 give Turing 43.7 / 50.7 / 53.5 tok/s at 1 request, 72.5 / 82.3 / 86.3 at
-  2 and 124.8 / 133.0 / 139.7 at 4, and vLLM 43.3 / 50.1 / 52.5, 72.0 / 81.9 / 85.0 and 123.2 / 132.5 / 140.7.
-  Drafting more at 1 request is slower on chat (99.1% of vLLM at `HEAD_REACH` 0.15, 98.5% at 0.08, 97.9% with
-  every chain at 5) and the same on code.
+  together are drawn out to the batch's longest (at 4 requests nearly every chain of 7 is drawn out to 7). On the
+  code workload chains of up to 3 / 5 / 7 give Turing 44.3 / 51.5 / 53.9 tok/s at 1 request, 73.2 / 83.4 / 86.9 at
+  2 and 125.8 / 135.4 / 141.5 at 4, and vLLM 43.5 / 50.3 / 52.9, 71.7 / 82.2 / 85.3 and 124.1 / 134.1 / 142.5.
+  Drafting more at 1 request was slower on chat in the run before (99.1% of vLLM at `HEAD_REACH` 0.15, 98.5% at
+  0.08, 97.9% with every chain at 5; `results_eagle3_chain_reach_cuda.json`) and the same on code.
+* A request drafting alone has the head's next chain launched behind its verify step, and the step that verifies
+  it once the host has read the one in flight: on chat at 1 request the device idled 1.16 ms of a 77.7 ms target
+  pass before and 0.18 ms after (`results_eagle3_device_time_cuda.json`), and in one boot that cell went from 100.0
+  to 100.6% of vLLM (code and rewrite at 1 request −0.2 to +0.7%). Qwen3's per-head q and k norms then went into the
+  rotary kernel's launch (72 fewer launches a forward): +0.2 to +1.6% in 14 of the 15 cells, chat at 4 requests
+  −0.8% with other outputs (`results_eagle3_changes_cuda.json`, one boot).
 * Before the cycle after a verify step was launched behind it from the device's accept counts (the device idled
   1.6% and 1.5% of a cycle at 2 and 4 requests, 0.7% and 0.5% after), Turing was at 97.6–100.9% of vLLM (run of
   2026-11-23; `results_eagle3_repeat_cuda.json`).
