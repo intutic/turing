@@ -12,10 +12,10 @@ All notable changes to this project are documented here. The format follows
   ones. The `.tgate4` format is unchanged. The vendored Marlin kernels gain their variant without zero points
   (dense and MoE, fp16 and bf16, groups of 64 and 128), which a matrix whose zero points are all 8 now takes: it
   reads and subtracts none. Qwen1.5-MoE-A2.7B-Chat with its LM head in fp16 on an L4, against vLLM on Qwen's
-  checkpoint in one boot: 101.6 / 99.4 / 99.3 / 99.7% at batch 1 / 8 / 32 / 64 converted this way, 100.8 / 98.3 /
-  98.3 / 98.7% with zero points (the routed experts' kernel took 251 against vLLM's 237 µs a call at batch 8);
-  GSM8K 44.4% ± 2.2 against 46.0% ± 2.2 with zero points (n=500). A grid with zero points wastes none of its 16
-  levels on a group whose weights lie to one side, and remains the default.
+  checkpoint in one boot: 102.6 / 100.0 / 100.3 / 100.5% at batch 1 / 8 / 32 / 64 converted this way, 101.5 /
+  99.1 / 99.1 / 99.6% with zero points (the routed experts' kernel took 251 against vLLM's 237 µs a call at batch
+  8); GSM8K 44.4% ± 2.2 in bf16 and 42.8% ± 2.2 in fp16, against 46.0% ± 2.2 with zero points (n=500). A grid with
+  zero points wastes none of its 16 levels on a group whose weights lie to one side, and remains the default.
 - 4-bit MoE experts: `--quantization` and `turing convert` now pack the stacked experts of an MoE layer too (GPTQ with
   each expert's own Gram matrices), read by int4 variants of the grouped MoE kernels. `.tgate4` files written before
   still load with their experts in the model dtype.
@@ -43,8 +43,8 @@ All notable changes to this project are documented here. The format follows
   remains int8.
 - `--draft-head`: speculative decoding with a published EAGLE-3 draft head (`turing/models/eagle3.py`). The head
   runs once per draft position for all drafting requests, and a request's chain is as long as its drafts are
-  likely to be reached by the target. Qwen3-8B on an L4 with chains of up to 5: 50.9 / 81.8 / 132.2 tok/s on code
-  prompts at 1 / 2 / 4 requests (16.5 / 26.4 / 46.1 without drafts; vLLM with the same head 50.6 / 82.8 / 133.6).
+  likely to be reached by the target. Qwen3-8B on an L4 with chains of up to 5: 50.7 / 82.3 / 133.0 tok/s on code
+  prompts at 1 / 2 / 4 requests (16.5 / 26.4 / 46.0 without drafts; vLLM with the same head 50.1 / 81.9 / 132.5).
 - Overlapped decode on CUDA: the next decode step is launched before the host has read the current step's tokens.
 - `turing bench-bw` (also `turing doctor`) reports the device's read bandwidth and matmul rates and, with `--model`,
   the least time a batch-1 decode step can take; `--tune` measures the int4 kernel crossover on the GPU present,
@@ -95,15 +95,26 @@ All notable changes to this project are documented here. The format follows
   - A long prompt's forward of a larger step budget holds the decode rows riding in it within the budget's rows,
     as a step of vLLM's does: with 8,192 prompt tokens and decode rows on top cuBLAS ran Qwen2.5-1.5B's q/k/v
     projection 19% slower than at 8,192 rows.
-  - Decode rows riding in a prefill forward over fp8 or native pages go through FlashInfer's decode wrapper
-    instead of its prefill wrapper with requests of one query (one layer, eight layers a plan: 1 to 7% less time
-    at 512 to 2,048 tokens, level at 8K and more).
+  - Decode rows riding in a prefill forward over native pages, and over fp8 pages on a GPU that cannot convert
+    E4M3 in hardware, go through FlashInfer's decode wrapper instead of its prefill wrapper with requests of one
+    query (one layer, eight layers a plan: 1 to 7% less time at 512 to 2,048 tokens, level at 8K and more). Over
+    fp8 pages on a GPU that can (compute capability 8.9 and up) they take Turing's decode kernel: 0.55 against
+    FlashInfer's 0.61 ms for 16 rows of 16K tokens (L4).
+  - The decode kernel turns fp8 pages into fp16/bf16 with the device's E4M3 conversion where it has one (compute
+    capability 8.9 and up), the same values as the bit-moving one (`results_kv_decode_fp8_launch_cuda.json`).
+  - A low-bit KV pool holds no low-bit slots for the layers it keeps in the model dtype: with them Qwen2.5-1.5B's
+    pool of fp8 pages, layer 0 in fp16, held 3.4% fewer tokens than in the same memory now.
   - A decode graph's kernel splits each row's context twice as often over 1-byte pages (512 programs a layer
     where that is more than one split): 2 to 5% less time in the kernel at 8K and 16K tokens for int8 and fp8
     pages, within 1.5% either way at 2K and under. Pages in the model dtype keep 256.
-  - Together, against vLLM's fp8 cache in one boot at batch 16 to 128: at 2,048 tokens a step Turing's fp8 takes
-    1.00× its time per request (before 1.00 to 1.01×) and its int8 1.01 to 1.03× (1.01 to 1.05×); at 8,192
-    1.01 to 1.03× and 1.02 to 1.04× (both 1.03 to 1.05×).
+  - Together, against vLLM's fp8 cache in one boot at batch 16 / 32 / 64 / 128, each the median of 3 runs: at
+    2,048 tokens a step Turing's fp8 makes 99.0 / 101.2 / 101.2 / 101.3% of its output a second and its int8
+    97.3 / 99.0 / 98.9 / 99.0%; at 8,192 99.9 / 100.3 / 99.7 / 101.1% and 98.2 / 97.8 / 97.0 / 97.8%. vLLM's
+    fp8 keeps no layer in fp16 and holds 3.6% more tokens than Turing's (at 8,192 tokens a step: 64 requests of
+    16,640 tokens at once against Turing's 62); with layer 0 in fp16 too (`kv_cache_dtype_skip_layers`), the
+    quality Turing keeps, Turing's fp8 makes 105.4 / 106.2% at 64 / 128 requests (2,048) and 103.5 / 104.8%
+    (8,192), its int8 103.1 / 103.8% and 100.7 / 101.3%. int8 pages hold 4 bytes more per head and token than
+    fp8 (scale and zero) and take 5% longer in the decode kernel.
 - With a draft head and at least two requests drafting, the cycle after the verify step in flight is launched
   behind it: the head's next chain and the step that verifies it start from the drafts that step accepts,
   counted on the device, and the host reads a cycle while the next one runs (the model's decode graph and the
@@ -114,12 +125,28 @@ All notable changes to this project are documented here. The format follows
   keeps the cycle read first: where it ends on a stop token the cycle launched ahead would be computed for
   nothing. Against vLLM with the same head, both engines warmed at each concurrency and their output counted
   alike: 101.0 / 99.9 / 99.8% at 1 / 2 / 4 requests (before: 100.8 to 101.0 / 99.3 to 99.8 / 99.4 to 99.5%).
+- The draft chains of requests whose drafts one verify step takes alone are drawn out to the batch's longest
+  (`ContinuousBatchEngine._even_chains`): the head drafts a position for every chain in one pass over its weights,
+  so the batch drafts position j while the chance of reaching it, summed over the requests, is `HEAD_REACH` or
+  more. Chat prompts at 4 requests: 2.64 to 2.68 tokens a target pass; code prompts are unchanged (their chains
+  are at their longest already). Qwen3-8B with the EAGLE-3 head on an L4 against vLLM with the same head, in one
+  boot: 13 of the 15 cells of `results_eagle3_cuda.json` at 100.3 to 101.9% of vLLM's output a second; chat at 1
+  request 99.1% (99.4% in another boot) and code with chains of 7 at 4 requests 99.3% (99.3%). A lower
+  `HEAD_REACH` at 1 request drafts more and runs slower on chat (99.1% at 0.15, 98.5% at 0.08, 97.9% drafting
+  every position) and the same on code.
 - `scripts/benchmark_speculation.py` counts output tokens the same way for both engines: vLLM's `token_ids` end
   with the stop token of a request that stopped on one, which Turing's stream leaves out (24 tokens of 4,274 on
   the code workload, so vLLM's rows of earlier runs read 0.6% high). `--passes 2` reports the second pass over
   the prompts and keeps both passes' seconds, so what an engine builds at a shape's first use is outside the row
   (Turing built a kernel in the first group of two requests: 1.6 s of a 52 s cell). Each row also holds every
-  group's seconds and tokens.
+  group's seconds and tokens, vLLM's rows its speculative-decoding counters (`LLM.get_metrics()`), and Turing's
+  rows the chain rule's `HEAD_REACH` (`--head-reach`). vLLM's tokens a target pass are its output after each
+  request's first token over its own count of drafting steps: its accepted count also holds drafts accepted past
+  a request's last token (30 to 64 tokens a cell on Qwen3-8B), which put n / (n - accepted) 2 to 6% high.
+- `scripts/benchmark_e2e_generation.py --repeats N` runs each batch size N times in a row for both engines and
+  reports the run with the median rate, keeping every run's rate and seconds: both engines' first batch of 16
+  prompts of 16K tokens ran about 2% slower than the next two, and runs of one engine differ by up to 1.5%. Rows
+  record their dtype.
 - On a GPU without bf16 matmul (compute capability below 8.0, a Tesla T4) the loader says once that a bf16
   checkpoint's prefill and multi-row decode steps run 7 to 10 times slower than in fp16. The dtype is not changed.
 - The decode step merges its attention splits in one load per query head instead of a loop over the splits, which
@@ -133,8 +160,8 @@ All notable changes to this project are documented here. The format follows
   the last forward of the budget. Before, the whole budget was one forward.
 - The decode kernel reads int8 KV pages under fp16/bf16 queries without dequantizing them: the codes go into the
   tensor-core products, each token's scale and zero are applied once, and a block's V tile is read together with
-  its K tile. fp8 pages become fp16/bf16 values by moving bits, with the layer's scales applied to the scores and
-  the output.
+  its K tile. fp8 pages become fp16/bf16 values by moving bits (by the device's conversion from compute
+  capability 8.9), with the layer's scales applied to the scores and the output.
 - A prefill graph gives the pages of its padding back after each replay, and falls back to the eager forward
   when the pool has no page for them or for the padding rows' scratch page.
 - The RoPE kernel rotates a tile of positions per program instead of one vector: a 2,048-token prefill step of

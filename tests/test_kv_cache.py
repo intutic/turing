@@ -382,7 +382,8 @@ def test_native_layers_store_exactly_and_others_quantize(dtype):
     kb, vb, _ = pool.read_batch(0, slots, [40])
     torch.testing.assert_close(kb[:, :, :40], k, rtol=0, atol=0)
     plain = KVPool(2, 2, 64, 16, torch.float32, "cpu", dtype)
-    assert pool.page_bytes() - plain.page_bytes() == 2 * 2 * PAGE * 64 * 4  # one layer's K and V in fp32
+    # the low-bit tensors hold layer 1 only: one low-bit layer and one layer's K and V in fp32
+    assert pool.k.shape[0] == 1 and pool.page_bytes() == plain.page_bytes() // 2 + 2 * 2 * PAGE * 64 * 4
     dst = pool.alloc_pages(1)[0]
     pool.copy_page(c.pages[0], dst)
     torch.testing.assert_close(pool.k_hi[0, dst], pool.k_hi[0, c.pages[0]], rtol=0, atol=0)

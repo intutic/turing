@@ -463,3 +463,23 @@ def test_drafts_made_before_a_stretch_of_plain_decoding_are_not_verified_after_i
     engine.draft_head.draft_many = lambda embed, work: [oracle(embed, *w) for w in work]
     assert _generate(engine, 60)[0] == ref
     assert engine.spec_accepted == engine.spec_drafted > 0
+
+
+def test_chains_drafted_together_are_drawn_out_to_the_batchs():
+    """Requests whose drafts one verify step takes share the head's passes and the target's: the batch drafts
+    position j while the chance of reaching it summed over them is HEAD_REACH or more, and every chain is drawn out to
+    that length; a request alone, or one at its limit, keeps its own chain."""
+    from types import SimpleNamespace
+    engine = _engine(_target("cpu"), draft_tokens=5)
+    req = lambda hits, tries: SimpleNamespace(head_hits=hits, head_tries=tries)  # noqa: E731
+    even = engine._even_chains
+    assert even([req(3, 5)], [4], [5]) == [4]  # alone: its own chain
+    # p = 0.6 each: 0.6^4 = 0.13 < 0.15 alone, 2 * 0.13 >= 0.15 together
+    assert even([req(3, 5), req(3, 5)], [4, 3], [5, 5]) == [5, 5]
+    assert even([req(3, 5), req(3, 5)], [4, 3], [5, 3]) == [5, 3]  # one at its limit (its last tokens)
+    assert even([req(3, 5), req(3, 5)], [4, 3], [5, 2]) == [5, 2]
+    # p = 0.2, 0.8, 0.4: 0.8^5 alone is 0.33, so the batch drafts 5 and every chain is drawn out to it
+    assert even([req(1, 5), req(4, 5), req(2, 5)], [2, 2, 2], [5, 5, 5]) == [5, 5, 5]
+    # summed chances: 3 * 0.1^2 = 0.03 < 0.15, so the batch's chain stays at the longest of its own (2)
+    assert even([req(1, 10), req(1, 10), req(1, 10)], [1, 2, 1], [5, 5, 5]) == [2, 2, 2]
+    assert even([req(0, 0), req(0, 0)], [5, 5], [5, 5]) == [5, 5]  # no verify yet: full chains

@@ -93,6 +93,8 @@ def run_turing(a, work):
                                    model=model, tokenizer=tok, prefix_caching=False, draft_tokens=0,
                                    spec_gate=SpeculationGatePolicy(), prefill_chunk_size=2048, draft_head=head)
     engine.ride_prefill = not a.no_ride_prefill
+    if a.head_reach is not None:  # the draft head's chain rule (ContinuousBatchEngine.HEAD_REACH); 0: always full
+        engine.HEAD_REACH = a.head_reach or 1e-30
     rows = []
 
     async def cell(prompts, k, c):
@@ -134,6 +136,7 @@ def run_turing(a, work):
                         plain = outs if k == 0 else plain
                         rows.append(dict(
                             engine="turing", model=a.model, dtype=a.dtype, drafter=a.draft_head or "prompt lookup",
+                            head_reach=engine.HEAD_REACH if a.draft_head else None,
                             workload=name, requests=len(prompts),
                             concurrency=c, draft_tokens=k, max_new_tokens=a.new_tokens, output_tokens=n,
                             seconds=round(secs, 3), pass_seconds=[round(r[0], 3) for r in runs],
@@ -163,7 +166,16 @@ def run_vllm(a, work):
         spec = dict(speculative_config={"method": "ngram", "num_speculative_tokens": k, "prompt_lookup_max": 3,
                                         "prompt_lookup_min": 1})
     llm = LLM(a.model, dtype={"fp16": "float16", "bf16": "bfloat16"}[a.dtype], enable_prefix_caching=False,
-              max_model_len=4096, gpu_memory_utilization=a.gpu_memory_utilization, **spec)
+              max_model_len=4096, gpu_memory_utilization=a.gpu_memory_utilization, disable_log_stats=False, **spec)
+
+    def spec_counts():
+        """vLLM's speculative-decoding counters so far (drafts, draft tokens, accepted tokens), or {} if this version
+        does not report them."""
+        try:
+            return {m.name.split(":")[-1]: m.value for m in llm.get_metrics()
+                    if "spec_decode" in m.name and isinstance(getattr(m, "value", None), (int, float))}
+        except Exception:
+            return {}
     sp = SamplingParams(temperature=0.0, max_tokens=a.new_tokens)
     # vLLM's token_ids end with the stop token of a request that stopped on one; Turing's stream leaves it out (a
     # stop token is not output). Counted the same way for both: without it (24 tokens of 4,274 on the code workload)
@@ -180,6 +192,7 @@ def run_vllm(a, work):
         for c in a.concurrency:
             passes = []
             for _ in range(a.passes):  # the last pass is the row
+                before = spec_counts()
                 t0 = time.perf_counter()
                 n = dropped = 0
                 groups, group_tokens = [], []
@@ -191,13 +204,22 @@ def run_vllm(a, work):
                     n += group_tokens[-1]
                     dropped += sum(len(o.outputs[0].token_ids) - output_tokens(o) for o in outs)
                 passes.append(time.perf_counter() - t0)
+                counts = {k: v - before.get(k, 0) for k, v in spec_counts().items()}
             secs = passes[-1]
+            drafted, accepted = counts.get("spec_decode_num_draft_tokens"), counts.get("spec_decode_num_accepted_tokens")
+            steps = counts.get("spec_decode_num_drafts")
+            # tokens a target pass by vLLM's own count of its drafting steps: its accepted count also holds drafts
+            # accepted past a request's last token (30 to 64 tokens a cell on Qwen3-8B), so n / (n - accepted) reads
+            # 2 to 6% high. Each request's first token comes from its prefill and its stop token from a step
             rows.append(dict(engine="vllm", model=a.model, dtype=a.dtype,
                              drafter=a.draft_head or "n-gram", workload=name, requests=len(prompts),
                              concurrency=c, draft_tokens=k, max_new_tokens=a.new_tokens, output_tokens=n,
                              stop_tokens_not_counted=dropped, seconds=round(secs, 3),
                              pass_seconds=[round(x, 3) for x in passes], group_seconds=groups,
-                             group_tokens=group_tokens, output_tok_per_s=round(n / secs, 1)))
+                             group_tokens=group_tokens, output_tok_per_s=round(n / secs, 1), spec_decode=counts,
+                             drafted_tokens=drafted, accepted_tokens=accepted,
+                             acceptance_rate=round(accepted / drafted, 4) if drafted else None,
+                             tokens_per_pass=round((n + dropped - len(prompts)) / steps, 3) if steps else None))
             print(json.dumps(rows[-1]), flush=True)
     import vllm
     return rows, f"vllm {vllm.__version__}"
@@ -220,6 +242,9 @@ def main():
                     help="passes over the prompts per cell; the last is reported (pass_seconds holds all): with 2, "
                          "what an engine builds at a shape's first use (a graph, a kernel) is outside the row")
     ap.add_argument("--gpu-memory-utilization", type=float, default=0.85)
+    ap.add_argument("--head-reach", type=float, default=None,
+                    help="Turing: a draft head's chain stops where the chance of reaching a draft falls below this "
+                         "(default the engine's; 0: every chain at --draft-tokens, as vLLM drafts)")
     ap.add_argument("--no-ride-prefill", action="store_true",
                     help="turing: decode steps of their own while prompts are prefilled (the engine before riders)")
     ap.add_argument("--out", default="benchmarks/results/results_speculation_cuda.json")

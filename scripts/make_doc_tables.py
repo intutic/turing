@@ -552,12 +552,15 @@ def t_moe_w4():
     speed, triton = load("results_moe_w4_speed_cuda.json"), load("results_moe_w4_speed_triton_cuda.json")
     gsm = {bool(r["quantize_lm_head"]): r for r in load("results_moe_w4_gsm8k_cuda.json") if "Qwen1.5-MoE" in r["model"]}
     vq = load("results_moe_w4_quality_vllm_cuda.json")[0]["gsm8k"]
+    sym = next((r for r in load("results_moe_w4_gsm8k_symmetric_cuda.json") if r.get("dtype", "bf16") == "bf16"), None)
     qwen = lambda x: "Qwen1.5-MoE" in x["model"]  # noqa: E731
     arms = [("vLLM GPTQ-Int4 (Qwen's checkpoint)", speed, lambda x: x["engine"] == "vllm" and qwen(x), vq),
             ("Turing GPTQ (4-bit LM head, the default)", speed,
              lambda x: x["engine"] == "turing" and qwen(x) and x.get("quantize_lm_head"), gsm.get(True)),
-            ("Turing GPTQ, fp16 LM head", speed,
-             lambda x: x["engine"] == "turing" and qwen(x) and not x.get("quantize_lm_head"), gsm.get(False)),
+            ("Turing GPTQ, fp16 LM head", speed, lambda x: x["engine"] == "turing" and qwen(x)
+             and not x.get("quantize_lm_head") and not x["model"].endswith("-sym"), gsm.get(False)),
+            ("Turing GPTQ symmetric (`--symmetric`), fp16 LM head", speed, lambda x: x["engine"] == "turing" and qwen(x)
+             and not x.get("quantize_lm_head") and x["model"].endswith("-sym"), sym),
             ("Turing GPTQ, 4-bit LM head, Triton kernels (no Marlin)", triton,
              lambda x: qwen(x) and x.get("quantize_lm_head"), None)]
     bats = sorted({r["batch"] for r in speed if qwen(r)})

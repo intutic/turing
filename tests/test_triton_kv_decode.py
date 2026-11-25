@@ -321,3 +321,35 @@ def test_one_split_writes_the_output_directly_and_matches_the_split_path(kv_cach
     split = triton_pool_decode(pool, 0, q, k, v, rows[0], rows[1])
     one = triton_pool_decode(pool, 0, q, k, v, rows2[0], rows2[1], n_splits=1)
     torch.testing.assert_close(one.float(), split.float(), atol=1e-3, rtol=0)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (8, 9),
+                    reason="the device's E4M3 conversion needs compute capability 8.9")
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+def test_fp8_pages_read_with_the_devices_conversion_give_the_same_attention(dtype, monkeypatch):
+    """On compute capability 8.9 and up the decode kernel turns fp8 bytes into 16-bit values with the device's
+    instruction; the bit-moving path it replaces gives the same values (each E4M3 value, subnormals included, is
+    exact in fp16 and bf16), so the attention is the same to the bit."""
+    from turing.kernels import triton_kv_decode as tkd
+    g = torch.Generator(device="cuda").manual_seed(4)
+    H, Hkv, D = 12, 2, 128
+    pool = KVPool(1, Hkv, D, 256, dtype, "cuda", "fp8")
+    caches = []
+    for T in (3, 257, 900):
+        c = KVCache(pool)
+        c.reserve(T + 1)
+        # small values too: E4M3 subnormals (magnitudes under 2^-6 times the layer's scale)
+        pool.append(0, c, *((torch.randn(1, Hkv, T, D, device="cuda", generator=g)
+                             * torch.logspace(-4, 0, T, device="cuda")[None, None, :, None]).to(dtype)
+                            for _ in range(2)))
+        c.length = T
+        caches.append(c)
+    q = torch.randn(3, H, 1, D, device="cuda", generator=g).to(dtype)
+    k, v = (torch.randn(3, Hkv, 1, D, device="cuda", generator=g).to(dtype) for _ in range(2))
+    outs = []
+    for hw in (True, False):
+        monkeypatch.setattr(tkd, "fp8_hw", lambda device, hw=hw: hw)
+        twins = [c.clone(share=False) for c in caches]  # each pass appends its own token
+        rows = torch.tensor([[c.slot for c in twins], [c.length for c in twins]], dtype=torch.int32, device="cuda")
+        outs.append(tkd.triton_pool_decode(pool, 0, q, k, v, rows[0], rows[1]))
+    assert torch.equal(outs[0], outs[1])

@@ -124,7 +124,7 @@ if HAS_TRITON:
                             G: tl.constexpr, BLOCK_G: tl.constexpr, D: tl.constexpr, BLOCK_N: tl.constexpr,
                             MODE: tl.constexpr, GROUP: tl.constexpr, HAS_SEL: tl.constexpr,
                             N_SPLITS: tl.constexpr, HKV: tl.constexpr, WINDOW: tl.constexpr,
-                            SOFTCAP: tl.constexpr, IEEE: tl.constexpr):
+                            SOFTCAP: tl.constexpr, IEEE: tl.constexpr, FP8_HW: tl.constexpr = False):
         b = tl.program_id(0)
         h = tl.program_id(1)
         split = tl.program_id(2)
@@ -182,7 +182,7 @@ if HAS_TRITON:
                 s = (tl.dot(q, tl.trans(kc.to(q.dtype))) * ksc[None, :] + qsum[:, None] * kz[None, :]) * sm_scale
             elif MODE == 3 and not IEEE:
                 kb = tl.load(K + row[:, None] * D + offs_d[None, :], mask=valid[:, None], other=0)
-                s = tl.dot(q, tl.trans(_e4m3(kb, q))) * (sm_scale * k_scale)
+                s = tl.dot(q, tl.trans(_e4m3(kb, q, FP8_HW))) * (sm_scale * k_scale)
             else:
                 k = _load_rows(K, KS, KZ, row, valid, offs_d, D, MODE, GROUP)
                 if IEEE:  # fp32 queries: IEEE fp32 products; fp16/bf16: tensor cores in that dtype, fp32 accumulation
@@ -207,7 +207,7 @@ if HAS_TRITON:
                 zacc = zacc * alpha + tl.sum(p * vz[None, :], 1)
             elif MODE == 3 and not IEEE:
                 vb = tl.load(V + row[:, None] * D + offs_d[None, :], mask=valid[:, None], other=0)
-                acc = acc * alpha[:, None] + tl.dot(p.to(q.dtype), _e4m3(vb, q))
+                acc = acc * alpha[:, None] + tl.dot(p.to(q.dtype), _e4m3(vb, q, FP8_HW))
             else:
                 v = _load_rows(V, VS, VZ, row, valid, offs_d, D, MODE, GROUP)
                 if IEEE:
@@ -296,17 +296,22 @@ def pool_append_supported(pool: KVPool, layer: int) -> bool:
 
 if HAS_TRITON:
     @triton.jit
-    def _e4m3(b, like):
-        """E4M3 bytes as the same values in `like`'s dtype (fp16 or bf16; each E4M3 value is exact in both): the sign
-        and the exponent and mantissa bits moved into place, and below 8 (subnormal) the magnitude times 2^-9."""
-        b16 = b.to(tl.int16)
-        mag = b16 & 0x7F
-        if like.dtype == tl.bfloat16:
-            bits = ((mag + 960) << 4) | ((b16 & 0x80) << 8)
+    def _e4m3(b, like, HW: tl.constexpr = False):
+        """E4M3 bytes as the same values in `like`'s dtype (fp16 or bf16; each E4M3 value is exact in both). HW (compute
+        capability 8.9 and up): the device's conversion, two values an instruction. Else the sign and the exponent and
+        mantissa bits moved into place, and below 8 (subnormal) the magnitude times 2^-9."""
+        if HW:
+            out = b.to(tl.float8e4nv, bitcast=True).to(like.dtype)
         else:
-            bits = ((mag + 64) << 7) | ((b16 & 0x80) << 8)
-        sub = mag.to(like.dtype) * 0.001953125
-        return tl.where(mag < 8, tl.where(b16 > 127, -sub, sub), bits.to(like.dtype, bitcast=True))
+            b16 = b.to(tl.int16)
+            mag = b16 & 0x7F
+            if like.dtype == tl.bfloat16:
+                bits = ((mag + 960) << 4) | ((b16 & 0x80) << 8)
+            else:
+                bits = ((mag + 64) << 7) | ((b16 & 0x80) << 8)
+            sub = mag.to(like.dtype) * 0.001953125
+            out = tl.where(mag < 8, tl.where(b16 > 127, -sub, sub), bits.to(like.dtype, bitcast=True))
+        return out
 
 
 def triton_pool_append(pool: KVPool, layer: int, cache, k: torch.Tensor, v: torch.Tensor,
@@ -330,6 +335,16 @@ def triton_pool_append(pool: KVPool, layer: int, cache, k: torch.Tensor, v: torc
     _pool_append_kernel[(L, Hkv, 2)](kt, vt, pt, slots, starts, kc, vc, *scales, kc, vc,
                                      kt.stride(0), kt.stride(1), vt.stride(0), vt.stride(1), pt.stride(0),
                                      HKV=Hkv, D=D, MODE=mode, GROUP=INT4_GROUP, TRACK=False)
+
+
+_FP8_HW = {}  # no import line added above the kernels (Triton's cache keys a kernel by its line number)
+
+
+def fp8_hw(device: torch.device) -> bool:
+    """The device converts E4M3 to 16-bit floats in hardware (compute capability 8.9 and up)."""
+    if device not in _FP8_HW:
+        _FP8_HW[device] = torch.cuda.get_device_capability(device) >= (8, 9)
+    return _FP8_HW[device]
 
 
 def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
@@ -375,7 +390,7 @@ def triton_pool_decode(pool: KVPool, layer: int, q: torch.Tensor, k: torch.Tenso
         float(softcap), int(window),
         G=G, BLOCK_G=BLOCK_G, D=D, BLOCK_N=BLOCK_N, MODE=mode, GROUP=INT4_GROUP, HAS_SEL=sel is not None,
         N_SPLITS=n_splits, HKV=Hkv, WINDOW=window > 0, SOFTCAP=softcap > 0, IEEE=q.dtype == torch.float32,
-        num_stages=2,
+        FP8_HW=mode == 3 and fp8_hw(q.device), num_stages=2,
     )
     if n_splits > 1:
         _kv_reduce_kernel[(B * Hkv, G)](acc, m, l, out, G=G, D=D, N_SPLITS=n_splits,

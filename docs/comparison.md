@@ -9,36 +9,36 @@ the [benchmarks](benchmarks.md) page.
 
 ## Where Turing Engine stands
 
-* **At or above vLLM's throughput in fp16 and at 4 bits, behind with a 1-byte KV cache at 16K tokens.**
+* **At or above vLLM's throughput in fp16 and at 4 bits; level with an fp8 KV cache at 16K tokens.**
   In fp16 Turing is at 101–103% of vLLM's throughput on Qwen2.5-1.5B (the median of three runs of each engine,
   taken in turn; the same at each engine's own step budget and with both at either one) and 101–114% on SmolLM2.
   At 4 bits with its LM head in 4 bits too (the default) Turing is 1.34 / 1.26 / 1.09× vLLM and 1.25 / 1.81 /
   1.54× llama.cpp at batch 1 / 8 / 64 (the three engines in turn within one boot); with the head kept in fp16 it
   is at 100–102% of vLLM. At 16K-token prompts in fp16 Turing is 1.06–1.40× faster per request; with one byte per
-  value Turing's fp8 cache is level with vLLM's when both take 2,048 tokens a step (within 0.3% either way) and
-  its int8 takes 1.01–1.03× vLLM's time; when both take 8,192 vLLM is 1.01–1.03× faster than Turing's fp8 and
-  1.02–1.04× faster than its int8, and with each engine at its own (Turing 2,048, vLLM 8,192) 1.01–1.04× and
-  1.03–1.07×.
+  value and both engines at the same step budget, Turing's fp8 makes 99.0–101.3% of vLLM fp8's output a second
+  and its int8 97.0–99.0% (the median of 3 runs each). vLLM's fp8 keeps no layer in fp16, which costs this model
+  its output ("Low-bit KV quality" below) but holds 3.6% more tokens; with layer 0 kept in fp16 as Turing keeps it, Turing's fp8 is
+  at 103.5–106.2% and its int8 at 100.7–103.8%. With each engine at its own step budget (Turing 2,048, vLLM 8,192)
+  Turing's fp8 takes 0.98–1.02× vLLM's time per request.
 * **First token.** A prompt arriving alone gets its first token sooner than on vLLM: 18 against 28–29 ms on
   SmolLM2-360M, 27 against 32 ms on Qwen2.5-1.5B and 68 against 71–73 ms on SmolLM2-1.7B. In a burst the mean
   first token follows the tokens an engine takes per step ("Step budgets" below): with both engines at 8,192
   Turing's comes 10–27% sooner on SmolLM2 and 6–12% sooner on Qwen2.5-1.5B at batch 8 to 64; with both at 2,048
   it comes 5–12% sooner on SmolLM2-360M, 4% sooner on Qwen2.5-1.5B and from 3% later to 1% sooner on
   SmolLM2-1.7B. llama.cpp starts fastest from a cold process.
-* **What is behind is at most 4% at equal step budgets.** The 1-byte KV caches at 16K tokens: Turing's int8
-  takes 1.4–3.0% more time per request than vLLM's fp8 at 2,048 tokens a step, and at 8,192 its fp8 1.4–3.0% and
-  its int8 2.0–3.7% more (what is left is the decode steps' attention: vLLM's goes through FlashInfer, whose
-  decode wrapper Turing uses for the decode rows riding in a prefill forward only). Qwen1.5-MoE in 4 bits with
-  its LM head in fp16 at batch 8 to 64 is 0.5–1.7% behind in throughput at each engine's step budget and with
-  both at either one (five runs, `results_moe_w4_speed_repeat_cuda.json`), with first tokens 6–20% sooner:
-  Turing's 4-bit weights carry a zero point per group, and Marlin's kernel for them takes 5–6% longer per
-  routed-expert call than the one vLLM runs Qwen's symmetric GPTQ checkpoint through (in the 4-bit table below
-  vLLM's own AWQ rows, with zero points, are 1.2% under its GPTQ rows). Converted with
-  `turing convert --symmetric` the model takes that kernel and is 0.3–0.7% behind (GSM8K 44.4% against 46.0%
-  with zero points, each ± 2.2%; vLLM 40.6%). An
-  EAGLE-3 head at 2 and 4 requests is 0.1–0.2% behind with both engines warmed at each concurrency and their
-  output counted alike (`results_eagle3_repeat_cuda.json`; vLLM's count included each request's stop token before,
-  which read as 0.9–1.2%). The mean first token of a burst of 8 on SmolLM2-1.7B with both engines at 2,048 tokens
+* **What is behind is at most 3% at equal step budgets.** The 1-byte KV caches at 16K tokens: Turing's int8 makes
+  97.0–99.0% of vLLM fp8's output a second (an int8 page holds 4 bytes more per head and token, each token's scale
+  and zero, and the decode kernel takes 5% longer over it), and its fp8 99.0% and 99.9% at 16 requests (within
+  the 1.5% spread between runs of one engine) and 99.7% at 64 requests and 8,192 tokens a step, where vLLM's
+  cache, with no layer in fp16, runs all 64 requests at once and Turing's 62. Qwen1.5-MoE in 4 bits with its LM
+  head in fp16 at batch 8 to 64 is 0.4–0.9% behind (99.1–99.6%; 0.5–1.7% in five runs of 2026-11-23,
+  `results_moe_w4_speed_repeat_cuda.json`), with first tokens 6–20% sooner: Turing's 4-bit weights carry a zero
+  point per group, and Marlin's kernel for them takes 5–6% longer per routed-expert call than the one vLLM runs
+  Qwen's symmetric GPTQ checkpoint through (in the 4-bit table below vLLM's own AWQ rows, with zero points, are
+  1.2% under its GPTQ rows). Converted with `turing convert --symmetric` the model takes that kernel and is at
+  100.0–102.6% (GSM8K 44.4% in bf16 and 42.8% in fp16 against 46.0% with zero points, each ± 2.2%; vLLM 40.6%).
+  An EAGLE-3 head is 0.9% behind on chat at 1 request and 0.7% on code with chains of 7 at 4 requests, and at
+  100.3–101.9% in the other 13 cells. The mean first token of a burst of 8 on SmolLM2-1.7B with both engines at 2,048 tokens
   a step is within 3% either way from boot to boot. vLLM 0.31 schedules its next step while the current one runs
   (`async_scheduling`, its default), so the host's work between steps costs it no GPU time; Turing's engine
   launches its decode steps, its steps that prefill, a draft head's verify step and, with two or more requests
@@ -47,9 +47,11 @@ the [benchmarks](benchmarks.md) page.
   back to back gave 448.8–449.6 tok/s without drafts and 1,573–1,585 with 8, and 439 and 1,626 an hour earlier
   (session of 2026-11-21; `results_speculation_repeat_cuda.json`). A Spot VM is also restarted now and then and
   may come back on another physical GPU, so each comparison of the two engines here is within one boot: the
-  512-token, short-prompt and 16K rows in blocks of the run of 2026-11-23 and 24 (a block holds the rows that are
-  compared with each other, and every row carries its block and boot), the 4-bit MoE and EAGLE-3 tables in one
-  boot of the run before, with their repeats in the two `*_repeat_cuda.json` files.
+  512-token and short-prompt rows in blocks of the run of 2026-11-23 and 24, the 16K rows, the 4-bit MoE table's
+  fp16-head rows and the EAGLE-3 table in blocks of the run of 2026-11-25 (a block holds the rows that are
+  compared with each other, and every row carries its block and boot), with earlier repeats in the two
+  `*_repeat_cuda.json` files. Both engines' first batch of a size is about 2% slower than the next, so the 16K rows
+  are the median of 3 runs of each (`results_longctx_first_batch_cuda.json`).
 * **Comparable quality.** Turing's bf16 matches vLLM's on GSM8K (57.2% and 57.4%), and its GPTQ matches vLLM's GPTQ
   checkpoint (50.4% and 50.2%; llama.cpp's Q4_K_M 52.4%, all ± 2.2%).
 * **Low-bit KV that stays correct by default.** Turing picks the layers to keep in full precision at startup; vLLM's
@@ -93,12 +95,12 @@ batch; the 16K rows are from `results_longctx_cuda.json`:
 | SmolLM2-1.7B, 1,024-token prompts | 2,048 | Turing | 64 | 700 | 2.92 s |
 | SmolLM2-1.7B, 1,024-token prompts | 8,192 | vLLM | 64 | 611 | 3.14 s |
 | SmolLM2-1.7B, 1,024-token prompts | 8,192 | Turing | 64 | 699 | 2.76 s |
-| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 2,048 | vLLM fp8 | 128 | 154 | 101.38 s |
-| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 2,048 | Turing int8 | 128 | 152 | 103.00 s |
-| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 2,048 | Turing fp8 | 128 | 155 | 100.88 s |
-| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 8,192 | vLLM fp8 | 128 | 156 | 95.99 s |
-| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 8,192 | Turing int8 | 128 | 152 | 99.47 s |
-| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 8,192 | Turing fp8 | 128 | 154 | 97.13 s |
+| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 2,048 | vLLM fp8 | 128 | 150 | 104.53 s |
+| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 2,048 | Turing int8 | 128 | 148 | 105.60 s |
+| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 2,048 | Turing fp8 | 128 | 152 | 103.17 s |
+| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 8,192 | vLLM fp8 | 128 | 148 | 101.87 s |
+| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 8,192 | Turing int8 | 128 | 145 | 104.45 s |
+| Qwen2.5-1.5B, 16K-token prompts, 1-byte KV | 8,192 | Turing fp8 | 128 | 150 | 100.80 s |
 <!-- /table -->
 
 * On the short prompts Turing has the higher throughput at either budget (101–114% of vLLM over batch 1 to 64).
@@ -151,13 +153,13 @@ Turing's Quest row and vLLM's per-token caches are from 2026-11-17.
 <!-- table:longctx -->
 | Engine, KV cache | KV capacity (tokens) | B=16 | B=32 | B=64 | B=128 |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| Turing fp8 | 1,023,744 | 1.81 | 1.73 | 1.67 | 1.65 |
-| Turing int8 | 994,736 | 1.87 | 1.75 | 1.70 | 1.69 |
-| vLLM fp8 | 1,069,392 | 1.75 | 1.66 | 1.63 | 1.64 |
+| Turing fp8 | 1,059,056 | 1.86 | 1.77 | 1.71 | 1.68 |
+| Turing int8 | 1,029,104 | 1.90 | 1.80 | 1.75 | 1.72 |
+| vLLM fp8 | 1,069,392 | 1.82 | 1.73 | 1.74 | 1.72 |
+| vLLM fp8, skip layer 0 | 1,032,640 | 1.81 | 1.72 | 1.80 | 1.79 |
 | vLLM auto | 547,568 | 2.22 | 2.23 | 2.58 | 2.65 |
 | Turing native | 547,568 | 2.09 | 1.96 | 1.93 | 1.90 |
 | Turing int4 | 1,304,864 | 2.25 | 2.12 | 2.09 | 2.06 |
-| vLLM fp8, skip layer 0 | 1,032,096 | 1.81 | 1.72 | 1.79 | 1.78 |
 | Turing int4, Quest 25% | 1,136,256 | 3.78 | 3.66 | 3.48 | 3.40 |
 | vLLM int8_per_token_head | 1,062,096 | 4.90 | 4.79 | 4.74 | 4.72 |
 | vLLM int4_per_token_head | 2,060,896 | 4.73 | 4.55 | 4.49 | 4.41 |
@@ -174,12 +176,12 @@ Qwen2.5-1.5B-Instruct in bf16, the same GSM8K, pass-key and WikiText-2 checks fo
 | KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | Turing bf16 (reference) | — | 57.2% | 100.0% | — | 1.90 |
-| Turing int8 | automatic | 58.6% | 100.0% | -0.000 ± 0.002 | 1.69 |
-| Turing fp8 | automatic | 56.6% | 100.0% | +0.009 ± 0.005 | 1.65 |
+| Turing int8 | automatic | 58.6% | 100.0% | -0.000 ± 0.002 | 1.72 |
+| Turing fp8 | automatic | 56.6% | 100.0% | +0.009 ± 0.005 | 1.68 |
 | Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.06 |
 | vLLM bf16 (reference) | — | 57.4% | 100.0% | — | 2.65 |
-| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.64 |
-| vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.78 |
+| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.72 |
+| vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.79 |
 | vLLM fp8_per_token_head | — | 0.6% | 0.0% | +2.404 ± 0.364 | — |
 | vLLM int8_per_token_head | — | 41.4% | 100.0% | +0.023 ± 0.007 | 4.72 |
 | vLLM int4_per_token_head | — | 0.6% | 0.0% | +8.127 ± 0.495 | 4.41 |

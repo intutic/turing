@@ -1135,8 +1135,12 @@ class ContinuousBatchEngine:
             return
         tokens = host_tensor([t for item in items for t in item[1]], torch.long, self.device)
         tokens = tokens.split([len(item[1]) for item in items])
-        items = [(aux, toks, start, k, cache) for (aux, _, start, k, cache), toks in zip(items, tokens)]
         ahead = self._verifies_ahead(reqs)
+        ks = [item[3] for item in items]
+        if ahead:  # the next verify step holds these requests' drafts alone
+            ks = self._even_chains(reqs, ks, [min(self._draft_count(r), r.max_new_tokens - len(r.generated_tokens) - 1)
+                                              for r in reqs])
+        items = [(aux, toks, start, k, cache) for (aux, _, start, _, cache), toks, k in zip(items, tokens, ks)]
         drafted = self.draft_head.draft_many(self.model.embed_tokens, items, **({"host": False} if ahead else {}))
         for req, (_, toks, start, _, _), (drafts, cache) in zip(reqs, items, drafted):
             req.head_drafts, req.head_cache = drafts, cache
@@ -1144,6 +1148,23 @@ class ContinuousBatchEngine:
         if ahead and not self._verify_ahead(reqs):
             for req in reqs:  # the usual way: the drafts on the host, for the next step to verify
                 req.head_drafts = req.head_drafts.tolist() if torch.is_tensor(req.head_drafts) else req.head_drafts
+
+    def _even_chains(self, reqs: List[AsyncSequenceRequest], ks: List[int], caps: List[int]) -> List[int]:
+        """The chains to draft for requests whose drafts one verify step takes alone (ks: each one's chain by its own
+        rule, caps: the most each may draft). The head drafts position j for every chain that reaches it in one
+        pass over its weights, and the verify step reads the target's weights once for all its rows. So the batch
+        drafts position j while the chance of reaching it, summed over the requests, is HEAD_REACH or more (each
+        request's own rule counts the step for it alone), and every chain is drawn out to the batch's: a longer
+        chain costs rows, not passes. Qwen3-8B with an EAGLE-3 head on an L4, chat prompts at 4 requests: 2.64 to
+        2.68 tokens a target pass."""
+        out = [max(0, min(k, c)) for k, c in zip(ks, caps)]
+        if len(reqs) < 2 or getattr(self.model, "_graphs", None) is None:
+            return out
+        p = [min(r.head_hits / r.head_tries, 1.0) if r.head_tries else 1.0 for r in reqs]
+        longest = max(out)
+        while longest < max(caps) and sum(x ** longest for x in p) >= self.HEAD_REACH:
+            longest += 1
+        return [max(k, min(longest, c)) for k, c in zip(out, caps)]
 
     def _verifies_ahead(self, reqs: List[AsyncSequenceRequest]) -> bool:
         """The step that verifies the drafts the head is about to make for reqs can be launched before the host has
@@ -1198,13 +1219,12 @@ class ContinuousBatchEngine:
         (reqs, tokens, _, _), ks, starts, _, aux = self._verifying
         if len(reqs) < 2 or any(r.state != RequestState.DECODING for r in reqs) or not self._verifies_ahead(reqs):
             return
-        nexts = []
-        for r, k in zip(reqs, ks):
-            left = r.max_new_tokens - len(r.generated_tokens) - (k + 1)  # at the least, after the cycle in flight
-            k2 = min(self._draft_count(r), r.head_len or self._draft_count(r), left - 1)
-            if k2 < 1 or not isinstance(r.head_cache, KVCache):
-                return
-            nexts.append(k2)
+        # at the least, after the cycle in flight: each request's tokens left but one
+        caps = [min(self._draft_count(r), r.max_new_tokens - len(r.generated_tokens) - (k + 1) - 1)
+                for r, k in zip(reqs, ks)]
+        nexts = self._even_chains(reqs, [r.head_len or self._draft_count(r) for r in reqs], caps)
+        if min(nexts) < 1 or not all(isinstance(r.head_cache, KVCache) for r in reqs):
+            return
         caches = [r.past_kv for r, k2 in zip(reqs, nexts) for _ in range(k2 + 1)]
         graphs = getattr(self.model, "_graphs", None)
         if graphs is None or len(caches) > DecodeGraphs.BUCKETS[-1] or not self._top_up(reqs) \

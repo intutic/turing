@@ -34,6 +34,17 @@ def prompts(tokenizer, n, C, seed=0):
     return [ids[s:s + C] for s in (rng.randrange(0, len(ids) - C) for _ in range(n))]
 
 
+def median_run(runs):
+    """runs: (seconds, output tokens, ...) of one batch size measured --repeats times in a row -> (the run with the
+    median output rate, every run's rate and seconds in measured order). One rule for both engines; the first run
+    of a size can be slower for both (the GPU's clock after the pause before it)."""
+    order = sorted(range(len(runs)), key=lambda i: runs[i][1] / runs[i][0])
+    extra = {} if len(runs) == 1 else dict(repeats=len(runs),
+                                           repeat_output_tok_per_s=[round(r[1] / r[0], 1) for r in runs],
+                                           repeat_seconds=[round(r[0], 3) for r in runs])
+    return runs[order[(len(runs) - 1) // 2]], extra
+
+
 def run_turing(a, batches):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     import torch
@@ -128,9 +139,11 @@ def run_turing(a, batches):
             await batch(prompts(tok, 1, engine.FORWARD_TOKENS + 24, seed=96), [2])
             for B in batches:
                 preempted = engine.preemptions
-                secs, n, ttft, own = await batch(prompts(tok, B, a.context))
+                runs = [await batch(prompts(tok, B, a.context)) for _ in range(a.repeats)]
+                (secs, n, ttft, own), repeat = median_run(runs)
                 pool = engine.kv_pool
-                rows.append(dict(engine="turing", model=a.model, batch=B, context=a.context, new_tokens=a.new_tokens,
+                rows.append(dict(engine="turing", model=a.model, dtype=a.dtype, batch=B, context=a.context,
+                                 new_tokens=a.new_tokens,
                                  seconds=round(secs, 3), output_tok_per_s=round(n / secs, 1),
                                  mean_ttft_s=round(sum(ttft) / len(ttft), 4),  # from the start of the batch
                                  # the two clocks a first token can be read on: started when the batch was submitted
@@ -150,7 +163,8 @@ def run_turing(a, batches):
                                  preemptions=engine.preemptions - preempted,  # requests whose cache was recomputed
                                  # the engine's own moving average of a whole decode step, by row bucket
                                  engine_step_ms={str(k): round(v * 1e3, 3) for k, v in engine._step_s.items() if v},
-                                 quantize_lm_head=a.quantize_lm_head, activation_sparsity=a.activation_sparsity))
+                                 quantize_lm_head=a.quantize_lm_head, activation_sparsity=a.activation_sparsity,
+                                 **repeat))
                 print(json.dumps(rows[-1]), flush=True)
         finally:
             await engine.stop()
@@ -208,17 +222,21 @@ def run_vllm(a, batches):
     rows = []
     for B in batches:
         ps = prompts(tok, B, a.context)
-        t0, wall0 = time.perf_counter(), time.time()
-        outs = llm.generate([{"prompt_token_ids": p} for p in ps], sp, use_tqdm=False)
-        secs = time.perf_counter() - t0
-        n = sum(len(o.outputs[0].token_ids) for o in outs)
+        runs = []
+        for _ in range(a.repeats):
+            t0, wall0 = time.perf_counter(), time.time()
+            outs = llm.generate([{"prompt_token_ids": p} for p in ps], sp, use_tqdm=False)
+            secs = time.perf_counter() - t0
+            runs.append((secs, sum(len(o.outputs[0].token_ids) for o in outs), outs, wall0))
+        (secs, n, outs, wall0), repeat = median_run(runs)
         ttft = [vllm_ttft(o) for o in outs]
         ttft = [t for t in ttft if t is not None]
         # vLLM starts each request's clock at its arrival in the engine (a wall-clock stamp); the same first tokens
         # on the clock started when the batch was submitted, as Turing's rows report them
         submit = [o.metrics.arrival_time - wall0 + t for o in outs
                   for t in [vllm_ttft(o)] if t is not None and getattr(o.metrics, "arrival_time", None)]
-        rows.append(dict(engine="vllm", model=a.model, batch=B, context=a.context, new_tokens=a.new_tokens,
+        rows.append(dict(engine="vllm", model=a.model, dtype=a.dtype, batch=B, context=a.context,
+                         new_tokens=a.new_tokens,
                          seconds=round(secs, 3), output_tok_per_s=round(n / secs, 1),
                          mean_ttft_s=round(sum(ttft) / len(ttft), 4) if ttft else None,  # from each arrival
                          mean_ttft_from_arrival_s=round(sum(ttft) / len(ttft), 4) if ttft else None,
@@ -226,7 +244,7 @@ def run_vllm(a, batches):
                          kv_cache_dtype=kv,
                          kv_capacity_tokens=capacity, kv_pool_gib=kv_gib, kv_skip_layers=skip,
                          gpu_memory_utilization=a.gpu_memory_utilization,
-                         max_num_batched_tokens=a.max_num_batched_tokens))
+                         max_num_batched_tokens=a.max_num_batched_tokens, **repeat))
         print(json.dumps(rows[-1]), flush=True)
     import vllm
     return rows, f"vllm {vllm.__version__}"
@@ -250,6 +268,8 @@ def main():
     ap.add_argument("--vllm-kv-cache-dtype", default=None, help="vllm: any kv_cache_dtype (int8_per_token_head, ...)")
     ap.add_argument("--kv-skip-layers", default="", help="vllm: layers kept out of the quantized cache, e.g. 0")
     ap.add_argument("--warmup-context", type=int, default=None, help="prompt length of the warm-up batches")
+    ap.add_argument("--repeats", type=int, default=1,
+                    help="measure each batch size this many times in a row; the row is the run with the median rate")
     ap.add_argument("--max-num-batched-tokens", type=int, default=None,
                     help="vllm: tokens per scheduler step (default: vLLM's own choice for its LLM class and the GPU)")
     ap.add_argument("--moe-expert-slots", type=float, default=None,
@@ -291,7 +311,9 @@ def main():
                                    and r.get("moe_expert_slots") == (a.moe_expert_slots if a.engine == "turing" else None)
                                    and r.get("quantize_lm_head", False) == (a.quantize_lm_head and a.engine == "turing")
                                    and r.get("activation_sparsity", 0.0) == (a.activation_sparsity
-                                                                              if a.engine == "turing" else 0.0))]
+                                                                              if a.engine == "turing" else 0.0)
+                                   # rows from before the field was recorded: the run in another dtype replaced them
+                                   and r.get("dtype", a.dtype) == a.dtype)]
     env = dict(platform=platform.platform(), runtime=version)
     with open(a.out, "w") as f:
         json.dump(dict(env=env, rows=keep + rows), f, indent=2)

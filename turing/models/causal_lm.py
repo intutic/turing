@@ -22,7 +22,7 @@ try:  # the native extension: one packed 4-bit expert on the CPU (csrc/turing_w4
     from ..turing_csrc import w4_expert_cpu
 except ImportError:  # a build without it: offload copies missing experts in, as before
     w4_expert_cpu = None
-from ..kernels.triton_kv_decode import (pool_append_supported, pool_decode_supported, triton_pool_append,
+from ..kernels.triton_kv_decode import (fp8_hw, pool_append_supported, pool_decode_supported, triton_pool_append,
                                         triton_pool_decode)
 from ..kernels import triton_fused_ops as fused_ops
 from ..kernels.triton_kv_prefill import pool_prefill_preferred, pool_prefill_supported, triton_pool_prefill
@@ -926,11 +926,13 @@ class SubspaceAttention(nn.Module):
         whole = torch.empty(1, T + R, self.num_heads * self.head_dim, dtype=q.dtype, device=q.device) \
             if fi and R else None
         if R:
-            if pool.layer_fields(layer, "k")[3] in ("native", "fp8") \
+            storage = pool.layer_fields(layer, "k")[3]
+            if (storage == "native" or storage == "fp8" and not fp8_hw(q.device)) \
                     and flashinfer_prefill_supported(pool, layer, q, self.window, self.softcap, min_chunk=1):
                 # pages FlashInfer reads in place: the decode rows through its decode wrapper, in a call of their
                 # own (in the chunks' call they would set its tile size: 1.66 ms a row at 16K tokens on
-                # Qwen2.5-1.5B, against 1.05 from the decode kernel)
+                # Qwen2.5-1.5B, against 1.05 from the decode kernel). fp8 pages on a device that converts E4M3 in
+                # hardware take the decode kernel: 0.55 ms against FlashInfer's 0.61 (16 rows of 16K tokens, L4)
                 triton_pool_append(pool, layer, None, k[:, :, T:], v[:, :, T:], packed.rider_slots, packed.rider_starts)
                 rode = flashinfer_rows(pool, layer, q[:, :, T:], [c.slot for c in packed.caches[n:]],
                                        packed.starts[n:], self.scale, out=None if whole is None else whole[0, T:])

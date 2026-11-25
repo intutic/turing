@@ -8,7 +8,8 @@ same slot in every layer. Storage modes (`kv_cache_dtype`):
 - "native": the model's dtype (D' = D).
 - "int8":   asymmetric round-to-nearest per token and KV head, fp16 scale and zero (D' = D, G = 1).
 - native_layers: layers whose K and V a low-bit pool stores in the model dtype anyway (`k_hi`, `v_hi`
-  [len(native_layers), num_pages, Hkv, 16, D]); set when calibration finds a layer the low-bit format damages.
+  [len(native_layers), num_pages, Hkv, 16, D]; the low-bit tensors then hold the other layers only); set when
+  calibration finds a layer the low-bit format damages.
 - "int4":   asymmetric round-to-nearest per group of 32 values along D, fp16 scale and zero per group, two codes per
             byte (D' = D / 2, G = D / 32).
 - "fp8":    float8 E4M3 bytes of x / scale, round to nearest even, saturating at +-448 (D' = D, no per-token
@@ -126,7 +127,12 @@ class KVPool:
         self.num_pages, self.dtype, self.device = num_pages, dtype, torch.device(device)
         self.kv_cache_dtype, self.track_pages = kv_cache_dtype, track_pages
         L, P, H, D = num_layers, num_pages, num_kv_heads, head_dim
-        shape = lambda tail: (L, P, H, PAGE) + tail
+        # layers a low-bit pool keeps in the model dtype (k_hi, v_hi); the low-bit tensors hold the other layers only
+        # (with slots for them too, Qwen2.5-1.5B's pool of fp8 pages and layer 0 in fp16 held 3.4% fewer tokens)
+        self.native_layers = tuple(sorted(set(native_layers))) if kv_cache_dtype != "native" else ()
+        self._hi = {layer: i for i, layer in enumerate(self.native_layers)}
+        self._lo = {layer: i for i, layer in enumerate(x for x in range(L) if x not in self._hi)}
+        shape = lambda tail: (len(self._lo), P, H, PAGE) + tail
         # uninitialized: a slot is read only after it is written (reads are bounded by each request's length or
         # masked), and untouched host pages are never backed by memory
         if kv_cache_dtype == "native":
@@ -142,9 +148,6 @@ class KVPool:
         self.fp8_scales = tuple((float(a), float(b)) for a, b in fp8_scales or ((1.0, 1.0),) * L)
         self.fp8_scale = (torch.tensor(self.fp8_scales, dtype=torch.float32, device=device)[:, :, None].repeat(1, 1, 4)
                           if kv_cache_dtype == "fp8" else None)
-        # layers a low-bit pool keeps in the model dtype (their slots in the low-bit tensors stay unused)
-        self.native_layers = tuple(sorted(set(native_layers))) if kv_cache_dtype != "native" else ()
-        self._hi = {layer: i for i, layer in enumerate(self.native_layers)}
         if self._hi:
             self.k_hi, self.v_hi = (torch.empty((len(self._hi), P, H, PAGE, D), dtype=dtype, device=device)
                                     for _ in range(2))
@@ -185,7 +188,8 @@ class KVPool:
         device = torch.device(device)
         D, H, L = config.head_dim, config.num_kv_heads, config.num_layers
         native = tuple(getattr(config, "kv_native_layers", None) or ()) if config.kv_cache_dtype != "native" else ()
-        page_bytes = PAGE * kv_bytes_per_token(L, H, D, config.kv_cache_dtype, torch.finfo(dtype).bits // 8)
+        page_bytes = PAGE * kv_bytes_per_token(L - len(set(native)), H, D, config.kv_cache_dtype,
+                                               torch.finfo(dtype).bits // 8)
         page_bytes += PAGE * kv_bytes_per_token(len(native), H, D, "native", torch.finfo(dtype).bits // 8)
         track = config.kv_page_budget < 1.0
         if track:
@@ -225,14 +229,15 @@ class KVPool:
         both the layer's one scale, a 4-wide tensor whose first element counts)."""
         if layer in self._hi:
             return (self.k_hi if which == "k" else self.v_hi)[self._hi[layer]], None, None, "native"
+        i = self._lo[layer]
         if self.kv_cache_dtype == "fp8":
             s = self.fp8_scale[layer, 0 if which == "k" else 1]
-            return (self.k if which == "k" else self.v)[layer], s, s, "fp8"
+            return (self.k if which == "k" else self.v)[i], s, s, "fp8"
         codes, scale, zero = ((self.k, self.k_scale, self.k_zero) if which == "k"
                               else (self.v, self.v_scale, self.v_zero))
         if self.kv_cache_dtype == "native":
-            return codes[layer], None, None, "native"
-        return codes[layer], scale[layer], zero[layer], self.kv_cache_dtype
+            return codes[i], None, None, "native"
+        return codes[i], scale[i], zero[i], self.kv_cache_dtype
 
     def _store(self, layer: int, which: str, phys: torch.Tensor, slot: torch.Tensor, xt: torch.Tensor) -> None:
         """xt [N, Hkv, D] into (page phys[n], slot slot[n]) of one layer's K or V."""

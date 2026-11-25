@@ -227,7 +227,8 @@ def test_decode_rows_through_flashinfer(storage, monkeypatch):
 
     out, kv, calls = step(True)
     ref, ref_kv, ref_calls = step(False)
-    in_place = [pool.layer_fields(i, "k")[3] in ("native", "fp8") for i in range(pool.num_layers)]
+    hw = causal_lm.fp8_hw(torch.device("cuda"))  # fp8 rows take the decode kernel where the device converts E4M3
+    in_place = [pool.layer_fields(i, "k")[3] in (("native",) if hw else ("native", "fp8")) for i in range(pool.num_layers)]
     assert calls == {"flashinfer": pool.num_layers + in_place.count(True), "decode": in_place.count(False)}
     assert ref_calls == {"flashinfer": pool.num_layers, "decode": pool.num_layers}
     torch.testing.assert_close(out, ref, atol=2e-2, rtol=2e-2)

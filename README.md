@@ -11,7 +11,7 @@ in 4 bits too) is 1.07–1.33× faster than vLLM at batch sizes 1 to 64.
 [![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
 [![Release: v2.0.0](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 1476](https://img.shields.io/badge/Tests-1476-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 1479](https://img.shields.io/badge/Tests-1479-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -69,15 +69,15 @@ OpenAI (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`), Anthropic 
 | KV cache | Layers kept in bf16 | GSM8K | Pass-key 2K–32K | ΔNLL vs bf16 | s/request (16K, B=128) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | Turing bf16 (reference) | — | 57.2% | 100.0% | — | 1.90 |
-| Turing int8 | automatic | 58.6% | 100.0% | -0.000 ± 0.002 | 1.69 |
-| Turing fp8 | automatic | 56.6% | 100.0% | +0.009 ± 0.005 | 1.65 |
+| Turing int8 | automatic | 58.6% | 100.0% | -0.000 ± 0.002 | 1.72 |
+| Turing fp8 | automatic | 56.6% | 100.0% | +0.009 ± 0.005 | 1.68 |
 | Turing int4 | automatic | 52.8% | 100.0% | +0.020 ± 0.005 | 2.06 |
 | vLLM bf16 (reference) | — | 57.4% | 100.0% | — | 2.65 |
-| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.64 |
-| vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.78 |
+| vLLM fp8 | — | 2.4% | 5.0% | +2.286 ± 0.394 | 1.72 |
+| vLLM fp8 | layer 0 (manual) | 56.8% | 100.0% | +0.013 ± 0.003 | 1.79 |
 <!-- /table -->
 
-  vLLM fp8 with layer 0 skipped *by hand* matches Turing's quality at 0.82–1.02× Turing's time per request (int4
+  vLLM fp8 with layer 0 skipped *by hand* matches Turing's quality at 0.80–1.07× Turing's time per request (int4
   to fp8), which is the point: the calibration finds that layer automatically. vLLM's per-token int8 and int4
   caches are in the [full table](docs/comparison.md). It is also packaged on its own for vLLM users, under
   Apache-2.0: [`packages/kv-layer-guard`](packages/kv-layer-guard). Validated on six instruct models (Qwen2.5 1.5B
@@ -129,14 +129,15 @@ model and prompts (Qwen2.5-1.5B-Instruct, 512-token prompts, 256 new tokens):
 * **4 bits with the LM head in fp16** (`--no-quantize-lm-head`): Turing is at 100–102% of vLLM. llama.cpp is 1.05×
   faster at batch 1; Turing is faster than llama.cpp at batch 8 and 64 (1.46× and 1.42×).
 * **16K-token prompts, fp16 KV at equal memory:** Turing is 1.06–1.40× faster per request than vLLM, more at larger
-  batches. With one byte per value Turing's fp8 cache is level with vLLM's when both engines take 2,048 tokens a
-  step and its int8 takes 1.01–1.03× vLLM's time; vLLM is 1.01–1.04× faster when both take 8,192 and 1.01–1.07×
-  with each at its own (Turing 2,048, vLLM 8,192).
+  batches. With one byte per value, at the same step budget, Turing's fp8 cache is at 99.0–101.3% of vLLM's fp8
+  and its int8 at 97.0–99.0%; vLLM's fp8 keeps no layer in fp16 and wrecks this model's output (above), and with
+  layer 0 kept in fp16 as Turing keeps it Turing's fp8 is at 103.5–106.2% and its int8 at 100.7–103.8%.
 * **Speculative decoding:** with prompt lookup (8 drafts) Turing is at 100–121% of vLLM's n-gram speculator on code,
-  rewrite and chat prompts; with a published EAGLE-3 head on Qwen3-8B it is at 99.8–101% of vLLM with the same head.
+  rewrite and chat prompts; with a published EAGLE-3 head on Qwen3-8B it is at 99.1–101.9% of vLLM with the same
+  head (13 of 15 cells at 100.3% or more).
 * **MoE models:** OLMoE in bf16 is level with vLLM at batch 1 and 8 and 3% behind at batch 32; Qwen1.5-MoE in 4
-  bits is at 101–127% of vLLM on Qwen's GPTQ checkpoint (98–102% with its LM head in fp16, as in that checkpoint;
-  99–102% converted with `--symmetric`, the grid of that checkpoint).
+  bits is at 101–127% of vLLM on Qwen's GPTQ checkpoint (99.1–101.5% with its LM head in fp16, as in that
+  checkpoint; 100.0–102.6% converted with `--symmetric`, the grid of that checkpoint).
   Mixtral-8x7B does not fit a 24 GB GPU in 4 bits: with two of each layer's eight experts computed on the CPU
   (`--moe-expert-slots 6`) it runs at 13.7 / 16.5 tok/s at batch 1 / 2, against 13.2 / 14.0 for llama.cpp with 26
   of its layers on the GPU.

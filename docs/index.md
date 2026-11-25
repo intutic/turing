@@ -10,7 +10,7 @@ in 4 bits too) is 1.05–1.27× faster than vLLM at batch sizes 1 to 64.
 [![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
 [![Release](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](https://github.com/intutic/turing/blob/master/CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
-[![Tests](https://img.shields.io/badge/Tests-1476-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests](https://img.shields.io/badge/Tests-1479-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -65,11 +65,10 @@ client, `langchain-turing` or `llama-index-llms-turing`. More in the [quickstart
 ## What it is not
 
 A production server. It has been measured on one NVIDIA L4 with models of 0.4B to 8B parameters, where it is level
-with or ahead of vLLM in fp16, level with an EAGLE-3 draft head and with a 1-byte fp8 KV cache at 16K tokens when
-both engines take 2,048 tokens a step, ahead at 4 bits with its default 4-bit LM head, at 16K-token prompts in
-fp16, on the first token of a single prompt and in cold start, and up to 4% behind with an int8 KV cache or at
-8,192 tokens a step at 16K tokens and 1–2% behind on a 4-bit MoE model with its LM head in fp16
-([comparison](comparison.md)).
+with or ahead of vLLM in fp16, within 1% either way with an EAGLE-3 draft head and with a 1-byte fp8 KV cache at
+16K tokens, ahead at 4 bits with its default 4-bit LM head, at 16K-token prompts in fp16, on the first token of a
+single prompt and in cold start, up to 3% behind with an int8 KV cache at 16K tokens and up to 1% behind on a
+4-bit MoE model with its LM head in fp16 (level converted with `--symmetric`) ([comparison](comparison.md)).
 For production serving (multi-GPU, larger models, a longer track record) use vLLM, SGLang or TensorRT-LLM; on a
 laptop, llama.cpp or Ollama.
 
