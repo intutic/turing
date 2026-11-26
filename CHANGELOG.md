@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/). Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 
+## Unreleased
+
+### Changed
+- The Colab notebook (`demo/turing_quickstart_colab.ipynb`) is rewritten. The old one, from 0.1.0, never ran Turing: its
+  "Turing Engine" and "baseline" rows were the same Hugging Face `generate` call, and it imported a class that no
+  longer exists. The new one installs `turing-engine` from PyPI, runs `turing serve` and talks to it through the
+  OpenAI, Anthropic and Ollama APIs, shows the layers the int8 and int4 KV caches keep and the tokens each holds,
+  asks the same questions with the int4 cache, and compares Turing's logits with Hugging Face's. Run end to end in a
+  clean Python 3.12 container on an L4 (turing 2.1.0, torch 2.15.0): 416K / 779K / 1.08M tokens for native / int8 /
+  int4 KV, layers 0 and 0, 1, 15 kept, the same answers with both caches, and the same next token as Hugging Face
+  at 21 of 21 positions. The T4's fp16 path was not run.
+- Integration tests and docs checked against live servers: a two-agent LangGraph graph with a tool call
+  (`packages/langchain-turing`), LlamaIndex RAG with streaming (`packages/llama-index-llms-turing`), LiteLLM load
+  balancing, failover and per-server prices, and DSPy (`model_type="chat"`) in `docs/integrations.md`.
+- KServe: the published `v2.1.0-cuda` image ran on GKE as an opt-in `kserve-turingserver` ClusterServingRuntime,
+  proposed upstream in kserve/kserve#6688 (`benchmarks/results/results_kserve_gke.json`, `docs/integrations.md`).
+
 ## 2.1.0 - 2026-11-26
 
 Highlights, each measured on one NVIDIA L4 against vLLM 0.31 (details below and in `docs/comparison.md`):

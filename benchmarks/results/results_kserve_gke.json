@@ -93,5 +93,22 @@
       },
       "note": "started with --served-model-name qwen25-1-5b-instruct; the seconds until /health answers include the model's download, its load, the KV calibration and the warm-up. Request timings: results_serve_first_token_cuda.json."
     }
+  },
+  "run_2026-11-26": {
+    "note": "The published ghcr.io/intutic/turing:v2.1.0-cuda image (release 2.1.0) with the kserve-turingserver ClusterServingRuntime proposed upstream in kserve/kserve#6688 (config/runtimes/kserve-turingserver.yaml there; args --model=/mnt/models --served-model-name={{.Name}}, /health readiness and startup probes), no override. Same cluster setup as 2026-11-23: GKE 1.36.4, one e2-standard-4 and one Spot g2-standard-8 with an NVIDIA L4, KServe v0.21.0 in Standard deployment mode. InferenceService qwen25-1-5b-instruct, storageUri hf://Qwen/Qwen2.5-1.5B-Instruct, runtime: kserve-turingserver.",
+    "seconds_apply_to_ready": 304,
+    "image_pull_s": 161.6,
+    "endpoints_through_predictor_service": {
+      "/health": 200,
+      "/v1/models": [
+        "qwen25-1-5b-instruct"
+      ],
+      "/v1/chat/completions": 200,
+      "/v1/chat/completions stream": "chunks",
+      "/metrics": "Prometheus text"
+    },
+    "seconds_pod_delete_to_ready": 93,
+    "chat_after_restart": 200,
+    "server_user": "uid 1000 (turing)"
   }
 }

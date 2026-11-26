@@ -187,6 +187,13 @@ spec:
 
 `hf://` storage URIs need KServe 0.15 or later.
 
+**Run on GKE on 2026-11-26**, with the published `v2.1.0-cuda` image and no override: the same cluster setup, with
+the runtime as an opt-in `kserve-turingserver` ClusterServingRuntime (`--served-model-name={{.Name}}`, proposed
+upstream in [kserve/kserve#6688](https://github.com/kserve/kserve/pull/6688)). The InferenceService was Ready 304 s
+after `kubectl apply`, including the image's pull onto a new node (162 s); `/health`, `/v1/models` (listing the
+InferenceService's name), a plain and a streamed chat completion and `/metrics` answered through the predictor
+Service, and after `kubectl delete pod` it was Ready again in 93 s.
+
 **Run on GKE on 2026-11-23** (`benchmarks/results/results_kserve_gke.json`): GKE 1.36.4 with one Spot L4 node
 (`g2-standard-8`), KServe v0.21.0 in Standard deployment mode, cert-manager v1.17.0.
 
