@@ -2,7 +2,7 @@
   "env": {
     "device": "cuda",
     "torch": "2.9.1+cu129",
-    "platform": "Linux-6.8.0-1073-gcp-x86_64-with-glibc2.35",
+    "platform": "Linux-6.8.0-1074-gcp-x86_64-with-glibc2.35",
     "gpu": "NVIDIA L4"
   },
   "text": "WikiText-2 raw test, first window",
@@ -97,15 +97,15 @@
       "params": 268098176,
       "dtype": "bfloat16",
       "tokens": 64,
-      "max_abs_diff_full": 0.8125,
-      "max_abs_diff_incremental": 0.671875,
-      "max_rel_diff": 0.02306867018342018,
-      "top1_agreement": 1.0,
+      "max_abs_diff_full": 0.625,
+      "max_abs_diff_incremental": 0.7578125,
+      "max_rel_diff": 0.02601931244134903,
+      "top1_agreement": 0.984375,
       "hf_self_max_abs_diff": 0.59375,
       "hf_self_top1_agreement": 1.0,
       "nll_hf": 3.8449575901031494,
-      "nll_turing": 3.8403732776641846,
-      "seconds": 11.9
+      "nll_turing": 3.833751678466797,
+      "seconds": 48.7
     },
     {
       "model": "Qwen/Qwen2.5-0.5B",
@@ -129,15 +129,15 @@
       "params": 596049920,
       "dtype": "bfloat16",
       "tokens": 64,
-      "max_abs_diff_full": 0.875,
-      "max_abs_diff_incremental": 0.625,
-      "max_rel_diff": 0.01953125,
+      "max_abs_diff_full": 0.8125,
+      "max_abs_diff_incremental": 0.578125,
+      "max_rel_diff": 0.01806640625,
       "top1_agreement": 0.984375,
       "hf_self_max_abs_diff": 1.0,
       "hf_self_top1_agreement": 1.0,
       "nll_hf": 3.9092719554901123,
-      "nll_turing": 3.9020183086395264,
-      "seconds": 15.3
+      "nll_turing": 3.8957393169403076,
+      "seconds": 33.5
     },
     {
       "model": "unsloth/Llama-3.2-1B",

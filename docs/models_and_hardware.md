@@ -65,7 +65,9 @@ Apple M4 Pro, fp32; OLMoE and Mistral-7B in bf16 to fit in memory. Source: `benc
 | mistralai/Mistral-7B-v0.1 | mistral | bfloat16 | 0.5 | — | 95.3% | +0.0002 |
 <!-- /table -->
 
-NVIDIA L4, bf16. Source: `benchmarks/results/results_parity_cuda.json`.
+NVIDIA L4, bf16. Source: `benchmarks/results/results_parity_cuda.json`. Qwen3-0.6B and Gemma 3 270M were measured
+again on 2026-11-26 with their per-head q/k norms inside the rotary kernel (Gemma 3 was at 64 of 64 top-1 and a
+max |Δlogit| of 0.672 before); in fp32 that path matches HF's within the test tolerance (`tests/test_hf_parity.py`).
 
 <!-- table:parity_cuda -->
 | Checkpoint | Type | dtype | max \|Δlogit\| vs HF | HF cached vs full (noise floor) | Top-1 agreement | ΔNLL vs HF |
@@ -74,9 +76,9 @@ NVIDIA L4, bf16. Source: `benchmarks/results/results_parity_cuda.json`.
 | facebook/opt-125m | opt | bfloat16 | 0.188 | 0.312 | 96.9% | -0.0017 |
 | facebook/opt-350m | opt | bfloat16 | 0.312 | 0.375 | 98.4% | -0.0016 |
 | HuggingFaceTB/SmolLM2-135M | llama | bfloat16 | 0.875 | 0.750 | 93.8% | -0.0061 |
-| unsloth/gemma-3-270m | gemma3_text | bfloat16 | 0.672 | 0.594 | 100.0% | -0.0046 |
+| unsloth/gemma-3-270m | gemma3_text | bfloat16 | 0.758 | 0.594 | 98.4% | -0.0112 |
 | Qwen/Qwen2.5-0.5B | qwen2 | bfloat16 | 1.38 | 0.484 | 100.0% | +0.0151 |
-| Qwen/Qwen3-0.6B | qwen3 | bfloat16 | 0.625 | 1.000 | 98.4% | -0.0073 |
+| Qwen/Qwen3-0.6B | qwen3 | bfloat16 | 0.578 | 1.000 | 98.4% | -0.0135 |
 | unsloth/Llama-3.2-1B | llama | bfloat16 | 0.266 | 0.312 | 100.0% | +0.0048 |
 | deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B | qwen2 | bfloat16 | 6.97 | 1.188 | 73.4% | -0.2354 |
 | unsloth/gemma-2-2b | gemma2 | bfloat16 | 0.704 | 0.453 | 98.4% | +0.0023 |

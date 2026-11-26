@@ -665,14 +665,14 @@ head, 24 requests per workload in waves of 1, 2 or 4, both engines with chains o
 | Workload | Requests in flight | Turing, no drafts | Turing, 5 drafts | Drafts accepted | Tokens per target pass | vLLM, no drafts | vLLM, 5 drafts |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | code | 1 | 16.5 | 51.5 | 64.2% | 4.12 | 16.4 | 50.3 |
-| code | 2 | 26.4 | 83.4 | 63.8% | 4.13 | 26.3 | 82.2 |
-| code | 4 | 46.0 | 135.4 | 63.8% | 4.13 | 45.9 | 134.1 |
-| rewrite | 1 | 16.4 | 51.5 | 65.1% | 4.12 | 16.3 | 50.6 |
-| rewrite | 2 | 28.3 | 90.7 | 64.7% | 4.16 | 28.3 | 88.8 |
-| rewrite | 4 | 51.0 | 151.2 | 64.6% | 4.15 | 50.9 | 149.1 |
+| code | 2 | 26.5 | 83.4 | 63.8% | 4.13 | 26.3 | 82.2 |
+| code | 4 | 46.2 | 135.4 | 63.8% | 4.13 | 45.9 | 134.1 |
+| rewrite | 1 | 16.5 | 51.5 | 65.1% | 4.12 | 16.4 | 50.6 |
+| rewrite | 2 | 28.5 | 90.7 | 64.7% | 4.16 | 28.3 | 88.8 |
+| rewrite | 4 | 51.2 | 151.2 | 64.6% | 4.15 | 51.0 | 149.1 |
 | chat | 1 | 16.7 | 34.2 | 37.2% | 2.62 | 16.6 | 33.7 |
-| chat | 2 | 30.5 | 63.8 | 34.5% | 2.67 | 30.6 | 62.3 |
-| chat | 4 | 60.5 | 108.7 | 34.0% | 2.66 | 60.7 | 110.6 |
+| chat | 2 | 30.9 | 63.8 | 34.5% | 2.67 | 30.7 | 62.3 |
+| chat | 4 | 60.4 | 108.7 | 34.0% | 2.66 | 60.6 | 110.6 |
 <!-- /table -->
 
 * The head runs once per draft position for every drafting request, from a paged pool of its own and under CUDA
@@ -681,8 +681,11 @@ head, 24 requests per workload in waves of 1, 2 or 4, both engines with chains o
   passes in its row differ by 0.7%), and chat at 4 requests, 98.3% of a vLLM row whose outputs, and speed, change
   between its processes: 107.3, 107.8, 108.7 and 110.6 tok/s in four processes of the boot (the row is the 110.6), and
   Turing 108.7, 108.8 and 108.8 in three with the same outputs each time, 100.2% of vLLM's mean
-  (`results_eagle3_chat_spread_cuda.json`). Without drafts the two engines are within 0.6% of each other (the run
-  before, on commit 7554bc7). Run of 2026-11-25: the drafted rows of both engines in one boot, the second of two
+  (`results_eagle3_chat_spread_cuda.json`). Without drafts Turing is at 100.4–100.8% of vLLM in eight of the nine
+  cells and takes less time over every workload; chat at 4 requests is 99.7% of a vLLM row whose outputs end
+  later (5,947 tokens to Turing's 5,882 in 97.4 s against 98.1): 59.6, 60.6 and 60.7 tok/s in three vLLM processes,
+  Turing 60.4 in two, 100.2% of vLLM's mean (at 2 requests 100.7%). Run of 2026-11-25: the drafted rows of both
+  engines in one boot, the rows without drafts in a second boot that day on the same tree, each the second of two
   passes over the prompts, both engines warmed at each concurrency; both count output without the stop token.
 * Tokens per target pass: each engine's output after each request's first token over its own count of a request's
   drafting steps (vLLM's `spec_decode_num_drafts`, Turing's verify steps; vLLM's output there includes its stop

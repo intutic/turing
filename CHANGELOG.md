@@ -44,7 +44,7 @@ All notable changes to this project are documented here. The format follows
 - `--draft-head`: speculative decoding with a published EAGLE-3 draft head (`turing/models/eagle3.py`). The head
   runs once per draft position for all drafting requests, and a request's chain is as long as its drafts are
   likely to be reached by the target. Qwen3-8B on an L4 with chains of up to 5: 50.7 / 82.3 / 133.0 tok/s on code
-  prompts at 1 / 2 / 4 requests (16.5 / 26.4 / 46.0 without drafts; vLLM with the same head 50.1 / 81.9 / 132.5).
+  prompts at 1 / 2 / 4 requests (16.5 / 26.5 / 46.2 without drafts; vLLM with the same head 50.1 / 81.9 / 132.5).
 - Overlapped decode on CUDA: the next decode step is launched before the host has read the current step's tokens.
 - `turing bench-bw` (also `turing doctor`) reports the device's read bandwidth and matmul rates and, with `--model`,
   the least time a batch-1 decode step can take; `--tune` measures the int4 kernel crossover on the GPU present,
@@ -81,7 +81,9 @@ All notable changes to this project are documented here. The format follows
   of 7 at 4 requests 99.3% (99.8% in a second measurement), chat at 4 requests 98.3% of the vLLM row, whose
   outputs and speed change between its processes (107.3 to 110.6 tok/s in four; Turing 108.7 to 108.8 in three,
   100.2% of vLLM's mean). Draft acceptance by position is the same in both engines
-  (`results_eagle3_acceptance_by_position_cuda.json`).
+  (`results_eagle3_acceptance_by_position_cuda.json`). Without drafts, in a second boot: 100.4–100.8% of vLLM in
+  eight of the nine cells (99.7–100.6% before), chat at 4 requests 99.7% of the vLLM row and 100.2% of its mean
+  over three processes. The CUDA parity rows of Qwen3-0.6B and Gemma 3 270M in bf16 were measured again on it.
 - `scripts/benchmark_speculation.py`: Turing's tokens a target pass are its output after each request's first token
   over its steps that verified a request's drafts (`verify_steps`, the engine's `spec_verifies`), as vLLM's are
   counted; its accepted count also holds tokens emitted after a stop token. `scripts/profile_device_time.py` takes
