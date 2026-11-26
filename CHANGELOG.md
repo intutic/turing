@@ -4,7 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/). Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 
-## Unreleased
+## 2.1.0 - 2026-11-26
+
+Highlights, each measured on one NVIDIA L4 against vLLM 0.31 (details below and in `docs/comparison.md`):
+EAGLE-3 draft heads (`--draft-head`, 101.0–102.4% of vLLM with the same head in 13 of 15 cells on Qwen3-8B); an fp8
+KV cache calibrated like int8 and int4 (99.0–101.3% of vLLM's fp8 at 16K tokens, and GSM8K 56.6% where vLLM's fp8
+gives 2.4%); 4-bit MoE experts through Marlin kernels and MoE expert offload to the CPU (`--moe-expert-slots`);
+overlapped decode, prefill CUDA graphs and a warm-up before the server listens; and a CUDA image that starts on a
+GPU (`v2.0.0-cuda` did not).
 
 ### Added
 - `turing convert --symmetric` (`turing.models.quant.symmetric`): every group's zero point at 8 and a range of
@@ -289,6 +296,12 @@ All notable changes to this project are documented here. The format follows
   `turing serve` does not import. Imports such as `turing.core.lineage` or `turing.kernels.triton_kslot_pool` become
   `turing.experimental.lineage` and `turing.experimental.kernels.triton_kslot_pool`; `turing.SubspaceStructuredRouter`,
   `turing.DynamicEntropyRouter` and `turing.HierarchicalVirtualPageManager` are now in `turing.experimental`.
+- Benchmark results moved from the repository root to `benchmarks/results/`, with reproduction commands in
+  `benchmarks/README.md`; scripts write there by default.
+- Documentation reorganised into Getting started, User guide, Performance and Internals sections; the README opens
+  with what is new, and the documentation's home page lists where Turing is ahead of, level with and behind vLLM.
+- Package description corrected (it still advertised 70B models on one GPU) and now names the fp8 KV cache and
+  EAGLE-3 draft heads; the Helm chart's description says what it deploys.
 
 ### Removed
 - The untrained draft heads (`turing.experimental.speculation`: Matryoshka and quadtree heads, tree pruner), their two
@@ -306,10 +319,6 @@ All notable changes to this project are documented here. The format follows
   power, Laplacian and conv kernels. The macOS arm64 extension shrinks from 742 KB to 507 KB.
 - 22 scripts that no document, test or workflow referenced: synthetic benchmark suites, an unused wheel builder and
   early GPU smoke scripts. The scripts left are listed in `benchmarks/README.md`.
-- Benchmark results moved from the repository root to `benchmarks/results/`, with reproduction commands in
-  `benchmarks/README.md`; scripts write there by default.
-- Documentation reorganised into Getting started, User guide, Performance and Internals sections.
-- Package description corrected (it still advertised 70B models on one GPU).
 
 ### Fixed
 - When the KV pool ran short, the engine could take the pages of the oldest request instead of the newest on

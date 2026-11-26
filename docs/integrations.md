@@ -117,14 +117,14 @@ documentation. The protocols are tested; the individual client applications are 
   `InferencePool`.
 - **[Helm chart](https://github.com/intutic/turing/tree/master/deploy/helm/turing-serving)**
   (`deploy/helm/turing-serving`): a Deployment with GPU limits, Prometheus scrape annotations (`/metrics` is
-  Prometheus text) and optional llm-d KV events. Defaults: model `Qwen/Qwen2.5-7B-Instruct`, image tag `v2.0.0-cuda`.
-- **[Docker images](docker.md):** `ghcr.io/intutic/turing:v2.0.0` (CPU) and `ghcr.io/intutic/turing:v2.0.0-cuda`.
+  Prometheus text) and optional llm-d KV events. Defaults: model `Qwen/Qwen2.5-7B-Instruct`, image tag `v2.1.0-cuda`.
+- **[Docker images](docker.md):** `ghcr.io/intutic/turing:v2.1.0` (CPU) and `ghcr.io/intutic/turing:v2.1.0-cuda`.
 
 ### KServe
 
 [`integrations/kserve/serving_runtime.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/serving_runtime.yaml)
 defines a `ServingRuntime` that runs `turing serve --model /mnt/models` on port 8080 with the
-`ghcr.io/intutic/turing:v2.0.0-cuda` image. KServe downloads the InferenceService's `storageUri` (`hf://`, `s3://`,
+`ghcr.io/intutic/turing:v2.1.0-cuda` image. KServe downloads the InferenceService's `storageUri` (`hf://`, `s3://`,
 `gs://`, `pvc://`) to `/mnt/models`, so that is the model it serves
 ([`inferenceservice.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/inferenceservice.yaml)):
 
@@ -152,8 +152,8 @@ spec:
   not set the library path where GKE mounts the NVIDIA driver (`Found no NVIDIA driver`). `deploy/Dockerfile` now
   does both. An image built from it started on an L4 under `docker run --gpus all` and with the driver libraries
   mounted the way GKE mounts them (healthy 80 to 84 s after `docker run`, the model's download included); the
-  published one failed both ways with the two errors above. The manifests need the rebuilt image, and none is
-  published yet.
+  published one failed both ways with the two errors above. The manifests now name `v2.1.0-cuda`, built from that
+  Dockerfile; before its release the same build served chat requests on an L4 both ways.
 - With those two things added to the same image at container start (a test-only override), the InferenceService was
   Ready 57 s after `kubectl apply` with the image already on the node (pulling its 4.1 GB took 4 min 8 s; the
   storage initializer's download 27 to 30 s). `/health`, `/v1/models`, a plain and a streamed chat completion and
@@ -165,4 +165,5 @@ spec:
   over when the pod turns Ready; a chat request no longer builds the tokenizer's vocabulary twice, and a short
   prompt arriving alone is prefilled whole from a CUDA graph (0.26 s to 0.03 s to the first token of a 34-token
   prompt, 0.06 s for the first request after a start); and `--served-model-name` sets the listed name. A
-  ServingRuntime can pass `--served-model-name={{.Name}}` (the InferenceService's name) once its image has the flag.
+  ServingRuntime can pass `--served-model-name={{.Name}}` (the InferenceService's name) with `v2.1.0-cuda`, which
+  has the flag.

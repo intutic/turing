@@ -29,9 +29,9 @@ Install Turing Engine, chat with a model in the terminal, then serve it over the
 
 === "Docker"
     ```bash
-    docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.0.0 --model HuggingFaceTB/SmolLM2-135M
+    docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.0 --model HuggingFaceTB/SmolLM2-135M
     ```
-    The CUDA image is `ghcr.io/intutic/turing:v2.0.0-cuda`. See [Docker](docker.md).
+    The CUDA image is `ghcr.io/intutic/turing:v2.1.0-cuda`. See [Docker](docker.md).
 
 On other platforms (Windows, Intel Macs) `pip install turing-engine` builds the C++ extension from the source package,
 which needs a C++20 compiler.

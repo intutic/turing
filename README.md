@@ -1,17 +1,17 @@
 # ⚡ Turing Engine
 
-**An LLM inference server whose int8/int4 KV cache finds the layers low-bit storage would break and keeps them in full
-precision**, with HuggingFace parity tests on 16 model types, 4-bit GPTQ weights, and OpenAI, Anthropic and Ollama
-APIs on one port. It runs on NVIDIA GPUs, Apple Silicon and CPUs. With Qwen2.5-1.5B on an NVIDIA L4, its int4 KV cache
-holds 2.4× as many tokens as a 16-bit cache in the same GPU memory, at +0.02 nats, and 4-bit decoding (the LM head
-in 4 bits too) is 1.07–1.33× faster than vLLM at batch sizes 1 to 64.
+**An LLM inference server whose int8/fp8/int4 KV cache finds the layers low-bit storage would break and keeps them in
+full precision**, with HuggingFace parity tests on 16 model types, 4-bit GPTQ weights, EAGLE-3 speculative decoding,
+and OpenAI, Anthropic and Ollama APIs on one port. It runs on NVIDIA GPUs, Apple Silicon and CPUs. With Qwen2.5-1.5B
+on an NVIDIA L4, its int4 KV cache holds 2.4× as many tokens as a 16-bit cache in the same GPU memory, at +0.02
+nats, and 4-bit decoding (the LM head in 4 bits too) is 1.09–1.34× faster than vLLM at batch sizes 1 to 64.
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
 [![PyPI: turing-engine](https://img.shields.io/pypi/v/turing-engine.svg)](https://pypi.org/project/turing-engine/)
 [![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
-[![Release: v2.0.0](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](CHANGELOG.md)
+[![Release: v2.1.0](https://img.shields.io/badge/Release-v2.1.0-blue.svg)](CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
-[![Tests: 1499](https://img.shields.io/badge/Tests-1499-brightgreen.svg)](https://github.com/intutic/turing/actions)
+[![Tests: 1507](https://img.shields.io/badge/Tests-1507-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
@@ -19,8 +19,24 @@ It loads HuggingFace checkpoints, llama.cpp GGUF files and its own 4-bit `.tgate
 HuggingFace's logits when the KV cache is kept in the model's dtype. It is built for trying KV-cache and quantization
 changes against real models, not for production serving ([how it compares](#how-it-compares)).
 
-[Get started](#get-started) · [What it is good for](#what-it-is-good-for) · [How it compares](#how-it-compares) ·
-[More ways to run it](#more-ways-to-run-it) · [Models](#models) · [Features](#features) · [Documentation](#documentation)
+[What's new](#whats-new-in-210) · [Get started](#get-started) · [What it is good for](#what-it-is-good-for) ·
+[How it compares](#how-it-compares) · [More ways to run it](#more-ways-to-run-it) · [Models](#models) ·
+[Features](#features) · [Documentation](#documentation)
+
+---
+
+## What's new in 2.1.0
+
+* **EAGLE-3 draft heads** (`--draft-head`): Qwen3-8B with a published head runs at 101.0–102.4% of vLLM with the same
+  head in 13 of 15 cells on an L4.
+* **fp8 KV cache** (`--kv-cache-dtype fp8`), calibrated like int8 and int4: at 16K-token prompts 99.0–101.3% of
+  vLLM's fp8, and it keeps Qwen2.5-1.5B-Instruct at 56.6% on GSM8K where vLLM's fp8 drops it to 2.4%.
+* **4-bit MoE**: `turing convert` packs the experts too and Marlin kernels run them (Qwen1.5-MoE at 101–127% of
+  vLLM); `--moe-expert-slots` computes some experts on the CPU, which fits Mixtral-8x7B on a 24 GB GPU.
+* **Shorter steps**: overlapped decode, CUDA graphs for prefill, and a warm-up before the server listens.
+* **A CUDA image that starts on a GPU.** `v2.0.0-cuda` lacks the C compiler Triton needs; `v2.1.0-cuda` has it.
+
+Everything else, with the measurements behind it, is in the [changelog](CHANGELOG.md).
 
 ---
 
@@ -36,8 +52,8 @@ Macs) pip builds it from the source package, which needs a C++20 compiler. From 
 
 Or run the server in Docker ([docs/docker.md](docs/docker.md)):
 ```bash
-docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.0.0 --model smollm2
-docker run --rm --gpus all -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.0.0-cuda --model Qwen/Qwen2.5-7B-Instruct --device cuda
+docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.0 --model smollm2
+docker run --rm --gpus all -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.0-cuda --model Qwen/Qwen2.5-7B-Instruct --device cuda
 ```
 
 ### 2. Chat in the terminal
@@ -91,7 +107,7 @@ OpenAI (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`), Anthropic 
   `turing eval-niah`, the Turing-vs-vLLM and llama.cpp benchmarks) run any idea against real models.
 
 **Limitations:** tensor and pipeline parallelism are tested as CPU processes only, not on multiple GPUs; the largest
-model run end to end is Qwen2.5-7B (7.6B).
+dense model run end to end is Qwen3-8B, and the largest MoE model Mixtral-8x7B in 4 bits with some experts on the CPU.
 
 ---
 
@@ -277,9 +293,11 @@ LiteLLM, KServe, Helm and llm-d: [integrations](docs/integrations.md).
 
 ## Documentation
 
-* [Quickstart](https://intutic.github.io/turing/quickstart/) · [Models & hardware](https://intutic.github.io/turing/models_and_hardware/) · [Serving & API](https://intutic.github.io/turing/serving/)
-* [Architecture](https://intutic.github.io/turing/architecture/) · [Benchmarks](https://intutic.github.io/turing/benchmarks/)
-* [Comparison](https://intutic.github.io/turing/comparison/) · [Docker](https://intutic.github.io/turing/docker/) · [Kubernetes & llm-d](https://intutic.github.io/turing/llmd-integration/) · [Integrations](https://intutic.github.io/turing/integrations/) · [Licensing](https://intutic.github.io/turing/licensing/)
+* **Getting started:** [Quickstart](https://intutic.github.io/turing/quickstart/) · [Docker](https://intutic.github.io/turing/docker/)
+* **User guide:** [Serving & API](https://intutic.github.io/turing/serving/) · [Models & hardware](https://intutic.github.io/turing/models_and_hardware/) · [Integrations](https://intutic.github.io/turing/integrations/) · [Kubernetes & llm-d](https://intutic.github.io/turing/llmd-integration/)
+* **Performance:** [Comparison](https://intutic.github.io/turing/comparison/) · [Benchmarks](https://intutic.github.io/turing/benchmarks/)
+* **Internals:** [Architecture](https://intutic.github.io/turing/architecture/) · [Experimental components](https://intutic.github.io/turing/experimental/)
+* **Project:** [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [Licensing](https://intutic.github.io/turing/licensing/)
 
 ---
 

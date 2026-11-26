@@ -155,11 +155,11 @@ ext_modules = [
 
 setup(
     name="turing-engine",
-    version="2.0.0",
+    version="2.1.0",
 
     author="Ishan Gupta",
     author_email="support@intutic.ai",
-    description="LLM inference server with an int8/int4 KV cache that keeps the layers low-bit storage would break in full precision, HuggingFace parity tests on 16 model types, and OpenAI, Anthropic and Ollama APIs on one port",
+    description="LLM inference server for KV-cache and quantization research: int8/fp8/int4 KV caches that keep the layers low-bit storage would break in full precision, 4-bit GPTQ, EAGLE-3 speculative decoding, HuggingFace parity tests on 16 model types, and OpenAI, Anthropic and Ollama APIs on one port",
     packages=find_packages(include=["turing", "turing.*"]),  # not the repo's scripts/ or integrations/
     ext_modules=ext_modules,
     cmdclass={"build_ext": StripBuildExt},
