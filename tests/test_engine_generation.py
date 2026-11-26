@@ -586,6 +586,17 @@ def test_the_newest_request_is_preempted_and_recomputed_when_the_pool_runs_out(m
     assert engine.kv_pool.used_pages == 0 and engine._ahead is None
 
 
+def test_requests_made_within_one_clock_tick_keep_their_order_of_arrival(monkeypatch):
+    """time.time() moves every 15.6 ms on Windows (Python before 3.13): requests made together share a timestamp, and
+    the pool must still take pages from the newest and leave the oldest its own."""
+    import time
+    from turing.serving.engine import AsyncSequenceRequest
+    monkeypatch.setattr(time, "time", lambda: 1.0)
+    reqs = [AsyncSequenceRequest(PROMPT) for _ in range(3)]
+    engine = _engine()
+    assert max(reqs, key=engine._seniority) is reqs[-1] and sorted(reqs, key=engine._seniority) == reqs
+
+
 def test_a_preempted_request_resumes_through_the_prefix_cache_and_a_cancelled_one_frees_its_place():
     prompts = [PROMPT[i:] for i in range(3)]
     refs = [_greedy(_engine(), p, 60) for p in prompts]

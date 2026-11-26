@@ -4,6 +4,7 @@ Supports chunked prefill, speculative interleaving, and Prometheus telemetry.
 """
 
 import asyncio
+import itertools
 import logging
 import uuid
 import statistics
@@ -61,6 +62,10 @@ class RequestState(Enum):
     DECODING = 2
     FINISHED = 3
 
+
+_ARRIVALS = itertools.count()
+
+
 class AsyncSequenceRequest:
     """One generation request. logits_processor(generated, logits) may change the next-token logits [V] in place or
     return new ones (constrained decoding, reasoning budgets); it sees every token generated so far. Generation ends at
@@ -103,6 +108,7 @@ class AsyncSequenceRequest:
         self.generated_tokens: List[int] = []
         self.output_queue: asyncio.Queue[Optional[int]] = asyncio.Queue()
         self.created_at: float = time.time()
+        self.arrival = next(_ARRIVALS)  # order of arrival: time.time() can tie (every 15.6 ms on Windows)
         self.first_token_at: Optional[float] = None
         self.last_token_at: Optional[float] = None
         self.finished_at: Optional[float] = None
@@ -492,7 +498,7 @@ class ContinuousBatchEngine:
     def _seniority(self, req: AsyncSequenceRequest):
         """Sorts requests by who keeps its pages when the pool is short: the more urgent lane, then the older."""
         lane = self.lane_policy.priority(req.lane) if self.lane_policy is not None and req.lane else 0
-        return lane, req.created_at
+        return lane, req.arrival
 
     def _need(self, r: AsyncSequenceRequest) -> int:
         """Tokens r's cache must hold after its next decode step: its next position and room for its drafts."""

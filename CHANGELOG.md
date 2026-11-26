@@ -312,6 +312,9 @@ All notable changes to this project are documented here. The format follows
 - Package description corrected (it still advertised 70B models on one GPU).
 
 ### Fixed
+- When the KV pool ran short, the engine could take the pages of the oldest request instead of the newest on
+  Windows: requests were ranked by `time.time()`, which moves every 15.6 ms there (Python before 3.13), so requests
+  that arrived together tied and the first in the batch lost. They are now ranked by their order of arrival.
 - Every chat request built the tokenizer's whole vocabulary twice to look for `<think>` tags (`get_vocab()`: a new
   dict of 151,936 entries each time for Qwen2.5), on the server's event loop: 205 ms before the request's first
   scheduler step on an L4 VM, during which no other request's tokens were sent either. The tags are looked up
