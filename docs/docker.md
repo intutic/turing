@@ -7,7 +7,7 @@ Turing Engine publishes a CPU image and a CUDA image to the GitHub Container Reg
 | `ghcr.io/intutic/turing:<version>` | linux/amd64, linux/arm64 | CPU PyTorch |
 | `ghcr.io/intutic/turing:<version>-cuda` | linux/amd64 | PyTorch for CUDA 12.8 |
 
-`<version>` is the release tag, for example `v2.1.0`; `latest` and `latest-cuda` follow the newest release. The
+`<version>` is the release tag, for example `v2.1.1`; `latest` and `latest-cuda` follow the newest release. The
 release workflow (`.github/workflows/release.yml`) publishes both images when a version tag is pushed, starting with
 v2.0.0.
 

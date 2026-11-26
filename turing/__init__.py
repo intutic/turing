@@ -2,7 +2,7 @@
 Turing Engine: an LLM inference server with a calibrated int8/int4 KV cache and OpenAI, Anthropic and Ollama APIs.
 """
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 
 
 __author__ = "Ishan Gupta"

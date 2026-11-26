@@ -2,5 +2,5 @@ apiVersion: v2
 name: turing-serving
 description: Turing Engine's `turing serve` (OpenAI, Anthropic and Ollama APIs on one port) as a Deployment and Service
 type: application
-version: 3.0.1
-appVersion: "2.1.0"
+version: 3.0.2
+appVersion: "2.1.1"

@@ -171,14 +171,21 @@ class KVPool:
     def cuda_budget(free: float, total: float, fraction: Optional[float] = None) -> float:
         """Bytes of `free` CUDA memory for the pool: `fraction` of it when given (ModelConfig's default is 0.6, which
         leaves room for another model in the process), else all but a reserve for what steps allocate besides the
-        pool (prefill activations, attention workspaces, CUDA graphs, adapters loaded later): a tenth of the device's
-        memory, at least 2 GiB, and never more than half of what is free. That is `turing serve`'s default, where
-        one model owns the GPU: on an L4 the memory in use outside the weights and the pool peaked at 0.4-1.2 GiB
-        across the benchmark sessions, and 60% of the free memory left 4-7 GiB of its 22.5 unused. On a 15 GB T4 a
-        2,048-token prefill of Qwen2.5-1.5B without FlashInfer ran out of memory with a reserve of 1.5 GiB."""
+        pool (prefill activations, attention workspaces, CUDA graphs, adapters loaded later): cuda_reserve, and never
+        more than half of what is free. That is `turing serve`'s default, where one model owns the GPU: on an L4 the
+        memory in use outside the weights and the pool peaked at 0.4-1.2 GiB across the benchmark sessions, and 60% of
+        the free memory left 4-7 GiB of its 22.5 unused."""
         if fraction is not None:
             return fraction * free
-        return free - min(max(0.1 * total, 2 * 2 ** 30), free / 2)
+        return free - min(KVPool.cuda_reserve(total), free / 2)
+
+    @staticmethod
+    def cuda_reserve(total: float) -> float:
+        """What cuda_budget keeps out of the pool: a tenth of the device's memory, at least 2 GiB, or 3 GiB on a GPU
+        under 20 GB. On a 15 GB T4 a 2,048-token prefill of Qwen2.5-1.5B without FlashInfer ran out of memory with
+        1.5 GiB, and with PyTorch 2.11 (Colab's runtime) the int4 warm-up's Triton launches did with 2 GiB: memory
+        outside PyTorch's allocator was 1.4 GiB there."""
+        return max(0.1 * total, (3 if total < 20 * 2 ** 30 else 2) * 2 ** 30)
 
     @classmethod
     def for_model(cls, config, dtype, device) -> "KVPool":
@@ -200,7 +207,7 @@ class KVPool:
             free, total = torch.cuda.mem_get_info(device)
             free += torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
             budget = cls.cuda_budget(free, total, config.kv_pool_fraction)
-            if config.kv_pool_fraction is None and free - budget < 0.999 * max(0.1 * total, 2 * 2 ** 30):
+            if config.kv_pool_fraction is None and free - budget < 0.999 * cls.cuda_reserve(total):
                 # the weights left less than twice the usual reserve: half goes to the pool, and a long prompt's
                 # working memory may not fit in the other half (Mixtral-8x7B with 6.5 of 8 experts a layer on a
                 # 24 GB card served short prompts and ran out of memory on a 512-token one)

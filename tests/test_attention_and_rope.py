@@ -29,3 +29,20 @@ def test_mps_attention_is_immune_to_sdpa_scale_caching():
     F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=1.0)  # another caller caches this shape at scale 1
     ref = F.scaled_dot_product_attention(q.cpu(), k.cpu(), v.cpu(), is_causal=True)
     torch.testing.assert_close(attn._attend(q, k, v, None, causal=True).cpu(), ref, atol=1e-4, rtol=0)
+
+
+def test_gqa_attention_on_a_gpu_without_flash_repeats_the_kv_heads(monkeypatch):
+    """A T4 (compute capability 7.5) has no flash kernel, and PyTorch 2.11's memory-efficient kernel has no GQA: SDPA
+    with enable_gqa there falls back to the math path and its [H, L, T] scores ran the warm-up out of memory. Turing
+    repeats the KV heads instead, which must give the same attention as enable_gqa."""
+    import torch.nn.functional as F
+    from turing.models import causal_lm
+    monkeypatch.setattr(causal_lm, "_NO_FLASH", {})
+    capability = {"t4": (7, 5), "l4": (8, 9)}
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: capability[device])
+    assert causal_lm._no_flash("t4") and not causal_lm._no_flash("l4")
+    q = torch.randn(1, 12, 20, 16)
+    k, v = torch.randn(1, 2, 20, 16), torch.randn(1, 2, 20, 16)  # 6 query heads share each KV head, as in Qwen2.5-1.5B
+    ref = F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=True)
+    out = F.scaled_dot_product_attention(q, k.repeat_interleave(6, dim=1), v.repeat_interleave(6, dim=1), is_causal=True)
+    torch.testing.assert_close(out, ref, atol=1e-6, rtol=0)

@@ -31,7 +31,7 @@ def test_kserve_manifest_validity():
     c = data["spec"]["containers"][0]
     assert c["args"][:2] == ["--model", "/mnt/models"]  # where KServe's storage initializer puts storageUri
     assert c["readinessProbe"]["httpGet"]["path"] == "/health"
-    assert c["image"] == "ghcr.io/intutic/turing:v2.1.0-cuda"  # the release workflow's CUDA image
+    assert c["image"] == "ghcr.io/intutic/turing:v2.1.1-cuda"  # the release workflow's CUDA image
 
 def test_cuda_image_has_a_c_compiler_and_the_driver_path():
     # the v2.0.0 CUDA image had neither and could not start on a GPU: Triton needs a C compiler at its first

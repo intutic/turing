@@ -581,6 +581,16 @@ def _branch_stream(device: torch.device) -> "torch.cuda.Stream":
     return _BRANCH_STREAMS[device]
 
 
+_NO_FLASH: dict = {}  # device -> bool
+
+
+def _no_flash(device: torch.device) -> bool:
+    """Whether the GPU has no flash-attention kernel (compute capability below 8.0, a T4 or V100)."""
+    if device not in _NO_FLASH:
+        _NO_FLASH[device] = torch.cuda.get_device_capability(device)[0] < 8
+    return _NO_FLASH[device]
+
+
 def append_chunk(pool: KVPool, layer: int, cache: KVCache, k: torch.Tensor, v: torch.Tensor) -> None:
     """KVPool.append; a chunk for a low-bit layer on CUDA is quantized by the append kernel."""
     if k.shape[2] > 1 and pool_append_supported(pool, layer):
@@ -830,10 +840,11 @@ class SubspaceAttention(nn.Module):
         (HF's OPT passes 1.0 after pre-scaling q) silently gets wrong attention."""
         if self.softcap is None and q.device.type != "mps":
             gqa = self.num_kv_groups > 1
-            if gqa and mask is not None and q.is_cuda:
-                # SDPA has no memory-efficient kernel for enable_gqa with a mask: it would fall back to the math path
-                # and materialise [H, L, T] scores (GBs for a 2K chunk at 32K context). Repeating the KV heads costs
-                # [H, T, D] instead.
+            if gqa and q.is_cuda and (mask is not None or _no_flash(q.device)):
+                # SDPA has no memory-efficient kernel for enable_gqa with a mask, nor (PyTorch 2.11) without one: with
+                # no flash kernel either (compute capability < 8.0, a T4) it falls back to the math path and
+                # materialises [H, L, T] scores (GBs for a 2K chunk at 32K context; out of memory in the warm-up on a
+                # T4). Repeating the KV heads costs [H, T, D] instead.
                 k, v = k.repeat_interleave(self.num_kv_groups, dim=1), v.repeat_interleave(self.num_kv_groups, dim=1)
                 gqa = False
             return F.scaled_dot_product_attention(q, k, v, attn_mask=mask, is_causal=causal, scale=self.scale,

@@ -4,7 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/). Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 
-## Unreleased
+## 2.1.1 - 2026-11-26
+
+### Added
+- Python 3.13: wheels (`cp313`) for Linux x86_64 and aarch64 and macOS arm64, and the test suite in CI on Ubuntu,
+  macOS and Windows. Colab's current runtime (2026.10) is Python 3.13 with PyTorch 2.11; 2.1.0 installed there only
+  by compiling its extension from source.
+
+### Fixed
+- `turing serve` ran out of GPU memory in its warm-up on a T4 with PyTorch 2.11 (Colab's current runtime). A GPU
+  below compute capability 8.0 has no flash-attention kernel, and PyTorch 2.11's memory-efficient kernel has no
+  grouped-query attention, so `scaled_dot_product_attention(..., enable_gqa=True)` fell back to the math path and
+  materialised the full [heads, tokens, tokens] scores of a 2,048-token prefill. On such GPUs the KV heads are now
+  repeated first (a few MB a layer), as was already done for masked attention. PyTorch 2.15 has a memory-efficient
+  GQA kernel, which is why the notebook's earlier T4 run passed.
+- With that fixed, an int4 KV cache on the same T4 and PyTorch 2.11 still failed its warm-up: a Triton launch of the
+  int4 prefill kernel found no memory, with 1.4 GiB in use outside PyTorch's allocator. The memory `turing serve`
+  keeps out of the KV pool is now at least 3 GiB on a GPU under 20 GB (it was 2 GiB), a tenth of the device and at
+  least 2 GiB from 20 GB up as before, so pools on an L4 and larger GPUs do not change. On a T4 the pool is about
+  1 GiB smaller.
 
 ### Changed
 - The Colab notebook (`demo/turing_quickstart_colab.ipynb`) is rewritten. The old one, from 0.1.0, never ran Turing: its
@@ -15,7 +33,11 @@ All notable changes to this project are documented here. The format follows
   clean Python 3.12 container on an L4 (turing 2.1.0, torch 2.15.0): 416K / 779K / 1.08M tokens for native / int8 /
   int4 KV, layers 0 and 0, 1, 15 kept, the same answers with both caches, and the same next token as Hugging Face
   at 21 of 21 positions. On a Tesla T4, as on Colab's free tier, it chose fp16 by itself and ran clean: 250K / 469K /
-  647K tokens, the same layers kept, and the same next token as Hugging Face at 21 of 21 positions.
+  647K tokens, the same layers kept, and the same next token as Hugging Face at 21 of 21 positions. In Colab's own
+  setup (Python 3.13, PyTorch 2.11 for CUDA 13, a T4) it ran clean once the two out-of-memory fixes under Fixed were
+  in; with 2.1.0 `turing serve` did not start there. Its questions are now ones both of its models answer, the first
+  answers are labelled with the cache actually used (int8 on a GPU, the model's dtype on a CPU), and the Anthropic
+  call is greedy like the others.
 - Integration tests and docs checked against live servers: a two-agent LangGraph graph with a tool call
   (`packages/langchain-turing`), LlamaIndex RAG with streaming (`packages/llama-index-llms-turing`), LiteLLM load
   balancing, failover and per-server prices, and DSPy (`model_type="chat"`) in `docs/integrations.md`.

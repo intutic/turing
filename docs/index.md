@@ -10,8 +10,8 @@ GPUs, Apple Silicon and CPUs. With Qwen2.5-1.5B on an NVIDIA L4, its int4 KV cac
 faster than vLLM at batch sizes 1 to 64.
 
 [![PyPI](https://img.shields.io/pypi/v/turing-engine.svg)](https://pypi.org/project/turing-engine/)
-[![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
-[![Release](https://img.shields.io/badge/Release-v2.1.0-blue.svg)](https://github.com/intutic/turing/blob/master/CHANGELOG.md)
+[![Python 3.10–3.13](https://img.shields.io/badge/Python-3.10–3.13-blue.svg)](https://pypi.org/project/turing-engine/)
+[![Release](https://img.shields.io/badge/Release-v2.1.1-blue.svg)](https://github.com/intutic/turing/blob/master/CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-green.svg)](licensing.md)
 [![Tests](https://img.shields.io/badge/Tests-1507-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
@@ -30,19 +30,19 @@ nats on Qwen2.5-1.5B) and to the model's dtype elsewhere; every other lossy opti
 
 === "pip"
     ```bash
-    pip install turing-engine                       # Python 3.10–3.12
+    pip install turing-engine                       # Python 3.10–3.13
     turing chat --model smollm2                     # terminal chat
     turing serve --model Qwen/Qwen2.5-0.5B-Instruct --port 8000
     ```
 
 === "Docker (CPU)"
     ```bash
-    docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.0 --model smollm2
+    docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.1 --model smollm2
     ```
 
 === "Docker (CUDA)"
     ```bash
-    docker run --rm --gpus all -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.0-cuda \
+    docker run --rm --gpus all -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.1-cuda \
       --model Qwen/Qwen2.5-0.5B-Instruct --device cuda
     ```
 

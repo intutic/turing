@@ -17,8 +17,8 @@ every KV-cache or quantization change costs on real models.
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
 [![PyPI: turing-engine](https://img.shields.io/pypi/v/turing-engine.svg)](https://pypi.org/project/turing-engine/)
-[![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)
-[![Release: v2.1.0](https://img.shields.io/badge/Release-v2.1.0-blue.svg)](CHANGELOG.md)
+[![Python 3.10–3.13](https://img.shields.io/badge/Python-3.10–3.13-blue.svg)](https://pypi.org/project/turing-engine/)
+[![Release: v2.1.1](https://img.shields.io/badge/Release-v2.1.1-blue.svg)](CHANGELOG.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-green.svg)](LICENSE)
 [![Tests: 1507](https://img.shields.io/badge/Tests-1507-brightgreen.svg)](https://github.com/intutic/turing/actions)
 
@@ -53,7 +53,7 @@ Everything else, with the measurements behind it, is in the [changelog](CHANGELO
 
 ### 1. Install
 ```bash
-pip install turing-engine                  # Python 3.10–3.12
+pip install turing-engine                  # Python 3.10–3.13
 pip install "turing-engine[structured]"    # optional: JSON-schema and tool_choice enforcement (llguidance)
 ```
 Wheels with the C++ extension are built for Linux x86_64 and aarch64 and macOS arm64; elsewhere (Windows, Intel
@@ -61,8 +61,8 @@ Macs) pip builds it from the source package, which needs a C++20 compiler. From 
 
 Or run the server in Docker ([docs/docker.md](docs/docker.md)):
 ```bash
-docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.0 --model smollm2
-docker run --rm --gpus all -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.0-cuda --model Qwen/Qwen2.5-7B-Instruct --device cuda
+docker run --rm -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.1 --model smollm2
+docker run --rm --gpus all -p 127.0.0.1:8000:8000 ghcr.io/intutic/turing:v2.1.1-cuda --model Qwen/Qwen2.5-7B-Instruct --device cuda
 ```
 
 ### 2. Chat in the terminal

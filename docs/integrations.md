@@ -160,14 +160,14 @@ documentation. The protocols are tested; the individual client applications are 
   `InferencePool`.
 - **[Helm chart](https://github.com/intutic/turing/tree/master/deploy/helm/turing-serving)**
   (`deploy/helm/turing-serving`): a Deployment with GPU limits, Prometheus scrape annotations (`/metrics` is
-  Prometheus text) and optional llm-d KV events. Defaults: model `Qwen/Qwen2.5-7B-Instruct`, image tag `v2.1.0-cuda`.
-- **[Docker images](docker.md):** `ghcr.io/intutic/turing:v2.1.0` (CPU) and `ghcr.io/intutic/turing:v2.1.0-cuda`.
+  Prometheus text) and optional llm-d KV events. Defaults: model `Qwen/Qwen2.5-7B-Instruct`, image tag `v2.1.1-cuda`.
+- **[Docker images](docker.md):** `ghcr.io/intutic/turing:v2.1.1` (CPU) and `ghcr.io/intutic/turing:v2.1.1-cuda`.
 
 ### KServe
 
 [`integrations/kserve/serving_runtime.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/serving_runtime.yaml)
 defines a `ServingRuntime` that runs `turing serve --model /mnt/models` on port 8080 with the
-`ghcr.io/intutic/turing:v2.1.0-cuda` image. KServe downloads the InferenceService's `storageUri` (`hf://`, `s3://`,
+`ghcr.io/intutic/turing:v2.1.1-cuda` image. KServe downloads the InferenceService's `storageUri` (`hf://`, `s3://`,
 `gs://`, `pvc://`) to `/mnt/models`, so that is the model it serves
 ([`inferenceservice.yaml`](https://github.com/intutic/turing/blob/master/integrations/kserve/inferenceservice.yaml)):
 

@@ -9,7 +9,7 @@ Thank you for your interest in contributing to **Turing Engine**! We welcome con
 ### 1. Prerequisites
 CI runs the test suite on these; other platforms are untested.
 - **Operating System**: Ubuntu, macOS on Apple Silicon, or Windows (native MSVC)
-- **Python**: 3.10, 3.11, or 3.12
+- **Python**: 3.10, 3.11, 3.12 or 3.13
 - **C++ Compiler**: `g++`, `clang++`, or Microsoft Visual C++ (Build Tools 2019/2022) with **C++20** support
 - **CPU Architecture**: x86_64 with **AVX2**, or arm64. On Apple Silicon PyTorch runs on the GPU through MPS; the C++
   extension uses portable code and NEON there (no Accelerate).
