@@ -194,6 +194,18 @@ after `kubectl apply`, including the image's pull onto a new node (162 s); `/hea
 InferenceService's name), a plain and a streamed chat completion and `/metrics` answered through the predictor
 Service, and after `kubectl delete pod` it was Ready again in 93 s.
 
+The same day in **Knative mode**, on a cluster set up with KServe v0.21.0's own Knative-mode install (Istio,
+Knative Serving 1.21.1) and the InferenceService without a deployment-mode annotation: Ready 372 s after
+`kubectl apply`, every endpoint answered through the Istio ingress gateway, and the revision was Ready again 123 s
+after `kubectl delete pod`. KServe's e2e test for the runtime (`test/e2e/predictor/test_turing.py` in #6688: chat
+and streamed chat on Qwen2.5-0.5B-Instruct on the CPU) passed against that cluster.
+
+!!! note "Give the storage initializer 4Gi"
+    KServe's storage initializer has a 1Gi memory limit by default, and downloading Qwen2.5-1.5B-Instruct's 3 GB
+    checkpoint through `hf://` was killed for running out of memory at that limit. 4Gi worked: install the
+    `kserve-resources` chart with `--set kserve.storage.resources.limits.memory=4Gi`, or set `memoryLimit` under
+    `storageInitializer` in the `inferenceservice-config` ConfigMap and restart `kserve-controller-manager`.
+
 **Run on GKE on 2026-11-23** (`benchmarks/results/results_kserve_gke.json`): GKE 1.36.4 with one Spot L4 node
 (`g2-standard-8`), KServe v0.21.0 in Standard deployment mode, cert-manager v1.17.0.
 

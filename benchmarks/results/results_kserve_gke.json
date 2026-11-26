@@ -110,5 +110,23 @@
     "seconds_pod_delete_to_ready": 93,
     "chat_after_restart": 200,
     "server_user": "uid 1000 (turing)"
+  },
+  "run_2026-11-26_knative": {
+    "note": "Knative deployment mode: GKE 1.36.4 (one e2-standard-8, one Spot g2-standard-8 with an NVIDIA L4), set up with KServe v0.21.0's own hack/setup/quick-install/kserve-knative-mode-full-install-helm.sh (cert-manager v1.17.0, Istio 1.27.1 with the ingress gateway as ClusterIP, Knative Serving 1.21.1, defaultDeploymentMode Knative). The published v2.1.0-cuda image with kserve/kserve#6688's kserve-turingserver runtime; the InferenceService without a deployment-mode annotation, requests through the Istio ingress gateway with the InferenceService's host.",
+    "attempts_1_2": "storage initializer at KServe's default memoryLimit 1Gi: hf-xet OOM-killed downloading the 3 GB checkpoint, revision failed with ProgressDeadlineExceeded. Editing the ConfigMap alone did not reach the pod (the controller caches it); setting kserve.storage.resources.limits.memory=4Gi through Helm and restarting kserve-controller-manager did.",
+    "seconds_apply_to_ready": 372,
+    "endpoints_through_ingress_gateway": {
+      "/health": 200,
+      "/v1/models": [
+        "qwen25-1-5b-instruct"
+      ],
+      "/v1/chat/completions": 200,
+      "/v1/chat/completions stream": "chunks",
+      "/metrics": "Prometheus text"
+    },
+    "seconds_pod_delete_to_ready": 123,
+    "chat_after_restart": 200,
+    "server_user": "uid 1000 (turing)",
+    "e2e": "test/e2e/predictor/test_turing.py (kserve/kserve#6688, marker turing_runtime): chat and streamed chat on Qwen2.5-0.5B-Instruct on the CPU node, KServe's pytest harness against this cluster: 2 passed in 184 s."
   }
 }

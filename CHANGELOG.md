@@ -14,12 +14,15 @@ All notable changes to this project are documented here. The format follows
   asks the same questions with the int4 cache, and compares Turing's logits with Hugging Face's. Run end to end in a
   clean Python 3.12 container on an L4 (turing 2.1.0, torch 2.15.0): 416K / 779K / 1.08M tokens for native / int8 /
   int4 KV, layers 0 and 0, 1, 15 kept, the same answers with both caches, and the same next token as Hugging Face
-  at 21 of 21 positions. The T4's fp16 path was not run.
+  at 21 of 21 positions. On a Tesla T4, as on Colab's free tier, it chose fp16 by itself and ran clean: 250K / 469K /
+  647K tokens, the same layers kept, and the same next token as Hugging Face at 21 of 21 positions.
 - Integration tests and docs checked against live servers: a two-agent LangGraph graph with a tool call
   (`packages/langchain-turing`), LlamaIndex RAG with streaming (`packages/llama-index-llms-turing`), LiteLLM load
   balancing, failover and per-server prices, and DSPy (`model_type="chat"`) in `docs/integrations.md`.
 - KServe: the published `v2.1.0-cuda` image ran on GKE as an opt-in `kserve-turingserver` ClusterServingRuntime,
-  proposed upstream in kserve/kserve#6688 (`benchmarks/results/results_kserve_gke.json`, `docs/integrations.md`).
+  proposed upstream in kserve/kserve#6688, in both Standard and Knative deployment modes, and KServe's e2e test for
+  it passed (`benchmarks/results/results_kserve_gke.json`, `docs/integrations.md`). The storage initializer needs 4Gi
+  to download a 3 GB checkpoint; at its 1Gi default it runs out of memory.
 
 ## 2.1.0 - 2026-11-26
 
