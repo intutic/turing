@@ -46,18 +46,61 @@ LiteLLM reaches Turing Engine through its OpenAI-compatible provider: use the `o
 `api_base`. A native `turing` provider is proposed upstream
 ([BerriAI/litellm#38181](https://github.com/BerriAI/litellm/pull/38181)) and is not merged yet.
 
+Two Turing servers behind one model name, with your own prices (`litellm --config litellm_config.yaml`):
+
 ```yaml
 model_list:
-  - model_name: turing/deepseek-r1
+  - model_name: qwen
     litellm_params:
-      model: openai/deepseek-r1-7b
-      api_base: http://localhost:8000/v1
-      api_key: turing-local
+      model: openai/Qwen/Qwen2.5-1.5B-Instruct   # the name after openai/ is free-form: a server serves one model
+      api_base: http://gpu-a:8000/v1
+      api_key: turing-local                     # any value unless the server runs with --api-key
+      input_cost_per_token: 0.000001            # your own prices; LiteLLM's cost map has no Turing rows
+      output_cost_per_token: 0.000002
       extra_headers:
-        X-Turing-Draft-Tokens: "4"   # optional: speculative draft tokens per step
+        X-Turing-Draft-Tokens: "4"              # optional: speculative draft tokens per step
+  - model_name: qwen
+    litellm_params:
+      model: openai/Qwen/Qwen2.5-1.5B-Instruct
+      api_base: http://gpu-b:8000/v1
+      api_key: turing-local
+      input_cost_per_token: 0.000001
+      output_cost_per_token: 0.000002
+
+router_settings:
+  num_retries: 2
+  allowed_fails: 1      # a server that fails once leaves the rotation for cooldown_time seconds
+  cooldown_time: 30
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY   # the proxy does not start without one
 ```
 
+Checked on 2026-11-26 against two `turing serve` processes, with LiteLLM's `Router` and its proxy: requests were
+spread over both servers (11 and 9 of 20); with one server stopped, all 40 requests were answered by the other.
+Each response's cost (`response._hidden_params["response_cost"]`, or the proxy's `x-litellm-response-cost` header)
+was its prompt and completion tokens times these prices; `litellm.completion_cost(completion_response=...)`
+returned 0.0 with them. Without prices the cost is 0.0. With the native provider the model is
+`turing/<name>`, with `TURING_API_BASE` and `TURING_API_KEY` (any value) from the environment.
+
 The `X-Turing-Sparsity` and `X-Turing-SVD-*` headers are not supported; requests that send them get HTTP 400.
+
+## DSPy
+
+DSPy calls models through LiteLLM. Pass `model_type="chat"`: DSPy 3.5 otherwise calls `/v1/responses`, which
+Turing does not serve (HTTP 404).
+
+```python
+import dspy
+
+lm = dspy.LM("openai/Qwen/Qwen2.5-0.5B-Instruct", api_base="http://localhost:8000/v1", api_key="turing-local",
+             model_type="chat", temperature=0.0)
+dspy.configure(lm=lm)
+print(dspy.ChainOfThought("question -> answer")(question="What is 12 + 7?").answer)
+```
+
+`dspy.BootstrapFewShot` compiles against it the same way: with Qwen2.5-0.5B-Instruct and 6 training questions,
+exact match on 6 others went from 1 to 4 (DSPy 3.5.0, 2026-11-26).
 
 ## LlamaIndex
 
