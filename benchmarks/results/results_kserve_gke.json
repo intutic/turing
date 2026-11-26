@@ -113,7 +113,7 @@
   },
   "run_2026-11-26_knative": {
     "note": "Knative deployment mode: GKE 1.36.4 (one e2-standard-8, one Spot g2-standard-8 with an NVIDIA L4), set up with KServe v0.21.0's own hack/setup/quick-install/kserve-knative-mode-full-install-helm.sh (cert-manager v1.17.0, Istio 1.27.1 with the ingress gateway as ClusterIP, Knative Serving 1.21.1, defaultDeploymentMode Knative). The published v2.1.0-cuda image with kserve/kserve#6688's kserve-turingserver runtime; the InferenceService without a deployment-mode annotation, requests through the Istio ingress gateway with the InferenceService's host.",
-    "attempts_1_2": "storage initializer at KServe's default memoryLimit 1Gi: hf-xet OOM-killed downloading the 3 GB checkpoint, revision failed with ProgressDeadlineExceeded. Editing the ConfigMap alone did not reach the pod (the controller caches it); setting kserve.storage.resources.limits.memory=4Gi through Helm and restarting kserve-controller-manager did.",
+    "attempts_1_2": "storage initializer at KServe's default 1Gi memory limit: hf-xet OOM-killed downloading the 3 GB checkpoint, revision failed with ProgressDeadlineExceeded. Editing storageInitializer.memoryLimit in the inferenceservice-config ConfigMap did not reach the pod: the default ClusterStorageContainer, which serves hf://, sets its own 1Gi limit. Setting kserve.storage.resources.limits.memory=4Gi through Helm, which patches that ClusterStorageContainer, did.",
     "seconds_apply_to_ready": 372,
     "endpoints_through_ingress_gateway": {
       "/health": 200,

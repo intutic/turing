@@ -203,8 +203,9 @@ and streamed chat on Qwen2.5-0.5B-Instruct on the CPU) passed against that clust
 !!! note "Give the storage initializer 4Gi"
     KServe's storage initializer has a 1Gi memory limit by default, and downloading Qwen2.5-1.5B-Instruct's 3 GB
     checkpoint through `hf://` was killed for running out of memory at that limit. 4Gi worked: install the
-    `kserve-resources` chart with `--set kserve.storage.resources.limits.memory=4Gi`, or set `memoryLimit` under
-    `storageInitializer` in the `inferenceservice-config` ConfigMap and restart `kserve-controller-manager`.
+    `kserve-resources` chart with `--set kserve.storage.resources.limits.memory=4Gi`. That value sets the limit of
+    the `default` ClusterStorageContainer, which is the one `hf://` downloads use; changing `memoryLimit` in the
+    `inferenceservice-config` ConfigMap alone does not raise it.
 
 **Run on GKE on 2026-11-23** (`benchmarks/results/results_kserve_gke.json`): GKE 1.36.4 with one Spot L4 node
 (`g2-standard-8`), KServe v0.21.0 in Standard deployment mode, cert-manager v1.17.0.
