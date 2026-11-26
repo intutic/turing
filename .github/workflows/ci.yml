@@ -58,6 +58,11 @@ jobs:
           cmake --build build-cmake
           ./build-cmake/bin/turing-cli info
 
+      # Two Windows runs crashed with an illegal instruction in PyTorch's CPU matmul (2026-11-26) and their reruns
+      # passed: the runner's CPU model and PyTorch's dispatch level tie a crash to the hardware it ran on.
+      - name: Runner CPU
+        run: python -c "import platform, torch; print(platform.processor() or platform.machine(), '|', torch.backends.cpu.get_cpu_capability())"
+
       - name: Run Test Suite (Strict Warning Escalation)
         run: |
           pytest -v
