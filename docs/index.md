@@ -1,10 +1,13 @@
 # Turing Engine
 
-**An LLM inference server whose int8/fp8/int4 KV cache finds the layers low-bit storage would break and keeps them in
-full precision**, with HuggingFace parity tests on 16 model types, 4-bit GPTQ weights, EAGLE-3 speculative decoding,
-and OpenAI, Anthropic and Ollama APIs on one port. It runs on NVIDIA GPUs, Apple Silicon and CPUs. With Qwen2.5-1.5B
-on an NVIDIA L4, its int4 KV cache holds 2.4× as many tokens as a 16-bit cache in the same GPU memory, at +0.02
-nats, and 4-bit decoding (the LM head in 4 bits too) is 1.09–1.34× faster than vLLM at batch sizes 1 to 64.
+**Storing an LLM's KV cache in 8 or 4 bits fits more tokens on a GPU, but on some models it silently breaks the
+output**: vLLM's fp8 cache takes Qwen2.5-1.5B-Instruct from 57% to 2% on GSM8K. Turing Engine is an LLM inference
+server that finds the layers a low-bit cache would break, keeps them in full precision, and lets you measure what
+every KV-cache or quantization change costs on real models. It has HuggingFace parity tests on 16 model types, 4-bit
+GPTQ weights, EAGLE-3 speculative decoding, and OpenAI, Anthropic and Ollama APIs on one port, and runs on NVIDIA
+GPUs, Apple Silicon and CPUs. With Qwen2.5-1.5B on an NVIDIA L4, its int4 KV cache holds 2.4× as many tokens as a
+16-bit cache in the same GPU memory, at +0.02 nats, and 4-bit decoding (the LM head in 4 bits too) is 1.09–1.34×
+faster than vLLM at batch sizes 1 to 64.
 
 [![PyPI](https://img.shields.io/pypi/v/turing-engine.svg)](https://pypi.org/project/turing-engine/)
 [![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10–3.12-blue.svg)](https://pypi.org/project/turing-engine/)

@@ -1,10 +1,19 @@
 # ⚡ Turing Engine
 
-**An LLM inference server whose int8/fp8/int4 KV cache finds the layers low-bit storage would break and keeps them in
-full precision**, with HuggingFace parity tests on 16 model types, 4-bit GPTQ weights, EAGLE-3 speculative decoding,
-and OpenAI, Anthropic and Ollama APIs on one port. It runs on NVIDIA GPUs, Apple Silicon and CPUs. With Qwen2.5-1.5B
-on an NVIDIA L4, its int4 KV cache holds 2.4× as many tokens as a 16-bit cache in the same GPU memory, at +0.02
-nats, and 4-bit decoding (the LM head in 4 bits too) is 1.09–1.34× faster than vLLM at batch sizes 1 to 64.
+**Storing an LLM's KV cache in 8 or 4 bits fits more tokens on a GPU, but on some models it silently breaks the
+output**: vLLM's fp8 cache takes Qwen2.5-1.5B-Instruct from 57% to 2% on GSM8K. Turing Engine is an LLM inference
+server that finds the layers a low-bit cache would break, keeps them in full precision, and lets you measure what
+every KV-cache or quantization change costs on real models.
+
+* **Low-bit KV caches that stay correct.** int8, fp8 and int4, with the damaged layers found at startup and nothing
+  to tune. The int4 cache holds 2.4× the tokens of a 16-bit one at +0.02 nats.
+* **Fast on one GPU.** On an NVIDIA L4, 4-bit decoding is 1.09–1.34× vLLM's speed; in fp16 and with EAGLE-3 draft
+  heads it is level with vLLM or a little ahead ([how it compares](#how-it-compares)).
+* **Checked against HuggingFace.** Logits match on 16 model types, and 13 GGUF files agree with llama.cpp.
+* **OpenAI, Anthropic and Ollama APIs on one port**, plus LangChain, LlamaIndex and LiteLLM clients.
+* **Runs where you work.** NVIDIA GPUs, Apple Silicon, x86 and ARM CPUs; pip, Docker, Helm or KServe.
+* **Small enough to change.** Paged KV, Triton kernels, GPTQ and speculative decoding in a few Python modules, with
+  the eval scripts to measure a change.
 
 [![Docs: Live](https://img.shields.io/badge/Documentation-intutic.github.io%2Fturing-blue.svg)](https://intutic.github.io/turing/)
 [![PyPI: turing-engine](https://img.shields.io/pypi/v/turing-engine.svg)](https://pypi.org/project/turing-engine/)
@@ -15,9 +24,9 @@ nats, and 4-bit decoding (the LM head in 4 bits too) is 1.09–1.34× faster tha
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/intutic/turing/blob/master/demo/turing_quickstart_colab.ipynb)
 
-It loads HuggingFace checkpoints, llama.cpp GGUF files and its own 4-bit `.tgate4` directories, and matches
-HuggingFace's logits when the KV cache is kept in the model's dtype. It is built for trying KV-cache and quantization
-changes against real models, not for production serving ([how it compares](#how-it-compares)).
+It loads HuggingFace checkpoints, llama.cpp GGUF files and its own 4-bit `.tgate4` directories. It is built for
+trying KV-cache and quantization changes against real models, not for production serving
+([how it compares](#how-it-compares)).
 
 [What's new](#whats-new-in-210) · [Get started](#get-started) · [What it is good for](#what-it-is-good-for) ·
 [How it compares](#how-it-compares) · [More ways to run it](#more-ways-to-run-it) · [Models](#models) ·
