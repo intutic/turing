@@ -4,16 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/). Releases before 1.6.0 are listed only as git tags (v0.1.0 to v1.5.0).
 
+## Unreleased
+
+### Changed
+- The Colab notebook, run on Colab itself on 2026-11-26 (Python 3.13.16, PyTorch 2.14.1, a T4) with 2.1.1 from PyPI:
+  `turing serve` was up in 272 s, the int8 answers were right, and one stream decoded at 58.6 tok/s. With int4, as on
+  a T4 VM with PyTorch 2.15, the one-liner came back as `reversed(s) = s[::-1]`, which does not run; with PyTorch 2.11
+  and on an L4 int4 gave the right line. The notebook now says before that cell that int4 is lossy, says the server
+  takes about 5 minutes to start on a T4, and points at the `latest` images instead of 2.1.0's.
+
 ## 2.1.1 - 2026-11-26
 
 ### Added
 - Python 3.13: wheels (`cp313`) for Linux x86_64 and aarch64 and macOS arm64, and the test suite in CI on Ubuntu,
-  macOS and Windows. Colab's current runtime (2026.10) is Python 3.13 with PyTorch 2.11; 2.1.0 installed there only
-  by compiling its extension from source.
+  macOS and Windows. Colab runs Python 3.13 (its 2026.10 runtime version with PyTorch 2.11; a T4 runtime on
+  2026-11-26 had PyTorch 2.14.1); 2.1.0 installed there only by compiling its extension from source.
 
 ### Fixed
-- `turing serve` ran out of GPU memory in its warm-up on a T4 with PyTorch 2.11 (Colab's current runtime). A GPU
-  below compute capability 8.0 has no flash-attention kernel, and PyTorch 2.11's memory-efficient kernel has no
+- `turing serve` ran out of GPU memory in its warm-up on a T4 with PyTorch 2.11 (Colab's 2026.10 runtime version).
+  A GPU below compute capability 8.0 has no flash-attention kernel, and PyTorch 2.11's memory-efficient kernel has no
   grouped-query attention, so `scaled_dot_product_attention(..., enable_gqa=True)` fell back to the math path and
   materialised the full [heads, tokens, tokens] scores of a 2,048-token prefill. On such GPUs the KV heads are now
   repeated first (a few MB a layer), as was already done for masked attention. PyTorch 2.15 has a memory-efficient
@@ -33,8 +42,9 @@ All notable changes to this project are documented here. The format follows
   clean Python 3.12 container on an L4 (turing 2.1.0, torch 2.15.0): 416K / 779K / 1.08M tokens for native / int8 /
   int4 KV, layers 0 and 0, 1, 15 kept, the same answers with both caches, and the same next token as Hugging Face
   at 21 of 21 positions. On a Tesla T4, as on Colab's free tier, it chose fp16 by itself and ran clean: 250K / 469K /
-  647K tokens, the same layers kept, and the same next token as Hugging Face at 21 of 21 positions. In Colab's own
-  setup (Python 3.13, PyTorch 2.11 for CUDA 13, a T4) it ran clean once the two out-of-memory fixes under Fixed were
+  647K tokens, the same layers kept, and the same next token as Hugging Face at 21 of 21 positions; there int4 turned
+  the one-liner into `reversed(s) = s[::-1]`, which does not run. In the setup of Colab's 2026.10 runtime version
+  (Python 3.13, PyTorch 2.11 for CUDA 13, a T4) it ran clean once the two out-of-memory fixes under Fixed were
   in; with 2.1.0 `turing serve` did not start there. Its questions are now ones both of its models answer, the first
   answers are labelled with the cache actually used (int8 on a GPU, the model's dtype on a CPU), and the Anthropic
   call is greedy like the others.
