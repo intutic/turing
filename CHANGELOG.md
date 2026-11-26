@@ -10,8 +10,19 @@ All notable changes to this project are documented here. The format follows
 - The Colab notebook, run on Colab itself on 2026-11-26 (Python 3.13.16, PyTorch 2.14.1, a T4) with 2.1.1 from PyPI:
   `turing serve` was up in 272 s, the int8 answers were right, and one stream decoded at 58.6 tok/s. With int4, as on
   a T4 VM with PyTorch 2.15, the one-liner came back as `reversed(s) = s[::-1]`, which does not run; with PyTorch 2.11
-  and on an L4 int4 gave the right line. The notebook now says before that cell that int4 is lossy, says the server
-  takes about 5 minutes to start on a T4, and points at the `latest` images instead of 2.1.0's.
+  and on an L4 int4 gave the right line. The notebook now says before that cell that int4 is lossy and why that
+  answer goes wrong, says the server takes about 5 minutes to start on a T4, and points at the `latest` images
+  instead of 2.1.0's.
+- Why it goes wrong, measured on a T4 (`scripts/probe_int4_answer.py`, new;
+  `benchmarks/results/results_quality_kv_int4_t4_cuda.json`). It is not the PyTorch version: int4 costs
+  +0.021 ± 0.004 nats a token on WikiText-2 with PyTorch 2.11 and +0.017 ± 0.006 with 2.14.1 (int8 +0.001 with
+  both), and it keeps the same layers (0, 1, 15) with both. int4 makes the answer's first word a near tie: an exact
+  cache puts "You" first and "Certainly" outside its top three, while with int4 the two are within 0.25 logits, either
+  way round depending on the PyTorch version and the kernel path, so fp16 rounding decides which one the server picks.
+  After "Certainly! … ```python" the model writes `reversed(s) = s[::-1]` with an exact cache too. Keeping 2 or 5 more
+  layers in full precision does not settle it (with 5 more, "Certainly" leads with both versions). The notebook run
+  in the same container setup with PyTorch 2.14.1 gave Colab's int4 answer, and its layer and Hugging Face cells
+  printed: the same layers and tokens as above, and the same next token as Hugging Face at 21 of 21 positions.
 
 ## 2.1.1 - 2026-11-26
 

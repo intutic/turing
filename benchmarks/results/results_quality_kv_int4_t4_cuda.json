@@ -1,0 +1,561 @@
+{
+  "note": "Temporary Spot T4 VM (n1-standard-8, us-central1-a) of 2026-11-26, python:3.13 containers, turing-engine 2.1.1 from PyPI, Qwen/Qwen2.5-1.5B-Instruct in fp16. Why the Colab notebook's int4 answer to the one-liner question came back as `reversed(s) = s[::-1]` with PyTorch 2.14.1 (Colab, 2026-11-26) and 2.15 but not 2.11. kv_quality: scripts/eval_kv_quality.py --arms exact_forward,int8,int4 --windows 8 --dtype fp16; probe: scripts/probe_int4_answer.py. The notebook itself, run in the same container setup with PyTorch 2.14.1, gave the same int4 answer as Colab.",
+  "runs": {
+    "2.11.0+cu130": {
+      "kv_quality": {
+        "env": {
+          "device": "cuda",
+          "torch": "2.11.0+cu130",
+          "platform": "Linux-6.8.0-1074-gcp-x86_64-with-glibc2.41",
+          "gpu": "Tesla T4"
+        },
+        "args": {
+          "models": "Qwen/Qwen2.5-1.5B-Instruct",
+          "arms": "exact_forward,int8,int4",
+          "context": 2048,
+          "decode": 256,
+          "windows": 8,
+          "device": "cuda",
+          "dtype": "fp16",
+          "out": "kvq_t211.json"
+        },
+        "text": "WikiText-2 raw test, consecutive windows",
+        "rows": [
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "exact_forward",
+            "mode": "forward",
+            "metric": "nll",
+            "value": 2.0899375081062317,
+            "se": 0.211557226851252,
+            "n": 8,
+            "seconds": 15.970135734999985,
+            "dtype": "float16"
+          },
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "int8",
+            "mode": "chunk",
+            "metric": "nll",
+            "value": 2.090554505586624,
+            "se": 0.21110152757614728,
+            "n": 8,
+            "seconds": 27.190416099999993,
+            "dtype": "float16"
+          },
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "int4",
+            "mode": "chunk",
+            "metric": "nll",
+            "value": 2.1106757521629333,
+            "se": 0.20877107779674797,
+            "n": 8,
+            "seconds": 31.431178408999926,
+            "dtype": "float16"
+          },
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "int8",
+            "metric": "delta_nll_vs_exact_forward",
+            "value": 0.0006169974803924561,
+            "se": 0.0010234384911413643,
+            "n": 8,
+            "dtype": "float16"
+          },
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "int4",
+            "metric": "delta_nll_vs_exact_forward",
+            "value": 0.02073824405670166,
+            "se": 0.004455473278999536,
+            "n": 8,
+            "dtype": "float16"
+          }
+        ]
+      },
+      "probe": {
+        "turing": "2.1.1",
+        "torch": "2.11.0+cu130",
+        "gpu": "Tesla T4",
+        "rows": [
+          {
+            "kv": "native",
+            "native_layers": [],
+            "lp_good": -8.6719970703125,
+            "lp_bad": -8.887933731079102,
+            "top5": [
+              [
+                "You",
+                26.578
+              ],
+              [
+                "```",
+                25.797
+              ],
+              [
+                "Here",
+                25.641
+              ],
+              [
+                "Certainly",
+                25.328
+              ],
+              [
+                "To",
+                24.641
+              ]
+            ],
+            "greedy": "You can reverse a string in Python using slicing. Here is a one-liner to reverse a string:\n\n```python\nreversed_string = s[::-1]\n```\n\nThis line of code creates a new string `reversed_string` that"
+          },
+          {
+            "kv": "int8",
+            "native_layers": [
+              0
+            ],
+            "lp_good": -8.920613288879395,
+            "lp_bad": -9.044365882873535,
+            "top5": [
+              [
+                "You",
+                26.578
+              ],
+              [
+                "```",
+                25.812
+              ],
+              [
+                "Here",
+                25.688
+              ],
+              [
+                "Certainly",
+                25.266
+              ],
+              [
+                "To",
+                24.594
+              ]
+            ],
+            "greedy": "You can reverse a string in Python using slicing. Here is a one-liner to reverse a string `s`:\n\n```python\nreversed_string = s[::-1]\n```\n\nThis line of code creates a new string that is the"
+          },
+          {
+            "kv": "int4",
+            "native_layers": [
+              0,
+              1,
+              15
+            ],
+            "lp_good": -11.040210723876953,
+            "lp_bad": -9.987549781799316,
+            "top5": [
+              [
+                "Certainly",
+                26.438
+              ],
+              [
+                "You",
+                26.188
+              ],
+              [
+                "```",
+                25.312
+              ],
+              [
+                "To",
+                25.219
+              ],
+              [
+                "Here",
+                25.125
+              ]
+            ],
+            "greedy": "You can reverse a string in Python using slicing. Here is a one-liner to reverse a string:\n\n```python\nreversed_string = s[::-1]\n```\n\nThis line of code creates a new string `reversed_string` that"
+          },
+          {
+            "kv": "int4",
+            "native_layers": [
+              0,
+              1,
+              15,
+              18,
+              19
+            ],
+            "lp_good": -10.23910140991211,
+            "lp_bad": -9.229862213134766,
+            "top5": [
+              [
+                "You",
+                26.141
+              ],
+              [
+                "Certainly",
+                26.125
+              ],
+              [
+                "Here",
+                25.125
+              ],
+              [
+                "```",
+                25.062
+              ],
+              [
+                "To",
+                25.016
+              ]
+            ],
+            "greedy": "You can reverse a string in Python using slicing. Here is a one-liner to reverse a string:\n\n```python\nreversed_string = s[::-1]\n```\n\nThis line of code creates a new string `reversed_string` that"
+          },
+          {
+            "kv": "int4",
+            "native_layers": [
+              0,
+              1,
+              2,
+              5,
+              15,
+              18,
+              19,
+              25
+            ],
+            "lp_good": -10.44098949432373,
+            "lp_bad": -7.655411720275879,
+            "top5": [
+              [
+                "Certainly",
+                26.094
+              ],
+              [
+                "You",
+                25.812
+              ],
+              [
+                "```",
+                25.281
+              ],
+              [
+                "Here",
+                25.031
+              ],
+              [
+                "Sure",
+                24.703
+              ]
+            ],
+            "greedy": "Certainly! Here's a one-liner in Python that reverses a string `s`:\n\n```python\nreversed(s) = s[::-1]\n```\n\nThis one-liner uses Python's slicing feature to reverse the string. The"
+          }
+        ],
+        "int4_layer_kl": [
+          4.6023,
+          0.5065,
+          0.0021,
+          0.0007,
+          0.0005,
+          0.0024,
+          0.0011,
+          0.0015,
+          0.0005,
+          0.0006,
+          0.0004,
+          0.0006,
+          0.0007,
+          0.001,
+          0.0013,
+          0.0506,
+          0.0002,
+          0.0012,
+          0.0034,
+          0.0035,
+          0.0003,
+          0.0004,
+          0.0011,
+          0.0012,
+          0.0006,
+          0.0023,
+          0.0007,
+          0.0013
+        ],
+        "native_after_bad_opening": "Certainly! Here's a one-liner in Python that reverses a string `s`:\n\n```python\nreversed(s) = s[::-1]\n```\n\nThis line of code uses Python's slicing feature to reverse the string"
+      }
+    },
+    "2.14.1+cu130": {
+      "kv_quality": {
+        "env": {
+          "device": "cuda",
+          "torch": "2.14.1+cu130",
+          "platform": "Linux-6.8.0-1074-gcp-x86_64-with-glibc2.41",
+          "gpu": "Tesla T4"
+        },
+        "args": {
+          "models": "Qwen/Qwen2.5-1.5B-Instruct",
+          "arms": "exact_forward,int8,int4",
+          "context": 2048,
+          "decode": 256,
+          "windows": 8,
+          "device": "cuda",
+          "dtype": "fp16",
+          "out": "kvq_t2141.json"
+        },
+        "text": "WikiText-2 raw test, consecutive windows",
+        "rows": [
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "exact_forward",
+            "mode": "forward",
+            "metric": "nll",
+            "value": 2.0899279564619064,
+            "se": 0.21153160304737922,
+            "n": 8,
+            "seconds": 16.40889812499995,
+            "dtype": "float16"
+          },
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "int8",
+            "mode": "chunk",
+            "metric": "nll",
+            "value": 2.0906515568494797,
+            "se": 0.2110663298887162,
+            "n": 8,
+            "seconds": 27.309368883999923,
+            "dtype": "float16"
+          },
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "int4",
+            "mode": "chunk",
+            "metric": "nll",
+            "value": 2.107012301683426,
+            "se": 0.2098678012400947,
+            "n": 8,
+            "seconds": 31.331660328999988,
+            "dtype": "float16"
+          },
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "int8",
+            "metric": "delta_nll_vs_exact_forward",
+            "value": 0.0007236003875732422,
+            "se": 0.0008565483294715641,
+            "n": 8,
+            "dtype": "float16"
+          },
+          {
+            "model": "Qwen/Qwen2.5-1.5B-Instruct",
+            "arm": "int4",
+            "metric": "delta_nll_vs_exact_forward",
+            "value": 0.01708434522151947,
+            "se": 0.005880694934420195,
+            "n": 8,
+            "dtype": "float16"
+          }
+        ]
+      },
+      "probe": {
+        "turing": "2.1.1",
+        "torch": "2.14.1+cu130",
+        "gpu": "Tesla T4",
+        "rows": [
+          {
+            "kv": "native",
+            "native_layers": [],
+            "lp_good": -8.659501075744629,
+            "lp_bad": -8.896547317504883,
+            "top5": [
+              [
+                "You",
+                26.562
+              ],
+              [
+                "```",
+                25.797
+              ],
+              [
+                "Here",
+                25.625
+              ],
+              [
+                "Certainly",
+                25.312
+              ],
+              [
+                "To",
+                24.625
+              ]
+            ],
+            "greedy": "You can reverse a string in Python using slicing. Here is a one-liner to reverse a string:\n\n```python\nreversed_string = s[::-1]\n```\n\nThis line of code creates a new string `reversed_string` that"
+          },
+          {
+            "kv": "int8",
+            "native_layers": [
+              0
+            ],
+            "lp_good": -8.784048080444336,
+            "lp_bad": -9.030753135681152,
+            "top5": [
+              [
+                "You",
+                26.5
+              ],
+              [
+                "```",
+                25.75
+              ],
+              [
+                "Here",
+                25.578
+              ],
+              [
+                "Certainly",
+                25.219
+              ],
+              [
+                "To",
+                24.547
+              ]
+            ],
+            "greedy": "You can reverse a string in Python using slicing. Here is a one-liner to reverse a string `s`:\n\n```python\nreversed_string = s[::-1]\n```\n\nThis line of code creates a new string that is the"
+          },
+          {
+            "kv": "int4",
+            "native_layers": [
+              0,
+              1,
+              15
+            ],
+            "lp_good": -10.3243408203125,
+            "lp_bad": -10.65711498260498,
+            "top5": [
+              [
+                "You",
+                25.906
+              ],
+              [
+                "Certainly",
+                25.859
+              ],
+              [
+                "To",
+                25.141
+              ],
+              [
+                "```",
+                24.453
+              ],
+              [
+                "Here",
+                24.422
+              ]
+            ],
+            "greedy": "You can reverse a string in Python using slicing. Here is a one-liner to reverse a string:\n\n```python\nreversed_string = s[::-1]\n```\n\nThis line of code creates a new string `reversed_string` that"
+          },
+          {
+            "kv": "int4",
+            "native_layers": [
+              0,
+              1,
+              15,
+              18,
+              19
+            ],
+            "lp_good": -11.268379211425781,
+            "lp_bad": -10.198087692260742,
+            "top5": [
+              [
+                "Certainly",
+                26.188
+              ],
+              [
+                "You",
+                26.156
+              ],
+              [
+                "To",
+                25.594
+              ],
+              [
+                "```",
+                24.875
+              ],
+              [
+                "Here",
+                24.812
+              ]
+            ],
+            "greedy": "You can reverse a string in Python using slicing. Here is a one-liner to reverse a string:\n\n```python\nreversed_string = s[::-1]\n```\n\nThis line of code creates a new string `reversed_string` that"
+          },
+          {
+            "kv": "int4",
+            "native_layers": [
+              0,
+              1,
+              2,
+              5,
+              15,
+              18,
+              19,
+              25
+            ],
+            "lp_good": -9.652568817138672,
+            "lp_bad": -7.494593620300293,
+            "top5": [
+              [
+                "Certainly",
+                26.094
+              ],
+              [
+                "You",
+                26.047
+              ],
+              [
+                "Here",
+                25.328
+              ],
+              [
+                "```",
+                25.219
+              ],
+              [
+                "Sure",
+                24.781
+              ]
+            ],
+            "greedy": "You can reverse a string in Python using slicing. Here is a one-liner to reverse a string:\n\n```python\nreversed_string = s[::-1]\n```\n\nThis one-liner uses Python's slicing feature to reverse the string `"
+          }
+        ],
+        "int4_layer_kl": [
+          4.6004,
+          0.5055,
+          0.0021,
+          0.0007,
+          0.0005,
+          0.0023,
+          0.0011,
+          0.0015,
+          0.0005,
+          0.0006,
+          0.0005,
+          0.0006,
+          0.0007,
+          0.001,
+          0.0013,
+          0.0502,
+          0.0002,
+          0.0012,
+          0.0034,
+          0.0036,
+          0.0003,
+          0.0004,
+          0.0011,
+          0.0012,
+          0.0006,
+          0.0023,
+          0.0007,
+          0.0013
+        ],
+        "native_after_bad_opening": "Certainly! Here's a one-liner in Python that reverses a string `s`:\n\n```python\nreversed(s) = s[::-1]\n```\n\nThis line of code uses Python's slicing feature to reverse the string"
+      }
+    }
+  }
+}
