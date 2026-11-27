@@ -15,6 +15,9 @@ All notable changes to this project are documented here. The format follows
   instead of 2.1.0's. It turns off progress bars, so the two cells that load the model print plain text: in the text
   copied from two Colab runs those cells came out empty, and they are the only ones whose output had progress bars,
   which Colab draws as widgets.
+- The notebook can be run again in the same Colab session. Its last cell leaves Turing's model, with its KV pool, and
+  Hugging Face's model on the GPU; a third Colab run held 11.81 GiB of the T4's 14.56 in the notebook's own process,
+  and `turing serve` ran out of memory loading its weights. The cell that starts the server now frees them first.
 - Why it goes wrong, measured on a T4 (`scripts/probe_int4_answer.py`, new;
   `benchmarks/results/results_quality_kv_int4_t4_cuda.json`). It is not the PyTorch version: int4 costs
   +0.021 ± 0.004 nats a token on WikiText-2 with PyTorch 2.11 and +0.017 ± 0.006 with 2.14.1 (int8 +0.001 with
