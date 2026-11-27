@@ -12,7 +12,9 @@ All notable changes to this project are documented here. The format follows
   a T4 VM with PyTorch 2.15, the one-liner came back as `reversed(s) = s[::-1]`, which does not run; with PyTorch 2.11
   and on an L4 int4 gave the right line. The notebook now says before that cell that int4 is lossy and why that
   answer goes wrong, says the server takes about 5 minutes to start on a T4, and points at the `latest` images
-  instead of 2.1.0's.
+  instead of 2.1.0's. It turns off progress bars, so the two cells that load the model print plain text: in the text
+  copied from two Colab runs those cells came out empty, and they are the only ones whose output had progress bars,
+  which Colab draws as widgets.
 - Why it goes wrong, measured on a T4 (`scripts/probe_int4_answer.py`, new;
   `benchmarks/results/results_quality_kv_int4_t4_cuda.json`). It is not the PyTorch version: int4 costs
   +0.021 ± 0.004 nats a token on WikiText-2 with PyTorch 2.11 and +0.017 ± 0.006 with 2.14.1 (int8 +0.001 with
