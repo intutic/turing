@@ -87,11 +87,14 @@ side; 4 and 6 follow 1. Wave 7 last.
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
   batched and one-token kernels round apart with 4-bit weights and fp16 KV, so a near-tie can flip a token.
-- **Wave 4 partly measured** (`results_cpu_waves45_c4a.json`): Llama-3.1-8B at TQ2_0 (2.53 GB) decodes 52.9 tok/s against
-  35.7 at Q4_K_M (1.48x), TQ1_0 42.0; prompt processing is slower in TQ formats (77.5 against 116.7). A model must be
-  trained ternary to keep its quality; BitNet-b1.58-2B-4T needed `third_party/patches/0001` to convert and run (squared
-  ReLU, sub-norm names, BPE vocab) and is being measured on x86.
+- **Wave 4 done** (`results_cpu_waves45_c4a.json`, `results_cpu_waves46_c4.json`): BitNet-b1.58-2B-4T, run through
+  `third_party/patches/0001`, has the same WikiText-2 perplexity in TQ2_0 / TQ1_0 as in F16 (15.070 / 15.070 / 15.074
+  +/- 0.43) and decodes 85.3 tok/s in TQ2_0 against 41.4 in Q4_K_M on a Xeon 6 (2.06x); prompt processing is 2.4x
+  slower. Llama-3.1-8B (not trained ternary, speed only) decodes 1.48x faster in TQ2_0 on a Neoverse-V2.
 - **Wave 5 no-go as designed**: a column-sparse 4-bit kernel streams 29-38 GB/s against ggml's 126-154 GB/s dense, 2x
   slower than dense even at 50% sparsity. TEAL on the CPU needs a different kernel (skip units of a cache line or more,
   outputs held in registers) before a llama.cpp patch is worth writing; not built.
 - **Wave 7 built** (`--max-batch-size N`): several requests decode together, exact against HF; throughput being measured.
+- **Wave 6 measured on x86** (`results_cpu_waves46_c4.json`): AMX through ggml's extra buffer types speeds Qwen3-8B
+  prompt processing 3.3x for Q4_0 (187 against 57 tok/s) and Q8_0 (201 against 61) on a Xeon 6, 1.13x for Q4_K_M.
+  Turing's backend uses those buffer types by default (repack on). SME2 on Apple M4 is unmeasured (CF3: cloud only).

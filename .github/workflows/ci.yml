@@ -71,6 +71,34 @@ jobs:
         run: |
           pytest -v
 
+  # The CPU backend on libllama (feat/cpu-first-inference): built from the pinned submodule with its patches, and its
+  # tests (exact against Hugging Face on tiny GGUFs), on x86 Linux, ARM Linux and macOS.
+  libllama-backend:
+    name: libllama backend (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-latest ]
+    steps:
+      - name: Check out repository and llama.cpp
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel pytest pybind11
+          pip install --no-build-isolation -e ".[dev]"
+      - name: Build the extension and the libllama backend
+        run: TURING_BUILD_LLAMA=1 python setup.py build_ext --inplace
+      - name: Backend tests
+        run: python -W error -m pytest tests/test_llama_backend.py tests/test_gguf_parity.py -v
+
   # AVX2 build on Intel macOS. Build-only: PyTorch publishes no macOS x86_64 wheels past 2.2, older than the
   # suite needs. (macos-13, the previous Intel image, is retired; macos-15-intel is its replacement.)
   native-build-intel-mac:

@@ -15,7 +15,9 @@ if (TURING_LLAMA)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
     set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
-    set(GGML_CPU_KLEIDIAI ON CACHE BOOL "ARM: KleidiAI kernels (no effect elsewhere)")
+    if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")  # ggml refuses KleidiAI on other targets
+        set(GGML_CPU_KLEIDIAI ON CACHE BOOL "ARM: KleidiAI kernels")
+    endif()
     set(GGML_METAL OFF CACHE BOOL "" FORCE)  # a CPU backend: Metal would take large prompt batches off the CPU (op offload)
     # Turing's patches to the pinned llama.cpp (third_party/patches, decision CF5), applied once at configure time: a
     # patch that already applies in reverse is in. They also cover its Python converter, so configure before converting.
