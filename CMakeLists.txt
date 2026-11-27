@@ -17,6 +17,23 @@ if (TURING_LLAMA)
     set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
     set(GGML_CPU_KLEIDIAI ON CACHE BOOL "ARM: KleidiAI kernels (no effect elsewhere)")
     set(GGML_METAL OFF CACHE BOOL "" FORCE)  # a CPU backend: Metal would take large prompt batches off the CPU (op offload)
+    # Turing's patches to the pinned llama.cpp (third_party/patches, decision CF5), applied once at configure time: a
+    # patch that already applies in reverse is in. They also cover its Python converter, so configure before converting.
+    file(GLOB TURING_LLAMA_PATCHES "${CMAKE_SOURCE_DIR}/third_party/patches/*.patch")
+    list(SORT TURING_LLAMA_PATCHES)
+    find_package(Git REQUIRED)
+    foreach(patch ${TURING_LLAMA_PATCHES})
+        execute_process(COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${patch}
+                        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/llama.cpp RESULT_VARIABLE in OUTPUT_QUIET ERROR_QUIET)
+        if (NOT in EQUAL 0)
+            execute_process(COMMAND ${GIT_EXECUTABLE} apply ${patch}
+                            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/llama.cpp RESULT_VARIABLE rc)
+            if (NOT rc EQUAL 0)
+                message(FATAL_ERROR "cannot apply ${patch} to third_party/llama.cpp (is the submodule at the pinned commit?)")
+            endif()
+            message(STATUS "applied ${patch}")
+        endif()
+    endforeach()
     add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
     find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
     execute_process(COMMAND "${Python_EXECUTABLE}" -m pybind11 --cmakedir OUTPUT_VARIABLE pybind11_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
