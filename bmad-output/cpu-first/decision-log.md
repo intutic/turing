@@ -6,6 +6,12 @@
 - Rationale: ggml already has ARM repacking, KleidiAI SME2, AMX and ternary types; matching them from scratch would take
   months before any new idea could be measured. User chose it over writing every kernel or patching llama.cpp.
 
+## CF1a Model code too: libllama, not bare ggml — 2026-11-27
+- Decision: Turing's CPU backend links libllama (llama.cpp's model graphs on ggml), pinned to commit 171527522 under
+  `third_party/`, instead of Turing-written graphs on bare ggml.
+- Rationale: libllama already runs Qwen3, Qwen3-MoE and gpt-oss with ARM repacking, KleidiAI and AMX, and exposes the
+  eval callback Wave 2's expert read-ahead hooks into. User confirmed after the Wave 1-2 design.
+
 ## CF2 First target: one user (batch 1) — 2026-11-27
 - Decision: single-user decode first; multi-user CPU serving is the last wave.
 - Rationale: batch 1 is bandwidth bound, where a CPU can approach a GPU; many users are compute bound, where the research

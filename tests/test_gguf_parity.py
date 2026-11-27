@@ -268,9 +268,11 @@ def _gguf_tensors(hf, arch: str, fuse: bool = False) -> dict:
     return out
 
 
-def _write_gguf(path: str, hf, quant: str = "F32", drop: str = None, arch: str = None, fuse: bool = False) -> str:
+def _write_gguf(path: str, hf, quant: str = "F32", drop: str = None, arch: str = None, fuse: bool = False,
+                merges: bool = False) -> str:
     """Writes an HF model as llama.cpp's convert_hf_to_gguf.py does: tensors (see _gguf_tensors), the metadata keys its
-    model class writes, tokenizer metadata, norms / 1-D / router tensors in F32 and the other weights in `quant`."""
+    model class writes, tokenizer metadata, norms / 1-D / router tensors in F32 and the other weights in `quant`.
+    merges: also a (dummy) BPE merge list, which libllama requires of a "gpt2" tokenizer to load at all."""
     cfg = hf.config
     mt = cfg.model_type
     arch = arch or GGUF_ARCH[mt]
@@ -342,6 +344,8 @@ def _write_gguf(path: str, hf, quant: str = "F32", drop: str = None, arch: str =
     w.add_tokenizer_model("gpt2")
     w.add_token_list([f"<tok_{i}>" for i in range(cfg.vocab_size)])
     w.add_token_types([1] * cfg.vocab_size)
+    if merges:
+        w.add_token_merges(["<tok_3> <tok_4>"])
     w.add_bos_token_id(1)
     w.add_eos_token_id(2)
     for gname, t in tensors.items():
