@@ -135,19 +135,28 @@ public:
         return out;
     }
 
+    // Make the cache hold exactly `prompt`, keeping the prefix it shares with the cached tokens and evaluating the rest;
+    // the last prompt token's logits [n_vocab]. How many prompt tokens came from the cache: cached_prompt_tokens().
+    std::vector<float> prefill(const std::vector<int>& prompt) {
+        if (prompt.empty()) throw std::invalid_argument("prefill needs a prompt");
+        size_t common = 0;
+        while (common < cached_.size() && common < prompt.size() && cached_[common] == prompt[common]) ++common;
+        if (common == prompt.size()) --common;  // re-evaluate the last prompt token to get its logits
+        truncate(static_cast<int>(common));
+        reused_ = static_cast<int>(common);
+        return eval(std::vector<int>(prompt.begin() + static_cast<long>(common), prompt.end()));
+    }
+    int cached_prompt_tokens() const { return reused_; }
+
     // Generate after `prompt`, reusing the cached prefix it shares with the last call. temperature <= 0 is greedy.
     // on_token returns false to stop. Stops at an end-of-generation token (not returned) or after max_new tokens.
     std::vector<int> generate(const std::vector<int>& prompt, int max_new, float temperature = 0.0f, float top_p = 1.0f,
                               int top_k = 0, uint32_t seed = 0, const std::function<bool(int)>& on_token = {}) {
         if (prompt.empty()) throw std::invalid_argument("generate needs a prompt");
-        size_t common = 0;
-        while (common < cached_.size() && common < prompt.size() && cached_[common] == prompt[common]) ++common;
-        if (common == prompt.size()) --common;  // re-evaluate the last prompt token to get its logits
-        truncate(static_cast<int>(common));
         llama_sampler* smpl = make_sampler(temperature, top_p, top_k, seed);
         std::vector<int> out;
         try {
-            eval(std::vector<int>(prompt.begin() + static_cast<long>(common), prompt.end()));
+            prefill(prompt);
             for (int i = 0; i < max_new && n_past() < n_ctx(); ++i) {
                 const int tok = llama_sampler_sample(smpl, ctx_, -1);
                 if (is_eog(tok)) break;
@@ -186,6 +195,7 @@ private:
     const llama_vocab* vocab_ = nullptr;
     llama_batch_ext* batch_ = nullptr;
     std::vector<int> cached_;  // tokens whose K/V are in the cache, in order
+    int reused_ = 0;           // prompt tokens the last prefill took from the cache
 };
 
 }  // namespace turing

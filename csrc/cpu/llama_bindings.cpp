@@ -60,6 +60,21 @@ PYBIND11_MODULE(turing_llama, m) {
             py::arg("tokens"), py::arg("all_logits") = false,
             "Append tokens after the cached ones; logits of the last token [n_vocab], or of all of them [n, n_vocab].")
         .def(
+            "prefill",
+            [](TuringLlama& self, const std::vector<int>& prompt) {
+                std::vector<float> v;
+                {
+                    py::gil_scoped_release release;
+                    v = self.prefill(prompt);
+                }
+                py::array_t<float> out({static_cast<py::ssize_t>(v.size())});
+                std::memcpy(out.mutable_data(), v.data(), v.size() * sizeof(float));
+                return out;
+            },
+            py::arg("prompt"),
+            "Make the cache hold exactly prompt (reusing the prefix it shares with the cached tokens); last logits.")
+        .def_property_readonly("cached_prompt_tokens", &TuringLlama::cached_prompt_tokens)
+        .def(
             "generate",
             [](TuringLlama& self, const std::vector<int>& prompt, int max_new, float temperature, float top_p, int top_k,
                uint32_t seed, py::object on_token) {

@@ -65,3 +65,69 @@ def test_libllama_truncate_and_errors(tmp_path):
     assert llm.eval(long, all_logits=True).shape == (len(long), llm.n_vocab)
     with pytest.raises(RuntimeError):
         turing_llama.Llama(str(tmp_path / "missing.gguf"))
+
+
+def _hf_greedy(hf, ids, n, eos=(), banned=None):
+    out, ids = [], list(ids)
+    for _ in range(n):
+        logits = _hf_logits(hf, ids)[-1]
+        if banned is not None:
+            logits[banned] = float("-inf")
+        t = int(logits.argmax())
+        if t in eos:
+            break
+        out.append(t)
+        ids.append(t)
+    return out
+
+
+def _engine(tmp_path, kind="qwen3"):
+    from turing.models.gguf_loader import GGUFReader
+    from turing.models.gguf_tokenizer import GGUFTokenizer
+    from turing.serving.llama_engine import LlamaCppEngine
+    hf = _hf_model(kind)
+    path = _write_gguf(str(tmp_path / f"{kind}.gguf"), hf, merges=True)
+    meta = GGUFReader(path, willneed=False).metadata
+    tok = GGUFTokenizer(meta)
+    return hf, tok, LlamaCppEngine(path, tok, "tiny", metadata=meta, n_ctx=64, n_threads=2, exact=True)
+
+
+def test_libllama_engine_serves_the_http_api(tmp_path):
+    """turing serve --backend libllama: the OpenAI completion endpoint returns HF's greedy tokens."""
+    from fastapi.testclient import TestClient
+    from turing.serving.server import create_app
+    hf, tok, engine = _engine(tmp_path)
+    want = _hf_greedy(hf, PROMPT, 5, eos=engine.eos_token_ids)
+    with TestClient(create_app(engine, admission=False, lanes=False, warmup=True)) as client:
+        r = client.post("/v1/completions", json={"model": "tiny", "prompt": PROMPT, "max_tokens": 5, "temperature": 0})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["choices"][0]["text"] == tok.decode(want, skip_special_tokens=True)
+        assert body["usage"]["completion_tokens"] == len(want)
+        assert client.get("/health").json()["device"] == "cpu"
+        assert client.get("/metrics", params={"format": "json"}).json()["telemetry"]["total_tokens_generated"] >= len(want)
+        too_long = client.post("/v1/completions", json={"model": "tiny", "prompt": PROMPT, "max_tokens": 1000})
+        assert too_long.status_code == 400
+
+
+def test_libllama_engine_logits_processor_path(tmp_path):
+    """A request with a logits processor (grammar, tools, thinking budget) samples in Python each step: banning HF's
+    first greedy token changes the output to HF's greedy output under the same ban."""
+    import asyncio
+    hf, _, engine = _engine(tmp_path)
+    banned = _hf_greedy(hf, PROMPT, 1)[0]
+
+    def ban(gen, logits):
+        logits[banned] = float("-inf")
+        return logits
+
+    async def run():
+        await engine.start()
+        req = await engine.add_request(PROMPT, 4, temperature=0.0, logits_processor=ban)
+        out = [t async for t in engine.stream_request(req)]
+        await engine.stop()
+        return out
+
+    got = asyncio.run(run())
+    assert banned not in got
+    assert got == _hf_greedy(hf, PROMPT, 4, eos=engine.eos_token_ids, banned=banned)

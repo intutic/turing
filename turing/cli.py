@@ -112,6 +112,9 @@ def main():
     serve_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, rocm, cpu, mps)")
+    serve_parser.add_argument("--backend", type=str, default="turing", choices=["turing", "libllama"], help="turing: Turing's engine (default); libllama: the CPU backend on llama.cpp for a .gguf file, one request at a time (built with TURING_BUILD_LLAMA=1)")
+    serve_parser.add_argument("--ctx", type=int, default=8192, help="--backend libllama: tokens of context, prompt plus output (default: 8192)")
+    serve_parser.add_argument("--threads", type=int, default=0, help="--backend libllama: CPU threads (default 0: all)")
     serve_parser.add_argument("--served-model-name", type=str, default=None, help="The model id /v1/models, /health and /api/tags report (default: HF-<--model>; a request may name any model)")
     serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
@@ -319,6 +322,28 @@ def main():
             except (KeyboardInterrupt, EOFError):
                 print("\nSession ended.")
                 break
+
+    elif args.command == "serve" and args.backend == "libllama":
+        # the CPU backend on libllama (decision CF1a): a GGUF file, one request at a time, the same HTTP APIs
+        if not (args.model.endswith(".gguf") and os.path.isfile(args.model)):
+            raise SystemExit("[!] --backend libllama serves a local .gguf file: pass its path to --model")
+        try:
+            from turing.serving.llama_engine import LlamaCppEngine
+            from turing.models.gguf_loader import GGUFReader
+            from turing.models.gguf_tokenizer import GGUFTokenizer
+            meta = GGUFReader(args.model, willneed=False).metadata
+            engine = LlamaCppEngine(args.model, GGUFTokenizer(meta), args.served_model_name or os.path.basename(args.model),
+                                    metadata=meta, n_ctx=args.ctx, n_threads=args.threads)
+        except ImportError as e:
+            raise SystemExit(f"[!] The libllama backend is not built ({e}): git submodule update --init "
+                             f"third_party/llama.cpp, then TURING_BUILD_LLAMA=1 pip install -e .")
+        print(f"[+] libllama CPU backend: {engine.llm.desc}, {engine.llm.n_ctx} tokens of context")
+        app = create_app(engine, embedding_model=args.embedding_model, rerank_model=args.rerank_model,
+                         api_key=args.api_key, reasoning_effort=args.reasoning_effort, admission=False, lanes=False,
+                         warmup=not args.no_warmup)
+        print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} "
+              f"(Model: {engine.model_config.name}, Device: cpu, backend: libllama)")
+        uvicorn.run(app, host=args.host, port=args.port)
 
     elif args.command == "serve":
         jcfg = TuringConfig(device=args.device, max_batch_size=args.max_batch_size)

@@ -226,12 +226,14 @@ class GGUFReader:
     Direct zero-copy reader and parser for GGUF binary files.
     """
 
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, willneed: bool = True):
+        """willneed: ask the OS to read the whole file ahead (the weights are loaded next); False when only the
+        metadata is read (the libllama backend), which must not page in a model larger than RAM."""
         self.filepath = filepath
         self.file_size = os.path.getsize(filepath)
         self.file_obj = open(filepath, "rb")
         self.mmap_obj = mmap.mmap(self.file_obj.fileno(), 0, access=mmap.ACCESS_READ)
-        if hasattr(self.mmap_obj, "madvise") and hasattr(mmap, "MADV_WILLNEED"):
+        if willneed and hasattr(self.mmap_obj, "madvise") and hasattr(mmap, "MADV_WILLNEED"):
             try:
                 self.mmap_obj.madvise(mmap.MADV_WILLNEED)
             except Exception:
