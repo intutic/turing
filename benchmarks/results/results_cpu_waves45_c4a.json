@@ -1,0 +1,213 @@
+{
+  "note": "Waves 4 and 5 on a temporary Spot GCP c4a-standard-16 (Neoverse-V2, 16 vCPU, 64 GB) of 2026-11-27, llama.cpp 171527522 with KleidiAI, 16 threads.",
+  "wave4_llama31_8b_speed_only": {
+    "note": "Meta-Llama-3.1-8B-Instruct re-quantized from Q8_0 (llama-quantize --allow-requantize) to Q4_K_M, TQ2_0 and TQ1_0: speed only, a model not trained ternary loses its quality in TQ formats. llama-bench -p 512 -n 128 -r 3. The BitNet-b1.58-2B-4T rows of this run failed: llama.cpp at 171527522 could not convert it (third_party/patches/0001 fixes that; measured on the x86 VM).",
+    "llama_bench": {
+      "Q8_0": [
+        {
+          "model_filename": "llama31-8b-Q8_0.gguf",
+          "model_size": 8532934912,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "avg_ts": 220.485392,
+          "stddev_ts": 0.161616
+        },
+        {
+          "model_filename": "llama31-8b-Q8_0.gguf",
+          "model_size": 8532934912,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "avg_ts": 31.109531,
+          "stddev_ts": 0.261947
+        }
+      ],
+      "Q4_K_M": [
+        {
+          "model_filename": "llama31-8b-Q4_K_M.gguf",
+          "model_size": 4912898304,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "avg_ts": 116.708876,
+          "stddev_ts": 0.767917
+        },
+        {
+          "model_filename": "llama31-8b-Q4_K_M.gguf",
+          "model_size": 4912898304,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "avg_ts": 35.739004,
+          "stddev_ts": 2.482339
+        }
+      ],
+      "TQ2_0": [
+        {
+          "model_filename": "llama31-8b-TQ2_0.gguf",
+          "model_size": 2526863616,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "avg_ts": 77.462295,
+          "stddev_ts": 0.021419
+        },
+        {
+          "model_filename": "llama31-8b-TQ2_0.gguf",
+          "model_size": 2526863616,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "avg_ts": 52.853084,
+          "stddev_ts": 0.093215
+        }
+      ],
+      "TQ1_0": [
+        {
+          "model_filename": "llama31-8b-TQ1_0.gguf",
+          "model_size": 2199707904,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "avg_ts": 53.929018,
+          "stddev_ts": 0.071074
+        },
+        {
+          "model_filename": "llama31-8b-TQ1_0.gguf",
+          "model_size": 2199707904,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "avg_ts": 41.985508,
+          "stddev_ts": 0.356121
+        }
+      ]
+    }
+  },
+  "wave5_teal_go_no_go": {
+    "note": "turing-teal-bench: ggml's dense Q4_0 / Q4_K matrix-vector product against a column-sparse Q4_0 one (each input column's weights contiguous, only active columns read) on Llama-3.1-8B's FFN shapes, 16 cold layer copies. The sparse kernel streams 29-38 GB/s against ggml's 126-154, so at 50% sparsity it is still 2x slower than dense Q4_K: no-go for this design (skip units of ~500 bytes per thread, and each active input costs a pass over the output slice).",
+    "rows": [
+      {
+        "kernel": "ggml dense q4_0",
+        "K": 4096,
+        "N": 14336,
+        "threads": 16,
+        "ms_per_layer": 0.2621,
+        "GB_s": 126.0
+      },
+      {
+        "kernel": "ggml dense q4_K",
+        "K": 4096,
+        "N": 14336,
+        "threads": 16,
+        "ms_per_layer": 0.2285,
+        "GB_s": 144.6
+      },
+      {
+        "kernel": "column-sparse Q4_0",
+        "sparsity": 0.0,
+        "K": 4096,
+        "N": 14336,
+        "threads": 16,
+        "ms_per_layer": 0.8813,
+        "GB_s": 37.5,
+        "speedup_vs_dense_q4_k": 0.26,
+        "max_rel_err": 0.000365
+      },
+      {
+        "kernel": "column-sparse Q4_0",
+        "sparsity": 0.25,
+        "K": 4096,
+        "N": 14336,
+        "threads": 16,
+        "ms_per_layer": 0.6674,
+        "GB_s": 37.1,
+        "speedup_vs_dense_q4_k": 0.34,
+        "max_rel_err": 0.000153
+      },
+      {
+        "kernel": "column-sparse Q4_0",
+        "sparsity": 0.4,
+        "K": 4096,
+        "N": 14336,
+        "threads": 16,
+        "ms_per_layer": 0.5593,
+        "GB_s": 35.4,
+        "speedup_vs_dense_q4_k": 0.41,
+        "max_rel_err": 0.000161
+      },
+      {
+        "kernel": "column-sparse Q4_0",
+        "sparsity": 0.5,
+        "K": 4096,
+        "N": 14336,
+        "threads": 16,
+        "ms_per_layer": 0.4676,
+        "GB_s": 35.3,
+        "speedup_vs_dense_q4_k": 0.49,
+        "max_rel_err": 1.85e-05
+      },
+      {
+        "kernel": "ggml dense q4_0",
+        "K": 14336,
+        "N": 4096,
+        "threads": 16,
+        "ms_per_layer": 0.2386,
+        "GB_s": 138.5
+      },
+      {
+        "kernel": "ggml dense q4_K",
+        "K": 14336,
+        "N": 4096,
+        "threads": 16,
+        "ms_per_layer": 0.2143,
+        "GB_s": 154.1
+      },
+      {
+        "kernel": "column-sparse Q4_0",
+        "sparsity": 0.0,
+        "K": 14336,
+        "N": 4096,
+        "threads": 16,
+        "ms_per_layer": 0.8988,
+        "GB_s": 36.7,
+        "speedup_vs_dense_q4_k": 0.24,
+        "max_rel_err": 0.000132
+      },
+      {
+        "kernel": "column-sparse Q4_0",
+        "sparsity": 0.25,
+        "K": 14336,
+        "N": 4096,
+        "threads": 16,
+        "ms_per_layer": 0.7508,
+        "GB_s": 33.0,
+        "speedup_vs_dense_q4_k": 0.29,
+        "max_rel_err": 3.02e-05
+      },
+      {
+        "kernel": "column-sparse Q4_0",
+        "sparsity": 0.4,
+        "K": 14336,
+        "N": 4096,
+        "threads": 16,
+        "ms_per_layer": 0.6329,
+        "GB_s": 31.3,
+        "speedup_vs_dense_q4_k": 0.34,
+        "max_rel_err": 2.79e-05
+      },
+      {
+        "kernel": "column-sparse Q4_0",
+        "sparsity": 0.5,
+        "K": 14336,
+        "N": 4096,
+        "threads": 16,
+        "ms_per_layer": 0.5676,
+        "GB_s": 29.1,
+        "speedup_vs_dense_q4_k": 0.38,
+        "max_rel_err": 5.76e-05
+      }
+    ]
+  }
+}

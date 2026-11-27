@@ -87,3 +87,11 @@ side; 4 and 6 follow 1. Wave 7 last.
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
   batched and one-token kernels round apart with 4-bit weights and fp16 KV, so a near-tie can flip a token.
+- **Wave 4 partly measured** (`results_cpu_waves45_c4a.json`): Llama-3.1-8B at TQ2_0 (2.53 GB) decodes 52.9 tok/s against
+  35.7 at Q4_K_M (1.48x), TQ1_0 42.0; prompt processing is slower in TQ formats (77.5 against 116.7). A model must be
+  trained ternary to keep its quality; BitNet-b1.58-2B-4T needed `third_party/patches/0001` to convert and run (squared
+  ReLU, sub-norm names, BPE vocab) and is being measured on x86.
+- **Wave 5 no-go as designed**: a column-sparse 4-bit kernel streams 29-38 GB/s against ggml's 126-154 GB/s dense, 2x
+  slower than dense even at 50% sparsity. TEAL on the CPU needs a different kernel (skip units of a cache line or more,
+  outputs held in registers) before a llama.cpp patch is worth writing; not built.
+- **Wave 7 built** (`--max-batch-size N`): several requests decode together, exact against HF; throughput being measured.
