@@ -1,6 +1,6 @@
 // turing-cpu: the libllama CPU backend from the command line.
 //   turing-cpu bench    --model m.gguf [--threads N] [--prompt-tokens 512] [--gen-tokens 128] [--reps 3] [--no-mmap] [--no-repack]
-//   turing-cpu generate --model m.gguf --prompt "text" [--max-tokens 64] [--temp 0] [--threads N]
+//   turing-cpu generate --model m.gguf --prompt "text" [--max-tokens 64] [--temp 0] [--threads N] [--draft N] (prompt lookup)
 // bench prints one JSON line: prompt and decode tokens/s (median of --reps), as llama-bench's pp/tg rows measure them.
 #include <algorithm>
 #include <chrono>
@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
     }
     const std::string cmd = argv[1];
     std::string model, prompt = "The capital of France is";
-    int threads = 0, n_prompt = 512, n_gen = 128, reps = 3, max_tokens = 64;
+    int threads = 0, n_prompt = 512, n_gen = 128, reps = 3, max_tokens = 64, n_draft = 0;
     float temp = 0.0f;
     turing::LlamaOptions opt;
     for (int i = 2; i < argc; ++i) {
@@ -43,6 +43,7 @@ int main(int argc, char** argv) {
         else if (a == "--prompt") prompt = next();
         else if (a == "--max-tokens") max_tokens = std::stoi(next());
         else if (a == "--temp") temp = std::stof(next());
+        else if (a == "--draft") n_draft = std::stoi(next());
         else if (a == "--no-mmap") opt.use_mmap = false;
         else if (a == "--no-repack") opt.repack = false;
         else if (a == "--readahead") opt.readahead = true, opt.repack = false;  // reads the mapped file: no repacked copy
@@ -66,12 +67,17 @@ int main(int argc, char** argv) {
         if (cmd == "generate") {
             const auto ids = llm.tokenize(prompt);
             const auto t0 = clk::now();
-            const auto out = llm.generate(ids, max_tokens, temp, 1.0f, 0, 0, [&](int t) {
+            const auto print = [&](int t) {
                 std::cout << llm.piece(t) << std::flush;
                 return true;
-            });
+            };
+            const auto out = n_draft > 0 && temp <= 0.0f ? llm.generate_lookup(ids, max_tokens, n_draft, print)
+                                                         : llm.generate(ids, max_tokens, temp, 1.0f, 0, 0, print);
             const double s = std::chrono::duration<double>(clk::now() - t0).count();
-            std::cerr << "\n(" << out.size() << " tokens in " << s << " s, " << out.size() / s << " tok/s incl. prompt)\n";
+            const auto sp = llm.spec_stats();
+            std::cerr << "\n(" << out.size() << " tokens in " << s << " s, " << out.size() / s << " tok/s incl. prompt";
+            if (n_draft > 0) std::cerr << "; drafts " << sp.drafted << " accepted " << sp.accepted << " in " << sp.steps << " steps";
+            std::cerr << ")\n";
             return 0;
         }
         if (cmd != "bench") {

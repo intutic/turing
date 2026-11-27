@@ -74,7 +74,7 @@ PYBIND11_MODULE(turing_llama, m) {
                 }
                 const py::ssize_t V = self.n_vocab();
                 py::array_t<float> out = all_logits ? py::array_t<float>({static_cast<py::ssize_t>(v.size()) / V, V})
-                                                    : py::array_t<float>({V});
+                                                    : py::array_t<float>(V);
                 std::memcpy(out.mutable_data(), v.data(), v.size() * sizeof(float));
                 return out;
             },
@@ -88,7 +88,7 @@ PYBIND11_MODULE(turing_llama, m) {
                     py::gil_scoped_release release;
                     v = self.prefill(prompt);
                 }
-                py::array_t<float> out({static_cast<py::ssize_t>(v.size())});
+                py::array_t<float> out(static_cast<py::ssize_t>(v.size()));
                 std::memcpy(out.mutable_data(), v.data(), v.size() * sizeof(float));
                 return out;
             },
@@ -98,7 +98,7 @@ PYBIND11_MODULE(turing_llama, m) {
         .def(
             "generate",
             [](TuringLlama& self, const std::vector<int>& prompt, int max_new, float temperature, float top_p, int top_k,
-               uint32_t seed, py::object on_token) {
+               uint32_t seed, py::object on_token, int n_draft) {
                 std::function<bool(int)> cb;
                 if (!on_token.is_none()) {
                     cb = [&on_token](int t) {
@@ -108,9 +108,22 @@ PYBIND11_MODULE(turing_llama, m) {
                     };
                 }
                 py::gil_scoped_release release;
+                if (n_draft > 0 && temperature <= 0.0f) return self.generate_lookup(prompt, max_new, n_draft, cb);
                 return self.generate(prompt, max_new, temperature, top_p, top_k, seed, cb);
             },
             py::arg("prompt"), py::arg("max_new"), py::arg("temperature") = 0.0f, py::arg("top_p") = 1.0f,
-            py::arg("top_k") = 0, py::arg("seed") = 0, py::arg("on_token") = py::none(),
-            "Generate after prompt (token ids), reusing the cached prefix; on_token(id) may return False to stop.");
+            py::arg("top_k") = 0, py::arg("seed") = 0, py::arg("on_token") = py::none(), py::arg("n_draft") = 0,
+            "Generate after prompt (token ids), reusing the cached prefix; on_token(id) may return False to stop. "
+            "n_draft > 0 with temperature 0: prompt-lookup speculation, the same tokens as greedy decoding.")
+        .def(
+            "spec_stats",
+            [](const TuringLlama& self) {
+                const auto s = self.spec_stats();
+                py::dict d;
+                d["steps"] = s.steps;
+                d["drafted"] = s.drafted;
+                d["accepted"] = s.accepted;
+                return d;
+            },
+            "Prompt-lookup speculation: verification steps, drafts verified, drafts accepted.");
 }

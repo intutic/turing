@@ -131,7 +131,7 @@ def main():
     serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
     serve_parser.add_argument("--embedding-model", type=str, default=None, help="HF embedding model (e.g. BAAI/bge-small-en-v1.5) for /v1/embeddings; default: the served model's mean-pooled hidden states")
     serve_parser.add_argument("--rerank-model", type=str, default=None, help="HF cross-encoder (e.g. cross-encoder/ms-marco-MiniLM-L-6-v2) for /v1/rerank; default: the served model's yes/no likelihood")
-    serve_parser.add_argument("--draft-tokens", type=int, default=8, help="Speculative draft tokens per request and step (0 = off): from prompt lookup, or from --draft-head")
+    serve_parser.add_argument("--draft-tokens", type=int, default=None, help="Speculative draft tokens per request and step (0 = off): from prompt lookup, or from --draft-head (default 8; --backend libllama: 0, prompt lookup for greedy requests)")
     serve_parser.add_argument("--draft-head", type=str, default=None, help="EAGLE-3 draft head for this model (a Hugging Face repository or a directory with config.json and its weights): it drafts instead of prompt lookup")
     serve_parser.add_argument("--api-key", type=str, default=os.getenv("TURING_API_KEY"), help="Require this key (Authorization: Bearer or x-api-key) on every endpoint but /health (default: $TURING_API_KEY; off when unset)")
     serve_parser.add_argument("--no-admission-control", action="store_true", help="Do not reject requests the KV pool cannot hold soon (429/503)")
@@ -333,7 +333,8 @@ def main():
             from turing.models.gguf_tokenizer import GGUFTokenizer
             meta = GGUFReader(args.model, willneed=False).metadata
             engine = LlamaCppEngine(args.model, GGUFTokenizer(meta), args.served_model_name or os.path.basename(args.model),
-                                    metadata=meta, n_ctx=args.ctx, n_threads=args.threads)
+                                    metadata=meta, n_ctx=args.ctx, n_threads=args.threads,
+                                    draft_tokens=args.draft_tokens or 0)
         except ImportError as e:
             raise SystemExit(f"[!] The libllama backend is not built ({e}): git submodule update --init "
                              f"third_party/llama.cpp, then TURING_BUILD_LLAMA=1 pip install -e .")
@@ -398,11 +399,12 @@ def main():
             from turing.models.eagle3 import load_eagle3
             draft_head = load_eagle3(args.draft_head, cfg.hidden_dim, cfg.num_layers)
             print(f"[+] Loaded EAGLE-3 draft head from {args.draft_head} (reads layers {draft_head.aux_layers})")
+        drafts = 8 if args.draft_tokens is None else args.draft_tokens
         engine = ContinuousBatchEngine(cfg, jcfg, model=model_inst, tokenizer=tokenizer_inst, dist_driver=dist_driver,
                                        draft_head=draft_head,
                                        prefix_caching=not args.no_prefix_caching and dist_driver is None
-                                       and not args.prefill_worker, draft_tokens=args.draft_tokens,
-                                       spec_gate=SpeculationGatePolicy() if args.draft_tokens else None,
+                                       and not args.prefill_worker, draft_tokens=drafts,
+                                       spec_gate=SpeculationGatePolicy() if drafts else None,
                                        remote_prefill=(args.prefill_server.rsplit(":", 1)[0],
                                                        int(args.prefill_server.rsplit(":", 1)[1]))
                                        if args.prefill_server else None)

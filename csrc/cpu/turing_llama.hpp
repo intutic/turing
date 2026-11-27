@@ -202,7 +202,85 @@ public:
         return out;
     }
 
+    // Greedy generation with prompt-lookup drafts (Wave 3): up to n_draft tokens that followed the latest n-gram where it
+    // last appeared in the prompt or output are verified in one evaluation, and kept while each is the argmax, so the
+    // tokens equal plain greedy decoding. Drafting pauses after repeated misses, so it cannot keep slowing the loop.
+    std::vector<int> generate_lookup(const std::vector<int>& prompt, int max_new, int n_draft,
+                                     const std::function<bool(int)>& on_token = {}) {
+        std::vector<int> hist(prompt), out;
+        int cur = argmax(prefill(prompt).data());
+        bool stop = false;
+        while (!stop && !is_eog(cur) && static_cast<int>(out.size()) < max_new) {
+            out.push_back(cur);
+            hist.push_back(cur);
+            if ((on_token && !on_token(cur)) || static_cast<int>(out.size()) >= max_new || n_past() + 1 >= n_ctx()) break;
+            std::vector<int> drafts;
+            if (pause_ > 0) {
+                --pause_;
+            } else {
+                const int room = std::min({n_draft, max_new - static_cast<int>(out.size()), n_ctx() - n_past() - 1});
+                drafts = lookup(hist, std::max(0, room));
+            }
+            std::vector<int> feed{cur};
+            feed.insert(feed.end(), drafts.begin(), drafts.end());
+            const std::vector<float> rows = eval(feed, /*all_logits=*/true);  // row i predicts the token after feed[i]
+            const size_t V = static_cast<size_t>(n_vocab());
+            size_t a = 0;
+            int pred = argmax(rows.data());
+            while (a < drafts.size() && pred == drafts[a]) {
+                if (is_eog(pred)) {
+                    stop = true;
+                    break;
+                }
+                out.push_back(pred);
+                hist.push_back(pred);
+                ++a;
+                if ((on_token && !on_token(pred)) || static_cast<int>(out.size()) >= max_new) {
+                    stop = true;
+                    break;
+                }
+                pred = argmax(rows.data() + a * V);
+            }
+            truncate(n_past() - static_cast<int>(drafts.size() - a));  // drop the rejected drafts' K/V
+            spec_.steps += 1;
+            spec_.drafted += drafts.size();
+            spec_.accepted += a;
+            if (!drafts.empty()) {
+                misses_ = a == 0 ? misses_ + 1 : 0;
+                if (misses_ >= 4) pause_ = 16, misses_ = 0;
+            }
+            cur = pred;
+        }
+        return out;
+    }
+    struct SpecStats {
+        uint64_t steps = 0, drafted = 0, accepted = 0;
+    };
+    SpecStats spec_stats() const { return spec_; }
+
 private:
+    int argmax(const float* row) const {
+        const int V = n_vocab();
+        return static_cast<int>(std::max_element(row, row + V) - row);
+    }
+    // Up to n tokens that followed the most recent earlier occurrence of the last 3, 2 or 1 tokens of hist.
+    static std::vector<int> lookup(const std::vector<int>& hist, int n) {
+        if (n <= 0) return {};
+        for (int g = 3; g >= 1; --g) {
+            if (static_cast<int>(hist.size()) <= g) continue;
+            const auto tail = hist.end() - g;
+            for (auto p = hist.end() - g - 1; p >= hist.begin(); --p) {
+                if (std::equal(tail, hist.end(), p)) {
+                    const auto from = p + g, to = std::min(hist.end(), from + n);
+                    if (from < to) return std::vector<int>(from, to);
+                    break;
+                }
+                if (p == hist.begin()) break;
+            }
+        }
+        return {};
+    }
+
     static void quiet_log(ggml_log_level level, const char* text, void*) {
         if (level == GGML_LOG_LEVEL_ERROR) std::fputs(text, stderr);
     }
@@ -229,6 +307,8 @@ private:
     llama_batch_ext* batch_ = nullptr;
     std::vector<int> cached_;  // tokens whose K/V are in the cache, in order
     int reused_ = 0;           // prompt tokens the last prefill took from the cache
+    SpecStats spec_;           // prompt-lookup drafts verified and accepted
+    int misses_ = 0, pause_ = 0;
 };
 
 }  // namespace turing

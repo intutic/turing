@@ -66,8 +66,10 @@ class LlamaCppEngine:
     _processed = ContinuousBatchEngine._processed
 
     def __init__(self, path: str, tokenizer, name: str, metadata: Optional[dict] = None, n_ctx: int = 4096,
-                 n_threads: int = 0, seed: int = 0, **llama_kwargs):
-        """metadata: the GGUF's key/values (GGUFReader(path, willneed=False).metadata), for the model's shape."""
+                 n_threads: int = 0, seed: int = 0, draft_tokens: int = 0, **llama_kwargs):
+        """metadata: the GGUF's key/values (GGUFReader(path, willneed=False).metadata), for the model's shape.
+        draft_tokens: prompt-lookup drafts per step for greedy requests without a logits processor (0 = off); the output
+        is the same as without them."""
         from turing import turing_llama  # built only with TURING_BUILD_LLAMA=1
         self.llm = turing_llama.Llama(path, n_ctx=n_ctx, n_threads=n_threads, **llama_kwargs)
         self.tokenizer = tokenizer
@@ -89,7 +91,7 @@ class LlamaCppEngine:
         self.model = _NoModule()
         self.kv_pool = _ContextPool(self.llm)
         self.eos_token_ids = _eos_ids(tokenizer) | ({self.llm.eos} if self.llm.eos >= 0 else set())
-        self.default_draft_tokens = 0
+        self.default_draft_tokens = draft_tokens
         self.admission = None
         self.lane_policy = None
         self.running_batch: List[_Request] = []
@@ -138,6 +140,7 @@ class LlamaCppEngine:
             raise bad_request(f"prompt plus max_tokens is {len(prompt_tokens) + max_new_tokens} tokens, but this "
                               f"server holds at most {self.llm.n_ctx} (--ctx)")
         req = _Request(prompt_tokens, max_new_tokens, temperature, top_k, top_p, logits_processor)
+        req.draft_tokens = self.default_draft_tokens if draft_tokens is None else draft_tokens
         self.waiting_queue.append(req)
         if self._wake is not None:
             self._wake.set()
@@ -205,7 +208,8 @@ class LlamaCppEngine:
 
         if req.logits_processor is None:
             self.llm.generate(req.prompt_tokens, req.max_new_tokens, temperature=max(req.temperature, 0.0),
-                              top_p=req.top_p, top_k=req.top_k, seed=self._seed, on_token=emit)
+                              top_p=req.top_p, top_k=req.top_k, seed=self._seed, on_token=emit,
+                              n_draft=req.draft_tokens if req.temperature <= 1e-5 else 0)
             req.cached_prompt_tokens = self.llm.cached_prompt_tokens
         else:
             logits = torch.from_numpy(self.llm.prefill(req.prompt_tokens))
@@ -237,8 +241,13 @@ class LlamaCppEngine:
             "latency": {"avg_ttft_ms": sum(ttft) / len(ttft) if ttft else 0.0,
                         "p99_ttft_ms": ttft[min(len(ttft) - 1, int(0.99 * len(ttft)))] if ttft else 0.0,
                         "avg_itl_ms": sum(self._itl) / len(self._itl) if self._itl else 0.0},
-            "speculation": {"drafted_tokens": 0, "accepted_tokens": 0, "acceptance_rate": 0.0},
+            "speculation": self._speculation(),
         }
+
+    def _speculation(self) -> dict:
+        s = self.llm.spec_stats()
+        return {"drafted_tokens": s["drafted"], "accepted_tokens": s["accepted"],
+                "acceptance_rate": s["accepted"] / s["drafted"] if s["drafted"] else 0.0}
 
     def get_llmd_metrics(self) -> dict:
         return {"num_requests_waiting": len(self.waiting_queue), "num_requests_running": len(self.running_batch),
