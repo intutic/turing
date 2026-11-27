@@ -184,7 +184,7 @@
   },
   "http_qwen3_8b_q4_k_m": {
     "note": "One client on the VM (scratchpad load.py): N /v1/completions requests at once, a fresh prompt each (~25 tokens), 128 greedy tokens; total_tok_s = generated tokens over the round's wall time, prefill and HTTP included. turing serve --backend libllama --max-batch-size 8 --ctx 8192 --threads 16 against llama-server -np 8 -c 8192 -t 16. A warm-up round, then rounds a and b.",
-    "caveat": "Not like for like: Turing's rows tokenized with GGUFTokenizer, a greedy word lookup that drops the spaces of Qwen3's byte-level BPE, so each prompt became 61 garbled tokens where llama-server's was 26 (counted with Qwen2.5's identical vocabulary): at 8 requests Turing prefilled 488 tokens against 208, about 1.4 s more at 200 tok/s. turing serve --backend libllama tokenizes with libllama (LlamaTokenizer) since; to be measured again.",
+    "caveat": "Not like for like: Turing's rows tokenized with GGUFTokenizer, a greedy word lookup that drops the spaces of Qwen3's byte-level BPE, so each prompt became 61 garbled tokens where llama-server's was 26 (counted with Qwen2.5's identical vocabulary): at 8 requests Turing prefilled 488 tokens against 208, about 1.4 s more at 200 tok/s. turing serve --backend libllama tokenizes with libllama (LlamaTokenizer) since; measured again in http_equal_prompts_qwen3_8b_q4_k_m.",
     "rows": [
       {
         "engine": "turing, before the one-thread fix",
@@ -516,5 +516,664 @@
       "threads=15 {\"round\": \"t15-8w\", \"max_tokens\": 128, \"completion_tokens\": 1024, \"wall_s\": 20.09, \"total_tok_s\": 50.96, \"lat",
       "threads=15 {\"round\": \"t15-8a\", \"max_tokens\": 128, \"completion_tokens\": 1024, \"wall_s\": 20.16, \"total_tok_s\": 50.79, \"lat"
     ]
+  },
+  "http_equal_prompts_qwen3_8b_q4_k_m": {
+    "note": "Run again after commit 89fe82e (turing serve --backend libllama tokenizes with libllama), same VM type (c4-standard-16, Xeon Platinum 8581C), same commands as http_qwen3_8b_q4_k_m; prompt_tokens is the sum the server reported, equal for both servers when they tokenize alike. Batch 16: --max-batch-size 16 / -np 16 at 16 requests. 'turing, again' ran last, as a drift check. chat: one request with thinking off (reasoning_effort none / chat_template_kwargs) and one with it on, 96 greedy tokens.",
+    "rows": [
+      {
+        "engine": "turing",
+        "batch": 8,
+        "concurrent": 1,
+        "round": "1a",
+        "total_tok_s": 15.4,
+        "prompt_tokens": 26,
+        "completion_tokens": 128,
+        "wall_s": 8.31,
+        "latency_s": [
+          8.31
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the shore and"
+      },
+      {
+        "engine": "turing",
+        "batch": 8,
+        "concurrent": 1,
+        "round": "1b",
+        "total_tok_s": 15.36,
+        "prompt_tokens": 26,
+        "completion_tokens": 128,
+        "wall_s": 8.33,
+        "latency_s": [
+          8.33
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the shore and"
+      },
+      {
+        "engine": "turing",
+        "batch": 8,
+        "concurrent": 4,
+        "round": "4a",
+        "total_tok_s": 36.32,
+        "prompt_tokens": 104,
+        "completion_tokens": 512,
+        "wall_s": 14.1,
+        "latency_s": [
+          14.0,
+          14.0,
+          14.1,
+          14.1
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "turing",
+        "batch": 8,
+        "concurrent": 4,
+        "round": "4b",
+        "total_tok_s": 36.39,
+        "prompt_tokens": 104,
+        "completion_tokens": 512,
+        "wall_s": 14.07,
+        "latency_s": [
+          13.97,
+          14.07,
+          14.07,
+          14.07
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "turing",
+        "batch": 8,
+        "concurrent": 8,
+        "round": "8a",
+        "total_tok_s": 58.92,
+        "prompt_tokens": 208,
+        "completion_tokens": 1024,
+        "wall_s": 17.38,
+        "latency_s": [
+          17.2,
+          17.38,
+          17.38,
+          17.38,
+          17.38,
+          17.38,
+          17.38,
+          17.38
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "turing",
+        "batch": 8,
+        "concurrent": 8,
+        "round": "8b",
+        "total_tok_s": 59.23,
+        "prompt_tokens": 208,
+        "completion_tokens": 1024,
+        "wall_s": 17.29,
+        "latency_s": [
+          17.16,
+          17.16,
+          17.28,
+          17.28,
+          17.28,
+          17.28,
+          17.29,
+          17.29
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the shore and"
+      },
+      {
+        "engine": "llama-server",
+        "batch": 8,
+        "concurrent": 1,
+        "round": "1a",
+        "total_tok_s": 15.56,
+        "prompt_tokens": 26,
+        "completion_tokens": 128,
+        "wall_s": 8.23,
+        "latency_s": [
+          8.22
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the shore and"
+      },
+      {
+        "engine": "llama-server",
+        "batch": 8,
+        "concurrent": 1,
+        "round": "1b",
+        "total_tok_s": 15.99,
+        "prompt_tokens": 26,
+        "completion_tokens": 128,
+        "wall_s": 8.01,
+        "latency_s": [
+          8.01
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the shore and"
+      },
+      {
+        "engine": "llama-server",
+        "batch": 8,
+        "concurrent": 4,
+        "round": "4a",
+        "total_tok_s": 36.75,
+        "prompt_tokens": 104,
+        "completion_tokens": 512,
+        "wall_s": 13.93,
+        "latency_s": [
+          13.93,
+          13.93,
+          13.93,
+          13.93
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "llama-server",
+        "batch": 8,
+        "concurrent": 4,
+        "round": "4b",
+        "total_tok_s": 36.96,
+        "prompt_tokens": 104,
+        "completion_tokens": 512,
+        "wall_s": 13.85,
+        "latency_s": [
+          13.85,
+          13.85,
+          13.85,
+          13.85
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "llama-server",
+        "batch": 8,
+        "concurrent": 8,
+        "round": "8a",
+        "total_tok_s": 63.49,
+        "prompt_tokens": 208,
+        "completion_tokens": 1024,
+        "wall_s": 16.13,
+        "latency_s": [
+          16.12,
+          16.13,
+          16.13,
+          16.13,
+          16.13,
+          16.13,
+          16.13,
+          16.13
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "llama-server",
+        "batch": 8,
+        "concurrent": 8,
+        "round": "8b",
+        "total_tok_s": 63.21,
+        "prompt_tokens": 208,
+        "completion_tokens": 1024,
+        "wall_s": 16.2,
+        "latency_s": [
+          16.2,
+          16.2,
+          16.2,
+          16.2,
+          16.2,
+          16.2,
+          16.2,
+          16.2
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "turing",
+        "batch": 16,
+        "concurrent": 16,
+        "round": "16a",
+        "total_tok_s": 92.46,
+        "prompt_tokens": 438,
+        "completion_tokens": 2048,
+        "wall_s": 22.15,
+        "latency_s": [
+          21.98,
+          22.13,
+          22.13,
+          22.13,
+          22.13,
+          22.14,
+          22.14,
+          22.14,
+          22.14,
+          22.14,
+          22.14,
+          22.14,
+          22.14,
+          22.15,
+          22.15,
+          22.15
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the shore and"
+      },
+      {
+        "engine": "turing",
+        "batch": 16,
+        "concurrent": 16,
+        "round": "16b",
+        "total_tok_s": 90.42,
+        "prompt_tokens": 438,
+        "completion_tokens": 2048,
+        "wall_s": 22.65,
+        "latency_s": [
+          22.48,
+          22.64,
+          22.64,
+          22.64,
+          22.64,
+          22.65,
+          22.65,
+          22.65,
+          22.65,
+          22.65,
+          22.65,
+          22.65,
+          22.65,
+          22.65,
+          22.65,
+          22.65
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "llama-server",
+        "batch": 16,
+        "concurrent": 16,
+        "round": "16a",
+        "total_tok_s": 98.24,
+        "prompt_tokens": 438,
+        "completion_tokens": 2048,
+        "wall_s": 20.85,
+        "latency_s": [
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84,
+          20.84
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the beach and"
+      },
+      {
+        "engine": "llama-server",
+        "batch": 16,
+        "concurrent": 16,
+        "round": "16b",
+        "total_tok_s": 98.65,
+        "prompt_tokens": 438,
+        "completion_tokens": 2048,
+        "wall_s": 20.76,
+        "latency_s": [
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75,
+          20.75
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "turing, again",
+        "batch": 8,
+        "concurrent": 8,
+        "round": "8a",
+        "total_tok_s": 62.83,
+        "prompt_tokens": 208,
+        "completion_tokens": 1024,
+        "wall_s": 16.3,
+        "latency_s": [
+          16.17,
+          16.29,
+          16.29,
+          16.3,
+          16.3,
+          16.3,
+          16.3,
+          16.3
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      },
+      {
+        "engine": "turing, again",
+        "batch": 8,
+        "concurrent": 8,
+        "round": "8b",
+        "total_tok_s": 62.9,
+        "prompt_tokens": 208,
+        "completion_tokens": 1024,
+        "wall_s": 16.28,
+        "latency_s": [
+          16.15,
+          16.28,
+          16.28,
+          16.28,
+          16.28,
+          16.28,
+          16.28,
+          16.28
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the dock of h"
+      }
+    ],
+    "stream": {
+      "e2e_turing_b8": [
+        {
+          "chunks": 129,
+          "first_s": 0.195,
+          "total_s": 8.282,
+          "median_gap_ms": 63.6,
+          "mean_gap_ms": 63.2
+        },
+        {
+          "chunks": 129,
+          "first_s": 0.19,
+          "total_s": 8.323,
+          "median_gap_ms": 63.8,
+          "mean_gap_ms": 63.5
+        }
+      ],
+      "e2e_llama_b8": [
+        {
+          "chunks": 129,
+          "first_s": 0.28,
+          "total_s": 8.11,
+          "median_gap_ms": 61.6,
+          "mean_gap_ms": 61.2
+        },
+        {
+          "chunks": 129,
+          "first_s": 0.164,
+          "total_s": 8.265,
+          "median_gap_ms": 61.5,
+          "mean_gap_ms": 63.3
+        }
+      ],
+      "e2e_turing_b16": [
+        {
+          "chunks": 129,
+          "first_s": 0.198,
+          "total_s": 8.094,
+          "median_gap_ms": 62.1,
+          "mean_gap_ms": 61.7
+        },
+        {
+          "chunks": 129,
+          "first_s": 0.19,
+          "total_s": 8.13,
+          "median_gap_ms": 62.3,
+          "mean_gap_ms": 62.0
+        }
+      ],
+      "e2e_llama_b16": [
+        {
+          "chunks": 129,
+          "first_s": 0.338,
+          "total_s": 8.128,
+          "median_gap_ms": 61.3,
+          "mean_gap_ms": 60.9
+        },
+        {
+          "chunks": 129,
+          "first_s": 0.162,
+          "total_s": 8.253,
+          "median_gap_ms": 61.3,
+          "mean_gap_ms": 63.2
+        }
+      ],
+      "e2e_turing_b8_again": [
+        {
+          "chunks": 129,
+          "first_s": 0.199,
+          "total_s": 8.4,
+          "median_gap_ms": 62.1,
+          "mean_gap_ms": 64.1
+        },
+        {
+          "chunks": 129,
+          "first_s": 0.191,
+          "total_s": 8.067,
+          "median_gap_ms": 62.0,
+          "mean_gap_ms": 61.5
+        }
+      ]
+    },
+    "chat": {
+      "e2e_turing_b8": [
+        {
+          "case": "thinking_off",
+          "status": 200,
+          "prompt_tokens": 27,
+          "completion_tokens": 6,
+          "content": "Red, blue, yellow.",
+          "reasoning": "",
+          "finish_reason": "stop"
+        },
+        {
+          "case": "thinking_on",
+          "status": 200,
+          "prompt_tokens": 23,
+          "completion_tokens": 96,
+          "content": "",
+          "reasoning": "\nOkay, the user asked for the three primary colors. Let me think. Primary colors are the basic colors that can't be created by mixing other colors. In art, the traditional primary colors are red, blue",
+          "finish_reason": "length"
+        }
+      ],
+      "e2e_llama_b8": [
+        {
+          "case": "thinking_off",
+          "status": 200,
+          "prompt_tokens": 27,
+          "completion_tokens": 7,
+          "content": "Red, blue, yellow.",
+          "reasoning": "",
+          "finish_reason": "stop"
+        },
+        {
+          "case": "thinking_on",
+          "status": 200,
+          "prompt_tokens": 23,
+          "completion_tokens": 96,
+          "content": "",
+          "reasoning": "Okay, the user asked for the three primary colors. Let me think. Primary colors are the basic colors that can't be created by mixing other colors. In art, the traditional primary colors are red, blue,",
+          "finish_reason": "length"
+        }
+      ],
+      "e2e_turing_b16": [
+        {
+          "case": "thinking_off",
+          "status": 200,
+          "prompt_tokens": 27,
+          "completion_tokens": 6,
+          "content": "Red, blue, yellow.",
+          "reasoning": "",
+          "finish_reason": "stop"
+        },
+        {
+          "case": "thinking_on",
+          "status": 200,
+          "prompt_tokens": 23,
+          "completion_tokens": 96,
+          "content": "",
+          "reasoning": "\nOkay, the user asked for the three primary colors. Let me think. Primary colors are the basic colors that can't be created by mixing other colors. In art, the traditional primary colors are red, blue",
+          "finish_reason": "length"
+        }
+      ],
+      "e2e_llama_b16": [
+        {
+          "case": "thinking_off",
+          "status": 200,
+          "prompt_tokens": 27,
+          "completion_tokens": 7,
+          "content": "Red, blue, yellow.",
+          "reasoning": "",
+          "finish_reason": "stop"
+        },
+        {
+          "case": "thinking_on",
+          "status": 200,
+          "prompt_tokens": 23,
+          "completion_tokens": 96,
+          "content": "",
+          "reasoning": "Okay, the user asked for the three primary colors. Let me think. Primary colors are the basic colors that can't be created by mixing other colors. In art, the traditional primary colors are red, blue,",
+          "finish_reason": "length"
+        }
+      ],
+      "e2e_turing_b8_again": [
+        {
+          "case": "thinking_off",
+          "status": 200,
+          "prompt_tokens": 27,
+          "completion_tokens": 6,
+          "content": "Red, blue, yellow.",
+          "reasoning": "",
+          "finish_reason": "stop"
+        },
+        {
+          "case": "thinking_on",
+          "status": 200,
+          "prompt_tokens": 23,
+          "completion_tokens": 96,
+          "content": "",
+          "reasoning": "\nOkay, the user asked for the three primary colors. Let me think. Primary colors are the basic colors that can't be created by mixing other colors. In art, the traditional primary colors are red, blue",
+          "finish_reason": "length"
+        }
+      ]
+    }
+  },
+  "step_breakdown_8_requests": {
+    "note": "scratchpad diag6.py: the turing serve engine (max_batch_size 8, 16 threads) in-process behind create_app, load.py in another process, 8 requests of 128 greedy tokens. Each libllama step timed: compute = on the libllama thread; into_thread / back_to_loop = the hand-offs; loop_between_steps = the event loop's work from one step's result to the next step's submit; period = submit to submit. Medians over decode steps of all 8 sequences. plain = 64 steps of 8 sequences through the same compute thread without the server.",
+    "lines": [
+      {
+        "case": "plain before",
+        "step_ms": 111.73
+      },
+      {
+        "url": "http://127.0.0.1:8010",
+        "model": "m",
+        "concurrent": 8,
+        "round": "d8w",
+        "max_tokens": 128,
+        "completion_tokens": 1024,
+        "prompt_tokens": 208,
+        "wall_s": 16.46,
+        "total_tok_s": 62.23,
+        "latency_s": [
+          16.33,
+          16.45,
+          16.45,
+          16.45,
+          16.45,
+          16.45,
+          16.45,
+          16.45
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the shore and watch the waves crash against the rocks, mesmerized by the way the water danced"
+      },
+      {
+        "url": "http://127.0.0.1:8010",
+        "model": "m",
+        "concurrent": 8,
+        "round": "d8a",
+        "max_tokens": 128,
+        "completion_tokens": 1024,
+        "prompt_tokens": 208,
+        "wall_s": 16.73,
+        "total_tok_s": 61.21,
+        "latency_s": [
+          16.6,
+          16.72,
+          16.73,
+          16.73,
+          16.73,
+          16.73,
+          16.73,
+          16.73
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the shore and watch the waves crash against the rocks, mesmerized by the way the water danced"
+      },
+      {
+        "case": "serve 8a",
+        "decode_steps": 126,
+        "compute_ms": 115.65,
+        "into_thread_ms": 0.22,
+        "back_to_loop_ms": 0.12,
+        "loop_between_steps_ms": 1.91,
+        "period_ms": 117.62
+      },
+      {
+        "url": "http://127.0.0.1:8010",
+        "model": "m",
+        "concurrent": 8,
+        "round": "d8b",
+        "max_tokens": 128,
+        "completion_tokens": 1024,
+        "prompt_tokens": 208,
+        "wall_s": 16.45,
+        "total_tok_s": 62.24,
+        "latency_s": [
+          16.32,
+          16.45,
+          16.45,
+          16.45,
+          16.45,
+          16.45,
+          16.45,
+          16.45
+        ],
+        "text0": "Ada had always been drawn to the sea. As a child, she would sit on the shore and watch the waves crash against the rocks, mesmerized by the way the water danced"
+      },
+      {
+        "case": "serve 8b",
+        "decode_steps": 126,
+        "compute_ms": 116.66,
+        "into_thread_ms": 0.23,
+        "back_to_loop_ms": 0.12,
+        "loop_between_steps_ms": 1.93,
+        "period_ms": 118.9
+      },
+      {
+        "case": "plain after",
+        "step_ms": 111.75
+      }
+    ],
+    "pyspy": {
+      "note": "An extra round under py-spy record --native --threads (100 Hz, 12 s, not timed): samples per thread where the thread was busy. It puts the event loop in torch argmax (_batched_loop) for 484 samples, about 48 ms a step, where the timed rounds measured 1.9 ms between steps for everything the loop does; py-spy stops the process for every sample, so these counts are not used.",
+      "libllama_0 (compute thread)": 666,
+      "MainThread": 590,
+      "MainThread in torch argmax": 484,
+      "MainThread in epoll_wait": 46
+    }
   }
 }

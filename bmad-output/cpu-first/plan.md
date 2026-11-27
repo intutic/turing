@@ -103,9 +103,14 @@ side; 4 and 6 follow 1. Wave 7 last.
   `turing serve` tokenized with `GGUFTokenizer`, a greedy word lookup that drops the spaces of byte-level BPE (Qwen,
   Llama 3, gpt-oss), so Turing prefilled 61 garbled tokens a prompt against llama-server's 26 (about 1.4 s of the 3.1 s
   gap at 8 requests) and chat requests failed on its hard-coded template. Fixed after the run: the libllama backend
-  tokenizes with libllama (`LlamaTokenizer`) and renders the GGUF's chat template as Hugging Face does. Open: measure
-  HTTP again with equal prompts; about 17 ms a step at 8 requests is still unexplained (the server's own Python is
-  ~72 us a token on an M4 Pro); vLLM-CPU and batch 64 not run.
+  tokenizes with libllama (`LlamaTokenizer`) and renders the GGUF's chat template as Hugging Face does.
+  Measured again with equal prompts (same file, `http_equal_prompts_qwen3_8b_q4_k_m`; 26 prompt tokens a request on
+  both): 15.4 / 36.3 / 59.1 tok/s at 1 / 4 / 8 requests against llama-server's 15.6-16.0 / 36.8-37.0 / 63.2-63.5, and
+  62.8-62.9 when Turing's 8-request run was repeated last (run order alone moved it 6%); at 16 requests with 16
+  sequences 90.4-92.5 against 98.2-98.7 (once each). Chat: both render Qwen3's template to the same 27 / 23 prompt
+  tokens and answer alike. Inside the server a step at 8 requests is 116 ms of libllama compute (111.7 in a plain loop
+  over `step`, whose sequences are shorter) plus 2.2 ms of hand-offs and event loop. Open: the 16-request gap and its
+  drift; vLLM-CPU and batch 64 not run.
 - **Wave 1 on x86** (same file): `turing-cpu` within 4% of llama-bench for Qwen3-8B Q4_0 / Q4_K_M / Q8_0 with repack on
   and off (Q4_K_M decode 16.5 against 16.5, prompt 195 against 183).
 - **Wave 6 measured on x86** (`results_cpu_waves46_c4.json`): AMX through ggml's extra buffer types speeds Qwen3-8B
