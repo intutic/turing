@@ -28,3 +28,9 @@
 - Decision: ternary, activation sparsity and fewer-experts modes are built as switches that print their measured quality
   cost (delta NLL with standard error); exact output stays the default.
 - Rationale: user's choice; matches the SPEC's "exact by default" constraint.
+
+## CF5 Wave 5 kernel changes as a patch file — 2026-11-27
+- Decision: activation sparsity's changes to llama.cpp's matrix kernels live as a patch under `third_party/patches/`,
+  applied to the pinned submodule at build time, behind an opt-in flag that prints its quality cost.
+- Rationale: user's choice over an intutic fork of llama.cpp or skipping the wave; the patch stays visible and is rebased
+  when the pin moves.
