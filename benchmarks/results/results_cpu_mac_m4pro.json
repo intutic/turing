@@ -1389,5 +1389,213 @@
         "text": "**Short answer**  \nBecause the Earth does not orbit the Sun "
       }
     ]
+  },
+  "models_in_ram": {
+    "note": "Two ~3B-active MoE models that fit in RAM, Qwen3-30B-A3B Q4_K_M (Qwen/Qwen3-30B-A3B-GGUF, 18.56 GB, sha256 0d003f66...) and Inkling 2 Mini Q4_K_M (bartowski/Inkling-2-Mini-GGUF, 18.66 GB, sha256 ed38ac61...; Thinking Machines, 26.4B total / 3.4B active, arch inkling2_loop), internal SSD, 10 threads. inram_log: scratchpad mac/inram.sh, turing-cpu bench (random ids, pp512 / tg128, median of 3) with repack on and off, then real text with the prompt prefilled first; real_text_fresh_cache: scratchpad mac/realtext_chat.py, 8 questions in each GGUF's own chat template, each generated from an empty cache, 128 greedy tokens, decode tok/s between the first and last token's timestamps, repack off.",
+    "real_text_fresh_cache": {
+      "Inkling-2-Mini-Q4_K_M.gguf": {
+        "n": 8,
+        "decode_median_tok_s": 26.16,
+        "decode_min": 23.2,
+        "decode_max": 26.43,
+        "prompt_median_tok_s": 59.8
+      },
+      "Qwen3-30B-A3B-Q4_K_M.gguf": {
+        "n": 8,
+        "decode_median_tok_s": 64.87,
+        "decode_min": 44.13,
+        "decode_max": 68.75,
+        "prompt_median_tok_s": 94.9
+      }
+    },
+    "real_text_fresh_cache_rows": [
+      {
+        "model": "Inkling-2-Mini-Q4_K_M.gguf",
+        "desc": "inkling2_loop ?B Q4_K - Medium",
+        "load_s": 2.05,
+        "repack": false,
+        "threads": 10,
+        "has_template": true
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 24,
+        "prompt_tok_s": 49.1,
+        "tokens": 128,
+        "tok_s": 26.35,
+        "text": "The user asks: \"Explain how a lighthouse lens focuses light.\" Need answer explanatory. Nee"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 24,
+        "prompt_tok_s": 70.1,
+        "tokens": 128,
+        "tok_s": 26.3,
+        "text": "The user asks: \"Describe how sourdough bread rises.\" Need answer explanatory. Need craft f"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 24,
+        "prompt_tok_s": 69.5,
+        "tokens": 128,
+        "tok_s": 25.38,
+        "text": "The user asks to summarize the causes of the French Revolution. This is a historical quest"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 22,
+        "prompt_tok_s": 60.7,
+        "tokens": 128,
+        "tok_s": 23.2,
+        "text": "The user asks \"How do ocean tides work?\" This is a science question. Need answer explanato"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 31,
+        "prompt_tok_s": 62.1,
+        "tokens": 128,
+        "tok_s": 26.03,
+        "text": "The user wants a Python function that merges overlapping intervals, with a docstring. This"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 22,
+        "prompt_tok_s": 58.8,
+        "tokens": 128,
+        "tok_s": 25.96,
+        "text": "The user asks to explain compound interest with an example. Need provide clear explanation"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 21,
+        "prompt_tok_s": 56.1,
+        "tokens": 128,
+        "tok_s": 26.43,
+        "text": "The user asks a factual science question: What causes the northern lights? Need answer con"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 27,
+        "prompt_tok_s": 56.7,
+        "tokens": 128,
+        "tok_s": 26.35,
+        "text": "The user asks for a description of how a bill becomes law in the United States. This is a "
+      },
+      {
+        "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+        "desc": "qwen3moe 30B.A3B Q4_K - Medium",
+        "load_s": 7.13,
+        "repack": false,
+        "threads": 10,
+        "has_template": true
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 22,
+        "prompt_tok_s": 8.6,
+        "tokens": 128,
+        "tok_s": 44.13,
+        "text": "A lighthouse lens is designed to focus and direct light in a powerful, concentrated beam t"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 20,
+        "prompt_tok_s": 87.6,
+        "tokens": 128,
+        "tok_s": 57.96,
+        "text": "Sourdough bread rises due to a natural fermentation process involving wild yeast and lacti"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 22,
+        "prompt_tok_s": 81.6,
+        "tokens": 128,
+        "tok_s": 63.97,
+        "text": "The French Revolution (1789\u20131799) was caused by a complex mix of political, social, econom"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 19,
+        "prompt_tok_s": 106.0,
+        "tokens": 128,
+        "tok_s": 67.95,
+        "text": "Ocean tides are the periodic rise and fall of sea levels caused primarily by the gravitati"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 26,
+        "prompt_tok_s": 63.7,
+        "tokens": 128,
+        "tok_s": 57.55,
+        "text": "Here's a Python function that merges overlapping intervals, along with a detailed docstrin"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 20,
+        "prompt_tok_s": 110.9,
+        "tokens": 128,
+        "tok_s": 65.77,
+        "text": "**Compound interest** is the interest calculated on the initial principal and also on the "
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 18,
+        "prompt_tok_s": 102.6,
+        "tokens": 128,
+        "tok_s": 68.75,
+        "text": "The **northern lights**, also known as the **aurora borealis**, are caused by **interactio"
+      },
+      {
+        "repack": false,
+        "prompt_tokens": 23,
+        "prompt_tok_s": 102.2,
+        "tokens": 128,
+        "tok_s": 68.32,
+        "text": "In the United States, a bill becomes a law through a structured process that involves both"
+      }
+    ],
+    "inram_log": [
+      "{\"run\": \"bench Qwen3-30B-A3B-Q4_K_M repack1\", \"mem\": {\"active_gb\": 16.2, \"inactive_gb\": 16.2, \"wired_gb\": 4.2, \"compressor_gb\": 10.4, \"file_backed_gb\": 18.2}, \"swap\": \"total = 6144.00M  used = 4538.62M  free \"}",
+      "{\"model\": \"/Users/ishangupta/models/Qwen3-30B-A3B-Q4_K_M.gguf\", \"desc\": \"qwen3moe 30B.A3B Q4_K - Medium\", \"threads\": 10, \"mmap\": true, \"repack\": true, \"load_s\": 42.05, \"pp512_tok_s\": 116.11, \"tg128_tok_s\": 45.26, \"reps\": 3, \"readahead\": false, \"readahead_bytes_read\": 0, \"readahead_bytes_missing\": 0, \"readahead_bytes_wanted\": 0, \"readahead_active_calls\": 0, \"readahead_calls\": 0, \"readahead_s\": 0.000}",
+      "{\"run\": \"bench Qwen3-30B-A3B-Q4_K_M repack0\", \"mem\": {\"active_gb\": 8.1, \"inactive_gb\": 9.9, \"wired_gb\": 4.5, \"compressor_gb\": 6.7, \"file_backed_gb\": 12.4}, \"swap\": \"total = 12288.00M  used = 12003.75M  fre\"}",
+      "{\"model\": \"/Users/ishangupta/models/Qwen3-30B-A3B-Q4_K_M.gguf\", \"desc\": \"qwen3moe 30B.A3B Q4_K - Medium\", \"threads\": 10, \"mmap\": true, \"repack\": false, \"load_s\": 3.71, \"pp512_tok_s\": 171.64, \"tg128_tok_s\": 70.79, \"reps\": 3, \"readahead\": false, \"readahead_bytes_read\": 0, \"readahead_bytes_missing\": 0, \"readahead_bytes_wanted\": 0, \"readahead_active_calls\": 0, \"readahead_calls\": 0, \"readahead_s\": 0.000}",
+      "{\"run\": \"realtext Qwen3-30B-A3B-Q4_K_M repack1\", \"mem\": {\"active_gb\": 6.5, \"inactive_gb\": 21.6, \"wired_gb\": 4.1, \"compressor_gb\": 6.2, \"file_backed_gb\": 20.6}, \"swap\": \"total = 12288.00M  used = 11995.75M  fre\"}",
+      "{\"model\": \"Qwen3-30B-A3B-Q4_K_M.gguf\", \"desc\": \"qwen3moe 30B.A3B Q4_K - Medium\", \"load_s\": 25.64, \"repack\": true, \"threads\": 10, \"has_template\": true}",
+      "{\"repack\": true, \"prompt_tokens\": 22, \"prompt_tok_s\": 11.0, \"tokens\": 128, \"tok_s\": 30.62, \"text\": \"A lighthouse lens, particularly the type used in modern lighthouses, is designed to focus \"}",
+      "{\"repack\": true, \"prompt_tokens\": 20, \"prompt_tok_s\": 72.9, \"tokens\": 128, \"tok_s\": 28.78, \"text\": \"Sourdough bread rises due to a natural fermentation process involving wild yeast and lacti\"}",
+      "{\"repack\": true, \"prompt_tokens\": 22, \"prompt_tok_s\": 38.6, \"tokens\": 128, \"tok_s\": 50.59, \"text\": \"The French Revolution (1789\\u20131799) was caused by a complex mix of political, social, econom\"}",
+      "{\"repack\": true, \"prompt_tokens\": 19, \"prompt_tok_s\": 115.3, \"tokens\": 128, \"tok_s\": 53.24, \"text\": \"Ocean tides are the periodic rise and fall of sea levels caused primarily by the gravitati\"}",
+      "{\"repack\": true, \"prompt_tokens\": 26, \"prompt_tok_s\": 78.5, \"tokens\": 128, \"tok_s\": 54.35, \"text\": \"Here's a Python function that merges overlapping intervals, along with a detailed docstrin\"}",
+      "{\"repack\": true, \"prompt_tokens\": 20, \"prompt_tok_s\": 137.1, \"tokens\": 128, \"tok_s\": 61.12, \"text\": \"**Compound interest** is the interest calculated on the initial principal and also on the \"}",
+      "{\"repack\": true, \"prompt_tokens\": 18, \"prompt_tok_s\": 145.9, \"tokens\": 128, \"tok_s\": 53.86, \"text\": \"The **northern lights**, also known as the **aurora borealis**, are caused by **interactio\"}",
+      "{\"repack\": true, \"prompt_tokens\": 23, \"prompt_tok_s\": 138.0, \"tokens\": 128, \"tok_s\": 63.29, \"text\": \"In the United States, a bill becomes a law through a structured legislative process that i\"}",
+      "{\"run\": \"realtext Qwen3-30B-A3B-Q4_K_M repack0\", \"mem\": {\"active_gb\": 4.8, \"inactive_gb\": 12.3, \"wired_gb\": 5.1, \"compressor_gb\": 6.7, \"file_backed_gb\": 12.5}, \"swap\": \"total = 13312.00M  used = 12188.12M  fre\"}",
+      "{\"model\": \"Qwen3-30B-A3B-Q4_K_M.gguf\", \"desc\": \"qwen3moe 30B.A3B Q4_K - Medium\", \"load_s\": 3.76, \"repack\": false, \"threads\": 10, \"has_template\": true}",
+      "{\"repack\": false, \"prompt_tokens\": 22, \"prompt_tok_s\": 73.8, \"tokens\": 128, \"tok_s\": 62.64, \"text\": \"A lighthouse lens is designed to focus and direct light in a powerful, concentrated beam t\"}",
+      "{\"repack\": false, \"prompt_tokens\": 20, \"prompt_tok_s\": 118.5, \"tokens\": 128, \"tok_s\": 69.04, \"text\": \"Sourdough bread rises due to a natural fermentation process involving wild yeast and lacti\"}",
+      "{\"repack\": false, \"prompt_tokens\": 22, \"prompt_tok_s\": 104.7, \"tokens\": 128, \"tok_s\": 40.01, \"text\": \"The French Revolution (1789\\u20131799) was caused by a complex mix of political, social, econom\"}",
+      "{\"repack\": false, \"prompt_tokens\": 19, \"prompt_tok_s\": 89.2, \"tokens\": 128, \"tok_s\": 51.75, \"text\": \"Ocean tides are the periodic rise and fall of sea levels caused primarily by the gravitati\"}",
+      "{\"repack\": false, \"prompt_tokens\": 26, \"prompt_tok_s\": 106.6, \"tokens\": 128, \"tok_s\": 70.91, \"text\": \"Here's a Python function that merges overlapping intervals, along with a detailed docstrin\"}",
+      "{\"repack\": false, \"prompt_tokens\": 20, \"prompt_tok_s\": 115.5, \"tokens\": 128, \"tok_s\": 60.4, \"text\": \"**Compound interest** is the interest calculated on the initial principal and also on the \"}",
+      "{\"repack\": false, \"prompt_tokens\": 18, \"prompt_tok_s\": 105.1, \"tokens\": 128, \"tok_s\": 67.7, \"text\": \"The **northern lights**, also known as the **aurora borealis**, are caused by **interactio\"}",
+      "{\"repack\": false, \"prompt_tokens\": 23, \"prompt_tok_s\": 101.9, \"tokens\": 128, \"tok_s\": 55.15, \"text\": \"In the United States, a bill becomes a law through a structured process that involves both\"}",
+      "{\"run\": \"bench Inkling-2-Mini-Q4_K_M repack1\", \"mem\": {\"active_gb\": 11.3, \"inactive_gb\": 20.2, \"wired_gb\": 4.6, \"compressor_gb\": 5.0, \"file_backed_gb\": 21.6}, \"swap\": \"total = 13312.00M  used = 12172.12M  fre\"}",
+      "/private/tmp/claude-501/-Users-ishangupta-jflux/6020b2e8-842b-4b6b-9f76-a0eb1383bf47/scratchpad/mac/inram.sh: line 10: 17239 Abort trap: 6              $TC bench --model $M --threads 10 --prompt-tokens 512 --gen-tokens 128 --reps 3 $flag 2> /dev/null",
+      "{\"run\": \"bench Inkling-2-Mini-Q4_K_M repack0\", \"mem\": {\"active_gb\": 9.5, \"inactive_gb\": 9.5, \"wired_gb\": 4.4, \"compressor_gb\": 23.7, \"file_backed_gb\": 17.1}, \"swap\": \"total = 13312.00M  used = 12100.12M  fre\"}",
+      "{\"model\": \"/Users/ishangupta/models/Inkling-2-Mini-Q4_K_M.gguf\", \"desc\": \"inkling2_loop ?B Q4_K - Medium\", \"threads\": 10, \"mmap\": true, \"repack\": false, \"load_s\": 2.79, \"pp512_tok_s\": 73.13, \"tg128_tok_s\": 28.67, \"reps\": 3, \"readahead\": false, \"readahead_bytes_read\": 0, \"readahead_bytes_missing\": 0, \"readahead_bytes_wanted\": 0, \"readahead_active_calls\": 0, \"readahead_calls\": 0, \"readahead_s\": 0.000}",
+      "{\"run\": \"realtext Inkling-2-Mini-Q4_K_M repack1\", \"mem\": {\"active_gb\": 9.1, \"inactive_gb\": 18.1, \"wired_gb\": 4.2, \"compressor_gb\": 6.2, \"file_backed_gb\": 20.9}, \"swap\": \"total = 13312.00M  used = 12060.12M  fre\"}",
+      "/private/tmp/claude-501/-Users-ishangupta-jflux/6020b2e8-842b-4b6b-9f76-a0eb1383bf47/scratchpad/mac/inram.sh: line 15: 17353 Abort trap: 6              python \"$D/realtext_chat.py\" $M $r 10 2> /dev/null",
+      "{\"run\": \"realtext Inkling-2-Mini-Q4_K_M repack0\", \"mem\": {\"active_gb\": 9.3, \"inactive_gb\": 9.2, \"wired_gb\": 4.6, \"compressor_gb\": 24.0, \"file_backed_gb\": 17.0}, \"swap\": \"total = 13312.00M  used = 12044.12M  fre\"}",
+      "{\"model\": \"Inkling-2-Mini-Q4_K_M.gguf\", \"desc\": \"inkling2_loop ?B Q4_K - Medium\", \"load_s\": 2.21, \"repack\": false, \"threads\": 10, \"has_template\": true}",
+      "{\"run\": \"end\", \"mem\": {\"active_gb\": 2.6, \"inactive_gb\": 21.6, \"wired_gb\": 4.2, \"compressor_gb\": 7.5, \"file_backed_gb\": 21.0}, \"swap\": \"total = 13312.00M  used = 12028.12M  fre\"}",
+      "INRAM DONE"
+    ],
+    "findings": [
+      "Qwen3-30B-A3B decodes real text at ~62 tok/s (median of 8, 44-69) with repack off; bench tg128 70.8 off, 45.3 on.",
+      "Inkling 2 Mini decodes real text at ~26 tok/s (median of 8, 23-26) with repack off; bench tg128 28.7. Output is coherent English (it reasons in plain text first: its template ignores enable_thinking).",
+      "Repack on was slower for Qwen3-30B-A3B on this Mac (bench tg 45.3 against 70.8) and swap use rose from 4.5 to 12 GB during it (the repacked copy is anonymous memory); not separated from the swapping.",
+      "Inkling 2 Mini with repack on aborts in llama.cpp at context creation: ggml-backend.cpp:1725 GGML_ASSERT(*cur_backend_id != -1) in llama_context::resolve_fused_ops (pin 171527522).",
+      "Turing bug found: TuringLlama::truncate ignores llama_memory_seq_rm's result. Inkling 2's memory is hybrid (grouped with Falcon-H1), whose suffix cannot be dropped, so prefill's prefix reuse (generate after eval, and turing serve's one-at-a-time path) fails with 'sequence positions must be consecutive'. Not fixed yet."
+    ]
   }
 }

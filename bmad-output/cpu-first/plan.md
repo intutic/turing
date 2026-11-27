@@ -94,7 +94,10 @@ side; 4 and 6 follow 1. Wave 7 last.
   plain mmap at 40 GB), identical text. While switched off, misses fault in a page at a time. Read-ahead now always
   reads; `--readahead-adaptive` keeps the switch. On the Mac (internal SSD, real text, `results_cpu_mac_m4pro.json`)
   always on and the switch are indistinguishable (5.5 against 5.9 tok/s, different prompts, ranges overlapping), both
-  above plain mmap's 4.7.
+  above plain mmap's 4.7. Models that fit in RAM (same file, `models_in_ram`): Qwen3-30B-A3B Q4_K_M decodes real text
+  at ~62 tok/s, Inkling 2 Mini Q4_K_M at ~26 (repack off; repack on was slower for Qwen3 under swap and aborts for
+  Inkling in llama.cpp). Open: `TuringLlama::truncate` ignores `llama_memory_seq_rm`'s result, so prompt reuse fails on
+  hybrid / recurrent models (Inkling 2, Qwen3-Next, Falcon-H1).
 - **Wave 3 done, gated**: prompt lookup with Qwen3's chat template, thinking off: a code edit decodes 37.4 tok/s against
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
