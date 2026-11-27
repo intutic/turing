@@ -42,7 +42,7 @@ PYBIND11_MODULE(turing_llama, m) {
              py::arg("use_mmap") = true, py::arg("repack") = true, py::arg("exact") = false, py::arg("verbose") = false,
              py::arg("readahead") = false, py::arg("readahead_threads") = 16, py::arg("readahead_chunk") = size_t(4) << 20,
              py::arg("readahead_check_resident") = true, py::arg("readahead_wait") = true,
-             py::arg("readahead_adaptive") = true, py::arg("readahead_window") = 64, py::arg("n_seq") = 1)
+             py::arg("readahead_adaptive") = false, py::arg("readahead_window") = 64, py::arg("n_seq") = 1)
         .def(
             "readahead_stats",
             [](const TuringLlama& self) {

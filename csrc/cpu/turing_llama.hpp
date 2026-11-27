@@ -39,7 +39,7 @@ struct LlamaOptions {
     size_t readahead_chunk = size_t(4) << 20;
     bool readahead_check_resident = true;  // false reads every chosen expert again (tests)
     bool readahead_wait = true;            // false: reads run beside the expert products instead of before them
-    bool readahead_adaptive = true;        // read only while >= 5% of the chosen experts' bytes miss the cache
+    bool readahead_adaptive = false;       // true: read only while >= 5% of the chosen experts' bytes miss (slower on real text)
     int readahead_window = 64;             // router outputs per adaptive decision
 };
 

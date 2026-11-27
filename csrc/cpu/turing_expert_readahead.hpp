@@ -46,12 +46,12 @@ class ExpertReadAhead {
 public:
     // wait: the products start after the reads (true), or the reads are queued and run beside the products (false),
     // so the products' own page faults and the large reads overlap; at most kMaxQueued reads wait in the queue.
-    // adaptive: read only while the missing share of the chosen experts' bytes over the last `window` router outputs is
-    // at least min_miss; below it the callback only looks (mincore). gpt-oss-120b on a Neoverse-V2: 4.4% missing with a
-    // 40 GB cache, where reading cost decode speed (12.8 against 17.4 tok/s), 6.7% at 28 GB and 12.7% at 20 GB, where it
-    // paid 3.8x and 4.1x (benchmarks/results/results_cpu_waves23_c4a.json).
+    // adaptive (off by default): read only while the missing share of the chosen experts' bytes over the last `window`
+    // router outputs is at least min_miss; below it the callback only looks (mincore), and the misses fault in a page at a
+    // time. gpt-oss-120b on a Neoverse-V2, real text: always reading decoded 10.6 / 5.7 / 3.6 tok/s at 40 / 28 / 20 GB of
+    // cache against adaptive's 5.5 / 4.9 / 3.5 (benchmarks/results/results_cpu_wave2_always_c4a.json).
     ExpertReadAhead(const std::string& path, int io_threads = 16, size_t chunk = size_t(4) << 20, bool check_resident = true,
-                    bool wait = true, bool adaptive = true, int window = 64, double min_miss = 0.05)
+                    bool wait = true, bool adaptive = false, int window = 64, double min_miss = 0.05)
         : chunk_(chunk), check_resident_(check_resident), wait_(wait), adaptive_(adaptive), window_(std::max(1, window)),
           min_miss_(min_miss), active_(!adaptive) {
         ggml_context* meta = nullptr;

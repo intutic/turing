@@ -77,19 +77,22 @@ side; 4 and 6 follow 1. Wave 7 last.
   Llama-3.1-8B Q4_K_M at 38.7 tok/s and Qwen3-30B-A3B at 64.9; Turing's fp32 C++ engine 0.73.
 - **Wave 1 done**: libllama backend, `turing serve --backend libllama`; matches llama-bench on the same VM (Qwen3-8B 39.2
   vs 38.6 tok/s decode, Qwen3-30B-A3B 65.1 vs 67.2) and Hugging Face's logits within 1e-3.
-- **Wave 2 done, adaptive** (`results_cpu_waves123_c4a.json`, `results_cpu_waves23_c4a.json`): gpt-oss-120b (63 GB) from
+- **Wave 2 done, always on** (`results_cpu_waves123_c4a.json`, `results_cpu_waves23_c4a.json`): gpt-oss-120b (63 GB) from
   a 2.7 GB/s SSD with the cache capped at 28 GB decodes at 12.1 tok/s with the read-ahead against 3.16 with plain mmap
   (3.8x; prompt 47.9 against 4.6, 10.5x), at 20 GB 8.09 against 1.96 (4.1x); text identical. With 40 GB of cache (4.4%
-  of expert bytes missing) plain mmap was faster (17.4 against 12.8), so the read-ahead now reads only while >= 5% of
-  the chosen experts' bytes miss the cache. Reading beside the products (async) paid less than before them (blocking).
+  of expert bytes missing) plain mmap was faster (17.4 against 12.8), so the read-ahead was made to read only while
+  >= 5% of the chosen experts' bytes miss the cache (undone on real-text evidence: see below). Reading beside the products (async) paid less than before them (blocking).
   A 48 GB machine already runs gpt-oss-120b from SSD at usable speed with plain mmap. **Caveat (2026-11-27, Mac
   runs): all of these decode with random token ids (turing-cpu bench, as llama-bench), which on the Mac missed half
   the expert bytes real text does and overstated real-text decode about 4x; re-measure with real text.** Re-measured
   on real text (`results_cpu_wave2_realtext_c4a.json`, same VM type, 8 prompts in both modes per cap, identical
   text): read-ahead 5.1 / 4.9 / 3.6 tok/s against plain mmap's 3.6 / 1.2 / 0.74 at 40 / 28 / 20 GB (1.4x / 4.2x /
   4.9x). The same boot's random-token bench gave read-ahead 4.96 at 28 GB where Wave 2's earlier build (before the
-  adaptive switch) gave 12.1; the switch had it on for only half the router outputs there. Open: read-ahead always on
-  against adaptive, on real text.
+  adaptive switch) gave 12.1; the switch had it on for only half the router outputs there. **The switch caused it**
+  (`results_cpu_wave2_always_c4a.json`): bench at 28 GB decodes 12.6 tok/s always on against 5.1 adaptive, and on real
+  text always on beat adaptive at every cap (10.6 / 5.7 / 3.6 against 5.5 / 4.9 / 3.5 tok/s at 40 / 28 / 20 GB; 3.2x
+  plain mmap at 40 GB), identical text. While switched off, misses fault in a page at a time. Read-ahead now always
+  reads; `--readahead-adaptive` keeps the switch. Always-on is unmeasured on macOS.
 - **Wave 3 done, gated**: prompt lookup with Qwen3's chat template, thinking off: a code edit decodes 37.4 tok/s against
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
