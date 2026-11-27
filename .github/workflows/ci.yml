@@ -96,6 +96,8 @@ jobs:
           pip install --no-build-isolation -e ".[dev]"
       - name: Build the extension and the libllama backend
         run: TURING_BUILD_LLAMA=1 python setup.py build_ext --inplace
+      - name: Fetch SmolLM2's tokenizer (the byte-level BPE test reads it from the cache and skips without it)
+        run: python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('HuggingFaceTB/SmolLM2-135M-Instruct')"
       - name: Backend tests
         run: python -W error -m pytest tests/test_llama_backend.py tests/test_gguf_parity.py -v
 
