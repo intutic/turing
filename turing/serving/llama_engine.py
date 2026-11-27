@@ -12,6 +12,7 @@ samples."""
 import asyncio
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from typing import AsyncGenerator, List, Optional
 
@@ -76,6 +77,10 @@ class LlamaCppEngine:
         from turing import turing_llama  # built only with TURING_BUILD_LLAMA=1
         self.max_batch_size = max(1, max_batch_size)
         self.llm = turing_llama.Llama(path, n_ctx=n_ctx, n_threads=n_threads, n_seq=self.max_batch_size, **llama_kwargs)
+        # Every libllama call runs on this one thread: libgomp keeps a team of threads per calling thread, and once a
+        # process holds more OpenMP threads than CPUs it stops spinning between parallel regions (80 against 60 ms a
+        # token, Qwen3-8B on 16 vCPUs: results_cpu_wave7_c4.json).
+        self._compute = ThreadPoolExecutor(1, thread_name_prefix="libllama")
         self.tokenizer = tokenizer
         meta = metadata or {}
         arch = meta.get("general.architecture", "llama")
@@ -131,9 +136,12 @@ class LlamaCppEngine:
 
     async def warm_up(self) -> float:
         t0 = time.perf_counter()
-        await asyncio.to_thread(self.llm.prefill, [max(self.llm.bos, 0)])
+        await self._call(self.llm.prefill, [max(self.llm.bos, 0)])
         self.llm.truncate(0)  # the batched loop hands sequence 0 out as empty
         return time.perf_counter() - t0
+
+    async def _call(self, fn, *args):
+        return await asyncio.get_running_loop().run_in_executor(self._compute, fn, *args)
 
     # ------------------------------------------------------------------ requests
     async def add_request(self, prompt_tokens: List[int], max_new_tokens: int, temperature: float = 0.0, top_k: int = 0,
@@ -182,7 +190,7 @@ class LlamaCppEngine:
             self.running_batch.append(req)
             loop = asyncio.get_running_loop()
             try:
-                await asyncio.to_thread(self._run, req, loop)
+                await self._call(self._run, req, loop)
             except BaseException as e:  # reported to the request's stream, the engine keeps serving
                 req.error = e
             finally:
@@ -219,7 +227,7 @@ class LlamaCppEngine:
             running = list(self.running_batch)
             seqs = [seq[r] for r in running]
             try:
-                rows = await asyncio.to_thread(self.llm.step, seqs, [feed[r] for r in running], [length[s] for s in seqs])
+                rows = await self._call(self.llm.step, seqs, [feed[r] for r in running], [length[s] for s in seqs])
             except BaseException as e:  # the whole step failed: fail its requests, keep serving
                 for r in running:
                     r.error = e

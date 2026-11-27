@@ -328,6 +328,7 @@ def main():
         # the CPU backend on libllama (decision CF1a): a GGUF file, one request at a time, the same HTTP APIs
         if not (args.model.endswith(".gguf") and os.path.isfile(args.model)):
             raise SystemExit("[!] --backend libllama serves a local .gguf file: pass its path to --model")
+        torch.set_num_threads(1)  # torch only samples here; its OpenMP team beside ggml's slows each step (llama_engine.py)
         try:
             from turing.serving.llama_engine import LlamaCppEngine
             from turing.models.gguf_loader import GGUFReader

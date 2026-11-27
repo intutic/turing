@@ -89,12 +89,20 @@ side; 4 and 6 follow 1. Wave 7 last.
   batched and one-token kernels round apart with 4-bit weights and fp16 KV, so a near-tie can flip a token.
 - **Wave 4 done** (`results_cpu_waves45_c4a.json`, `results_cpu_waves46_c4.json`): BitNet-b1.58-2B-4T, run through
   `third_party/patches/0001`, has the same WikiText-2 perplexity in TQ2_0 / TQ1_0 as in F16 (15.070 / 15.070 / 15.074
-  +/- 0.43) and decodes 85.3 tok/s in TQ2_0 against 41.4 in Q4_K_M on a Xeon 6 (2.06x); prompt processing is 2.4x
+  +/- 0.43) and decodes 85.3 tok/s in TQ2_0 against 41.4 in Q4_K_M on a Xeon Platinum 8581C (2.06x); prompt processing is 2.4x
   slower. Llama-3.1-8B (not trained ternary, speed only) decodes 1.48x faster in TQ2_0 on a Neoverse-V2.
 - **Wave 5 no-go as designed**: a column-sparse 4-bit kernel streams 29-38 GB/s against ggml's 126-154 GB/s dense, 2x
   slower than dense even at 50% sparsity. TEAL on the CPU needs a different kernel (skip units of a cache line or more,
   outputs held in registers) before a llama.cpp patch is worth writing; not built.
-- **Wave 7 built** (`--max-batch-size N`): several requests decode together, exact against HF; throughput being measured.
+- **Wave 7 measured on x86** (`results_cpu_wave7_c4.json`, c4-standard-16, Qwen3-8B): the engine decodes 8 sequences at
+  70.0 tok/s and 16 at 109.5 in Q4_K_M (llama-batched-bench 68.6-69.6 and 106.2-108.9), 130.5 at 16 in Q4_0 (126.1-131.9).
+  Over HTTP (`turing serve --backend libllama --max-batch-size 8` against `llama-server -np 8`, 128 greedy tokens a
+  request): 15.2 / 34.4 / 53.4 tok/s at 1 / 4 / 8 requests against 15.7 / 37.4 / 63.6. The engine runs every libllama
+  call on one thread now: on `asyncio.to_thread` workers beside torch, libgomp held more threads than CPUs and every
+  step took 80 ms instead of 60 (12.1 tok/s at 1 request before the fix). Open: the rest of the gap at 8 requests is in
+  the server's per-token work (a Python loop over `step` makes 70 tok/s); vLLM-CPU and batch 64 not run.
+- **Wave 1 on x86** (same file): `turing-cpu` within 4% of llama-bench for Qwen3-8B Q4_0 / Q4_K_M / Q8_0 with repack on
+  and off (Q4_K_M decode 16.5 against 16.5, prompt 195 against 183).
 - **Wave 6 measured on x86** (`results_cpu_waves46_c4.json`): AMX through ggml's extra buffer types speeds Qwen3-8B
-  prompt processing 3.3x for Q4_0 (187 against 57 tok/s) and Q8_0 (201 against 61) on a Xeon 6, 1.13x for Q4_K_M.
+  prompt processing 3.3x for Q4_0 (187 against 57 tok/s) and Q8_0 (201 against 61) on a Xeon Platinum 8581C (5th-generation Xeon, Emerald Rapids), 1.13x for Q4_K_M.
   Turing's backend uses those buffer types by default (repack on). SME2 on Apple M4 is unmeasured (CF3: cloud only).

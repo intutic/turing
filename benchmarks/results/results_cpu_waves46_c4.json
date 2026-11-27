@@ -1,5 +1,5 @@
 {
-  "note": "Waves 4 and 6 on a temporary Spot GCP c4-standard-16 (Xeon 6 with AMX: amx_bf16 amx_int8 amx_tile; 16 vCPU, read bandwidth 112 GB/s with 16 threads) of 2026-11-27, llama.cpp 171527522 plus third_party/patches/0001, 16 threads. Turing's own rows (turing-cpu parity, --seqs batching, the TEAL bench) are missing: its build forced GGML_CPU_KLEIDIAI on, which ggml refuses outside ARM (fixed in CMakeLists.txt after this run).",
+  "note": "Waves 4 and 6 on a temporary Spot GCP c4-standard-16 (Xeon Platinum 8581C, 5th-generation Xeon (Emerald Rapids), with AMX: amx_bf16 amx_int8 amx_tile; 16 vCPU, read bandwidth 112 GB/s with 16 threads) of 2026-11-27, llama.cpp 171527522 plus third_party/patches/0001, 16 threads. Turing's own rows (turing-cpu parity, --seqs batching, the TEAL bench) are missing: its build forced GGML_CPU_KLEIDIAI on, which ggml refuses outside ARM (fixed in CMakeLists.txt after this run).",
   "wave6_amx_qwen3_8b": {
     "note": "llama-bench -p 512 -n 128 -r 3; repack 1 = ggml's extra buffer types on (AMX for Q4_0/Q8_0/Q4_K), repack 0 = off.",
     "Q4_0_repack1": [

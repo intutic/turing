@@ -1,0 +1,519 @@
+{
+  "note": "Wave 7 and the Turing backend on x86: a temporary Spot GCP c4-standard-16 (INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 5th-generation Xeon (Emerald Rapids) with AMX; 16 vCPU, 58 GB) of 2026-11-27, llama.cpp 171527522 plus third_party/patches, 16 threads, Qwen3-8B GGUFs from Qwen/Qwen3-8B-GGUF. Every row of a section ran in the same boot.",
+  "parity_qwen3_8b": {
+    "note": "llama-bench -p 512 -n 128 -r 3 against turing-cpu bench --prompt-tokens 512 --gen-tokens 128 --reps 3 (median of 3 after a warm-up); repack 1 = ggml's extra buffer types (AMX), 0 = off (turing-cpu --no-repack). tok/s.",
+    "rows": [
+      {
+        "quant": "Q4_0",
+        "repack": true,
+        "llama_pp512": 183.53,
+        "llama_pp512_sd": 0.29,
+        "turing_pp512": 176.76,
+        "llama_tg128": 24.41,
+        "llama_tg128_sd": 0.16,
+        "turing_tg128": 24.42
+      },
+      {
+        "quant": "Q4_0",
+        "repack": false,
+        "llama_pp512": 57.72,
+        "llama_pp512_sd": 0.74,
+        "turing_pp512": 56.64,
+        "llama_tg128": 12.58,
+        "llama_tg128_sd": 0.43,
+        "turing_tg128": 12.87
+      },
+      {
+        "quant": "Q4_K_M",
+        "repack": true,
+        "llama_pp512": 182.6,
+        "llama_pp512_sd": 7.09,
+        "turing_pp512": 195.37,
+        "llama_tg128": 16.48,
+        "llama_tg128_sd": 0.07,
+        "turing_tg128": 16.54
+      },
+      {
+        "quant": "Q4_K_M",
+        "repack": false,
+        "llama_pp512": 146.22,
+        "llama_pp512_sd": 0.43,
+        "turing_pp512": 142.84,
+        "llama_tg128": 17.34,
+        "llama_tg128_sd": 0.35,
+        "turing_tg128": 17.63
+      },
+      {
+        "quant": "Q8_0",
+        "repack": true,
+        "llama_pp512": 188.9,
+        "llama_pp512_sd": 2.7,
+        "turing_pp512": 190.76,
+        "llama_tg128": 13.06,
+        "llama_tg128_sd": 0.08,
+        "turing_tg128": 12.97
+      },
+      {
+        "quant": "Q8_0",
+        "repack": false,
+        "llama_pp512": 61.72,
+        "llama_pp512_sd": 0.49,
+        "turing_pp512": 60.86,
+        "llama_tg128": 11.87,
+        "llama_tg128_sd": 0.03,
+        "turing_tg128": 12.07
+      }
+    ]
+  },
+  "batch_qwen3_8b": {
+    "note": "128-token prompts, 64 decode steps. Turing: turing-cpu bench --seqs N (sequences prefilled together, then one token each per step through TuringLlama::step; N = 1 is the single-sequence bench). llama.cpp: llama-batched-bench -c 4096 -b 2048 -ub 512 -npp 128 -ntg 64 -npl 1,4,8,16, unified KV (-kvu) and per-sequence (-no-kvu), 2 runs each. Decode tok/s summed over the sequences.",
+    "rows": [
+      {
+        "quant": "Q4_K_M",
+        "seqs": 1,
+        "turing_tg_total": 16.62,
+        "turing_pp_total": 197.16,
+        "llama_tg_total_unified_kv": [
+          16.43,
+          16.44
+        ],
+        "llama_tg_total_per_seq_kv": [
+          16.49,
+          16.49
+        ]
+      },
+      {
+        "quant": "Q4_K_M",
+        "seqs": 4,
+        "turing_tg_total": 40.29,
+        "turing_pp_total": 207.88,
+        "llama_tg_total_unified_kv": [
+          39.45,
+          39.54
+        ],
+        "llama_tg_total_per_seq_kv": [
+          38.96,
+          39.28
+        ]
+      },
+      {
+        "quant": "Q4_K_M",
+        "seqs": 8,
+        "turing_tg_total": 69.98,
+        "turing_pp_total": 200.02,
+        "llama_tg_total_unified_kv": [
+          69.15,
+          68.58
+        ],
+        "llama_tg_total_per_seq_kv": [
+          69.44,
+          69.57
+        ]
+      },
+      {
+        "quant": "Q4_K_M",
+        "seqs": 16,
+        "turing_tg_total": 109.53,
+        "turing_pp_total": 206.24,
+        "llama_tg_total_unified_kv": [
+          106.16,
+          106.28
+        ],
+        "llama_tg_total_per_seq_kv": [
+          108.59,
+          108.93
+        ]
+      },
+      {
+        "quant": "Q4_0",
+        "seqs": 1,
+        "turing_tg_total": 24.59,
+        "turing_pp_total": 178.97,
+        "llama_tg_total_unified_kv": [
+          24.22,
+          24.12
+        ],
+        "llama_tg_total_per_seq_kv": [
+          24.2,
+          23.94
+        ]
+      },
+      {
+        "quant": "Q4_0",
+        "seqs": 4,
+        "turing_tg_total": 58.62,
+        "turing_pp_total": 179.76,
+        "llama_tg_total_unified_kv": [
+          58.38,
+          57.96
+        ],
+        "llama_tg_total_per_seq_kv": [
+          57.87,
+          57.81
+        ]
+      },
+      {
+        "quant": "Q4_0",
+        "seqs": 8,
+        "turing_tg_total": 90.26,
+        "turing_pp_total": 180.72,
+        "llama_tg_total_unified_kv": [
+          91.15,
+          89.12
+        ],
+        "llama_tg_total_per_seq_kv": [
+          89.55,
+          87.67
+        ]
+      },
+      {
+        "quant": "Q4_0",
+        "seqs": 16,
+        "turing_tg_total": 130.49,
+        "turing_pp_total": 182.55,
+        "llama_tg_total_unified_kv": [
+          126.12,
+          130.09
+        ],
+        "llama_tg_total_per_seq_kv": [
+          131.2,
+          131.88
+        ]
+      }
+    ]
+  },
+  "http_qwen3_8b_q4_k_m": {
+    "note": "One client on the VM (scratchpad load.py): N /v1/completions requests at once, a fresh prompt each (~25 tokens), 128 greedy tokens; total_tok_s = generated tokens over the round's wall time, prefill and HTTP included. turing serve --backend libllama --max-batch-size 8 --ctx 8192 --threads 16 against llama-server -np 8 -c 8192 -t 16. A warm-up round, then rounds a and b.",
+    "rows": [
+      {
+        "engine": "turing, before the one-thread fix",
+        "concurrent": 1,
+        "round": "1a",
+        "total_tok_s": 12.14,
+        "completion_tokens": 128,
+        "wall_s": 10.54,
+        "latency_s": [
+          10.54
+        ]
+      },
+      {
+        "engine": "turing, before the one-thread fix",
+        "concurrent": 1,
+        "round": "1b",
+        "total_tok_s": 12.15,
+        "completion_tokens": 128,
+        "wall_s": 10.54,
+        "latency_s": [
+          10.54
+        ]
+      },
+      {
+        "engine": "turing, before the one-thread fix",
+        "concurrent": 4,
+        "round": "4a",
+        "total_tok_s": 29.91,
+        "completion_tokens": 512,
+        "wall_s": 17.12,
+        "latency_s": [
+          16.99,
+          17.11,
+          17.11,
+          17.11
+        ]
+      },
+      {
+        "engine": "turing, before the one-thread fix",
+        "concurrent": 4,
+        "round": "4b",
+        "total_tok_s": 29.88,
+        "completion_tokens": 512,
+        "wall_s": 17.13,
+        "latency_s": [
+          17.01,
+          17.13,
+          17.13,
+          17.13
+        ]
+      },
+      {
+        "engine": "turing, before the one-thread fix",
+        "concurrent": 8,
+        "round": "8a",
+        "total_tok_s": 49.75,
+        "completion_tokens": 1024,
+        "wall_s": 20.58,
+        "latency_s": [
+          20.43,
+          20.58,
+          20.58,
+          20.58,
+          20.58,
+          20.58,
+          20.58,
+          20.58
+        ]
+      },
+      {
+        "engine": "turing, before the one-thread fix",
+        "concurrent": 8,
+        "round": "8b",
+        "total_tok_s": 49.79,
+        "completion_tokens": 1024,
+        "wall_s": 20.57,
+        "latency_s": [
+          20.42,
+          20.56,
+          20.56,
+          20.56,
+          20.56,
+          20.56,
+          20.56,
+          20.56
+        ]
+      },
+      {
+        "engine": "llama-server",
+        "concurrent": 1,
+        "round": "1a",
+        "total_tok_s": 15.56,
+        "completion_tokens": 128,
+        "wall_s": 8.23,
+        "latency_s": [
+          8.22
+        ]
+      },
+      {
+        "engine": "llama-server",
+        "concurrent": 1,
+        "round": "1b",
+        "total_tok_s": 15.85,
+        "completion_tokens": 128,
+        "wall_s": 8.07,
+        "latency_s": [
+          8.07
+        ]
+      },
+      {
+        "engine": "llama-server",
+        "concurrent": 4,
+        "round": "4a",
+        "total_tok_s": 37.21,
+        "completion_tokens": 512,
+        "wall_s": 13.76,
+        "latency_s": [
+          13.76,
+          13.76,
+          13.76,
+          13.76
+        ]
+      },
+      {
+        "engine": "llama-server",
+        "concurrent": 4,
+        "round": "4b",
+        "total_tok_s": 37.5,
+        "completion_tokens": 512,
+        "wall_s": 13.65,
+        "latency_s": [
+          13.65,
+          13.65,
+          13.65,
+          13.65
+        ]
+      },
+      {
+        "engine": "llama-server",
+        "concurrent": 8,
+        "round": "8a",
+        "total_tok_s": 63.15,
+        "completion_tokens": 1024,
+        "wall_s": 16.22,
+        "latency_s": [
+          16.21,
+          16.21,
+          16.21,
+          16.21,
+          16.21,
+          16.21,
+          16.21,
+          16.21
+        ]
+      },
+      {
+        "engine": "llama-server",
+        "concurrent": 8,
+        "round": "8b",
+        "total_tok_s": 64.13,
+        "completion_tokens": 1024,
+        "wall_s": 15.97,
+        "latency_s": [
+          15.96,
+          15.96,
+          15.96,
+          15.96,
+          15.96,
+          15.96,
+          15.97,
+          15.97
+        ]
+      },
+      {
+        "engine": "turing",
+        "concurrent": 1,
+        "round": "fix1a",
+        "total_tok_s": 15.32,
+        "completion_tokens": 128,
+        "wall_s": 8.36,
+        "latency_s": [
+          8.36
+        ]
+      },
+      {
+        "engine": "turing",
+        "concurrent": 1,
+        "round": "fix1b",
+        "total_tok_s": 15.09,
+        "completion_tokens": 128,
+        "wall_s": 8.48,
+        "latency_s": [
+          8.48
+        ]
+      },
+      {
+        "engine": "turing",
+        "concurrent": 4,
+        "round": "fix4a",
+        "total_tok_s": 34.43,
+        "completion_tokens": 512,
+        "wall_s": 14.87,
+        "latency_s": [
+          14.76,
+          14.87,
+          14.87,
+          14.87
+        ]
+      },
+      {
+        "engine": "turing",
+        "concurrent": 4,
+        "round": "fix4b",
+        "total_tok_s": 34.46,
+        "completion_tokens": 512,
+        "wall_s": 14.86,
+        "latency_s": [
+          14.75,
+          14.86,
+          14.86,
+          14.86
+        ]
+      },
+      {
+        "engine": "turing",
+        "concurrent": 8,
+        "round": "fix8a",
+        "total_tok_s": 53.51,
+        "completion_tokens": 1024,
+        "wall_s": 19.14,
+        "latency_s": [
+          19.0,
+          19.13,
+          19.13,
+          19.13,
+          19.13,
+          19.14,
+          19.14,
+          19.14
+        ]
+      },
+      {
+        "engine": "turing",
+        "concurrent": 8,
+        "round": "fix8b",
+        "total_tok_s": 53.31,
+        "completion_tokens": 1024,
+        "wall_s": 19.21,
+        "latency_s": [
+          19.08,
+          19.21,
+          19.21,
+          19.21,
+          19.21,
+          19.21,
+          19.21,
+          19.21
+        ]
+      }
+    ],
+    "streamed_one_request": {
+      "note": "scratchpad stream.py: one streamed request, 128 greedy tokens; chunks carry one or two tokens, so total_s is the figure to compare.",
+      "before_fix": [
+        "turing-b8 {\"chunks\": 110, \"first_s\": 0.395, \"total_s\": 10.536, \"median_gap_ms\": 80.1, \"mean_gap_ms\": 93.0}",
+        "turing-b8 {\"chunks\": 67, \"first_s\": 0.349, \"total_s\": 10.496, \"median_gap_ms\": 159.7, \"mean_gap_ms\": 153.7}",
+        "turing-b8 {\"chunks\": 110, \"first_s\": 0.376, \"total_s\": 10.526, \"median_gap_ms\": 80.1, \"mean_gap_ms\": 93.1}",
+        "turing-b1 {\"chunks\": 67, \"first_s\": 0.39, \"total_s\": 10.543, \"median_gap_ms\": 159.5, \"mean_gap_ms\": 153.8}",
+        "turing-b1 {\"chunks\": 71, \"first_s\": 0.327, \"total_s\": 10.473, \"median_gap_ms\": 159.5, \"mean_gap_ms\": 144.9}",
+        "turing-b1 {\"chunks\": 67, \"first_s\": 0.378, \"total_s\": 10.524, \"median_gap_ms\": 159.6, \"mean_gap_ms\": 153.7}",
+        "llama-np8 {\"chunks\": 129, \"first_s\": 0.203, \"total_s\": 8.014, \"median_gap_ms\": 61.4, \"mean_gap_ms\": 61.0}",
+        "llama-np8 {\"chunks\": 129, \"first_s\": 0.167, \"total_s\": 7.964, \"median_gap_ms\": 61.4, \"mean_gap_ms\": 60.9}",
+        "llama-np8 {\"chunks\": 129, \"first_s\": 0.174, \"total_s\": 7.991, \"median_gap_ms\": 61.6, \"mean_gap_ms\": 61.1}"
+      ],
+      "after_fix": [
+        "stream b8 {\"chunks\": 67, \"first_s\": 0.347, \"total_s\": 8.249, \"median_gap_ms\": 123.5, \"mean_gap_ms\": 119.7}",
+        "stream b8 {\"chunks\": 129, \"first_s\": 0.338, \"total_s\": 8.301, \"median_gap_ms\": 61.9, \"mean_gap_ms\": 62.2}",
+        "stream b1 {\"chunks\": 110, \"first_s\": 0.353, \"total_s\": 8.829, \"median_gap_ms\": 67.1, \"mean_gap_ms\": 77.8}",
+        "stream b1 {\"chunks\": 67, \"first_s\": 0.349, \"total_s\": 8.82, \"median_gap_ms\": 133.0, \"mean_gap_ms\": 128.3}"
+      ]
+    }
+  },
+  "openmp_diagnosis": {
+    "note": "turing serve decoded at 80 ms a token where turing-cpu and a Python loop over Llama.step took 60. ggml and torch share one libgomp, which keeps a team of threads per calling thread; the server ran libllama calls on asyncio.to_thread workers and torch on the event loop's thread, so the process held more OpenMP threads than its 16 CPUs and libgomp stopped spinning between parallel regions (OMP_WAIT_POLICY=passive on the main thread: 88 ms; =active with a second team: 797 ms). Fewer ggml threads did not help (15: 11.1 tok/s, 14: 11.0, 16: 12.1). Fix: every libllama call on one engine-owned thread, torch.set_num_threads(1) in turing serve --backend libllama. Lines: ms per decode step, Qwen3-8B Q4_K_M, 16 threads.",
+    "generate_main_vs_worker_thread": [
+      "generate, n_ctx 4096, main thread              64.1 ms/step (median)",
+      "generate, n_ctx 4096, worker thread            81.1 ms/step (median)",
+      "generate, n_ctx 8192, main thread              62.6 ms/step (median)",
+      "generate, n_ctx 8192, worker thread            81.9 ms/step (median)",
+      "generate, n_ctx 8192, after the server imports   64.9 ms/step (median)",
+      "generate on the engine's Llama (as turing serve)   67.0 ms/step (median)"
+    ],
+    "openmp_env": [
+      "(default)                                main thread      70.9 ms/step",
+      "(default)                                worker thread    87.0 ms/step",
+      "(default)                                main again       69.0 ms/step",
+      "OMP_WAIT_POLICY=passive                  main thread      88.2 ms/step",
+      "OMP_WAIT_POLICY=passive                  worker thread    86.7 ms/step",
+      "OMP_WAIT_POLICY=passive                  main again       86.4 ms/step",
+      "OMP_WAIT_POLICY=active                   main thread      66.2 ms/step",
+      "OMP_WAIT_POLICY=active                   worker thread   797.4 ms/step",
+      "OMP_WAIT_POLICY=active                   main again       60.9 ms/step",
+      "OMP_PROC_BIND=true                       main thread      60.8 ms/step",
+      "OMP_PROC_BIND=true                       worker thread    78.7 ms/step",
+      "OMP_PROC_BIND=true                       main again       61.0 ms/step"
+    ],
+    "one_compute_thread_fresh_process": [
+      "(default)                    main       rep 0   60.7 ms/step",
+      "(default)                    main       rep 1   60.3 ms/step",
+      "(default)                    dedicated  rep 0   60.5 ms/step",
+      "(default)                    dedicated  rep 1   60.4 ms/step",
+      "(default)                    pool       rep 0   60.4 ms/step",
+      "(default)                    pool       rep 1   60.3 ms/step",
+      "OMP_WAIT_POLICY=active       dedicated  rep 0   60.5 ms/step",
+      "OMP_WAIT_POLICY=active       dedicated  rep 1   60.4 ms/step",
+      "GOMP_SPINCOUNT=10000000      dedicated  rep 0   60.3 ms/step",
+      "GOMP_SPINCOUNT=10000000      dedicated  rep 1   60.2 ms/step",
+      "GOMP_SPINCOUNT=10000000      pool       rep 0   60.4 ms/step",
+      "GOMP_SPINCOUNT=10000000      pool       rep 1   60.3 ms/step"
+    ],
+    "python_batched_loop_8_seqs": [
+      "8 seqs, numpy argmax            112.7 ms/step   71.0 tok/s total",
+      "8 seqs, torch argmax (1 thread)  114.3 ms/step   70.0 tok/s total",
+      "8 seqs, numpy argmax            113.9 ms/step   70.2 tok/s total",
+      "8 seqs, torch argmax (1 thread)  115.1 ms/step   69.5 tok/s total"
+    ],
+    "turing_serve_15_threads_after_fix": [
+      "threads=15 {\"round\": \"t15-1w\", \"max_tokens\": 128, \"completion_tokens\": 128, \"wall_s\": 9.67, \"total_tok_s\": 13.24, \"laten",
+      "threads=15 {\"round\": \"t15-1a\", \"max_tokens\": 128, \"completion_tokens\": 128, \"wall_s\": 9.56, \"total_tok_s\": 13.38, \"laten",
+      "threads=15 {\"round\": \"t15-8w\", \"max_tokens\": 128, \"completion_tokens\": 1024, \"wall_s\": 20.09, \"total_tok_s\": 50.96, \"lat",
+      "threads=15 {\"round\": \"t15-8a\", \"max_tokens\": 128, \"completion_tokens\": 1024, \"wall_s\": 20.16, \"total_tok_s\": 50.79, \"lat"
+    ]
+  }
+}
