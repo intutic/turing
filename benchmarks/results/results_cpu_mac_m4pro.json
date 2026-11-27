@@ -1,0 +1,416 @@
+{
+  "note": "CPU-first measurements on the user's Mac (decision CF3a): Apple M4 Pro (10 performance + 4 efficiency cores), 48 GB, macOS; turing-cpu built from feat/cpu-first-inference (libllama 171527522, KleidiAI, Metal off), 10 threads, repack off. gpt-oss-120b MXFP4 (63.4 GB, bigger than RAM) from the internal SSD and from a SanDisk Extreme Pro 55AF on USB (link 10 Gb/s). Other apps were open: about 20-26 GB of RAM was left for the model (turing-cpu's peak resident size 26 GB); the memory state before and after each run is logged.",
+  "drive_read_GB_s": {
+    "note": "scratchpad readspeed.py: F_NOCACHE reads; seq_8m = one thread, 8 MB in order; rand_1m_tN = N threads, 1 MB at random 1 MB-aligned offsets over the file.",
+    "rows": [
+      {
+        "file": "/Volumes/SanDisk/models/gpt-oss-120b-MXFP4.gguf",
+        "test": "seq_8m",
+        "gb": 4.0,
+        "GB_s": 0.96
+      },
+      {
+        "file": "/Volumes/SanDisk/models/gpt-oss-120b-MXFP4.gguf",
+        "test": "rand_1m_t1",
+        "gb": 4.0,
+        "GB_s": 0.75
+      },
+      {
+        "file": "/Volumes/SanDisk/models/gpt-oss-120b-MXFP4.gguf",
+        "test": "rand_1m_t8",
+        "gb": 4.0,
+        "GB_s": 1.07
+      },
+      {
+        "file": "/Volumes/SanDisk/models/gpt-oss-120b-MXFP4.gguf",
+        "test": "rand_1m_t16",
+        "gb": 4.0,
+        "GB_s": 1.08
+      },
+      {
+        "file": "/Users/ishangupta/models/gpt-oss-120b-MXFP4.gguf",
+        "test": "seq_8m",
+        "gb": 8.0,
+        "GB_s": 4.8
+      },
+      {
+        "file": "/Users/ishangupta/models/gpt-oss-120b-MXFP4.gguf",
+        "test": "rand_1m_t1",
+        "gb": 8.0,
+        "GB_s": 2.74
+      },
+      {
+        "file": "/Users/ishangupta/models/gpt-oss-120b-MXFP4.gguf",
+        "test": "rand_1m_t8",
+        "gb": 8.0,
+        "GB_s": 7.42
+      },
+      {
+        "file": "/Users/ishangupta/models/gpt-oss-120b-MXFP4.gguf",
+        "test": "rand_1m_t16",
+        "gb": 8.0,
+        "GB_s": 7.49
+      }
+    ]
+  },
+  "decode_gpt_oss_120b": {
+    "note": "turing-cpu bench --threads 10 --prompt-tokens 64 --gen-tokens 64 --reps 2 --no-repack [--readahead]: median of 2 after a 16-token warm-up, as Wave 2 ran it. No drop_caches on macOS without sudo: before each run the other drive's copy was read through the page cache (flush_s). Model load read the whole file (load_s). Read-ahead was slower than plain mmap from both drives here, where on Linux (Wave 2, 28 GB cache) it was 3.8x faster.",
+    "lines": [
+      {
+        "run": "internal_mmap",
+        "flush_s": 70,
+        "mem_before": {
+          "free_gb": 0.1,
+          "active_gb": 16.4,
+          "inactive_gb": 17.5,
+          "wired_gb": 3.8,
+          "compressor_gb": 9.5,
+          "file_backed_gb": 20.6
+        }
+      },
+      {
+        "run": "internal_mmap",
+        "model": "/Users/ishangupta/models/gpt-oss-120b-MXFP4.gguf",
+        "desc": "gpt-oss 120B MXFP4 MoE",
+        "threads": 10,
+        "mmap": true,
+        "repack": false,
+        "load_s": 25.58,
+        "pp64_tok_s": 63.0,
+        "tg64_tok_s": 17.26,
+        "reps": 2,
+        "readahead": false,
+        "readahead_bytes_read": 0,
+        "readahead_bytes_missing": 0,
+        "readahead_bytes_wanted": 0,
+        "readahead_active_calls": 0,
+        "readahead_calls": 0,
+        "readahead_s": 0.0
+      },
+      {
+        "run": "internal_mmap",
+        "wall_s": 49,
+        "mem_after": {
+          "free_gb": 0.2,
+          "active_gb": 14.1,
+          "inactive_gb": 14.1,
+          "wired_gb": 3.8,
+          "compressor_gb": 15.0,
+          "file_backed_gb": 27.3
+        },
+        "swap": "total = 7168.00M  used = 5428.19M  free = 1739.81M  (encrypted)"
+      },
+      {
+        "run": "internal_readahead",
+        "flush_s": 72,
+        "mem_before": {
+          "free_gb": 0.1,
+          "active_gb": 9.4,
+          "inactive_gb": 21.2,
+          "wired_gb": 4.3,
+          "compressor_gb": 12.1,
+          "file_backed_gb": 23.5
+        }
+      },
+      {
+        "run": "internal_readahead",
+        "model": "/Users/ishangupta/models/gpt-oss-120b-MXFP4.gguf",
+        "desc": "gpt-oss 120B MXFP4 MoE",
+        "threads": 10,
+        "mmap": true,
+        "repack": false,
+        "load_s": 25.52,
+        "pp64_tok_s": 50.36,
+        "tg64_tok_s": 9.25,
+        "reps": 2,
+        "readahead": true,
+        "readahead_bytes_read": 11366039552,
+        "readahead_bytes_missing": 24093212672,
+        "readahead_bytes_wanted": 289090684800,
+        "readahead_active_calls": 1344,
+        "readahead_calls": 4824,
+        "readahead_s": 8.533
+      },
+      {
+        "run": "internal_readahead",
+        "wall_s": 51,
+        "mem_after": {
+          "free_gb": 0.3,
+          "active_gb": 14.3,
+          "inactive_gb": 14.3,
+          "wired_gb": 3.7,
+          "compressor_gb": 14.6,
+          "file_backed_gb": 27.1
+        },
+        "swap": "total = 7168.00M  used = 5428.19M  free = 1739.81M  (encrypted)"
+      },
+      {
+        "run": "sandisk_mmap",
+        "flush_s": 9,
+        "mem_before": {
+          "free_gb": 0.1,
+          "active_gb": 7.0,
+          "inactive_gb": 22.2,
+          "wired_gb": 3.7,
+          "compressor_gb": 14.1,
+          "file_backed_gb": 26.9
+        }
+      },
+      {
+        "run": "sandisk_mmap",
+        "model": "/Volumes/SanDisk/models/gpt-oss-120b-MXFP4.gguf",
+        "desc": "gpt-oss 120B MXFP4 MoE",
+        "threads": 10,
+        "mmap": true,
+        "repack": false,
+        "load_s": 89.49,
+        "pp64_tok_s": 63.81,
+        "tg64_tok_s": 10.66,
+        "reps": 2,
+        "readahead": false,
+        "readahead_bytes_read": 0,
+        "readahead_bytes_missing": 0,
+        "readahead_bytes_wanted": 0,
+        "readahead_active_calls": 0,
+        "readahead_calls": 0,
+        "readahead_s": 0.0
+      },
+      {
+        "run": "sandisk_mmap",
+        "wall_s": 132,
+        "mem_after": {
+          "free_gb": 0.2,
+          "active_gb": 14.6,
+          "inactive_gb": 14.5,
+          "wired_gb": 3.5,
+          "compressor_gb": 14.4,
+          "file_backed_gb": 27.4
+        },
+        "swap": "total = 7168.00M  used = 5428.19M  free = 1739.81M  (encrypted)"
+      },
+      {
+        "run": "sandisk_readahead",
+        "flush_s": 9,
+        "mem_before": {
+          "free_gb": 0.1,
+          "active_gb": 11.4,
+          "inactive_gb": 18.0,
+          "wired_gb": 3.6,
+          "compressor_gb": 14.0,
+          "file_backed_gb": 27.1
+        }
+      },
+      {
+        "run": "sandisk_readahead",
+        "model": "/Volumes/SanDisk/models/gpt-oss-120b-MXFP4.gguf",
+        "desc": "gpt-oss 120B MXFP4 MoE",
+        "threads": 10,
+        "mmap": true,
+        "repack": false,
+        "load_s": 80.18,
+        "pp64_tok_s": 35.94,
+        "tg64_tok_s": 6.83,
+        "reps": 2,
+        "readahead": true,
+        "readahead_bytes_read": 11725438976,
+        "readahead_bytes_missing": 23854317568,
+        "readahead_bytes_wanted": 289090684800,
+        "readahead_active_calls": 1408,
+        "readahead_calls": 4824,
+        "readahead_s": 18.451
+      },
+      {
+        "run": "sandisk_readahead",
+        "wall_s": 128,
+        "mem_after": {
+          "free_gb": 0.3,
+          "active_gb": 14.7,
+          "inactive_gb": 14.6,
+          "wired_gb": 3.3,
+          "compressor_gb": 14.2,
+          "file_backed_gb": 27.3
+        },
+        "swap": "total = 7168.00M  used = 5428.19M  free = 1739.81M  (encrypted)"
+      }
+    ],
+    "thermal": "The drive's temperature was not monitored; the SanDisk rows ran 5-15 minutes into sustained reads and may already be throttled."
+  },
+  "verify_k_tokens_cached": {
+    "note": "scratchpad verify.py: one eval of the next k true tokens (all logits) at 16 positions, k rotated, cache truncated back after each. The k windows overlapped, so the experts were already in RAM (gb_read 0): this is the in-memory cost of checking k drafts, not the drive-bound one it set out to measure. distinct_experts and gb_wanted (read-ahead's counters, summed over the 36 MoE layers) show the experts k tokens choose: 144 for one token (4 a layer), 634 for eight.",
+    "rows": [
+      {
+        "run": "internal_mmap",
+        "readahead": false,
+        "k": 1,
+        "n": 16,
+        "median_s": 0.022,
+        "vs_k1": 1.0,
+        "tok_s_if_all_accepted": 45.81,
+        "distinct_experts": 0.0,
+        "gb_wanted": 0.0,
+        "gb_read": 0.0
+      },
+      {
+        "run": "internal_mmap",
+        "readahead": false,
+        "k": 2,
+        "n": 16,
+        "median_s": 0.034,
+        "vs_k1": 1.57,
+        "tok_s_if_all_accepted": 58.33,
+        "distinct_experts": 0.0,
+        "gb_wanted": 0.0,
+        "gb_read": 0.0
+      },
+      {
+        "run": "internal_mmap",
+        "readahead": false,
+        "k": 4,
+        "n": 16,
+        "median_s": 0.062,
+        "vs_k1": 2.82,
+        "tok_s_if_all_accepted": 64.96,
+        "distinct_experts": 0.0,
+        "gb_wanted": 0.0,
+        "gb_read": 0.0
+      },
+      {
+        "run": "internal_mmap",
+        "readahead": false,
+        "k": 8,
+        "n": 16,
+        "median_s": 0.129,
+        "vs_k1": 5.89,
+        "tok_s_if_all_accepted": 62.24,
+        "distinct_experts": 0.0,
+        "gb_wanted": 0.0,
+        "gb_read": 0.0
+      },
+      {
+        "run": "sandisk_mmap",
+        "readahead": false,
+        "k": 1,
+        "n": 16,
+        "median_s": 0.022,
+        "vs_k1": 1.0,
+        "tok_s_if_all_accepted": 45.14,
+        "distinct_experts": 0.0,
+        "gb_wanted": 0.0,
+        "gb_read": 0.0
+      },
+      {
+        "run": "sandisk_mmap",
+        "readahead": false,
+        "k": 2,
+        "n": 16,
+        "median_s": 0.036,
+        "vs_k1": 1.62,
+        "tok_s_if_all_accepted": 55.75,
+        "distinct_experts": 0.0,
+        "gb_wanted": 0.0,
+        "gb_read": 0.0
+      },
+      {
+        "run": "sandisk_mmap",
+        "readahead": false,
+        "k": 4,
+        "n": 16,
+        "median_s": 0.061,
+        "vs_k1": 2.75,
+        "tok_s_if_all_accepted": 65.69,
+        "distinct_experts": 0.0,
+        "gb_wanted": 0.0,
+        "gb_read": 0.0
+      },
+      {
+        "run": "sandisk_mmap",
+        "readahead": false,
+        "k": 8,
+        "n": 16,
+        "median_s": 0.152,
+        "vs_k1": 6.86,
+        "tok_s_if_all_accepted": 52.64,
+        "distinct_experts": 0.0,
+        "gb_wanted": 0.0,
+        "gb_read": 0.0
+      },
+      {
+        "run": "sandisk_readahead",
+        "readahead": true,
+        "k": 1,
+        "n": 16,
+        "median_s": 0.072,
+        "vs_k1": 1.0,
+        "tok_s_if_all_accepted": 13.93,
+        "distinct_experts": 144.0,
+        "gb_wanted": 1.904,
+        "gb_read": 0.0
+      },
+      {
+        "run": "sandisk_readahead",
+        "readahead": true,
+        "k": 2,
+        "n": 16,
+        "median_s": 0.116,
+        "vs_k1": 1.61,
+        "tok_s_if_all_accepted": 17.26,
+        "distinct_experts": 243.0,
+        "gb_wanted": 3.212,
+        "gb_read": 0.0
+      },
+      {
+        "run": "sandisk_readahead",
+        "readahead": true,
+        "k": 4,
+        "n": 16,
+        "median_s": 0.191,
+        "vs_k1": 2.66,
+        "tok_s_if_all_accepted": 20.93,
+        "distinct_experts": 397.5,
+        "gb_wanted": 5.255,
+        "gb_read": 0.0
+      },
+      {
+        "run": "sandisk_readahead",
+        "readahead": true,
+        "k": 8,
+        "n": 16,
+        "median_s": 0.359,
+        "vs_k1": 5.01,
+        "tok_s_if_all_accepted": 22.26,
+        "distinct_experts": 633.5,
+        "gb_wanted": 8.374,
+        "gb_read": 0.0
+      }
+    ]
+  },
+  "speculation_gpt_oss_120b": {
+    "note": "scratchpad spec.sh: turing-cpu generate, Wave 3's code-edit prompt in gpt-oss's format (final channel), 200 greedy tokens, prompt-lookup drafts 0 and 4 alternated twice per drive, plain mmap, repack off; seconds include the prompt.",
+    "rows": [
+      {
+        "drive": "sandisk",
+        "draft": 0,
+        "round": "a",
+        "tokens": 108,
+        "seconds": 105.109,
+        "tok_s": 1.02751,
+        "drafted": 0,
+        "accepted": 0,
+        "steps": null
+      },
+      {
+        "drive": "sandisk",
+        "draft": 4,
+        "round": "a",
+        "tokens": 108,
+        "seconds": 109.092,
+        "tok_s": 0.989993,
+        "drafted": 17,
+        "accepted": 7,
+        "steps": 101
+      }
+    ],
+    "text_identical": [],
+    "stopped": "Stopped after the first two SanDisk runs: the user reported the drive overheating, after about 40 minutes in which it served ~0.5 TB of reads at up to 1 GB/s (the copy, cache flushes, and each run's load reading the whole 63 GB file). Their 1.0 tok/s, against 10.7 in decode_gpt_oss_120b, is taken as thermal throttling: not a measurement of speculation. Internal-SSD runs not done."
+  }
+}

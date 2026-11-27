@@ -111,6 +111,14 @@ side; 4 and 6 follow 1. Wave 7 last.
   tokens and answer alike. Inside the server a step at 8 requests is 116 ms of libllama compute (111.7 in a plain loop
   over `step`, whose sequences are shorter) plus 2.2 ms of hand-offs and event loop. Open: the 16-request gap and its
   drift; vLLM-CPU and batch 64 not run.
+- **On the Mac** (`results_cpu_mac_m4pro.json`, decision CF3a; M4 Pro, 48 GB, ~20-26 GB left for the model): the internal
+  SSD reads 4.8 GB/s in order and 7.5 GB/s with 8-16 parallel 1 MB reads, the SanDisk Extreme Pro (USB, 10 Gb/s link)
+  0.96 and 1.08. gpt-oss-120b (63.4 GB) decodes at 17.3 tok/s from the internal SSD and 10.7 from the SanDisk with
+  plain mmap; Turing's read-ahead is slower on macOS (9.3 and 6.8), where it was 3.8x faster on Linux. With its experts
+  already in RAM a token takes 22 ms (45 tok/s), so 60-80% of decode time is waiting on the drive. Checking k drafts on
+  this MoE needs almost k times the experts (144 for one token, 398 for 4, 634 for 8): 4 drafts cost 2.75x one token
+  even in RAM. The SanDisk overheated after ~40 minutes of sustained reads (its last runs fell to 1 tok/s): runs
+  stopped; the speculation test from the internal SSD is not done.
 - **Wave 1 on x86** (same file): `turing-cpu` within 4% of llama-bench for Qwen3-8B Q4_0 / Q4_K_M / Q8_0 with repack on
   and off (Q4_K_M decode 16.5 against 16.5, prompt 195 against 183).
 - **Wave 6 measured on x86** (`results_cpu_waves46_c4.json`): AMX through ggml's extra buffer types speeds Qwen3-8B

@@ -24,6 +24,12 @@
 - Rationale: the user's choice (heavy runs slow their Mac, as in the 2026-11-16 note). Consequence: the SPEC's M4 Pro
   targets are measured on the cloud ARM VM instead, and the M4 numbers stay unmeasured.
 
+## CF3a Mac and SanDisk measurements allowed — 2026-11-27
+- Decision: the user's Mac (M4 Pro, 48 GB) and the SanDisk Extreme Pro on it are measured too, beside the cloud VMs;
+  each Mac run with the user's go-ahead, while the Mac is otherwise idle.
+- Rationale: the user's choice ("test on my mac as well apart from cloud vm", "Yes, measure first"). A model bigger than
+  RAM needs no memory cap there: gpt-oss-120b (63 GB) is already larger than 48 GB.
+
 ## CF4 Lossy modes: opt-in, quality printed — 2026-11-27
 - Decision: ternary, activation sparsity and fewer-experts modes are built as switches that print their measured quality
   cost (delta NLL with standard error); exact output stays the default.
