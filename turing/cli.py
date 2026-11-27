@@ -129,7 +129,7 @@ def main():
     serve_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
     serve_parser.add_argument("--no-cuda-graphs", action="store_true", help="Run decode steps eagerly instead of replaying CUDA graphs")
     serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=None, help="Share of free GPU memory (after the weights) for the paged KV pool (default: all of it but a reserve of a tenth of the GPU's memory, at least 2 GiB)")
-    serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
+    serve_parser.add_argument("--max-batch-size", type=int, default=None, help="Continuous batching size (default 64; --backend libllama: 1, one request at a time, or N sequences decoded together)")
     serve_parser.add_argument("--embedding-model", type=str, default=None, help="HF embedding model (e.g. BAAI/bge-small-en-v1.5) for /v1/embeddings; default: the served model's mean-pooled hidden states")
     serve_parser.add_argument("--rerank-model", type=str, default=None, help="HF cross-encoder (e.g. cross-encoder/ms-marco-MiniLM-L-6-v2) for /v1/rerank; default: the served model's yes/no likelihood")
     serve_parser.add_argument("--draft-tokens", type=int, default=None, help="Speculative draft tokens per request and step (0 = off): from prompt lookup, or from --draft-head (default 8; --backend libllama: 0, prompt lookup for greedy requests)")
@@ -335,7 +335,7 @@ def main():
             meta = GGUFReader(args.model, willneed=False).metadata
             engine = LlamaCppEngine(args.model, GGUFTokenizer(meta), args.served_model_name or os.path.basename(args.model),
                                     metadata=meta, n_ctx=args.ctx, n_threads=args.threads,
-                                    draft_tokens=args.draft_tokens or 0,
+                                    draft_tokens=args.draft_tokens or 0, max_batch_size=args.max_batch_size or 1,
                                     **(dict(readahead=True, repack=False) if args.expert_readahead else {}))
         except ImportError as e:
             raise SystemExit(f"[!] The libllama backend is not built ({e}): git submodule update --init "
@@ -349,7 +349,7 @@ def main():
         uvicorn.run(app, host=args.host, port=args.port)
 
     elif args.command == "serve":
-        jcfg = TuringConfig(device=args.device, max_batch_size=args.max_batch_size)
+        jcfg = TuringConfig(device=args.device, max_batch_size=args.max_batch_size or 64)
         dev = jcfg.resolve_device()
 
         model_inst = None

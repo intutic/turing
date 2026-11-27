@@ -224,3 +224,58 @@ def test_expert_readahead_adapts_to_the_miss_share(tmp_path):
         warm.eval([t])
     s = warm.readahead_stats()
     assert s["active_calls"] == 0 and s["bytes_read"] == 0 and s["bytes_missing"] <= s["bytes_wanted"] // 20
+
+
+def test_step_decodes_several_sequences_like_one_each(tmp_path):
+    """Wave 7: one batched step over two sequences gives each the logits it gets alone (exact mode)."""
+    path = _write_gguf(str(tmp_path / "q3.gguf"), _hf_model("qwen3"), merges=True)
+    a, b = PROMPT, [5, 9, 77, 31, 2, 64, 42]
+    alone = [torch.from_numpy(_llama(path).eval(x)) for x in (a, b)]
+    both = _llama(path, n_seq=2)
+    rows = torch.from_numpy(both.step([0, 1], [a, b], [0, 0]))
+    torch.testing.assert_close(rows[0], alone[0], atol=1e-4, rtol=0)
+    torch.testing.assert_close(rows[1], alone[1], atol=1e-4, rtol=0)
+    nxt = torch.from_numpy(both.step([1, 0], [[DECODE[0]], [DECODE[1]]], [len(b), len(a)]))  # order and positions per sequence
+    torch.testing.assert_close(nxt[0], _hf_logits(_hf_model("qwen3"), b + [DECODE[0]])[-1], atol=1e-3, rtol=0)
+    torch.testing.assert_close(nxt[1], _hf_logits(_hf_model("qwen3"), a + [DECODE[1]])[-1], atol=1e-3, rtol=0)
+    both.seq_clear(0)
+    torch.testing.assert_close(torch.from_numpy(both.step([0], [a], [0]))[0], alone[0], atol=1e-4, rtol=0)
+
+
+def test_batched_engine_serves_concurrent_requests_exactly(tmp_path):
+    """max_batch_size 3: three requests decode together, one with a logits processor; each gets HF's greedy tokens."""
+    import asyncio
+    from turing.models.gguf_loader import GGUFReader
+    from turing.models.gguf_tokenizer import GGUFTokenizer
+    from turing.serving.llama_engine import LlamaCppEngine
+    hf = _hf_model("qwen3")
+    path = _write_gguf(str(tmp_path / "q3.gguf"), hf, merges=True)
+    meta = GGUFReader(path, willneed=False).metadata
+    engine = LlamaCppEngine(path, GGUFTokenizer(meta), "tiny", metadata=meta, n_ctx=128, n_threads=2, exact=True,
+                            max_batch_size=3)
+    prompts = [PROMPT, [5, 9, 77, 31, 2, 64, 42], [8, 8, 30, 12]]
+    banned = _hf_greedy(hf, prompts[2], 1)[0]
+
+    def ban(gen, logits):
+        logits[banned] = float("-inf")
+        return logits
+
+    async def run():
+        await engine.start()
+        reqs = [await engine.add_request(p, 5, temperature=0.0, logits_processor=ban if i == 2 else None)
+                for i, p in enumerate(prompts)]
+        outs = await asyncio.gather(*[(lambda r: _collect(engine, r))(r) for r in reqs])
+        util = engine.get_kv_cache_utilization()
+        await engine.stop()
+        return outs, util
+
+    outs, util = asyncio.run(run())
+    eos = engine.eos_token_ids
+    assert outs[0] == _hf_greedy(hf, prompts[0], 5, eos=eos)
+    assert outs[1] == _hf_greedy(hf, prompts[1], 5, eos=eos)
+    assert outs[2] == _hf_greedy(hf, prompts[2], 5, eos=eos, banned=banned)
+    assert util == 0.0  # every sequence freed
+
+
+async def _collect(engine, req):
+    return [t async for t in engine.stream_request(req)]

@@ -2,9 +2,11 @@
 CPU kernels from the pinned third_party/llama.cpp) behind the same request interface as ContinuousBatchEngine, so the
 server's OpenAI / Anthropic / Ollama endpoints, chat templates, tools, reasoning and grammar constraints run on it.
 
-Requests are served one at a time in arrival order (batch 1: decision CF2 in bmad-output/cpu-first/decision-log.md);
-the context's KV cache is kept between them, so a request that shares a prompt prefix with the last one only evaluates
-the rest. A request without a logits processor runs libllama's own sampling loop; one with a processor (grammar,
+With max_batch_size 1 (the default) requests are served one at a time in arrival order (batch 1: decision CF2 in
+bmad-output/cpu-first/decision-log.md); the context's KV cache is kept between them, so a request that shares a prompt
+prefix with the last one only evaluates the rest. With max_batch_size > 1 (Wave 7) up to that many requests decode
+together, each in its own libllama sequence of one shared KV pool of n_ctx tokens: every step feeds each running request
+its next input in one batched call, so a weight read serves all of them. A request without a logits processor runs libllama's own sampling loop; one with a processor (grammar,
 tools, a thinking budget) gets its logits in Python each step and the engine's own sampler, as ContinuousBatchEngine
 samples."""
 import asyncio
@@ -66,13 +68,14 @@ class LlamaCppEngine:
     _processed = ContinuousBatchEngine._processed
 
     def __init__(self, path: str, tokenizer, name: str, metadata: Optional[dict] = None, n_ctx: int = 4096,
-                 n_threads: int = 0, seed: int = 0, draft_tokens: int = 0, **llama_kwargs):
+                 n_threads: int = 0, seed: int = 0, draft_tokens: int = 0, max_batch_size: int = 1, **llama_kwargs):
         """metadata: the GGUF's key/values (GGUFReader(path, willneed=False).metadata), for the model's shape.
         draft_tokens: prompt-lookup drafts per step for greedy requests without a logits processor (0 = off). Greedy in
         exact arithmetic; libllama's batched kernels round differently from its one-token kernels (fp16 KV, 4-bit
         weights), so a near-tie can flip a token (results_cpu_waves123_c4a.json)."""
         from turing import turing_llama  # built only with TURING_BUILD_LLAMA=1
-        self.llm = turing_llama.Llama(path, n_ctx=n_ctx, n_threads=n_threads, **llama_kwargs)
+        self.max_batch_size = max(1, max_batch_size)
+        self.llm = turing_llama.Llama(path, n_ctx=n_ctx, n_threads=n_threads, n_seq=self.max_batch_size, **llama_kwargs)
         self.tokenizer = tokenizer
         meta = metadata or {}
         arch = meta.get("general.architecture", "llama")
@@ -106,6 +109,7 @@ class LlamaCppEngine:
         self._completed = 0
         self._ttft: List[float] = []
         self._itl: List[float] = []
+        self._lengths: dict = {}
 
     # ------------------------------------------------------------------ text
     encode_prompt = ContinuousBatchEngine.encode_prompt
@@ -163,6 +167,8 @@ class LlamaCppEngine:
         req.cancelled = True
 
     async def _loop(self):
+        if self.max_batch_size > 1:
+            return await self._batched_loop()
         while self.is_running:
             if not self.waiting_queue:
                 self._wake.clear()
@@ -182,6 +188,82 @@ class LlamaCppEngine:
                 self.running_batch.remove(req)
                 self._completed += 1
                 loop.call_soon(req.output_queue.put_nowait, None)
+
+    async def _batched_loop(self):
+        """Wave 7: up to max_batch_size requests decode together, one libllama sequence each. A request is admitted when a
+        sequence is free and the shared pool can hold its prompt plus max_tokens beside the running ones."""
+        free = list(range(self.max_batch_size))[::-1]
+        seq, feed, reserved = {}, {}, {}
+        length = self._lengths  # tokens in each running sequence's K/V
+        while self.is_running:
+            while free and self.waiting_queue:
+                req = self.waiting_queue[0]
+                need = len(req.prompt_tokens) + req.max_new_tokens
+                if req.cancelled:
+                    self.waiting_queue.pop(0)
+                    req.output_queue.put_nowait(None)
+                    continue
+                if sum(reserved.values()) + need > self.llm.n_ctx:
+                    break  # waits for a running request to finish
+                self.waiting_queue.pop(0)
+                s = free.pop()
+                seq[req], length[s], feed[req], reserved[req] = s, 0, list(req.prompt_tokens), need
+                req.generator = torch.Generator().manual_seed(self._seed)
+                req.start = time.perf_counter()
+                self.running_batch.append(req)
+            if not self.running_batch:
+                self._wake.clear()
+                await self._wake.wait()
+                continue
+            running = list(self.running_batch)
+            seqs = [seq[r] for r in running]
+            try:
+                rows = await asyncio.to_thread(self.llm.step, seqs, [feed[r] for r in running], [length[s] for s in seqs])
+            except BaseException as e:  # the whole step failed: fail its requests, keep serving
+                for r in running:
+                    r.error = e
+                    self._finish(r, seq, free, reserved)
+                continue
+            now = time.perf_counter()
+            for i, r in enumerate(running):
+                s = seq[r]
+                length[s] += len(feed[r])
+                if r.cancelled:
+                    self._finish(r, seq, free, reserved)
+                    continue
+                row = self._processed(r, torch.from_numpy(rows[i]))
+                p = self._probs(r, row)
+                tok = int(row.argmax()) if p is None else int(torch.multinomial(p, 1, generator=r.generator))
+                if tok in self.eos_token_ids or self.llm.is_eog(tok):
+                    r.finish_reason = "stop"
+                    self._finish(r, seq, free, reserved)
+                    continue
+                if r.first_token_time is None:
+                    r.first_token_time = now
+                    self._ttft.append((now - r.start) * 1000)
+                else:
+                    self._itl.append((now - r.last) * 1000)
+                r.last = now
+                r.generated_tokens.append(tok)
+                self._tokens += 1
+                r.output_queue.put_nowait(tok)
+                if len(r.generated_tokens) >= r.max_new_tokens:
+                    r.finish_reason = "length"
+                    self._finish(r, seq, free, reserved)
+                else:
+                    feed[r] = [tok]
+
+    def _finish(self, r: _Request, seq: dict, free: list, reserved: dict) -> None:
+        s = seq.pop(r)
+        self._lengths.pop(s, None)
+        self.llm.seq_clear(s)
+        free.append(s)
+        reserved.pop(r, None)
+        self.running_batch.remove(r)
+        self._completed += 1
+        if r.finish_reason is None:
+            r.finish_reason = "stop"
+        r.output_queue.put_nowait(None)
 
     def _run(self, req: _Request, loop: asyncio.AbstractEventLoop) -> None:
         """One request on the engine's worker thread: tokens go to its queue on the event loop as they come."""
@@ -229,7 +311,8 @@ class LlamaCppEngine:
 
     # ------------------------------------------------------------------ metrics
     def get_kv_cache_utilization(self) -> float:
-        return self.llm.n_past / self.llm.n_ctx
+        used = sum(self._lengths.values()) if self.max_batch_size > 1 else self.llm.n_past
+        return used / self.llm.n_ctx
 
     def get_telemetry(self) -> dict:
         up = time.time() - self._started

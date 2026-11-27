@@ -31,6 +31,7 @@ struct LlamaOptions {
     bool repack = true;      // ggml's repacked weight layouts (ARM, AMX); copies weights out of the mapping
     bool exact = false;      // fp32 KV cache and no flash attention (libllama's defaults round K/V to fp16): parity tests
     bool verbose = false;    // libllama's own log lines
+    int n_seq = 1;           // sequences decoded together by step() (Wave 7); one shared KV pool of n_ctx tokens
     // Wave 2: read each MoE layer's chosen experts from the file before the expert products fault them in
     // (csrc/cpu/turing_expert_readahead.hpp). Needs use_mmap and repack off (a repacked copy is already in memory).
     bool readahead = false;
@@ -62,6 +63,8 @@ public:
         const int nt = opt.n_threads > 0 ? opt.n_threads : static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
         cp.n_threads = cp.n_threads_batch = nt;
         cp.no_perf = true;
+        cp.n_seq_max = static_cast<uint32_t>(std::max(1, opt.n_seq));
+        cp.kv_unified = true;  // one pool of n_ctx tokens shared by the sequences
         if (opt.exact) {
             cp.type_k = cp.type_v = GGML_TYPE_F32;
             cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
@@ -130,6 +133,52 @@ public:
         if (n < 0) throw std::runtime_error("token_to_piece failed");
         return std::string(buf, static_cast<size_t>(n));
     }
+
+    // Wave 7, several sequences decoded together. step() appends tokens[i] to sequence seqs[i] at positions pos[i],
+    // pos[i] + 1, ... in as few libllama calls as n_batch allows, and returns each sequence's last-token logits
+    // [seqs.size(), n_vocab]. The caller tracks positions; seq_clear() frees a finished sequence's K/V. With n_seq > 1,
+    // use these instead of eval / prefill / generate (those keep sequence 0's tokens for prefix reuse).
+    std::vector<float> step(const std::vector<int>& seqs, const std::vector<std::vector<int>>& tokens,
+                            const std::vector<int>& pos) {
+        if (seqs.size() != tokens.size() || seqs.size() != pos.size()) throw std::invalid_argument("step: sizes differ");
+        const size_t V = static_cast<size_t>(n_vocab()), cap = llama_n_batch(ctx_);
+        std::vector<float> out(seqs.size() * V);
+        std::vector<std::pair<size_t, int32_t>> pending;  // (row of out, index in the batch) of the last tokens queued
+        llama_batch_ext_clear(batch_);
+        size_t n = 0;
+        auto flush = [&]() {
+            if (n == 0) return;
+            const int32_t rc = llama_process(ctx_, LLAMA_PROCESS_TYPE_DECODE, batch_);
+            if (rc != 0) throw std::runtime_error("llama_process returned " + std::to_string(rc));
+            for (const auto& [row, idx] : pending) {
+                const float* r = llama_get_logits_ith(ctx_, idx);
+                if (!r) throw std::runtime_error("no logits for an output token");
+                std::copy(r, r + V, out.begin() + static_cast<long>(row * V));
+            }
+            pending.clear();
+            llama_batch_ext_clear(batch_);
+            n = 0;
+        };
+        for (size_t i = 0; i < seqs.size(); ++i) {
+            if (tokens[i].empty()) throw std::invalid_argument("step: a sequence with no tokens");
+            for (size_t j = 0; j < tokens[i].size(); ++j) {
+                if (n == cap) flush();
+                const int32_t idx = llama_batch_ext_add_token(batch_, seqs[i], tokens[i][j]);
+                if (idx < 0) throw std::runtime_error("step: batch add failed (" + std::to_string(idx) + ")");
+                const llama_pos p = static_cast<llama_pos>(pos[i] + static_cast<int>(j));
+                llama_batch_ext_set_pos(batch_, idx, &p);
+                if (j + 1 == tokens[i].size()) {
+                    llama_batch_ext_set_output_logits(batch_, idx, true);
+                    pending.emplace_back(i, idx);
+                }
+                ++n;
+            }
+        }
+        flush();
+        return out;
+    }
+    void seq_clear(int seq) { llama_memory_seq_rm(llama_get_memory(ctx_), seq, -1, -1); }
+    int n_seq() const { return static_cast<int>(llama_n_seq_max(ctx_)); }
 
     // Drop the KV cache beyond the first n tokens.
     void truncate(int n) {

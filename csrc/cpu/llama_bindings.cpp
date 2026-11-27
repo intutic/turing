@@ -18,7 +18,7 @@ PYBIND11_MODULE(turing_llama, m) {
         .def(py::init([](const std::string& path, int n_ctx, int n_batch, int n_threads, bool use_mmap, bool repack,
                          bool exact, bool verbose, bool readahead, int readahead_threads, size_t readahead_chunk,
                          bool readahead_check_resident, bool readahead_wait, bool readahead_adaptive,
-                         int readahead_window) {
+                         int readahead_window, int n_seq) {
                  LlamaOptions o;
                  o.n_ctx = n_ctx;
                  o.n_batch = n_batch;
@@ -34,6 +34,7 @@ PYBIND11_MODULE(turing_llama, m) {
                  o.readahead_wait = readahead_wait;
                  o.readahead_adaptive = readahead_adaptive;
                  o.readahead_window = readahead_window;
+                 o.n_seq = n_seq;
                  py::gil_scoped_release release;
                  return std::make_unique<TuringLlama>(path, o);
              }),
@@ -41,7 +42,7 @@ PYBIND11_MODULE(turing_llama, m) {
              py::arg("use_mmap") = true, py::arg("repack") = true, py::arg("exact") = false, py::arg("verbose") = false,
              py::arg("readahead") = false, py::arg("readahead_threads") = 16, py::arg("readahead_chunk") = size_t(4) << 20,
              py::arg("readahead_check_resident") = true, py::arg("readahead_wait") = true,
-             py::arg("readahead_adaptive") = true, py::arg("readahead_window") = 64)
+             py::arg("readahead_adaptive") = true, py::arg("readahead_window") = 64, py::arg("n_seq") = 1)
         .def(
             "readahead_stats",
             [](const TuringLlama& self) {
@@ -60,6 +61,24 @@ PYBIND11_MODULE(turing_llama, m) {
             "Expert read-ahead counters: router outputs seen, experts chosen, their bytes, bytes read, seconds.")
         .def_property_readonly("n_vocab", &TuringLlama::n_vocab)
         .def_property_readonly("n_ctx", &TuringLlama::n_ctx)
+        .def_property_readonly("n_seq", &TuringLlama::n_seq)
+        .def("seq_clear", &TuringLlama::seq_clear, py::arg("seq"))
+        .def(
+            "step",
+            [](TuringLlama& self, const std::vector<int>& seqs, const std::vector<std::vector<int>>& tokens,
+               const std::vector<int>& pos) {
+                std::vector<float> v;
+                {
+                    py::gil_scoped_release release;
+                    v = self.step(seqs, tokens, pos);
+                }
+                const py::ssize_t V = self.n_vocab();
+                py::array_t<float> out({static_cast<py::ssize_t>(seqs.size()), V});
+                std::memcpy(out.mutable_data(), v.data(), v.size() * sizeof(float));
+                return out;
+            },
+            py::arg("seqs"), py::arg("tokens"), py::arg("pos"),
+            "Several sequences in one batch: tokens[i] appended to seqs[i] from position pos[i]; last-token logits [n, V].")
         .def_property_readonly("n_past", &TuringLlama::n_past)
         .def_property_readonly("bos", &TuringLlama::bos)
         .def_property_readonly("eos", &TuringLlama::eos)
