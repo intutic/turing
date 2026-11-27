@@ -132,6 +132,7 @@ class LlamaCppEngine:
     async def warm_up(self) -> float:
         t0 = time.perf_counter()
         await asyncio.to_thread(self.llm.prefill, [max(self.llm.bos, 0)])
+        self.llm.truncate(0)  # the batched loop hands sequence 0 out as empty
         return time.perf_counter() - t0
 
     # ------------------------------------------------------------------ requests

@@ -262,6 +262,7 @@ def test_batched_engine_serves_concurrent_requests_exactly(tmp_path):
 
     async def run():
         await engine.start()
+        await engine.warm_up()  # as turing serve does: its prefill must not leave tokens in sequence 0
         reqs = [await engine.add_request(p, 5, temperature=0.0, logits_processor=ban if i == 2 else None)
                 for i, p in enumerate(prompts)]
         outs = await asyncio.gather(*[(lambda r: _collect(engine, r))(r) for r in reqs])
