@@ -71,3 +71,16 @@ Every wave ends with its numbers measured against llama.cpp on the same machine,
 ## Order and overlap
 Wave 0 first. Wave 1 is the base for 2-6. After Wave 1, Waves 2, 3 and 5 touch different files and can run side by
 side; 4 and 6 follow 1. Wave 7 last.
+
+## Status (2026-11-27)
+- **Wave 0 done** (`benchmarks/results/results_cpu_baseline_c4a.json`): c4a-standard-16 reads 283 GB/s; llama.cpp decodes
+  Llama-3.1-8B Q4_K_M at 38.7 tok/s and Qwen3-30B-A3B at 64.9; Turing's fp32 C++ engine 0.73.
+- **Wave 1 done**: libllama backend, `turing serve --backend libllama`; matches llama-bench on the same VM (Qwen3-8B 39.2
+  vs 38.6 tok/s decode, Qwen3-30B-A3B 65.1 vs 67.2) and Hugging Face's logits within 1e-3.
+- **Wave 2 built, not yet a win** (`results_cpu_waves123_c4a.json`): with 40 GB of cache for gpt-oss-120b (63 GB) and a
+  0.68 GB/s SSD, plain mmap decodes at 17.4 tok/s because 95.6% of expert reads hit the cache; the read-ahead before the
+  products cost time (12.8 tok/s). A non-blocking mode and 28 / 20 GB caches are being measured. Finding worth keeping:
+  a 48 GB machine already runs gpt-oss-120b from SSD at usable speed with plain mmap.
+- **Wave 3 built, gated**: prompt lookup slowed Qwen3-8B on the CPU (verifying 4 drafts costs ~2.5 one-token steps) and is
+  greedy only in exact arithmetic (batched and one-token kernels round apart). It now drafts only when measured
+  acceptance beats measured cost; being re-measured on a prompt whose answer copies text.
