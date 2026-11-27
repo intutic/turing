@@ -332,9 +332,8 @@ def main():
         try:
             from turing.serving.llama_engine import LlamaCppEngine
             from turing.models.gguf_loader import GGUFReader
-            from turing.models.gguf_tokenizer import GGUFTokenizer
             meta = GGUFReader(args.model, willneed=False).metadata
-            engine = LlamaCppEngine(args.model, GGUFTokenizer(meta), args.served_model_name or os.path.basename(args.model),
+            engine = LlamaCppEngine(args.model, None, args.served_model_name or os.path.basename(args.model),
                                     metadata=meta, n_ctx=args.ctx, n_threads=args.threads,
                                     draft_tokens=args.draft_tokens or 0, max_batch_size=args.max_batch_size or 1,
                                     **(dict(readahead=True, repack=False) if args.expert_readahead else {}))

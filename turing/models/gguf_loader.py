@@ -76,6 +76,14 @@ class GGMLType(IntEnum):
     F64 = 28
     IQ1_M = 29
     BF16 = 30
+    # read (so the metadata of such files loads, as turing serve --backend libllama needs), not dequantized
+    TQ1_0 = 34
+    TQ2_0 = 35
+    MXFP4 = 39
+    NVFP4 = 40
+    Q1_0 = 41
+    Q2_0 = 42
+    F8_E4M3 = 43
 
 
 GGUF_MAGIC = 0x46554747  # 'GGUF' in Little Endian (0x47, 0x47, 0x55, 0x46)

@@ -280,3 +280,42 @@ def test_batched_engine_serves_concurrent_requests_exactly(tmp_path):
 
 async def _collect(engine, req):
     return [t async for t in engine.stream_request(req)]
+
+
+def test_libllama_tokenizer_matches_hf_on_a_byte_level_vocabulary(tmp_path):
+    """turing serve --backend libllama tokenizes with libllama (LlamaTokenizer, tokenizer None): on SmolLM2's byte-level
+    BPE it encodes, decodes and renders the chat template as Hugging Face does, and the chat endpoint serves HF's greedy
+    text. GGUFTokenizer turned "a long story" into "alongstory" here."""
+    import transformers as tf
+    from fastapi.testclient import TestClient
+    from turing.models.gguf_loader import GGUFReader
+    from turing.serving.llama_engine import LlamaCppEngine
+    from turing.serving.server import create_app
+    name = "HuggingFaceTB/SmolLM2-135M-Instruct"
+    try:
+        hf_tok = tf.AutoTokenizer.from_pretrained(name, local_files_only=True)
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"tokenizer {name} is not in the local Hugging Face cache: {e}")
+    hf = _hf_model("qwen3", vocab_size=len(hf_tok))
+    path = _write_gguf(str(tmp_path / "q3.gguf"), hf, tokenizer=hf_tok)
+    engine = LlamaCppEngine(path, None, "tiny", metadata=GGUFReader(path, willneed=False).metadata, n_ctx=256,
+                            n_threads=2, exact=True)
+    tok = engine.tokenizer
+    for text in ["Write a long, detailed story.", "  two  spaces\n\nand\ttabs", "café naïve 日本語 🦙", "x = f(1); # ok",
+                 "<|im_start|>user\nhi<|im_end|>"]:
+        ids = tok.encode(text, add_special_tokens=False)
+        assert ids == hf_tok.encode(text, add_special_tokens=False), text
+        assert tok.decode(ids) == hf_tok.decode(ids, skip_special_tokens=True), text
+    msgs = [{"role": "user", "content": "Hello there"}]
+    text = tok.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
+    assert text == hf_tok.apply_chat_template(msgs, add_generation_prompt=True, tokenize=False)
+    assert tok.convert_tokens_to_ids("<|im_end|>") == hf_tok.convert_tokens_to_ids("<|im_end|>")
+    assert hf_tok.eos_token_id in engine.eos_token_ids
+    prompt = hf_tok.encode(text, add_special_tokens=False)
+    want = _hf_greedy(hf, prompt, 4, eos=engine.eos_token_ids)
+    with TestClient(create_app(engine, admission=False, lanes=False, warmup=True)) as client:
+        r = client.post("/v1/chat/completions", json={"model": "tiny", "messages": msgs, "max_tokens": 4, "temperature": 0})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["usage"]["prompt_tokens"] == len(prompt)
+        assert body["choices"][0]["message"]["content"] == hf_tok.decode(want, skip_special_tokens=True)

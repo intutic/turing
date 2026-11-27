@@ -184,6 +184,7 @@
   },
   "http_qwen3_8b_q4_k_m": {
     "note": "One client on the VM (scratchpad load.py): N /v1/completions requests at once, a fresh prompt each (~25 tokens), 128 greedy tokens; total_tok_s = generated tokens over the round's wall time, prefill and HTTP included. turing serve --backend libllama --max-batch-size 8 --ctx 8192 --threads 16 against llama-server -np 8 -c 8192 -t 16. A warm-up round, then rounds a and b.",
+    "caveat": "Not like for like: Turing's rows tokenized with GGUFTokenizer, a greedy word lookup that drops the spaces of Qwen3's byte-level BPE, so each prompt became 61 garbled tokens where llama-server's was 26 (counted with Qwen2.5's identical vocabulary): at 8 requests Turing prefilled 488 tokens against 208, about 1.4 s more at 200 tok/s. turing serve --backend libllama tokenizes with libllama (LlamaTokenizer) since; to be measured again.",
     "rows": [
       {
         "engine": "turing, before the one-thread fix",

@@ -127,9 +127,9 @@ public:
             throw std::runtime_error("tokenize failed");
         return out;
     }
-    std::string piece(int token) const {
+    std::string piece(int token, bool special = true) const {
         char buf[256];
-        int n = llama_token_to_piece(vocab_, token, buf, sizeof(buf), 0, true);
+        int n = llama_token_to_piece(vocab_, token, buf, sizeof(buf), 0, special);
         if (n < 0) throw std::runtime_error("token_to_piece failed");
         return std::string(buf, static_cast<size_t>(n));
     }

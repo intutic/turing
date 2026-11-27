@@ -10,6 +10,7 @@ GGUF loader parity against the reference implementations, no mocks:
 Real files against llama.cpp itself: scripts/eval_gguf_parity.py.
 """
 
+import json
 import math
 import shutil
 
@@ -269,10 +270,12 @@ def _gguf_tensors(hf, arch: str, fuse: bool = False) -> dict:
 
 
 def _write_gguf(path: str, hf, quant: str = "F32", drop: str = None, arch: str = None, fuse: bool = False,
-                merges: bool = False) -> str:
+                merges: bool = False, tokenizer=None, pre: str = "smollm") -> str:
     """Writes an HF model as llama.cpp's convert_hf_to_gguf.py does: tensors (see _gguf_tensors), the metadata keys its
     model class writes, tokenizer metadata, norms / 1-D / router tensors in F32 and the other weights in `quant`.
-    merges: also a (dummy) BPE merge list, which libllama requires of a "gpt2" tokenizer to load at all."""
+    merges: also a (dummy) BPE merge list, which libllama requires of a "gpt2" tokenizer to load at all.
+    tokenizer: a Hugging Face byte-level BPE tokenizer to write instead of the dummy vocabulary (llama.cpp's
+    pre-tokenizer `pre`)."""
     cfg = hf.config
     mt = cfg.model_type
     arch = arch or GGUF_ARCH[mt]
@@ -342,12 +345,27 @@ def _write_gguf(path: str, hf, quant: str = "F32", drop: str = None, arch: str =
             if getattr(cfg, "shared_expert_intermediate_size", None):
                 w.add_expert_shared_feed_forward_length(cfg.shared_expert_intermediate_size)
     w.add_tokenizer_model("gpt2")
-    w.add_token_list([f"<tok_{i}>" for i in range(cfg.vocab_size)])
-    w.add_token_types([1] * cfg.vocab_size)
-    if merges:
-        w.add_token_merges(["<tok_3> <tok_4>"])
-    w.add_bos_token_id(1)
-    w.add_eos_token_id(2)
+    if tokenizer is not None:  # a byte-level BPE tokenizer's vocabulary, merges and chat template
+        tj = json.loads(tokenizer.backend_tokenizer.to_str())
+        added = {a["id"]: a["special"] for a in tj["added_tokens"]}
+        vocab = tokenizer.get_vocab()
+        assert sorted(vocab.values()) == list(range(cfg.vocab_size))
+        w.add_tokenizer_pre(pre)
+        w.add_token_list(sorted(vocab, key=vocab.get))
+        w.add_token_types([gguf.TokenType.CONTROL if added.get(i) else gguf.TokenType.USER_DEFINED if i in added
+                           else gguf.TokenType.NORMAL for i in range(cfg.vocab_size)])
+        w.add_token_merges([m if isinstance(m, str) else " ".join(m) for m in tj["model"]["merges"]])
+        w.add_add_bos_token(False)
+        w.add_bos_token_id(tokenizer.bos_token_id)
+        w.add_eos_token_id(tokenizer.eos_token_id)
+        w.add_chat_template(tokenizer.chat_template)
+    else:
+        w.add_token_list([f"<tok_{i}>" for i in range(cfg.vocab_size)])
+        w.add_token_types([1] * cfg.vocab_size)
+        if merges:
+            w.add_token_merges(["<tok_3> <tok_4>"])
+        w.add_bos_token_id(1)
+        w.add_eos_token_id(2)
     for gname, t in tensors.items():
         if gname == drop:
             continue

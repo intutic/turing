@@ -58,6 +58,49 @@ class _ContextPool:
                 "page_size": PAGE, "bytes_per_page": 0, "native_layers": None}
 
 
+class LlamaTokenizer:
+    """libllama's own tokenizer (the one llama-server uses) under the Hugging Face method names the server calls, and the
+    GGUF's chat template rendered as Hugging Face renders one. GGUFTokenizer is a greedy word lookup: it drops the spaces
+    of byte-level BPE vocabularies (Qwen, Llama 3, gpt-oss) and ignores the chat template."""
+
+    def __init__(self, llm, metadata: dict):
+        self.llm = llm
+        tokens = metadata.get("tokenizer.ggml.tokens") or []
+        self._vocab = {str(t): i for i, t in enumerate(tokens)}
+        self.chat_template = metadata.get("tokenizer.chat_template")
+        self.bos_token_id = llm.bos if llm.bos >= 0 else None
+        self.eos_token_id = llm.eos if llm.eos >= 0 else None
+        self.bos_token = str(tokens[llm.bos]) if 0 <= llm.bos < len(tokens) else None
+        self.eos_token = str(tokens[llm.eos]) if 0 <= llm.eos < len(tokens) else None
+
+    def __len__(self) -> int:
+        return self.llm.n_vocab
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> List[int]:
+        return self.llm.tokenize(text, add_special=add_special_tokens, parse_special=True)
+
+    def decode(self, token_ids, skip_special_tokens: bool = True) -> str:
+        if isinstance(token_ids, torch.Tensor):
+            token_ids = token_ids.tolist()
+        return b"".join(self.llm.piece(int(t), not skip_special_tokens) for t in token_ids).decode("utf-8", "replace")
+
+    def convert_tokens_to_ids(self, token: str) -> Optional[int]:
+        return self._vocab.get(token)
+
+    def get_vocab(self) -> dict:
+        return dict(self._vocab)
+
+    def apply_chat_template(self, conversation, tools=None, add_generation_prompt: bool = False, tokenize: bool = False,
+                            **kwargs):
+        from transformers.utils.chat_template_utils import render_jinja_template  # transformers >= 4.51
+        if not self.chat_template:
+            raise ValueError("the GGUF has no chat template")
+        rendered, _ = render_jinja_template([conversation], tools=tools, chat_template=self.chat_template,
+                                            add_generation_prompt=add_generation_prompt, bos_token=self.bos_token,
+                                            eos_token=self.eos_token, **kwargs)
+        return self.encode(rendered[0], add_special_tokens=False) if tokenize else rendered[0]
+
+
 class _NoModule(torch.nn.Module):
     """The weights live in libllama, not in torch: no parameters, no LoRA adapters."""
     adapter_names = ()
@@ -70,7 +113,8 @@ class LlamaCppEngine:
 
     def __init__(self, path: str, tokenizer, name: str, metadata: Optional[dict] = None, n_ctx: int = 4096,
                  n_threads: int = 0, seed: int = 0, draft_tokens: int = 0, max_batch_size: int = 1, **llama_kwargs):
-        """metadata: the GGUF's key/values (GGUFReader(path, willneed=False).metadata), for the model's shape.
+        """tokenizer: None for libllama's own (LlamaTokenizer), as turing serve runs it.
+        metadata: the GGUF's key/values (GGUFReader(path, willneed=False).metadata), for the model's shape.
         draft_tokens: prompt-lookup drafts per step for greedy requests without a logits processor (0 = off). Greedy in
         exact arithmetic; libllama's batched kernels round differently from its one-token kernels (fp16 KV, 4-bit
         weights), so a near-tie can flip a token (results_cpu_waves123_c4a.json)."""
@@ -81,8 +125,8 @@ class LlamaCppEngine:
         # process holds more OpenMP threads than CPUs it stops spinning between parallel regions (80 against 60 ms a
         # token, Qwen3-8B on 16 vCPUs: results_cpu_wave7_c4.json).
         self._compute = ThreadPoolExecutor(1, thread_name_prefix="libllama")
-        self.tokenizer = tokenizer
         meta = metadata or {}
+        self.tokenizer = tokenizer if tokenizer is not None else LlamaTokenizer(self.llm, meta)
         arch = meta.get("general.architecture", "llama")
 
         def shape(key, default=0):

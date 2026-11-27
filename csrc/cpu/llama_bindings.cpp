@@ -88,7 +88,12 @@ PYBIND11_MODULE(turing_llama, m) {
         .def("is_eog", &TuringLlama::is_eog, py::arg("token"))
         .def("tokenize", &TuringLlama::tokenize, py::arg("text"), py::arg("add_special") = true,
              py::arg("parse_special") = true)
-        .def("piece", &TuringLlama::piece, py::arg("token"))
+        .def(
+            "piece",
+            [](const TuringLlama& self, int token, bool special) { return py::bytes(self.piece(token, special)); },
+            py::arg("token"), py::arg("special") = true,
+            "The token's bytes (a byte-level token can hold part of a UTF-8 character); special=False: empty for control "
+            "tokens.")
         .def("truncate", &TuringLlama::truncate, py::arg("n"))
         .def(
             "eval",

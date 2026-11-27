@@ -99,8 +99,13 @@ side; 4 and 6 follow 1. Wave 7 last.
   Over HTTP (`turing serve --backend libllama --max-batch-size 8` against `llama-server -np 8`, 128 greedy tokens a
   request): 15.2 / 34.4 / 53.4 tok/s at 1 / 4 / 8 requests against 15.7 / 37.4 / 63.6. The engine runs every libllama
   call on one thread now: on `asyncio.to_thread` workers beside torch, libgomp held more threads than CPUs and every
-  step took 80 ms instead of 60 (12.1 tok/s at 1 request before the fix). Open: the rest of the gap at 8 requests is in
-  the server's per-token work (a Python loop over `step` makes 70 tok/s); vLLM-CPU and batch 64 not run.
+  step took 80 ms instead of 60 (12.1 tok/s at 1 request before the fix). The HTTP rows are not like for like:
+  `turing serve` tokenized with `GGUFTokenizer`, a greedy word lookup that drops the spaces of byte-level BPE (Qwen,
+  Llama 3, gpt-oss), so Turing prefilled 61 garbled tokens a prompt against llama-server's 26 (about 1.4 s of the 3.1 s
+  gap at 8 requests) and chat requests failed on its hard-coded template. Fixed after the run: the libllama backend
+  tokenizes with libllama (`LlamaTokenizer`) and renders the GGUF's chat template as Hugging Face does. Open: measure
+  HTTP again with equal prompts; about 17 ms a step at 8 requests is still unexplained (the server's own Python is
+  ~72 us a token on an M4 Pro); vLLM-CPU and batch 64 not run.
 - **Wave 1 on x86** (same file): `turing-cpu` within 4% of llama-bench for Qwen3-8B Q4_0 / Q4_K_M / Q8_0 with repack on
   and off (Q4_K_M decode 16.5 against 16.5, prompt 195 against 183).
 - **Wave 6 measured on x86** (`results_cpu_waves46_c4.json`): AMX through ggml's extra buffer types speeds Qwen3-8B
