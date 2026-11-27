@@ -4,6 +4,7 @@
 // (csrc/cpu/llama_bindings.cpp) and turing-cpu (csrc/cpu/turing_cpu_main.cpp). Decision CF1a in
 // bmad-output/cpu-first/decision-log.md.
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -36,6 +37,7 @@ struct LlamaOptions {
     int readahead_threads = 16;
     size_t readahead_chunk = size_t(4) << 20;
     bool readahead_check_resident = true;  // false reads every chosen expert again (tests)
+    bool readahead_wait = true;            // false: reads run beside the expert products instead of before them
 };
 
 class TuringLlama {
@@ -72,7 +74,7 @@ public:
                 throw std::invalid_argument("expert read-ahead reads the mapped file: use_mmap on, repack off");
             }
             readahead_ = std::make_unique<ExpertReadAhead>(path, opt.readahead_threads, opt.readahead_chunk,
-                                                           opt.readahead_check_resident);
+                                                           opt.readahead_check_resident, opt.readahead_wait);
             cp.cb_eval = &ExpertReadAhead::callback;
             cp.cb_eval_user_data = readahead_.get();
 #endif
@@ -202,9 +204,12 @@ public:
         return out;
     }
 
-    // Greedy generation with prompt-lookup drafts (Wave 3): up to n_draft tokens that followed the latest n-gram where it
-    // last appeared in the prompt or output are verified in one evaluation, and kept while each is the argmax, so the
-    // tokens equal plain greedy decoding. Drafting pauses after repeated misses, so it cannot keep slowing the loop.
+    // Greedy generation with prompt-lookup drafts (Wave 3): tokens that followed the latest n-gram where it last appeared
+    // in the prompt or output are verified in one evaluation and kept while each is the argmax (greedy in exact
+    // arithmetic; libllama's batched kernels round differently from its one-token kernels, so a near-tie can flip).
+    // A cost gate decides how many to draft: on a CPU, verifying k drafts costs several one-token steps (2.5x for k=4,
+    // Qwen3-8B Q4_K_M on Neoverse-V2: results_cpu_waves123_c4a.json), so it drafts the k that maximizes expected tokens
+    // per unit of measured cost, and none when no k pays, probing now and then to notice text that starts to repeat.
     std::vector<int> generate_lookup(const std::vector<int>& prompt, int max_new, int n_draft,
                                      const std::function<bool(int)>& on_token = {}) {
         std::vector<int> hist(prompt), out;
@@ -214,16 +219,17 @@ public:
             out.push_back(cur);
             hist.push_back(cur);
             if ((on_token && !on_token(cur)) || static_cast<int>(out.size()) >= max_new || n_past() + 1 >= n_ctx()) break;
-            std::vector<int> drafts;
-            if (pause_ > 0) {
-                --pause_;
-            } else {
-                const int room = std::min({n_draft, max_new - static_cast<int>(out.size()), n_ctx() - n_past() - 1});
-                drafts = lookup(hist, std::max(0, room));
-            }
+            const int room = std::min({n_draft, kMaxDraft, max_new - static_cast<int>(out.size()), n_ctx() - n_past() - 1});
+            std::vector<int> drafts = lookup(hist, std::max(0, room));
+            const int k = choose_draft(static_cast<int>(drafts.size()));
+            drafts.resize(static_cast<size_t>(k));
             std::vector<int> feed{cur};
             feed.insert(feed.end(), drafts.begin(), drafts.end());
+            const auto t0 = std::chrono::steady_clock::now();
             const std::vector<float> rows = eval(feed, /*all_logits=*/true);  // row i predicts the token after feed[i]
+            const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            double& t = k == 0 ? t1_ : tk_[k];
+            t = t == 0.0 ? dt : 0.8 * t + 0.2 * dt;
             const size_t V = static_cast<size_t>(n_vocab());
             size_t a = 0;
             int pred = argmax(rows.data());
@@ -245,9 +251,9 @@ public:
             spec_.steps += 1;
             spec_.drafted += drafts.size();
             spec_.accepted += a;
-            if (!drafts.empty()) {
-                misses_ = a == 0 ? misses_ + 1 : 0;
-                if (misses_ >= 4) pause_ = 16, misses_ = 0;
+            if (k > 0) {  // per-draft acceptance: a successes, then one failure unless every draft was kept
+                succ_ = 0.98 * succ_ + static_cast<double>(a);
+                fail_ = 0.98 * fail_ + (a < drafts.size() ? 1.0 : 0.0);
             }
             cur = pred;
         }
@@ -259,6 +265,24 @@ public:
     SpecStats spec_stats() const { return spec_; }
 
 private:
+    static constexpr int kMaxDraft = 16;
+    // Drafts worth verifying out of `available`: the k maximizing (1 + p + ... + p^k) / cost(k), where p is the measured
+    // per-draft acceptance and cost(k) the measured time of a k-draft step over a one-token step (prior 1 + 0.35 k until
+    // measured); 0 when no k beats a one-token step, except one probe every 32 steps.
+    int choose_draft(int available) {
+        if (available <= 0) return 0;
+        const double p = succ_ / (succ_ + fail_);
+        int best_k = 0;
+        double best = 1.0, gain = 1.0, pk = 1.0;
+        for (int k = 1; k <= available; ++k) {
+            pk *= p;
+            gain += pk;
+            const double cost = (tk_[k] > 0.0 && t1_ > 0.0) ? tk_[k] / t1_ : 1.0 + 0.35 * k;
+            if (gain / cost > best) best = gain / cost, best_k = k;
+        }
+        if (best_k == 0 && ++since_probe_ >= 32) since_probe_ = 0, best_k = std::min(available, 2);
+        return best_k;
+    }
     int argmax(const float* row) const {
         const int V = n_vocab();
         return static_cast<int>(std::max_element(row, row + V) - row);
@@ -308,7 +332,9 @@ private:
     std::vector<int> cached_;  // tokens whose K/V are in the cache, in order
     int reused_ = 0;           // prompt tokens the last prefill took from the cache
     SpecStats spec_;           // prompt-lookup drafts verified and accepted
-    int misses_ = 0, pause_ = 0;
+    double succ_ = 4.0, fail_ = 1.0;          // decayed draft successes / failures (prior p = 0.8: explore first)
+    double t1_ = 0.0, tk_[kMaxDraft + 1] = {}; // measured seconds of a one-token step and of a k-draft step
+    int since_probe_ = 0;
 };
 
 }  // namespace turing

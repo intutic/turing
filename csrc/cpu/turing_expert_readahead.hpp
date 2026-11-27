@@ -36,14 +36,17 @@ struct ReadAheadStats {
     uint64_t calls = 0;            // router outputs seen
     uint64_t experts = 0;          // (layer, expert) pairs the routers chose, counted once per call
     uint64_t bytes_wanted = 0;     // their bytes in the file
-    uint64_t bytes_read = 0;       // the bytes that were not resident and were read
+    uint64_t bytes_read = 0;       // the bytes that were not resident and were read (queued, when not waiting)
     double seconds = 0.0;          // time inside the callback
 };
 
 class ExpertReadAhead {
 public:
-    ExpertReadAhead(const std::string& path, int io_threads = 16, size_t chunk = size_t(4) << 20, bool check_resident = true)
-        : chunk_(chunk), check_resident_(check_resident) {
+    // wait: the products start after the reads (true), or the reads are queued and run beside the products (false),
+    // so the products' own page faults and the large reads overlap; at most kMaxQueued reads wait in the queue.
+    ExpertReadAhead(const std::string& path, int io_threads = 16, size_t chunk = size_t(4) << 20, bool check_resident = true,
+                    bool wait = true)
+        : chunk_(chunk), check_resident_(check_resident), wait_(wait) {
         ggml_context* meta = nullptr;
         gguf_init_params gp{true, &meta};
         gguf_context* g = gguf_init_from_file(path.c_str(), gp);
@@ -76,6 +79,8 @@ public:
         {
             std::lock_guard<std::mutex> lk(mu_);
             stop_ = true;
+            pending_ -= queue_.size();
+            queue_.clear();  // queued read-ahead is only a hint: drop it
         }
         cv_.notify_all();
         for (auto& w : workers_) w.join();
@@ -132,7 +137,7 @@ private:
         }
         uint64_t read = 0;
         for (const Job& j : jobs) read += j.len;
-        if (!jobs.empty()) run(jobs);
+        if (!jobs.empty()) run(jobs, wait_);
         const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         std::lock_guard<std::mutex> lk(stats_mu_);
         stats_.calls += 1;
@@ -169,14 +174,20 @@ private:
         }
     }
 
-    // Read every job (in parallel on the workers) into scratch memory: the reads fill the page cache.
-    void run(const std::vector<Job>& jobs) {
+    // Read every job (in parallel on the workers) into scratch memory: the reads fill the page cache. wait: until done.
+    void run(const std::vector<Job>& jobs, bool wait) {
         {
             std::lock_guard<std::mutex> lk(mu_);
-            queue_.insert(queue_.end(), jobs.begin(), jobs.end());
-            pending_ += jobs.size();
+            if (!wait) {  // reads still queued are for a layer whose products already ran: replace them
+                pending_ -= queue_.size();
+                queue_.clear();
+            }
+            const size_t n = wait ? jobs.size() : std::min(kMaxQueued, jobs.size());
+            queue_.insert(queue_.end(), jobs.begin(), jobs.begin() + static_cast<long>(n));
+            pending_ += n;
         }
         cv_.notify_all();
+        if (!wait) return;
         std::unique_lock<std::mutex> lk(mu_);
         done_cv_.wait(lk, [this] { return pending_ == 0; });
     }
@@ -205,8 +216,10 @@ private:
     }
 
     std::map<int, std::vector<ExpertTensor>> layers_;
+    static constexpr size_t kMaxQueued = 4096;
     size_t chunk_;
     bool check_resident_;
+    bool wait_;
     int fd_ = -1;
     void* map_ = nullptr;
     uint64_t file_size_ = 0, page_ = 4096;

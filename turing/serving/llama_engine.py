@@ -68,8 +68,9 @@ class LlamaCppEngine:
     def __init__(self, path: str, tokenizer, name: str, metadata: Optional[dict] = None, n_ctx: int = 4096,
                  n_threads: int = 0, seed: int = 0, draft_tokens: int = 0, **llama_kwargs):
         """metadata: the GGUF's key/values (GGUFReader(path, willneed=False).metadata), for the model's shape.
-        draft_tokens: prompt-lookup drafts per step for greedy requests without a logits processor (0 = off); the output
-        is the same as without them."""
+        draft_tokens: prompt-lookup drafts per step for greedy requests without a logits processor (0 = off). Greedy in
+        exact arithmetic; libllama's batched kernels round differently from its one-token kernels (fp16 KV, 4-bit
+        weights), so a near-tie can flip a token (results_cpu_waves123_c4a.json)."""
         from turing import turing_llama  # built only with TURING_BUILD_LLAMA=1
         self.llm = turing_llama.Llama(path, n_ctx=n_ctx, n_threads=n_threads, **llama_kwargs)
         self.tokenizer = tokenizer

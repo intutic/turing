@@ -17,7 +17,7 @@ PYBIND11_MODULE(turing_llama, m) {
     py::class_<TuringLlama>(m, "Llama")
         .def(py::init([](const std::string& path, int n_ctx, int n_batch, int n_threads, bool use_mmap, bool repack,
                          bool exact, bool verbose, bool readahead, int readahead_threads, size_t readahead_chunk,
-                         bool readahead_check_resident) {
+                         bool readahead_check_resident, bool readahead_wait) {
                  LlamaOptions o;
                  o.n_ctx = n_ctx;
                  o.n_batch = n_batch;
@@ -30,13 +30,14 @@ PYBIND11_MODULE(turing_llama, m) {
                  o.readahead_threads = readahead_threads;
                  o.readahead_chunk = readahead_chunk;
                  o.readahead_check_resident = readahead_check_resident;
+                 o.readahead_wait = readahead_wait;
                  py::gil_scoped_release release;
                  return std::make_unique<TuringLlama>(path, o);
              }),
              py::arg("path"), py::kw_only(), py::arg("n_ctx") = 4096, py::arg("n_batch") = 2048, py::arg("n_threads") = 0,
              py::arg("use_mmap") = true, py::arg("repack") = true, py::arg("exact") = false, py::arg("verbose") = false,
              py::arg("readahead") = false, py::arg("readahead_threads") = 16, py::arg("readahead_chunk") = size_t(4) << 20,
-             py::arg("readahead_check_resident") = true)
+             py::arg("readahead_check_resident") = true, py::arg("readahead_wait") = true)
         .def(
             "readahead_stats",
             [](const TuringLlama& self) {
@@ -114,7 +115,8 @@ PYBIND11_MODULE(turing_llama, m) {
             py::arg("prompt"), py::arg("max_new"), py::arg("temperature") = 0.0f, py::arg("top_p") = 1.0f,
             py::arg("top_k") = 0, py::arg("seed") = 0, py::arg("on_token") = py::none(), py::arg("n_draft") = 0,
             "Generate after prompt (token ids), reusing the cached prefix; on_token(id) may return False to stop. "
-            "n_draft > 0 with temperature 0: prompt-lookup speculation, the same tokens as greedy decoding.")
+            "n_draft > 0 with temperature 0: prompt-lookup speculation; greedy in exact arithmetic (libllama's batched "
+            "kernels round differently from its one-token kernels, so a near-tie can flip; exact=True avoids it).")
         .def(
             "spec_stats",
             [](const TuringLlama& self) {

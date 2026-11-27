@@ -133,13 +133,13 @@ def test_libllama_engine_logits_processor_path(tmp_path):
     assert got == _hf_greedy(hf, PROMPT, 4, eos=engine.eos_token_ids, banned=banned)
 
 
-@pytest.mark.parametrize("check_resident", [True, False])
-def test_expert_readahead_is_exact_and_reads_the_chosen_experts(tmp_path, check_resident):
+@pytest.mark.parametrize("check_resident,wait", [(True, True), (False, True), (True, False)])
+def test_expert_readahead_is_exact_and_reads_the_chosen_experts(tmp_path, check_resident, wait):
     """Wave 2: the read-ahead only reads the file, so the logits are bit-identical with it on; it runs once per MoE
     layer per evaluation, and (forced to read even resident pages) reads at least the chosen experts' bytes."""
     path = _write_gguf(str(tmp_path / "moe.gguf"), _hf_model("qwen3_moe"), merges=True)
     plain, ra = _llama(path, repack=False), _llama(path, repack=False, readahead=True, readahead_threads=4,
-                                                    readahead_check_resident=check_resident)
+                                                    readahead_check_resident=check_resident, readahead_wait=wait)
 
     def run(llm):
         return torch.cat([torch.from_numpy(llm.eval(PROMPT, all_logits=True))]
@@ -164,7 +164,8 @@ def test_expert_readahead_needs_the_mapped_file(tmp_path):
 
 @pytest.mark.parametrize("kind", ["qwen3", "qwen3_moe"])
 def test_prompt_lookup_speculation_is_exact(tmp_path, kind):
-    """Wave 3: prompt-lookup drafts are kept only while each is the argmax, so the output equals greedy decoding; a
+    """Wave 3: prompt-lookup drafts are kept only while each is the argmax, so in exact mode (F32 weights, fp32 KV) the
+    output equals greedy decoding (with 4-bit weights and fp16 KV, batched and one-token kernels round apart); a
     prompt that repeats itself gives drafts that are accepted."""
     path = _write_gguf(str(tmp_path / f"{kind}.gguf"), _hf_model(kind), merges=True)
     plain, spec = _llama(path), _llama(path)
@@ -181,7 +182,7 @@ def test_prompt_lookup_speculation_is_exact(tmp_path, kind):
 
 
 def test_libllama_engine_prompt_lookup_matches_plain(tmp_path):
-    """The engine with draft tokens returns the same greedy tokens as without, and reports its drafts."""
+    """The engine with draft tokens returns the same greedy tokens as without (exact mode), and reports its drafts."""
     import asyncio
     from turing.models.gguf_loader import GGUFReader
     from turing.models.gguf_tokenizer import GGUFTokenizer

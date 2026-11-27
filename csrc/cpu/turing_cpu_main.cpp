@@ -48,6 +48,7 @@ int main(int argc, char** argv) {
         else if (a == "--no-repack") opt.repack = false;
         else if (a == "--readahead") opt.readahead = true, opt.repack = false;  // reads the mapped file: no repacked copy
         else if (a == "--readahead-threads") opt.readahead_threads = std::stoi(next());
+        else if (a == "--readahead-async") opt.readahead = true, opt.repack = false, opt.readahead_wait = false;
         else if (a == "--verbose") opt.verbose = true;
         else {
             std::cerr << "unknown option " << a << "\n";
