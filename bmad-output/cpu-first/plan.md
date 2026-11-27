@@ -24,21 +24,25 @@ Every wave ends with its numbers measured against llama.cpp on the same machine,
   cache size and pinned set, before any streaming code is tuned.
 - Files: `scripts/benchmark_cpu_decode.py`, `scripts/moe_route_trace.py`; quality through `scripts/eval_kv_quality.py`.
 
-## Wave 1: low-bit CPU kernels and MoE on the CPU path
-- Matrix-vector and small-batch matrix products on packed Q4_K / Q8_0 / MXFP4 weights with int8 activations: NEON
-  dotprod and i8mm, AVX-512 VNNI / AVX2 (per CF1, through ggml or in `csrc/turing_simd.hpp`,
-  `csrc/turing_gguf_simd.hpp`); `csrc/turing_model_cpp.hpp` stops dequantizing to fp32 at load.
-- MoE layers in the C++ engine (router, top-k, expert products); a NEON path for `csrc/turing_w4_expert_cpu.hpp`
-  (x86-only today).
-- Accept: parity with the PyTorch reference (atol <= 1e-3) per kernel; Qwen3-30B-A3B Q4 decode at batch 1 >= llama.cpp
-  CPU on the same Mac; same next token as Hugging Face over a prompt.
+## Wave 1: a CPU backend for Turing built on llama.cpp (CF1)
+- Design (2026-11-27, after reading llama.cpp at 171527522): link libllama, the model code that sits on ggml's kernels,
+  pinned to one commit under `third_party/`, rather than rewriting each architecture's graph on bare ggml. libllama
+  already runs Qwen3, Qwen3-MoE and gpt-oss with ARM repacking, KleidiAI and AMX, so Turing's work starts at the new
+  parts. A C++ shim (`csrc/cpu/`: load, prefill, decode, logits, sampling hooks) is bound into Python, and
+  `turing serve --device cpu --model x.gguf` runs it behind Turing's OpenAI / Anthropic / Ollama APIs.
+- Replaces the fp32 standalone engine for speed; that engine stays as the dependency-free path.
+- Accept: logits of an F16 GGUF within atol 1e-3 of Hugging Face's on a small model; decode speed equal to llama-bench on
+  the same VM (same kernels); the existing suite green with the backend absent (optional build, like Marlin).
 
-## Wave 2: models larger than RAM, experts streamed from SSD
-- Non-expert weights resident; experts read whole with parallel `pread` in >= 1 MB chunks (reuse
-  `csrc/turing_parallel_reader.hpp`), hot set pinned from Wave 0's traces, the rest left to the OS file cache or an LRU
-  (measure both: flash-moe found the OS cache 38% better); next-layer prefetch from the router.
-- Accept: gpt-oss-120b output token-identical to a resident run on a larger machine; decode >= 2x llama.cpp mmap on
-  this Mac, >= 7 tok/s from the internal SSD and >= 3 from the SanDisk, or the measured reason it cannot.
+## Wave 2: models larger than RAM, experts read ahead of the expert products
+- Design: an eval callback on `ffn_moe_topk-<layer>` (llama.cpp calls it after the router and before the expert
+  products, `ggml_backend_sched_compute_splits`) reads the chosen experts' byte ranges, found from the GGUF's tensor
+  offsets, with parallel `pread` in >= 1 MB chunks (`csrc/turing_parallel_reader.hpp`, io_uring on Linux), skipping
+  ranges `mincore` reports resident. The products then read them from the page cache instead of faulting 4-16 KB at a
+  time. Exact by construction: no routing changes.
+- Then: a hot set pinned from Wave 0's routing traces; next-layer prefetch measured, kept only if it pays.
+- Accept: token-identical output with and without the prefetcher; on a VM whose memory is capped below the model
+  (cgroup `MemoryMax`) with local NVMe, decode >= 2x llama.cpp's plain mmap, or the measured reason it cannot.
 
 ## Wave 3: speculative decoding on the CPU path
 - Prompt lookup first (no extra model), then a small draft model / EAGLE-3 heads (Turing has both on CUDA); draft length
