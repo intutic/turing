@@ -131,3 +131,32 @@ def test_libllama_engine_logits_processor_path(tmp_path):
     got = asyncio.run(run())
     assert banned not in got
     assert got == _hf_greedy(hf, PROMPT, 4, eos=engine.eos_token_ids, banned=banned)
+
+
+@pytest.mark.parametrize("check_resident", [True, False])
+def test_expert_readahead_is_exact_and_reads_the_chosen_experts(tmp_path, check_resident):
+    """Wave 2: the read-ahead only reads the file, so the logits are bit-identical with it on; it runs once per MoE
+    layer per evaluation, and (forced to read even resident pages) reads at least the chosen experts' bytes."""
+    path = _write_gguf(str(tmp_path / "moe.gguf"), _hf_model("qwen3_moe"), merges=True)
+    plain, ra = _llama(path, repack=False), _llama(path, repack=False, readahead=True, readahead_threads=4,
+                                                    readahead_check_resident=check_resident)
+
+    def run(llm):
+        return torch.cat([torch.from_numpy(llm.eval(PROMPT, all_logits=True))]
+                         + [torch.from_numpy(llm.eval([t]))[None] for t in DECODE])
+
+    assert torch.equal(run(ra), run(plain))
+    s = ra.readahead_stats()
+    assert s["moe_layers"] == 2 and s["calls"] == 2 * (1 + len(DECODE))
+    assert 0 < s["experts"] <= s["calls"] * 4 and s["bytes_wanted"] > 0
+    if check_resident:
+        assert s["bytes_read"] <= s["bytes_wanted"] + 2 * s["experts"] * 3 * 16384  # page rounding at most
+    else:
+        assert s["bytes_read"] >= s["bytes_wanted"]
+    assert plain.readahead_stats()["calls"] == 0
+
+
+def test_expert_readahead_needs_the_mapped_file(tmp_path):
+    path = _write_gguf(str(tmp_path / "moe.gguf"), _hf_model("qwen3_moe"), merges=True)
+    with pytest.raises(ValueError):
+        _llama(path, readahead=True)  # repack on: the products would read a copy, not the file

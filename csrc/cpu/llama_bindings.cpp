@@ -16,7 +16,8 @@ PYBIND11_MODULE(turing_llama, m) {
     m.doc() = "Turing Engine's CPU backend on libllama (llama.cpp, pinned in third_party/llama.cpp)";
     py::class_<TuringLlama>(m, "Llama")
         .def(py::init([](const std::string& path, int n_ctx, int n_batch, int n_threads, bool use_mmap, bool repack,
-                         bool exact, bool verbose) {
+                         bool exact, bool verbose, bool readahead, int readahead_threads, size_t readahead_chunk,
+                         bool readahead_check_resident) {
                  LlamaOptions o;
                  o.n_ctx = n_ctx;
                  o.n_batch = n_batch;
@@ -25,11 +26,31 @@ PYBIND11_MODULE(turing_llama, m) {
                  o.repack = repack;
                  o.exact = exact;
                  o.verbose = verbose;
+                 o.readahead = readahead;
+                 o.readahead_threads = readahead_threads;
+                 o.readahead_chunk = readahead_chunk;
+                 o.readahead_check_resident = readahead_check_resident;
                  py::gil_scoped_release release;
                  return std::make_unique<TuringLlama>(path, o);
              }),
              py::arg("path"), py::kw_only(), py::arg("n_ctx") = 4096, py::arg("n_batch") = 2048, py::arg("n_threads") = 0,
-             py::arg("use_mmap") = true, py::arg("repack") = true, py::arg("exact") = false, py::arg("verbose") = false)
+             py::arg("use_mmap") = true, py::arg("repack") = true, py::arg("exact") = false, py::arg("verbose") = false,
+             py::arg("readahead") = false, py::arg("readahead_threads") = 16, py::arg("readahead_chunk") = size_t(4) << 20,
+             py::arg("readahead_check_resident") = true)
+        .def(
+            "readahead_stats",
+            [](const TuringLlama& self) {
+                const turing::ReadAheadStats s = self.readahead_stats();
+                py::dict d;
+                d["calls"] = s.calls;
+                d["experts"] = s.experts;
+                d["bytes_wanted"] = s.bytes_wanted;
+                d["bytes_read"] = s.bytes_read;
+                d["seconds"] = s.seconds;
+                d["moe_layers"] = self.readahead_layers();
+                return d;
+            },
+            "Expert read-ahead counters: router outputs seen, experts chosen, their bytes, bytes read, seconds.")
         .def_property_readonly("n_vocab", &TuringLlama::n_vocab)
         .def_property_readonly("n_ctx", &TuringLlama::n_ctx)
         .def_property_readonly("n_past", &TuringLlama::n_past)

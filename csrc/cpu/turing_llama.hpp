@@ -13,7 +13,12 @@
 #include <thread>
 #include <vector>
 
+#include <memory>
+
 #include "llama.h"
+#if !defined(_WIN32)
+#include "cpu/turing_expert_readahead.hpp"
+#endif
 
 namespace turing {
 
@@ -25,6 +30,12 @@ struct LlamaOptions {
     bool repack = true;      // ggml's repacked weight layouts (ARM, AMX); copies weights out of the mapping
     bool exact = false;      // fp32 KV cache and no flash attention (libllama's defaults round K/V to fp16): parity tests
     bool verbose = false;    // libllama's own log lines
+    // Wave 2: read each MoE layer's chosen experts from the file before the expert products fault them in
+    // (csrc/cpu/turing_expert_readahead.hpp). Needs use_mmap and repack off (a repacked copy is already in memory).
+    bool readahead = false;
+    int readahead_threads = 16;
+    size_t readahead_chunk = size_t(4) << 20;
+    bool readahead_check_resident = true;  // false reads every chosen expert again (tests)
 };
 
 class TuringLlama {
@@ -50,6 +61,21 @@ public:
         if (opt.exact) {
             cp.type_k = cp.type_v = GGML_TYPE_F32;
             cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+        }
+        if (opt.readahead) {
+#if defined(_WIN32)
+            llama_model_free(model_);
+            throw std::runtime_error("expert read-ahead needs pread and mincore (not on Windows)");
+#else
+            if (!opt.use_mmap || opt.repack) {
+                llama_model_free(model_);
+                throw std::invalid_argument("expert read-ahead reads the mapped file: use_mmap on, repack off");
+            }
+            readahead_ = std::make_unique<ExpertReadAhead>(path, opt.readahead_threads, opt.readahead_chunk,
+                                                           opt.readahead_check_resident);
+            cp.cb_eval = &ExpertReadAhead::callback;
+            cp.cb_eval_user_data = readahead_.get();
+#endif
         }
         ctx_ = llama_init_from_model(model_, cp);
         if (!ctx_) {
@@ -79,7 +105,11 @@ public:
         llama_model_desc(model_, buf, sizeof(buf));
         return buf;
     }
-    llama_context* context() { return ctx_; }  // for callbacks (Wave 2's expert read-ahead)
+#if !defined(_WIN32)
+    // Expert read-ahead counters (all zero when it is off) and the MoE layers it found in the file.
+    ReadAheadStats readahead_stats() const { return readahead_ ? readahead_->stats() : ReadAheadStats{}; }
+    size_t readahead_layers() const { return readahead_ ? readahead_->moe_layers() : 0; }
+#endif
 
     std::vector<int> tokenize(const std::string& text, bool add_special = true, bool parse_special = true) const {
         int n = -llama_tokenize(vocab_, text.c_str(), static_cast<int32_t>(text.size()), nullptr, 0, add_special, parse_special);
@@ -190,6 +220,9 @@ private:
     }
 
     LlamaOptions opt_;
+#if !defined(_WIN32)
+    std::unique_ptr<ExpertReadAhead> readahead_;  // declared before ctx_: the context's callback points at it
+#endif
     llama_model* model_ = nullptr;
     llama_context* ctx_ = nullptr;
     const llama_vocab* vocab_ = nullptr;

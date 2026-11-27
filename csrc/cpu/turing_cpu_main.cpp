@@ -45,6 +45,8 @@ int main(int argc, char** argv) {
         else if (a == "--temp") temp = std::stof(next());
         else if (a == "--no-mmap") opt.use_mmap = false;
         else if (a == "--no-repack") opt.repack = false;
+        else if (a == "--readahead") opt.readahead = true, opt.repack = false;  // reads the mapped file: no repacked copy
+        else if (a == "--readahead-threads") opt.readahead_threads = std::stoi(next());
         else if (a == "--verbose") opt.verbose = true;
         else {
             std::cerr << "unknown option " << a << "\n";
@@ -95,10 +97,14 @@ int main(int argc, char** argv) {
             for (int i = 0; i < n_gen; ++i) llm.eval({pick(rng)});
             tg.push_back(n_gen / std::chrono::duration<double>(clk::now() - t0).count());
         }
+        const turing::ReadAheadStats ra = llm.readahead_stats();
         std::printf("{\"model\": \"%s\", \"desc\": \"%s\", \"threads\": %d, \"mmap\": %s, \"repack\": %s, \"load_s\": %.2f, "
-                    "\"pp%d_tok_s\": %.2f, \"tg%d_tok_s\": %.2f, \"reps\": %d}\n",
+                    "\"pp%d_tok_s\": %.2f, \"tg%d_tok_s\": %.2f, \"reps\": %d, \"readahead\": %s, "
+                    "\"readahead_bytes_read\": %llu, \"readahead_bytes_wanted\": %llu, \"readahead_s\": %.3f}\n",
                     model.c_str(), llm.desc().c_str(), threads, opt.use_mmap ? "true" : "false",
-                    opt.repack ? "true" : "false", load_s, n_prompt, median(pp), n_gen, median(tg), reps);
+                    opt.repack ? "true" : "false", load_s, n_prompt, median(pp), n_gen, median(tg), reps,
+                    opt.readahead ? "true" : "false", static_cast<unsigned long long>(ra.bytes_read),
+                    static_cast<unsigned long long>(ra.bytes_wanted), ra.seconds);
     } catch (const std::exception& e) {
         std::cerr << "error: " << e.what() << "\n";
         return 1;
