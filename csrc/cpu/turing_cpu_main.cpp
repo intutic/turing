@@ -1,5 +1,6 @@
 // turing-cpu: the libllama CPU backend from the command line.
 //   turing-cpu bench    --model m.gguf [--threads N] [--prompt-tokens 512] [--gen-tokens 128] [--reps 3] [--no-mmap] [--no-repack]
+//                       [--seqs N] (N sequences decoded together: total and per-sequence tokens/s)
 //   turing-cpu generate --model m.gguf --prompt "text" [--max-tokens 64] [--temp 0] [--threads N] [--draft N] (prompt lookup)
 // bench prints one JSON line: prompt and decode tokens/s (median of --reps), as llama-bench's pp/tg rows measure them.
 #include <algorithm>
@@ -26,7 +27,7 @@ int main(int argc, char** argv) {
     }
     const std::string cmd = argv[1];
     std::string model, prompt = "The capital of France is";
-    int threads = 0, n_prompt = 512, n_gen = 128, reps = 3, max_tokens = 64, n_draft = 0;
+    int threads = 0, n_prompt = 512, n_gen = 128, reps = 3, max_tokens = 64, n_draft = 0, n_seqs = 1;
     float temp = 0.0f;
     turing::LlamaOptions opt;
     for (int i = 2; i < argc; ++i) {
@@ -44,6 +45,7 @@ int main(int argc, char** argv) {
         else if (a == "--max-tokens") max_tokens = std::stoi(next());
         else if (a == "--temp") temp = std::stof(next());
         else if (a == "--draft") n_draft = std::stoi(next());
+        else if (a == "--seqs") n_seqs = std::stoi(next());
         else if (a == "--no-mmap") opt.use_mmap = false;
         else if (a == "--no-repack") opt.repack = false;
         else if (a == "--readahead") opt.readahead = true, opt.repack = false;  // reads the mapped file: no repacked copy
@@ -61,7 +63,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     opt.n_threads = threads;
-    opt.n_ctx = std::max(4096, n_prompt + n_gen + 8);
+    opt.n_seq = n_seqs;
+    opt.n_ctx = std::max(4096, n_seqs * (n_prompt + n_gen + 8));
     try {
         const auto t_load = clk::now();
         turing::TuringLlama llm(model, opt);
@@ -88,6 +91,37 @@ int main(int argc, char** argv) {
         }
         std::mt19937 rng(42);
         std::uniform_int_distribution<int> pick(0, llm.n_vocab() - 1);
+        if (n_seqs > 1) {  // Wave 7: n_seqs sequences prefilled together, then decoded together, one token each per step
+            std::vector<int> seqs(static_cast<size_t>(n_seqs)), pos(static_cast<size_t>(n_seqs), 0);
+            std::vector<std::vector<int>> prompts(static_cast<size_t>(n_seqs));
+            for (int i = 0; i < n_seqs; ++i) {
+                seqs[i] = i;
+                prompts[i].resize(static_cast<size_t>(n_prompt));
+                for (auto& t : prompts[i]) t = pick(rng);
+            }
+            std::vector<double> pp, tg;
+            for (int r = 0; r <= reps; ++r) {  // rep 0 warms up
+                for (int i = 0; i < n_seqs; ++i) llm.seq_clear(i);
+                auto t0 = clk::now();
+                llm.step(seqs, prompts, std::vector<int>(static_cast<size_t>(n_seqs), 0));
+                const double p_s = std::chrono::duration<double>(clk::now() - t0).count();
+                for (int i = 0; i < n_seqs; ++i) pos[i] = n_prompt;
+                t0 = clk::now();
+                for (int g = 0; g < n_gen; ++g) {
+                    std::vector<std::vector<int>> one(static_cast<size_t>(n_seqs), std::vector<int>{0});
+                    for (auto& o : one) o[0] = pick(rng);
+                    llm.step(seqs, one, pos);
+                    for (auto& q : pos) ++q;
+                }
+                const double g_s = std::chrono::duration<double>(clk::now() - t0).count();
+                if (r > 0) pp.push_back(n_seqs * n_prompt / p_s), tg.push_back(n_seqs * n_gen / g_s);
+            }
+            std::printf("{\"model\": \"%s\", \"desc\": \"%s\", \"threads\": %d, \"seqs\": %d, \"repack\": %s, "
+                        "\"pp%d_total_tok_s\": %.2f, \"tg%d_total_tok_s\": %.2f, \"tg_per_seq_tok_s\": %.2f, \"reps\": %d}\n",
+                        model.c_str(), llm.desc().c_str(), threads, n_seqs, opt.repack ? "true" : "false", n_prompt,
+                        median(pp), n_gen, median(tg), median(tg) / n_seqs, reps);
+            return 0;
+        }
         std::vector<int> toks(static_cast<size_t>(n_prompt));
         for (auto& t : toks) t = pick(rng);
         llm.truncate(0);
