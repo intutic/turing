@@ -84,7 +84,12 @@ side; 4 and 6 follow 1. Wave 7 last.
   the chosen experts' bytes miss the cache. Reading beside the products (async) paid less than before them (blocking).
   A 48 GB machine already runs gpt-oss-120b from SSD at usable speed with plain mmap. **Caveat (2026-11-27, Mac
   runs): all of these decode with random token ids (turing-cpu bench, as llama-bench), which on the Mac missed half
-  the expert bytes real text does and overstated real-text decode about 4x; re-measure with real text.**
+  the expert bytes real text does and overstated real-text decode about 4x; re-measure with real text.** Re-measured
+  on real text (`results_cpu_wave2_realtext_c4a.json`, same VM type, 8 prompts in both modes per cap, identical
+  text): read-ahead 5.1 / 4.9 / 3.6 tok/s against plain mmap's 3.6 / 1.2 / 0.74 at 40 / 28 / 20 GB (1.4x / 4.2x /
+  4.9x). The same boot's random-token bench gave read-ahead 4.96 at 28 GB where Wave 2's earlier build (before the
+  adaptive switch) gave 12.1; the switch had it on for only half the router outputs there. Open: read-ahead always on
+  against adaptive, on real text.
 - **Wave 3 done, gated**: prompt lookup with Qwen3's chat template, thinking off: a code edit decodes 37.4 tok/s against
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
