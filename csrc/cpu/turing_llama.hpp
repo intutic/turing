@@ -38,6 +38,8 @@ struct LlamaOptions {
     size_t readahead_chunk = size_t(4) << 20;
     bool readahead_check_resident = true;  // false reads every chosen expert again (tests)
     bool readahead_wait = true;            // false: reads run beside the expert products instead of before them
+    bool readahead_adaptive = true;        // read only while >= 5% of the chosen experts' bytes miss the cache
+    int readahead_window = 64;             // router outputs per adaptive decision
 };
 
 class TuringLlama {
@@ -74,7 +76,8 @@ public:
                 throw std::invalid_argument("expert read-ahead reads the mapped file: use_mmap on, repack off");
             }
             readahead_ = std::make_unique<ExpertReadAhead>(path, opt.readahead_threads, opt.readahead_chunk,
-                                                           opt.readahead_check_resident, opt.readahead_wait);
+                                                           opt.readahead_check_resident, opt.readahead_wait,
+                                                           opt.readahead_adaptive, opt.readahead_window);
             cp.cb_eval = &ExpertReadAhead::callback;
             cp.cb_eval_user_data = readahead_.get();
 #endif

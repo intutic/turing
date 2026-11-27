@@ -139,7 +139,8 @@ def test_expert_readahead_is_exact_and_reads_the_chosen_experts(tmp_path, check_
     layer per evaluation, and (forced to read even resident pages) reads at least the chosen experts' bytes."""
     path = _write_gguf(str(tmp_path / "moe.gguf"), _hf_model("qwen3_moe"), merges=True)
     plain, ra = _llama(path, repack=False), _llama(path, repack=False, readahead=True, readahead_threads=4,
-                                                    readahead_check_resident=check_resident, readahead_wait=wait)
+                                                    readahead_check_resident=check_resident, readahead_wait=wait,
+                                                    readahead_adaptive=False)
 
     def run(llm):
         return torch.cat([torch.from_numpy(llm.eval(PROMPT, all_logits=True))]
@@ -204,3 +205,22 @@ def test_libllama_engine_prompt_lookup_matches_plain(tmp_path):
     spec, s4 = asyncio.run(run(4))
     assert spec == plain and s0["drafted_tokens"] == 0
     assert s4["drafted_tokens"] > 0 and 0 < s4["acceptance_rate"] <= 1
+
+
+def test_expert_readahead_adapts_to_the_miss_share(tmp_path):
+    """Adaptive (the default): it reads only after a window of router outputs in which at least 5% of the chosen experts'
+    bytes missed the cache. Every page counted missing (check_resident off) switches it on after the first window; a
+    small file that stays in the page cache never does."""
+    path = _write_gguf(str(tmp_path / "moe.gguf"), _hf_model("qwen3_moe"), merges=True)
+    cold = _llama(path, repack=False, readahead=True, readahead_check_resident=False, readahead_window=2)
+    for t in PROMPT[:6]:
+        cold.eval([t])
+    s = cold.readahead_stats()
+    assert s["calls"] == 12 and s["active_calls"] == 10  # the first window (2 router outputs) only looks
+    assert s["bytes_read"] > 0 and s["bytes_missing"] >= s["bytes_read"]
+    warm = _llama(path, repack=False, readahead=True, readahead_window=2)
+    warm.eval(PROMPT)  # a fresh file is in the page cache: nothing misses
+    for t in DECODE:
+        warm.eval([t])
+    s = warm.readahead_stats()
+    assert s["active_calls"] == 0 and s["bytes_read"] == 0 and s["bytes_missing"] <= s["bytes_wanted"] // 20

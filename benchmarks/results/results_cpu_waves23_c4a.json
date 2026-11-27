@@ -1,0 +1,190 @@
+{
+  "note": "Wave 2 and Wave 3 re-measured on a temporary Spot GCP c4a-standard-16-lssd (Neoverse-V2, 16 vCPU, 64 GB) of 2026-11-27, 16 threads, turing-cpu from feat/cpu-first-inference b968520 (libllama 171527522, KleidiAI). The 4 local NVMe drives in RAID 0 read 2.7 GB/s (dd iflag=direct, 8 GiB).",
+  "wave2_gpt_oss_120b": {
+    "note": "gpt-oss-120b MXFP4 (63.4 GB), page cache dropped before each run, the run in a systemd scope with MemoryMax (memory.peak printed: the cap held), 64-token prompt and 64 decoded tokens x2. readahead = the experts read before the products (blocking); readahead-async = queued beside them. Missing share of the chosen experts' bytes: 6.7% at 28 GB, 12.7% at 20 GB (4.4% at 40 GB in results_cpu_waves123).",
+    "28g_mmap": {
+      "turing_cpu": [
+        {
+          "model": "/mnt/raid/m/gpt-oss-120b-MXFP4.gguf",
+          "desc": "gpt-oss 120B MXFP4 MoE",
+          "threads": 16,
+          "mmap": true,
+          "repack": false,
+          "load_s": 23.61,
+          "pp64_tok_s": 4.55,
+          "tg64_tok_s": 3.16,
+          "reps": 2,
+          "readahead": false,
+          "readahead_bytes_read": 0,
+          "readahead_bytes_wanted": 0,
+          "readahead_s": 0.0
+        }
+      ],
+      "cgroup": [
+        "memory.peak 28 GiB"
+      ]
+    },
+    "28g_readahead": {
+      "turing_cpu": [
+        {
+          "model": "/mnt/raid/m/gpt-oss-120b-MXFP4.gguf",
+          "desc": "gpt-oss 120B MXFP4 MoE",
+          "threads": 16,
+          "mmap": true,
+          "repack": false,
+          "load_s": 23.66,
+          "pp64_tok_s": 47.89,
+          "tg64_tok_s": 12.1,
+          "reps": 2,
+          "readahead": true,
+          "readahead_bytes_read": 19455414272,
+          "readahead_bytes_wanted": 291708086400,
+          "readahead_s": 11.291
+        }
+      ],
+      "cgroup": [
+        "memory.peak 28 GiB"
+      ]
+    },
+    "28g_readahead-async": {
+      "turing_cpu": [
+        {
+          "model": "/mnt/raid/m/gpt-oss-120b-MXFP4.gguf",
+          "desc": "gpt-oss 120B MXFP4 MoE",
+          "threads": 16,
+          "mmap": true,
+          "repack": false,
+          "load_s": 23.67,
+          "pp64_tok_s": 51.25,
+          "tg64_tok_s": 8.25,
+          "reps": 2,
+          "readahead": true,
+          "readahead_bytes_read": 19601321984,
+          "readahead_bytes_wanted": 291708086400,
+          "readahead_s": 3.237
+        }
+      ],
+      "cgroup": [
+        "memory.peak 28 GiB"
+      ]
+    },
+    "20g_mmap": {
+      "turing_cpu": [
+        {
+          "model": "/mnt/raid/m/gpt-oss-120b-MXFP4.gguf",
+          "desc": "gpt-oss 120B MXFP4 MoE",
+          "threads": 16,
+          "mmap": true,
+          "repack": false,
+          "load_s": 23.62,
+          "pp64_tok_s": 3.31,
+          "tg64_tok_s": 1.96,
+          "reps": 2,
+          "readahead": false,
+          "readahead_bytes_read": 0,
+          "readahead_bytes_wanted": 0,
+          "readahead_s": 0.0
+        }
+      ],
+      "cgroup": [
+        "memory.peak 20 GiB"
+      ]
+    },
+    "20g_readahead": {
+      "turing_cpu": [
+        {
+          "model": "/mnt/raid/m/gpt-oss-120b-MXFP4.gguf",
+          "desc": "gpt-oss 120B MXFP4 MoE",
+          "threads": 16,
+          "mmap": true,
+          "repack": false,
+          "load_s": 23.66,
+          "pp64_tok_s": 18.35,
+          "tg64_tok_s": 8.09,
+          "reps": 2,
+          "readahead": true,
+          "readahead_bytes_read": 36995055616,
+          "readahead_bytes_wanted": 291708086400,
+          "readahead_s": 20.719
+        }
+      ],
+      "cgroup": [
+        "memory.peak 20 GiB"
+      ]
+    },
+    "20g_readahead-async": {
+      "turing_cpu": [
+        {
+          "model": "/mnt/raid/m/gpt-oss-120b-MXFP4.gguf",
+          "desc": "gpt-oss 120B MXFP4 MoE",
+          "threads": 16,
+          "mmap": true,
+          "repack": false,
+          "load_s": 23.66,
+          "pp64_tok_s": 18.16,
+          "tg64_tok_s": 5.19,
+          "reps": 2,
+          "readahead": true,
+          "readahead_bytes_read": 38621003776,
+          "readahead_bytes_wanted": 291708086400,
+          "readahead_s": 3.449
+        }
+      ],
+      "cgroup": [
+        "memory.peak 20 GiB"
+      ]
+    },
+    "greedy_text_20g_identical_mmap_vs_async": true
+  },
+  "wave3_prompt_lookup_qwen3_8b_gated": {
+    "note": "Qwen3-8B Q4_K_M, Qwen3 chat template with thinking off, greedy, cost gate on (drafts only when measured acceptance beats measured verification cost). code = a code edit whose answer copies the function; open = a short story. The open prompt's text differed at 4 drafts: batched and one-token kernels round apart (4-bit weights, fp16 KV).",
+    "code_prompt": {
+      "draft_0": {
+        "tokens": 87,
+        "seconds": 3.0324,
+        "tok_s": 28.6902
+      },
+      "draft_4": {
+        "tokens": 87,
+        "seconds": 2.32851,
+        "tok_s": 37.363,
+        "drafted": 75,
+        "accepted": 54,
+        "steps": 33
+      },
+      "draft_8": {
+        "tokens": 87,
+        "seconds": 2.32995,
+        "tok_s": 37.3399,
+        "drafted": 75,
+        "accepted": 54,
+        "steps": 33
+      },
+      "identical_to_draft_0": true
+    },
+    "open_prompt": {
+      "draft_0": {
+        "tokens": 200,
+        "seconds": 5.3541,
+        "tok_s": 37.3546
+      },
+      "draft_4": {
+        "tokens": 200,
+        "seconds": 5.45811,
+        "tok_s": 36.6427,
+        "drafted": 12,
+        "accepted": 1,
+        "steps": 198
+      },
+      "draft_8": {
+        "tokens": 200,
+        "seconds": 5.44436,
+        "tok_s": 36.7353,
+        "drafted": 10,
+        "accepted": 1,
+        "steps": 198
+      },
+      "identical_to_draft_0": false
+    }
+  }
+}

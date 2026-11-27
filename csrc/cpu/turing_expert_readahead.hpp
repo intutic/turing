@@ -37,6 +37,8 @@ struct ReadAheadStats {
     uint64_t experts = 0;          // (layer, expert) pairs the routers chose, counted once per call
     uint64_t bytes_wanted = 0;     // their bytes in the file
     uint64_t bytes_read = 0;       // the bytes that were not resident and were read (queued, when not waiting)
+    uint64_t bytes_missing = 0;    // the bytes that were not resident, read or not
+    uint64_t active_calls = 0;     // router outputs whose missing experts were read
     double seconds = 0.0;          // time inside the callback
 };
 
@@ -44,9 +46,14 @@ class ExpertReadAhead {
 public:
     // wait: the products start after the reads (true), or the reads are queued and run beside the products (false),
     // so the products' own page faults and the large reads overlap; at most kMaxQueued reads wait in the queue.
+    // adaptive: read only while the missing share of the chosen experts' bytes over the last `window` router outputs is
+    // at least min_miss; below it the callback only looks (mincore). gpt-oss-120b on a Neoverse-V2: 4.4% missing with a
+    // 40 GB cache, where reading cost decode speed (12.8 against 17.4 tok/s), 6.7% at 28 GB and 12.7% at 20 GB, where it
+    // paid 3.8x and 4.1x (benchmarks/results/results_cpu_waves23_c4a.json).
     ExpertReadAhead(const std::string& path, int io_threads = 16, size_t chunk = size_t(4) << 20, bool check_resident = true,
-                    bool wait = true)
-        : chunk_(chunk), check_resident_(check_resident), wait_(wait) {
+                    bool wait = true, bool adaptive = true, int window = 64, double min_miss = 0.05)
+        : chunk_(chunk), check_resident_(check_resident), wait_(wait), adaptive_(adaptive), window_(std::max(1, window)),
+          min_miss_(min_miss), active_(!adaptive) {
         ggml_context* meta = nullptr;
         gguf_init_params gp{true, &meta};
         gguf_context* g = gguf_init_from_file(path.c_str(), gp);
@@ -135,15 +142,26 @@ private:
                 add_missing(off, et.per_expert, jobs);
             }
         }
-        uint64_t read = 0;
-        for (const Job& j : jobs) read += j.len;
-        if (!jobs.empty()) run(jobs, wait_);
+        uint64_t missing = 0;
+        for (const Job& j : jobs) missing += j.len;
+        const bool active = active_;
+        if (active && !jobs.empty()) run(jobs, wait_);
+        if (adaptive_) {  // decide for the next window from this one's missing share
+            win_wanted_ += wanted;
+            win_missing_ += missing;
+            if (++win_calls_ >= window_) {
+                active_ = win_wanted_ > 0 && double(win_missing_) >= min_miss_ * double(win_wanted_);
+                win_calls_ = 0, win_wanted_ = win_missing_ = 0;
+            }
+        }
         const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         std::lock_guard<std::mutex> lk(stats_mu_);
         stats_.calls += 1;
         stats_.experts += chosen.size();
         stats_.bytes_wanted += wanted;
-        stats_.bytes_read += read;
+        stats_.bytes_read += active ? missing : 0;
+        stats_.bytes_missing += missing;
+        stats_.active_calls += active ? 1 : 0;
         stats_.seconds += s;
     }
 
@@ -220,6 +238,12 @@ private:
     size_t chunk_;
     bool check_resident_;
     bool wait_;
+    bool adaptive_;
+    int window_;
+    double min_miss_;
+    bool active_;
+    int win_calls_ = 0;
+    uint64_t win_wanted_ = 0, win_missing_ = 0;
     int fd_ = -1;
     void* map_ = nullptr;
     uint64_t file_size_ = 0, page_ = 4096;
