@@ -515,5 +515,419 @@
       "readahead_s": 0.0
     },
     "finding": "Real text misses about twice the expert bytes of random ids (11.8-14.2% against 6.1-6.9% of 1.9 GB a token) and decodes at 3.4-4.1 tok/s against 5.7-6.1; bench, whose warm-up and 64-token prompt are random ids too, reports 16.2-17.3. For an MoE bigger than RAM, bench overstates real-text decode about 4x on this Mac. Wave 2's numbers (results_cpu_waves123_c4a / waves23_c4a) were measured the same way."
+  },
+  "real_text_readahead_vs_mmap": {
+    "note": "scratchpad realtext.py / realtext.sh, internal SSD only: gpt-oss-120b real greedy decoding, 64 tokens after each of 28 different prompts (4 per process, no prompt reused, so no process inherits another's experts), processes in the order mmap(count-only), readahead, readahead, mmap(count-only), plain, readahead, plain. plain = mmap with nothing else; mmap = mmap with read-ahead only counting missing bytes (mincore), which itself cost ~2.6 s per 64 tokens; readahead = Turing's read-ahead, defaults (adaptive, 16 threads, blocking). Generations that hit end-of-text early are shorter than 64 tokens.",
+    "summary": {
+      "plain": {
+        "n": 8,
+        "median_tok_s": 4.7,
+        "mean_tok_s": 4.76,
+        "min": 3.81,
+        "max": 5.72
+      },
+      "readahead": {
+        "n": 12,
+        "median_tok_s": 6.21,
+        "mean_tok_s": 6.22,
+        "min": 5.66,
+        "max": 6.86
+      },
+      "mmap": {
+        "n": 8,
+        "median_tok_s": 3.99,
+        "mean_tok_s": 4.06,
+        "min": 3.41,
+        "max": 5.01
+      }
+    },
+    "finding": "On real text read-ahead decodes at 6.2 tok/s (median of 12) against 4.7 for plain mmap (median of 8): about 1.3x. Real text left 9-18% of the chosen experts' bytes outside the page cache; bench's random ids 6-7%, where read-ahead was slower (decode_gpt_oss_120b). The adaptive switch (reads while >= 5% miss) is on in both regimes, so on this Mac the break-even lies between ~7% and ~12% missing: untuned.",
+    "lines": [
+      {
+        "process": "mmap 0",
+        "mem_before": {
+          "active_gb": 17.9,
+          "inactive_gb": 17.9,
+          "wired_gb": 4.0,
+          "compressor_gb": 6.9,
+          "file_backed_gb": 13.2
+        }
+      },
+      {
+        "mode": "mmap",
+        "prompt": 0,
+        "tokens": 64,
+        "tok_s": 4.08,
+        "missing_share": 0.119,
+        "gb_read": 0.0,
+        "read_s": 2.62,
+        "active_calls": 0,
+        "calls": 2304,
+        "text": "A lighthouse\u2019s beam is created by a special kind of glass ca"
+      },
+      {
+        "mode": "mmap",
+        "prompt": 1,
+        "tokens": 37,
+        "tok_s": 3.66,
+        "missing_share": 0.127,
+        "gb_read": 0.0,
+        "read_s": 1.55,
+        "active_calls": 0,
+        "calls": 1368,
+        "text": "Sourdough bread rises through a natural fermentation process"
+      },
+      {
+        "mode": "mmap",
+        "prompt": 2,
+        "tokens": 64,
+        "tok_s": 3.41,
+        "missing_share": 0.134,
+        "gb_read": 0.0,
+        "read_s": 2.65,
+        "active_calls": 0,
+        "calls": 2304,
+        "text": "**Key causes of the French Revolution (summarized)**  \n\n| Ca"
+      },
+      {
+        "mode": "mmap",
+        "prompt": 3,
+        "tokens": 64,
+        "tok_s": 4.37,
+        "missing_share": 0.111,
+        "gb_read": 0.0,
+        "read_s": 2.61,
+        "active_calls": 0,
+        "calls": 2304,
+        "text": "...\n\n<|end|><|start|>assistant<|channel|>analysis<|message|>"
+      },
+      {
+        "process": "readahead 4",
+        "mem_before": {
+          "active_gb": 14.4,
+          "inactive_gb": 14.4,
+          "wired_gb": 3.5,
+          "compressor_gb": 14.6,
+          "file_backed_gb": 27.1
+        }
+      },
+      {
+        "mode": "readahead",
+        "prompt": 4,
+        "tokens": 64,
+        "tok_s": 6.31,
+        "missing_share": 0.157,
+        "gb_read": 19.13,
+        "read_s": 6.48,
+        "active_calls": 2276,
+        "calls": 2304,
+        "text": "Below is a step\u2011by\u2011step, plain\u2011English description of how a "
+      },
+      {
+        "mode": "readahead",
+        "prompt": 5,
+        "tokens": 64,
+        "tok_s": 6.15,
+        "missing_share": 0.168,
+        "gb_read": 20.16,
+        "read_s": 6.79,
+        "active_calls": 2240,
+        "calls": 2304,
+        "text": "A good chess opening does three things:\n\n1. **Control the ce"
+      },
+      {
+        "mode": "readahead",
+        "prompt": 6,
+        "tokens": 22,
+        "tok_s": 5.66,
+        "missing_share": 0.183,
+        "gb_read": 8.03,
+        "read_s": 2.64,
+        "active_calls": 828,
+        "calls": 828,
+        "text": "Here\u2019s a concise, step\u2011by\u2011step overview of how a typical sta"
+      },
+      {
+        "mode": "readahead",
+        "prompt": 7,
+        "tokens": 64,
+        "tok_s": 6.42,
+        "missing_share": 0.115,
+        "gb_read": 12.59,
+        "read_s": 5.55,
+        "active_calls": 1984,
+        "calls": 2304,
+        "text": "...\n\n<|end|><|start|>assistant<|channel|>analysis<|message|>"
+      },
+      {
+        "process": "readahead 8",
+        "mem_before": {
+          "active_gb": 14.5,
+          "inactive_gb": 14.4,
+          "wired_gb": 3.5,
+          "compressor_gb": 14.5,
+          "file_backed_gb": 27.0
+        }
+      },
+      {
+        "mode": "readahead",
+        "prompt": 8,
+        "tokens": 64,
+        "tok_s": 6.86,
+        "missing_share": 0.132,
+        "gb_read": 15.53,
+        "read_s": 5.85,
+        "active_calls": 2148,
+        "calls": 2304,
+        "text": "Vaccines work by **teaching** the immune system to recognize"
+      },
+      {
+        "mode": "readahead",
+        "prompt": 9,
+        "tokens": 64,
+        "tok_s": 6.04,
+        "missing_share": 0.138,
+        "gb_read": 16.4,
+        "read_s": 6.42,
+        "active_calls": 2240,
+        "calls": 2304,
+        "text": "**Short answer**  \nCats purr mainly as a form of communicati"
+      },
+      {
+        "mode": "readahead",
+        "prompt": 10,
+        "tokens": 64,
+        "tok_s": 6.59,
+        "missing_share": 0.092,
+        "gb_read": 9.37,
+        "read_s": 5.02,
+        "active_calls": 1792,
+        "calls": 2304,
+        "text": "Below is a step\u2011by\u2011step overview of how a proposal becomes a"
+      },
+      {
+        "mode": "readahead",
+        "prompt": 11,
+        "tokens": 64,
+        "tok_s": 6.29,
+        "missing_share": 0.148,
+        "gb_read": 18.07,
+        "read_s": 6.9,
+        "active_calls": 2304,
+        "calls": 2304,
+        "text": "**Short answer:**  \nNoise\u2011cancelling (NC) headphones use a t"
+      },
+      {
+        "process": "mmap 12",
+        "mem_before": {
+          "active_gb": 14.3,
+          "inactive_gb": 14.3,
+          "wired_gb": 3.5,
+          "compressor_gb": 14.8,
+          "file_backed_gb": 27.5
+        }
+      },
+      {
+        "mode": "mmap",
+        "prompt": 12,
+        "tokens": 64,
+        "tok_s": 3.69,
+        "missing_share": 0.139,
+        "gb_read": 0.0,
+        "read_s": 2.69,
+        "active_calls": 0,
+        "calls": 2304,
+        "text": "**Compound interest** is the interest you earn not only on t"
+      },
+      {
+        "mode": "mmap",
+        "prompt": 13,
+        "tokens": 64,
+        "tok_s": 5.01,
+        "missing_share": 0.088,
+        "gb_read": 0.0,
+        "read_s": 2.77,
+        "active_calls": 0,
+        "calls": 2304,
+        "text": "The \u201c... ... ... ... ... ... ... ... ... ... ... ... ... ..."
+      },
+      {
+        "mode": "mmap",
+        "prompt": 14,
+        "tokens": 64,
+        "tok_s": 4.37,
+        "missing_share": 0.104,
+        "gb_read": 0.0,
+        "read_s": 2.71,
+        "active_calls": 0,
+        "calls": 2304,
+        "text": "Coffee roasting is a fascinating blend of art, chemistry, an"
+      },
+      {
+        "mode": "mmap",
+        "prompt": 15,
+        "tokens": 64,
+        "tok_s": 3.89,
+        "missing_share": 0.127,
+        "gb_read": 0.0,
+        "read_s": 2.72,
+        "active_calls": 0,
+        "calls": 2304,
+        "text": "... (final answer)<|end|><|start|>assistant<|channel|>analys"
+      },
+      {
+        "process": "plain 16"
+      },
+      {
+        "mode": "plain",
+        "prompt": 16,
+        "tokens": 53,
+        "tok_s": 3.81,
+        "missing_share": null,
+        "gb_read": 0.0,
+        "read_s": 0.0,
+        "active_calls": 0,
+        "calls": 0,
+        "text": "A jet engine creates thrust by accelerating a large mass of "
+      },
+      {
+        "mode": "plain",
+        "prompt": 17,
+        "tokens": 64,
+        "tok_s": 4.39,
+        "missing_share": null,
+        "gb_read": 0.0,
+        "read_s": 0.0,
+        "active_calls": 0,
+        "calls": 0,
+        "text": "The color of the sky changes because of how sunlight interac"
+      },
+      {
+        "mode": "plain",
+        "prompt": 18,
+        "tokens": 64,
+        "tok_s": 5.03,
+        "missing_share": null,
+        "gb_read": 0.0,
+        "read_s": 0.0,
+        "active_calls": 0,
+        "calls": 0,
+        "text": "Below is a **step\u2011by\u2011step narrative** of how a honey\u2011bee col"
+      },
+      {
+        "mode": "plain",
+        "prompt": 19,
+        "tokens": 64,
+        "tok_s": 4.2,
+        "missing_share": null,
+        "gb_read": 0.0,
+        "read_s": 0.0,
+        "active_calls": 0,
+        "calls": 0,
+        "text": "A credit score is a three\u2011digit number that lenders use to g"
+      },
+      {
+        "process": "readahead 20"
+      },
+      {
+        "mode": "readahead",
+        "prompt": 20,
+        "tokens": 64,
+        "tok_s": 6.19,
+        "missing_share": 0.146,
+        "gb_read": 17.26,
+        "read_s": 6.36,
+        "active_calls": 2212,
+        "calls": 2304,
+        "text": "Glaciers are massive, slow\u2011moving rivers of ice that reshape"
+      },
+      {
+        "mode": "readahead",
+        "prompt": 21,
+        "tokens": 64,
+        "tok_s": 5.87,
+        "missing_share": 0.167,
+        "gb_read": 20.3,
+        "read_s": 7.18,
+        "active_calls": 2304,
+        "calls": 2304,
+        "text": "**Short answer**\n\n- **Weather** = what you experience **righ"
+      },
+      {
+        "mode": "readahead",
+        "prompt": 22,
+        "tokens": 10,
+        "tok_s": 6.05,
+        "missing_share": 0.115,
+        "gb_read": 2.41,
+        "read_s": 1.09,
+        "active_calls": 396,
+        "calls": 396,
+        "text": "**The ...** ... (the answer ... )"
+      },
+      {
+        "mode": "readahead",
+        "prompt": 23,
+        "tokens": 64,
+        "tok_s": 6.24,
+        "missing_share": 0.127,
+        "gb_read": 13.9,
+        "read_s": 5.82,
+        "active_calls": 1828,
+        "calls": 2304,
+        "text": "...\n\n<|end|><|start|>assistant<|channel|>analysis<|message|>"
+      },
+      {
+        "process": "plain 24"
+      },
+      {
+        "mode": "plain",
+        "prompt": 24,
+        "tokens": 64,
+        "tok_s": 4.68,
+        "missing_share": null,
+        "gb_read": 0.0,
+        "read_s": 0.0,
+        "active_calls": 0,
+        "calls": 0,
+        "text": "The heart works like a **four\u2011chamber pump** that moves bloo"
+      },
+      {
+        "mode": "plain",
+        "prompt": 25,
+        "tokens": 64,
+        "tok_s": 5.53,
+        "missing_share": null,
+        "gb_read": 0.0,
+        "read_s": 0.0,
+        "active_calls": 0,
+        "calls": 0,
+        "text": "Below is a comprehensive answer that covers the main factors"
+      },
+      {
+        "mode": "plain",
+        "prompt": 26,
+        "tokens": 64,
+        "tok_s": 5.72,
+        "missing_share": null,
+        "gb_read": 0.0,
+        "read_s": 0.0,
+        "active_calls": 0,
+        "calls": 0,
+        "text": "Cheese ... (the answer) ...<|end|><|start|>assistant<|channe"
+      },
+      {
+        "mode": "plain",
+        "prompt": 27,
+        "tokens": 64,
+        "tok_s": 4.72,
+        "missing_share": null,
+        "gb_read": 0.0,
+        "read_s": 0.0,
+        "active_calls": 0,
+        "calls": 0,
+        "text": "**Short answer**  \nBecause the Earth does not orbit the Sun "
+      }
+    ]
   }
 }

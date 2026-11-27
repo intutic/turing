@@ -123,7 +123,9 @@ side; 4 and 6 follow 1. Wave 7 last.
   stopped. **Those decode figures are `turing-cpu bench`'s, which decodes random token ids after a random prompt (as
   llama-bench does): real text misses twice the expert bytes (12-14% of 1.9 GB a token against 6-7%) and decodes at
   3.4-4.1 tok/s from the internal SSD, about a quarter of bench's 16-17.** Wave 2's numbers were measured the same way
-  and need re-measuring with real text. Prompt lookup on a code edit from the internal SSD: 2.0 tok/s with and without
+  and need re-measuring with real text. Re-measured on the Mac with real text (28 prompts, internal SSD): read-ahead
+  6.2 tok/s against 4.7 for plain mmap (1.3x), the reverse of the random-token result; real text left 9-18% of expert
+  bytes uncached, random ids 6-7%. The adaptive threshold (5%) is untuned for macOS. Prompt lookup on a code edit from the internal SSD: 2.0 tok/s with and without
   drafts (7 of 14 drafts accepted), so it does not answer whether speculation pays more when the drive is the limit.
 - **Wave 1 on x86** (same file): `turing-cpu` within 4% of llama-bench for Qwen3-8B Q4_0 / Q4_K_M / Q8_0 with repack on
   and off (Q4_K_M decode 16.5 against 16.5, prompt 195 against 183).
