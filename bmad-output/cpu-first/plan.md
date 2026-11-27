@@ -82,7 +82,9 @@ side; 4 and 6 follow 1. Wave 7 last.
   (3.8x; prompt 47.9 against 4.6, 10.5x), at 20 GB 8.09 against 1.96 (4.1x); text identical. With 40 GB of cache (4.4%
   of expert bytes missing) plain mmap was faster (17.4 against 12.8), so the read-ahead now reads only while >= 5% of
   the chosen experts' bytes miss the cache. Reading beside the products (async) paid less than before them (blocking).
-  A 48 GB machine already runs gpt-oss-120b from SSD at usable speed with plain mmap.
+  A 48 GB machine already runs gpt-oss-120b from SSD at usable speed with plain mmap. **Caveat (2026-11-27, Mac
+  runs): all of these decode with random token ids (turing-cpu bench, as llama-bench), which on the Mac missed half
+  the expert bytes real text does and overstated real-text decode about 4x; re-measure with real text.**
 - **Wave 3 done, gated**: prompt lookup with Qwen3's chat template, thinking off: a code edit decodes 37.4 tok/s against
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
@@ -118,7 +120,11 @@ side; 4 and 6 follow 1. Wave 7 last.
   already in RAM a token takes 22 ms (45 tok/s), so 60-80% of decode time is waiting on the drive. Checking k drafts on
   this MoE needs almost k times the experts (144 for one token, 398 for 4, 634 for 8): 4 drafts cost 2.75x one token
   even in RAM. The SanDisk overheated after ~40 minutes of sustained reads (its last runs fell to 1 tok/s): runs
-  stopped; the speculation test from the internal SSD is not done.
+  stopped. **Those decode figures are `turing-cpu bench`'s, which decodes random token ids after a random prompt (as
+  llama-bench does): real text misses twice the expert bytes (12-14% of 1.9 GB a token against 6-7%) and decodes at
+  3.4-4.1 tok/s from the internal SSD, about a quarter of bench's 16-17.** Wave 2's numbers were measured the same way
+  and need re-measuring with real text. Prompt lookup on a code edit from the internal SSD: 2.0 tok/s with and without
+  drafts (7 of 14 drafts accepted), so it does not answer whether speculation pays more when the drive is the limit.
 - **Wave 1 on x86** (same file): `turing-cpu` within 4% of llama-bench for Qwen3-8B Q4_0 / Q4_K_M / Q8_0 with repack on
   and off (Q4_K_M decode 16.5 against 16.5, prompt 195 against 183).
 - **Wave 6 measured on x86** (`results_cpu_waves46_c4.json`): AMX through ggml's extra buffer types speeds Qwen3-8B
