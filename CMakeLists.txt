@@ -28,6 +28,12 @@ if (TURING_LLAMA)
     target_include_directories(turing-cpu PRIVATE csrc)
     target_link_libraries(turing-cpu PRIVATE llama)
     set_target_properties(turing-cpu PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    add_executable(turing-teal-bench csrc/cpu/teal_bench.cpp)  # Wave 5 go / no-go microbenchmark
+    target_link_libraries(turing-teal-bench PRIVATE ggml)
+    if (NOT MSVC)
+        target_compile_options(turing-teal-bench PRIVATE -march=native)  # as ggml's own kernels (GGML_NATIVE)
+    endif()
+    set_target_properties(turing-teal-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
 
 # Compile options: AVX2/FMA/F16C on x86_64 only; 64-bit ARM gets NEON by default.
