@@ -115,6 +115,7 @@ def main():
     serve_parser.add_argument("--backend", type=str, default="turing", choices=["turing", "libllama"], help="turing: Turing's engine (default); libllama: the CPU backend on llama.cpp for a .gguf file, one request at a time (built with TURING_BUILD_LLAMA=1)")
     serve_parser.add_argument("--ctx", type=int, default=8192, help="--backend libllama: tokens of context, prompt plus output (default: 8192)")
     serve_parser.add_argument("--threads", type=int, default=0, help="--backend libllama: CPU threads (default 0: all)")
+    serve_parser.add_argument("--expert-readahead", action="store_true", help="--backend libllama, MoE models larger than RAM: read the experts each layer chose from the file before their products, while >= 5%% of their bytes miss the page cache (gpt-oss-120b with 28 GB of cache: 3.8x faster decode); turns weight repacking off")
     serve_parser.add_argument("--served-model-name", type=str, default=None, help="The model id /v1/models, /health and /api/tags report (default: HF-<--model>; a request may name any model)")
     serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
@@ -334,7 +335,8 @@ def main():
             meta = GGUFReader(args.model, willneed=False).metadata
             engine = LlamaCppEngine(args.model, GGUFTokenizer(meta), args.served_model_name or os.path.basename(args.model),
                                     metadata=meta, n_ctx=args.ctx, n_threads=args.threads,
-                                    draft_tokens=args.draft_tokens or 0)
+                                    draft_tokens=args.draft_tokens or 0,
+                                    **(dict(readahead=True, repack=False) if args.expert_readahead else {}))
         except ImportError as e:
             raise SystemExit(f"[!] The libllama backend is not built ({e}): git submodule update --init "
                              f"third_party/llama.cpp, then TURING_BUILD_LLAMA=1 pip install -e .")
