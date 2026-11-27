@@ -92,7 +92,9 @@ side; 4 and 6 follow 1. Wave 7 last.
   (`results_cpu_wave2_always_c4a.json`): bench at 28 GB decodes 12.6 tok/s always on against 5.1 adaptive, and on real
   text always on beat adaptive at every cap (10.6 / 5.7 / 3.6 against 5.5 / 4.9 / 3.5 tok/s at 40 / 28 / 20 GB; 3.2x
   plain mmap at 40 GB), identical text. While switched off, misses fault in a page at a time. Read-ahead now always
-  reads; `--readahead-adaptive` keeps the switch. Always-on is unmeasured on macOS.
+  reads; `--readahead-adaptive` keeps the switch. On the Mac (internal SSD, real text, `results_cpu_mac_m4pro.json`)
+  always on and the switch are indistinguishable (5.5 against 5.9 tok/s, different prompts, ranges overlapping), both
+  above plain mmap's 4.7.
 - **Wave 3 done, gated**: prompt lookup with Qwen3's chat template, thinking off: a code edit decodes 37.4 tok/s against
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
