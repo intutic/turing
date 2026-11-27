@@ -58,12 +58,16 @@ jobs:
           cmake --build build-cmake
           ./build-cmake/bin/turing-cli info
 
-      # Two Windows runs crashed with an illegal instruction in PyTorch's CPU matmul (2026-11-26) and their reruns
-      # passed: the runner's CPU model and PyTorch's dispatch level tie a crash to the hardware it ran on.
+      # Three Windows runs crashed with an illegal instruction (0xc000001d) in PyTorch's bf16 CPU matmul, each in
+      # test_key_smoothing_is_exact_and_tames_outlier_channels_in_a_4bit_cache, and their reruns passed (2026-11-26).
+      # The one with this line logged ran on an Intel Family 6 Model 207 (Emerald Rapids, AVX512); every passing
+      # Windows job ran on AMD. Likely oneDNN's AMX bf16 kernels on a VM whose OS does not run AMX tiles.
       - name: Runner CPU
-        run: python -c "import platform, torch; print(platform.processor() or platform.machine(), '|', torch.backends.cpu.get_cpu_capability())"
+        run: python -c "import platform, torch; print(platform.processor() or platform.machine(), '|', torch.backends.cpu.get_cpu_capability(), '| AMX tiles:', torch.cpu._is_amx_tile_supported())"
 
       - name: Run Test Suite (Strict Warning Escalation)
+        env:
+          ONEDNN_MAX_CPU_ISA: AVX512_CORE_BF16  # AVX-512 with bf16, no AMX: see the step above
         run: |
           pytest -v
 
