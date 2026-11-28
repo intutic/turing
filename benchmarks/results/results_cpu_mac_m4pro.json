@@ -1597,5 +1597,103 @@
       "Inkling 2 Mini with repack on aborts in llama.cpp at context creation: ggml-backend.cpp:1725 GGML_ASSERT(*cur_backend_id != -1) in llama_context::resolve_fused_ops (pin 171527522).",
       "Turing bug found: TuringLlama::truncate ignores llama_memory_seq_rm's result. Inkling 2's memory is hybrid (grouped with Falcon-H1), whose suffix cannot be dropped, so prefill's prefix reuse (generate after eval, and turing serve's one-at-a-time path) fails with 'sequence positions must be consecutive'. Fixed after this run: truncate checks the result and clears the whole sequence when the suffix cannot be dropped, prefill re-evaluates what was cleared, and prompt-lookup drafts are off on recurrent and hybrid models (tests/test_llama_backend.py::test_prompt_reuse_on_recurrent_memory, a tiny Mamba). Checked on Inkling 2 Mini: two chat requests in a row through create_app, both 200, the second with 0 cached prompt tokens."
     ]
+  },
+  "cpu_vs_gpu": {
+    "note": "Turing's libllama backend built with TURING_BUILD_LLAMA_METAL=1 (commit e91f848). Four Q4_K_M MoE models with 3-4B active parameters, all fitting in RAM, from the internal SSD: Qwen3-30B-A3B (Qwen), Inkling 2 Mini, Gemma 4 26B-A4B-it and Qwen3.6 35B-A3B (bartowski). Real text: scratchpad mac/realtext_chat.py, 8 questions in each GGUF's chat template, 128 greedy tokens each from an empty cache, decode tok/s between the first and last token; cpu = 10 threads, repack off, n_gpu_layers 0; gpu = n_gpu_layers -1 (every layer on the M4 Pro GPU, recommendedMaxWorkingSetSize 40.2 GB). gpu_bench: turing-cpu bench --gpu-layers -1, pp512 / tg128, random ids, median of 3. Same session, models run one after another.",
+    "summary": {
+      "Qwen3-30B-A3B-Q4_K_M": {
+        "cpu": {
+          "decode_median_tok_s": 69.8,
+          "decode_min": 63.77,
+          "decode_max": 74.31,
+          "n": 8,
+          "prompt_median_tok_s": 130,
+          "load_s": 6.93
+        },
+        "gpu": {
+          "decode_median_tok_s": 73.5,
+          "decode_min": 72.66,
+          "decode_max": 74.35,
+          "n": 8,
+          "prompt_median_tok_s": 173,
+          "load_s": 1.29
+        },
+        "gpu_bench": {
+          "pp512_tok_s": 830.75,
+          "tg128_tok_s": 74.86
+        }
+      },
+      "Inkling-2-Mini-Q4_K_M": {
+        "cpu": {
+          "decode_median_tok_s": 25.5,
+          "decode_min": 25.35,
+          "decode_max": 25.86,
+          "n": 8,
+          "prompt_median_tok_s": 54,
+          "load_s": 7.07
+        },
+        "gpu": {
+          "decode_median_tok_s": 29.6,
+          "decode_min": 29.51,
+          "decode_max": 29.75,
+          "n": 8,
+          "prompt_median_tok_s": 73,
+          "load_s": 1.4
+        },
+        "gpu_bench": {
+          "pp512_tok_s": 299.4,
+          "tg128_tok_s": 29.65
+        }
+      },
+      "google_gemma-4-26B-A4B-it-Q4_K_M": {
+        "cpu": {
+          "decode_median_tok_s": 46.8,
+          "decode_min": 42.12,
+          "decode_max": 47.49,
+          "n": 8,
+          "prompt_median_tok_s": 90,
+          "load_s": 6.56
+        },
+        "gpu": {
+          "decode_median_tok_s": 58.9,
+          "decode_min": 54.64,
+          "decode_max": 59.02,
+          "n": 8,
+          "prompt_median_tok_s": 158,
+          "load_s": 1.33
+        },
+        "gpu_bench": {
+          "pp512_tok_s": 759.48,
+          "tg128_tok_s": 59.55
+        }
+      },
+      "Qwen_Qwen3.6-35B-A3B-Q4_K_M": {
+        "cpu": {
+          "decode_median_tok_s": 47.4,
+          "decode_min": 40.82,
+          "decode_max": 49.51,
+          "n": 8,
+          "prompt_median_tok_s": 96,
+          "load_s": 8.5
+        },
+        "gpu": {
+          "decode_median_tok_s": 60.4,
+          "decode_min": 60.15,
+          "decode_max": 60.69,
+          "n": 8,
+          "prompt_median_tok_s": 204,
+          "load_s": 1.73
+        },
+        "gpu_bench": {
+          "pp512_tok_s": 837.21,
+          "tg128_tok_s": 62.47
+        }
+      }
+    },
+    "vision_checks": [
+      "Inkling 2 Mini + mmproj-Inkling-2-Mini-f16, turing serve --mmproj --gpu-layers -1: a solid red and a solid green 224x224 PNG answered 'Red' and 'Green' (reasoning split out, 60 prompt positions)",
+      "Qwen3.6 35B-A3B + mmproj-Qwen_Qwen3.6-35B-A3B-f16 (M-RoPE), GPU: red and yellow answered 'Red' and 'yellow' (33 positions, 0.3-0.8 s)"
+    ],
+    "finding": "The GPU decodes 5-27% faster than the CPU on these models (Qwen3-30B-A3B 73.5 against 69.8 tok/s, Qwen3.6 60.4 against 47.4, Gemma 4 58.9 against 46.8, Inkling 2 Mini 29.6 against 25.5): decode is bound by memory bandwidth on both. Prompt processing is where the GPU wins: 760-840 tok/s at 512 tokens for the three faster models, against 172 on the CPU for Qwen3-30B-A3B (models_in_ram)."
   }
 }

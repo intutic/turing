@@ -30,6 +30,13 @@
 - Rationale: the user's choice ("test on my mac as well apart from cloud vm", "Yes, measure first"). A model bigger than
   RAM needs no memory cap there: gpt-oss-120b (63 GB) is already larger than 48 GB.
 
+## CF3b Apple GPU through the libllama backend, opt-in — 2026-11-27
+- Decision: ggml's Metal backend builds only with `TURING_BUILD_LLAMA_METAL=1`; `n_gpu_layers` / `--gpu-layers` (-1 =
+  all) puts layers on the GPU, and 0 keeps the model, its KV cache and op offload on the CPU, so CPU measurements stay
+  CPU measurements. Image input (libmtmd, `--mmproj`) comes with the same backend, CPU or GPU.
+- Rationale: the user's request ("run these on mac's gpu using turing", "extend turing to handle" images). CPU stays the
+  default and the plan's subject; the GPU path exists to compare against and to serve on Apple silicon.
+
 ## CF4 Lossy modes: opt-in, quality printed — 2026-11-27
 - Decision: ternary, activation sparsity and fewer-experts modes are built as switches that print their measured quality
   cost (delta NLL with standard error); exact output stays the default.

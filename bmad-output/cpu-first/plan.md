@@ -100,6 +100,11 @@ side; 4 and 6 follow 1. Wave 7 last.
   on recurrent / hybrid models (Inkling 2, Qwen3-Next, Falcon-H1, Mamba); it now clears the sequence when the suffix
   cannot be dropped, and prompt-lookup drafts are off on them. `turing serve --backend libllama --no-repack` computes
   from the mapped file (Inkling 2 Mini serves with it; it aborts in llama.cpp with repacking).
+- **Apple GPU and images (decision CF3b, `cpu_vs_gpu` in `results_cpu_mac_m4pro.json`)**: an opt-in Metal build
+  (`TURING_BUILD_LLAMA_METAL=1`, `--gpu-layers -1`) and image input through a vision projector (`--mmproj`, base64
+  data: URLs). Real-text decode, CPU against GPU, Q4_K_M: Qwen3-30B-A3B 69.8 / 73.5, Qwen3.6 35B-A3B 47.4 / 60.4,
+  Gemma 4 26B-A4B 46.8 / 58.9, Inkling 2 Mini 25.5 / 29.6 tok/s; the GPU's gain is prompt processing (760-840 tok/s at
+  512 tokens). Inkling 2's reasoning (special-token channels) now comes back as reasoning_content.
 - **Wave 3 done, gated**: prompt lookup with Qwen3's chat template, thinking off: a code edit decodes 37.4 tok/s against
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
