@@ -105,6 +105,11 @@ side; 4 and 6 follow 1. Wave 7 last.
   data: URLs). Real-text decode, CPU against GPU, Q4_K_M: Qwen3-30B-A3B 69.8 / 73.5, Qwen3.6 35B-A3B 47.4 / 60.4,
   Gemma 4 26B-A4B 46.8 / 58.9, Inkling 2 Mini 25.5 / 29.6 tok/s; the GPU's gain is prompt processing (760-840 tok/s at
   512 tokens). Inkling 2's reasoning (special-token channels) now comes back as reasoning_content.
+- **Answer quality on the Mac** (`results_model_quality_mac_m4pro.json`, `scripts/model_quality`: 76 auto-scored tasks
+  of code, bug fixes, word problems, JSON extraction and tool calls, through turing serve on the GPU, reasoning off):
+  Gemma 4 26B-A4B 75, Qwen3.6 35B-A3B 74, Qwen3-30B-A3B 70, Inkling 2 Mini 70 (5 of its 6 misses cut off by the token
+  budget; 796 s against 123-239 s). Open: Turing's tool parser reads neither the Qwen3.5/3.6 XML calls, Gemma 4's
+  `call:name{...}`, nor Inkling's JSON calls, so only Qwen3-30B-A3B's come back as `tool_calls`.
 - **Wave 3 done, gated**: prompt lookup with Qwen3's chat template, thinking off: a code edit decodes 37.4 tok/s against
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
