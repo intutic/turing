@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """run_eval.py selfcheck | run | run-hard OUT.jsonl MODEL.gguf [MODEL.gguf ...]: the task set (tasks.py) against models served by
 turing serve --backend libllama on the Mac's GPU, one model at a time; or the scorers against the reference answers.
-Every request: greedy, reasoning_effort none, the task's max_tokens. Generated code runs in a separate Python process
+Every request: greedy, reasoning_effort none and the task's max_tokens, or EFFORT=medium MAX_TOKENS=6144 for
+reasoning on. Generated code runs in a separate Python process
 (-I, 10 s timeout, a temporary directory) after a check for process, network and file-deleting calls."""
 import json
 import math
@@ -164,8 +165,9 @@ def run(out, models, which="base"):
                             raise RuntimeError(f"turing serve exited for {name}")
                         time.sleep(1)
                 for t in ts:
-                    body = {"model": name, "messages": t["messages"], "max_tokens": t["max_tokens"], "temperature": 0,
-                            "reasoning_effort": "none"}
+                    body = {"model": name, "messages": t["messages"], "temperature": 0,
+                            "max_tokens": int(os.environ.get("MAX_TOKENS", t["max_tokens"])),  # reasoning on needs room
+                            "reasoning_effort": os.environ.get("EFFORT", "none")}
                     if t.get("tools"):
                         body["tools"] = t["tools"]
                     t0 = time.perf_counter()

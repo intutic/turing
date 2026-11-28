@@ -110,7 +110,9 @@ side; 4 and 6 follow 1. Wave 7 last.
   Gemma 4 26B-A4B 75, Qwen3.6 35B-A3B 74, Qwen3-30B-A3B 70, Inkling 2 Mini 70 (5 of its 6 misses cut off by the token
   budget; 796 s against 123-239 s). Turing's tool parser now reads the Qwen3.5/3.6 XML calls (typed by the tool's
   schema), Gemma 4's `call:name{...}` and Inkling's JSON calls: all four models' 10 tool calls come back as
-  `tool_calls` (before, only Qwen3-30B-A3B's).
+  `tool_calls` (before, only Qwen3-30B-A3B's). With reasoning on (medium, a 4,096-token thinking budget Turing now
+  enforces for Gemma 4 and Inkling 2 too): Gemma 4 76, Qwen3-30B-A3B 75, Inkling 2 Mini 75, Qwen3.6 74 of 76; Inkling
+  thinks briefly (17 min, 24k tokens) where the others take 30-38 min. Gemma 4's image input works through turing serve.
 - **Wave 3 done, gated**: prompt lookup with Qwen3's chat template, thinking off: a code edit decodes 37.4 tok/s against
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
