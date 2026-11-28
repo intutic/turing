@@ -322,9 +322,10 @@ def create_app(
         except ValueError as e:
             raise bad_request(str(e))
         choice = normalize_tool_choice(req.tool_choice)
-        enabled, budget = effort_budget(req.reasoning_effort or reasoning_effort)
+        effort = req.reasoning_effort or reasoning_effort
+        enabled, budget = effort_budget(effort)
         ids, text = render_chat(engine, openai_messages(req.messages), tools if choice != "none" else None,
-                                **thinking_kwargs(engine, enabled))
+                                **thinking_kwargs(engine, enabled, effort))
         return ids, text, tools, choice, budget
 
     @app.get("/health")
@@ -617,10 +618,13 @@ def create_app(
             raise bad_request(str(e))
         choice = normalize_tool_choice(req.tool_choice)
         enabled, budget = AnthropicAPIHandler.thinking(req)
+        effort = None
         if enabled is None:
+            effort = reasoning_effort
             enabled, budget = effort_budget(reasoning_effort)
         prompt_ids, prompt_text = render_chat(engine, AnthropicAPIHandler.to_chat_messages(req),
-                                              tools if choice != "none" else None, **thinking_kwargs(engine, enabled))
+                                              tools if choice != "none" else None,
+                                              **thinking_kwargs(engine, enabled, effort))
         params = GenerationParams(
             max_tokens=_max_tokens(req.max_tokens, prompt_ids, 1024), temperature=req.temperature, top_p=req.top_p,
             top_k=req.top_k, stop=req.stop_sequences, tools=tools, tool_choice=choice, thinking_budget=budget, **ctl)

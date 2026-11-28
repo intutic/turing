@@ -121,6 +121,45 @@ def _think_ids(tokenizer) -> Optional[Tuple[int, int]]:
     return vocab[OPEN], vocab[CLOSE]
 
 
+CHANNEL_THINKING, CHANNEL_TEXT = "<|content_thinking|>", "<|content_text|>"
+CHANNEL_MARKS = ("<|message_model|>", "<|end_message|>", CHANNEL_THINKING, CHANNEL_TEXT)
+
+
+@functools.lru_cache(maxsize=8)
+def _channel_ids(tokenizer):
+    try:
+        vocab = tokenizer.get_vocab()
+    except Exception:
+        return None
+    if CHANNEL_THINKING not in vocab or CHANNEL_TEXT not in vocab:
+        return None
+    return vocab[CHANNEL_THINKING], vocab[CHANNEL_TEXT], frozenset(vocab[t] for t in CHANNEL_MARKS if t in vocab)
+
+
+def channel_token_ids(tokenizer) -> Optional[Tuple[int, int, frozenset]]:
+    """(thinking id, text id, every marker id) for models that mark reasoning with special tokens instead of <think>
+    text (Inkling 2), else None. Read once per tokenizer, as think_token_ids."""
+    return _channel_ids(tokenizer) if tokenizer is not None else None
+
+
+class ChannelSplit:
+    """Reasoning marked with special tokens (Inkling 2): the model writes <|message_model|><|content_thinking|> reasoning
+    <|end_message|> <|message_model|><|content_text|> answer <|end_message|>. push(token) is the part a generated token
+    belongs to ("reasoning" | "content"), or None for a marker, which is not text. Decoding skips special tokens, so the
+    text filter (ReasoningStreamFilter) would never see these markers."""
+
+    def __init__(self, ids: Tuple[int, int, frozenset]):
+        self.thinking, self.text, self.marks = ids
+        self.part = "content"
+
+    def push(self, token: int) -> Optional[str]:
+        if token == self.thinking:
+            self.part = "reasoning"
+        elif token == self.text:
+            self.part = "content"
+        return None if token in self.marks else self.part
+
+
 def think_token_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:
     """(<think> ids, </think> ids) when the tokenizer has both tags as tokens (a reasoning model), else None. The
     vocabulary is read once per tokenizer: get_vocab() builds a new dict of every token (0.1 s for Qwen2.5's

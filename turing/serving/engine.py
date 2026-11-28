@@ -46,7 +46,7 @@ def _eos_ids(tokenizer) -> Set[int]:
     eos = getattr(tokenizer, "eos_token_id", None)
     if isinstance(eos, int):
         ids.add(eos)
-    for tok in ("<|im_end|>", "<|eot_id|>", "<end_of_turn>", "<|end|>", "<|endoftext|>"):
+    for tok in ("<|im_end|>", "<|eot_id|>", "<end_of_turn>", "<|end|>", "<|endoftext|>", "<|content_model_end_sampling|>"):
         try:
             tid = tokenizer.convert_tokens_to_ids(tok)
         except Exception:

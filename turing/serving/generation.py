@@ -16,7 +16,8 @@ import torch
 
 from ..core.kv_cache import PAGE, KVCache
 from .engine import ContinuousBatchEngine, RequestRejected
-from .reasoning import ReasoningBudgetManager, ReasoningStreamFilter, ThinkingBudget, think_token_ids
+from .reasoning import (ChannelSplit, ReasoningBudgetManager, ReasoningStreamFilter, ThinkingBudget,
+                        channel_token_ids, think_token_ids)
 from .structured import GrammarConstraint, StructuredOutputError, validate_json
 from .tools import (HERMES_OPEN, MISTRAL_MARK, ToolCallingHandler, call_grammar, normalize_tools, tool_format)
 from .traffic import Lane
@@ -135,11 +136,15 @@ def render_text(engine: ContinuousBatchEngine, prompt: Any) -> List[int]:
     return engine.encode_prompt(prompt)
 
 
-def thinking_kwargs(engine: ContinuousBatchEngine, enabled: Optional[bool]) -> Dict[str, Any]:
-    """Chat-template kwargs that switch thinking off (Qwen3's enable_thinking) when a request disables it."""
+def thinking_kwargs(engine: ContinuousBatchEngine, enabled: Optional[bool], effort: Optional[str] = None) -> Dict[str, Any]:
+    """Chat-template kwargs that switch thinking off (Qwen3's enable_thinking) when a request disables it, and pass
+    the request's reasoning effort to templates that read one (Inkling 2: none / minimal / low / medium / high)."""
+    kw: Dict[str, Any] = {}
     if enabled is False and think_token_ids(engine.tokenizer) is not None:
-        return {"enable_thinking": False}
-    return {}
+        kw["enable_thinking"] = False
+    if effort is not None and "reasoning_effort" in (getattr(engine.tokenizer, "chat_template", None) or ""):
+        kw["reasoning_effort"] = effort.lower()
+    return kw
 
 
 def effort_budget(effort: Optional[str]) -> Tuple[Optional[bool], Optional[int]]:
@@ -302,6 +307,8 @@ class Generation:
         self.constraint = constraint
         self.reasoning = ReasoningStreamFilter(in_thinking) if params.reasoning and \
             think_token_ids(engine.tokenizer) is not None else None
+        channels = channel_token_ids(engine.tokenizer) if params.reasoning and self.reasoning is None else None
+        self.channels = ChannelSplit(channels) if channels else None  # reasoning marked by special tokens (Inkling 2)
         self.tool_fmt = tool_fmt
         self.stats: Optional[dict] = None  # the server's per-lane counters ("finished" counts this request's end)
         self.finish_reason: Optional[str] = None
@@ -332,8 +339,11 @@ class Generation:
         d = self.req.draft_tokens
         return self.engine.default_draft_tokens if d is None else d
 
-    def _route(self, text: str, gate: Optional[ToolGate]):
-        pieces = [(None, text)] if self.reasoning is None else [self.reasoning.process_token(text)]
+    def _route(self, text: str, gate: Optional[ToolGate], part: str = "content"):
+        if part == "reasoning":
+            pieces = [(text, None)]
+        else:
+            pieces = [(None, text)] if self.reasoning is None else [self.reasoning.process_token(text)]
         return self._emit(pieces, gate)
 
     def _emit(self, pieces, gate):
@@ -352,18 +362,28 @@ class Generation:
         stops = StopStrings(self.params.stop)
         gate = ToolGate(self.tool_fmt) if self.tool_fmt else None
         stream = self.engine.stream_request(self.req)
+        part = "content"
         try:
             async for token in stream:
                 self.output_ids.append(token)
+                if self.channels is not None:
+                    p = self.channels.push(token)
+                    if p is None:  # a marker: no text of its own
+                        continue
+                    if p != part:  # text decoded before the switch belongs to the part it was generated in
+                        out, _ = stops.push(detok.flush())
+                        for ev in self._route(out, gate, part):
+                            yield ev
+                        part = p
                 out, hit = stops.push(detok.push(token))
-                for ev in self._route(out, gate):
+                for ev in self._route(out, gate, part):
                     yield ev
                 if hit is not None:
                     self.stop_sequence = hit
                     break
             if self.stop_sequence is None:
                 out, _ = stops.push(detok.flush())
-                for ev in self._route(out + stops.flush(), gate):
+                for ev in self._route(out + stops.flush(), gate, part):
                     yield ev
             if self.reasoning is not None:
                 for ev in self._emit([self.reasoning.flush()], gate):
