@@ -116,6 +116,7 @@ def main():
     serve_parser.add_argument("--ctx", type=int, default=8192, help="--backend libllama: tokens of context, prompt plus output (default: 8192)")
     serve_parser.add_argument("--threads", type=int, default=0, help="--backend libllama: CPU threads (default 0: all)")
     serve_parser.add_argument("--expert-readahead", action="store_true", help="--backend libllama, MoE models larger than RAM: read the experts each layer chose from the file before their products (gpt-oss-120b, real text, a 40 GB cap on Linux: 10.6 against 3.4 tok/s decode); turns weight repacking off")
+    serve_parser.add_argument("--no-repack", action="store_true", help="--backend libllama: compute from the mapped GGUF instead of ggml's repacked copy of the weights, which needs memory for a second copy (Qwen3-30B-A3B on a 48 GB M4 Pro: 71 tok/s decode without it, 45 with it while swapping) and aborts in llama.cpp for Inkling 2 Mini")
     serve_parser.add_argument("--served-model-name", type=str, default=None, help="The model id /v1/models, /health and /api/tags report (default: HF-<--model>; a request may name any model)")
     serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
@@ -333,10 +334,13 @@ def main():
             from turing.serving.llama_engine import LlamaCppEngine
             from turing.models.gguf_loader import GGUFReader
             meta = GGUFReader(args.model, willneed=False).metadata
+            weights = dict(repack=False) if args.no_repack or args.expert_readahead else {}
+            if args.expert_readahead:
+                weights["readahead"] = True
             engine = LlamaCppEngine(args.model, None, args.served_model_name or os.path.basename(args.model),
                                     metadata=meta, n_ctx=args.ctx, n_threads=args.threads,
                                     draft_tokens=args.draft_tokens or 0, max_batch_size=args.max_batch_size or 1,
-                                    **(dict(readahead=True, repack=False) if args.expert_readahead else {}))
+                                    **weights)
         except ImportError as e:
             raise SystemExit(f"[!] The libllama backend is not built ({e}): git submodule update --init "
                              f"third_party/llama.cpp, then TURING_BUILD_LLAMA=1 pip install -e .")

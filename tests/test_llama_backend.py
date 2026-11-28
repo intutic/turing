@@ -163,6 +163,35 @@ def test_expert_readahead_needs_the_mapped_file(tmp_path):
         _llama(path, readahead=True)  # repack on: the products would read a copy, not the file
 
 
+@pytest.mark.parametrize("flags,want", [([], {}), (["--no-repack"], {"repack": False}),
+                                        (["--expert-readahead"], {"repack": False, "readahead": True}),
+                                        (["--no-repack", "--expert-readahead"], {"repack": False, "readahead": True})])
+def test_serve_passes_the_weight_flags_to_the_engine(tmp_path, monkeypatch, flags, want):
+    """turing serve --backend libllama: --no-repack (Inkling 2 Mini needs it) and --expert-readahead reach the engine."""
+    import sys
+    import turing.cli as cli
+    import turing.serving.llama_engine as llama_engine
+    path = _write_gguf(str(tmp_path / "q3.gguf"), _hf_model("qwen3"), merges=True)
+    seen = {}
+
+    class Stop(Exception):
+        pass
+
+    def engine(*args, **kwargs):
+        seen.update(kwargs)
+        raise Stop  # before the server starts
+
+    monkeypatch.setattr(llama_engine, "LlamaCppEngine", engine)
+    monkeypatch.setattr(sys, "argv", ["turing", "serve", "--backend", "libllama", "--model", path, *flags])
+    threads = torch.get_num_threads()
+    try:
+        with pytest.raises(Stop):
+            cli.main()
+    finally:
+        torch.set_num_threads(threads)  # serve sets torch to one thread
+    assert {k: seen[k] for k in ("repack", "readahead") if k in seen} == want
+
+
 @pytest.mark.parametrize("kind", ["qwen3", "qwen3_moe"])
 def test_prompt_lookup_speculation_is_exact(tmp_path, kind):
     """Wave 3: prompt-lookup drafts are kept only while each is the argmax, so in exact mode (F32 weights, fp32 KV) the

@@ -98,8 +98,8 @@ side; 4 and 6 follow 1. Wave 7 last.
   at ~62 tok/s, Inkling 2 Mini Q4_K_M at ~26 (repack off; repack on was slower for Qwen3 under swap and aborts for
   Inkling in llama.cpp). Fixed: `TuringLlama::truncate` ignored `llama_memory_seq_rm`'s result, so prompt reuse failed
   on recurrent / hybrid models (Inkling 2, Qwen3-Next, Falcon-H1, Mamba); it now clears the sequence when the suffix
-  cannot be dropped, and prompt-lookup drafts are off on them. Open: `turing serve` has no switch for repack off, which
-  Inkling 2 needs (only `--expert-readahead` turns it off).
+  cannot be dropped, and prompt-lookup drafts are off on them. `turing serve --backend libllama --no-repack` computes
+  from the mapped file (Inkling 2 Mini serves with it; it aborts in llama.cpp with repacking).
 - **Wave 3 done, gated**: prompt lookup with Qwen3's chat template, thinking off: a code edit decodes 37.4 tok/s against
   28.7 (1.31x, 72% of drafts accepted, text identical); an open prompt 36.7 against 37.4 (the gate drafted 12 tokens in
   198 steps). Ungated, verifying 4 drafts costs ~2.5 one-token steps on this CPU. Greedy only in exact arithmetic:
