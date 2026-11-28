@@ -123,6 +123,11 @@ def test_libllama_engine_serves_the_http_api(tmp_path):
         assert client.get("/metrics", params={"format": "json"}).json()["telemetry"]["total_tokens_generated"] >= len(want)
         too_long = client.post("/v1/completions", json={"model": "tiny", "prompt": PROMPT, "max_tokens": 1000})
         assert too_long.status_code == 400
+        ctx = engine.llm.n_ctx  # llama.cpp pads n_ctx=64 up to 256
+        assert too_long.json()["error"]["message"].startswith(f"This model's maximum context length is {ctx} tokens")
+    import asyncio
+    with pytest.raises(Exception, match=f"maximum context length is {ctx} tokens.*1000 in the completion"):
+        asyncio.run(engine.add_request(list(range(8)), 1000))  # the engine's own check, under the HTTP layer's
 
 
 def test_libllama_engine_logits_processor_path(tmp_path):

@@ -86,6 +86,10 @@ def test_rejections_return_400_429_503_with_retry_after():
         too_big = pool.page_limit * 16 + 1
         r = client.post("/v1/completions", json={"model": "m", "prompt": "hi", "max_tokens": too_big, "stream": True})
         assert r.status_code == 400 and r.json()["error"]["type"] == "invalid_request_error"
+        # OpenAI's wording: agents (OpenCode, LiteLLM) match it, compact the conversation and retry
+        msg = r.json()["error"]["message"]
+        assert msg.startswith(f"This model's maximum context length is {pool.page_limit * 16} tokens. However, you "
+                              f"requested ") and f", {too_big} in the completion). Please reduce the length" in msg, msg
 
         held = pool.alloc_pages(pool.page_limit)  # another tenant holds every page
         try:

@@ -199,7 +199,7 @@ class LlamaCppEngine:
     async def add_request(self, prompt_tokens: List[int], max_new_tokens: int, temperature: float = 0.0, top_k: int = 0,
                           top_p: float = 1.0, draft_tokens: Optional[int] = None, lane=None, prefix_kv=None,
                           logits_processor=None, adapter=None, media=None, **_) -> _Request:
-        from turing.serving.generation import bad_request
+        from turing.serving.generation import bad_request, context_exceeded
         if prefix_kv is not None or adapter:
             raise bad_request("the libllama backend serves neither a caller's KV cache nor LoRA adapters")
         if media is not None and self.media_marker is None:
@@ -207,8 +207,8 @@ class LlamaCppEngine:
         if media is not None and self.max_batch_size > 1:  # shortcut: batched decode has no image prefill, add it when asked
             raise bad_request("image input runs one request at a time: start turing serve without --max-batch-size")
         if len(prompt_tokens) + max_new_tokens > self.llm.n_ctx:
-            raise bad_request(f"prompt plus max_tokens is {len(prompt_tokens) + max_new_tokens} tokens, but this "
-                              f"server holds at most {self.llm.n_ctx} (--ctx)")
+            raise bad_request(context_exceeded(self.llm.n_ctx, len(prompt_tokens), max_new_tokens)
+                              + " (turing serve --ctx sets the context)")
         req = _Request(prompt_tokens, max_new_tokens, temperature, top_k, top_p, logits_processor)
         req.media = media
         req.draft_tokens = self.default_draft_tokens if draft_tokens is None else draft_tokens

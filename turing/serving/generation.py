@@ -17,7 +17,7 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 import torch
 
 from ..core.kv_cache import PAGE, KVCache
-from .engine import ContinuousBatchEngine, RequestRejected
+from .engine import ContinuousBatchEngine, RequestRejected, context_exceeded
 from .reasoning import (ChannelSplit, ReasoningBudgetManager, ReasoningStreamFilter, ThinkingBudget,
                         channel_token_ids, think_text_tags, think_token_ids, thinking_block_ids)
 from .structured import GrammarConstraint, StructuredOutputError, validate_json
@@ -529,7 +529,7 @@ async def start(engine: ContinuousBatchEngine, prompt_ids: List[int], params: Ge
     need = (prefix_kv.length if prefix_kv is not None else 0) + len(prompt_ids) + params.max_tokens
     cap = min(pool.table_width, pool.page_limit) * PAGE
     if need > cap:
-        raise bad_request(f"prompt plus max_tokens is {need} tokens, but this server holds at most {cap} per request")
+        raise bad_request(context_exceeded(cap, need - params.max_tokens, params.max_tokens))
 
     media = {}
     if params.images:
