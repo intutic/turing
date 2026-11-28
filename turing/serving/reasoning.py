@@ -185,6 +185,25 @@ def think_text_tags(tokenizer) -> Optional[Tuple[str, str]]:
     return _text_tags(tokenizer) if tokenizer is not None else None
 
 
+@functools.lru_cache(maxsize=8)
+def _block_ids(tokenizer):
+    try:
+        vocab = tokenizer.get_vocab()
+    except Exception:
+        return None
+    for opens, closes in (([OPEN], [CLOSE]), ([GEMMA_OPEN], [GEMMA_CLOSE]),
+                          ([CHANNEL_HEADER, CHANNEL_THINKING], ["<|end_message|>"])):
+        if all(t in vocab for t in opens + closes):
+            return [vocab[t] for t in opens], [vocab[t] for t in closes]
+    return None
+
+
+def thinking_block_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:
+    """(token ids opening a thinking block, ids closing it) for <think> models, Gemma 4 (<|channel> / <channel|>) and
+    Inkling 2 (<|message_model|><|content_thinking|> / <|end_message|>): what ThinkingBudget counts and forces."""
+    return _block_ids(tokenizer) if tokenizer is not None else None
+
+
 def think_token_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:
     """(<think> ids, </think> ids) when the tokenizer has both tags as tokens (a reasoning model), else None. The
     vocabulary is read once per tokenizer: get_vocab() builds a new dict of every token (0.1 s for Qwen2.5's

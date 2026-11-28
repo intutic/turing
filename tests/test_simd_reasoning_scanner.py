@@ -115,3 +115,31 @@ def test_gemma4_thinking_channel_is_split_and_switched_on():
             return {"<think>": 1, "</think>": 2}
 
     assert think_text_tags(Qwen()) is None
+
+
+def test_thinking_budget_covers_gemma4_and_inkling2():
+    """A reasoning effort's thinking budget applies to every reasoning model, not only <think> ones: Gemma 4's block
+    opens with <|channel> and closes with <channel|>, Inkling 2's opens with <|message_model|><|content_thinking|> and
+    closes with <|end_message|>. At the budget the close sequence is forced, so the answer always gets room."""
+    import torch
+    from turing.serving.reasoning import ThinkingBudget, thinking_block_ids
+
+    class Vocab:
+        def __init__(self, v):
+            self.v = v
+
+        def get_vocab(self):
+            return self.v
+
+    gemma = thinking_block_ids(Vocab({"<|channel>": 100, "<channel|>": 101}))
+    inkling = thinking_block_ids(Vocab({"<|message_model|>": 200001, "<|content_thinking|>": 200008,
+                                        "<|end_message|>": 200010, "<|content_text|>": 200004}))
+    qwen = thinking_block_ids(Vocab({"<think>": 151667, "</think>": 151668}))
+    assert gemma == ([100], [101]) and inkling == ([200001, 200008], [200010]) and qwen == ([151667], [151668])
+    assert thinking_block_ids(Vocab({"hello": 1})) is None
+    for open_ids, close_ids in (gemma, inkling):
+        budget = ThinkingBudget(open_ids, close_ids, budget=3)
+        gen = list(open_ids) + [5, 6, 7]  # three thinking tokens: the budget is spent
+        logits = torch.zeros(200100)
+        budget(gen, logits)
+        assert int(logits.argmax()) == close_ids[0] and torch.isinf(logits).sum() == logits.numel() - 1

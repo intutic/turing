@@ -19,7 +19,7 @@ import torch
 from ..core.kv_cache import PAGE, KVCache
 from .engine import ContinuousBatchEngine, RequestRejected
 from .reasoning import (ChannelSplit, ReasoningBudgetManager, ReasoningStreamFilter, ThinkingBudget,
-                        channel_token_ids, think_text_tags, think_token_ids)
+                        channel_token_ids, think_text_tags, think_token_ids, thinking_block_ids)
 from .structured import GrammarConstraint, StructuredOutputError, validate_json
 from .tools import (GEMMA_OPEN, HERMES_OPEN, MISTRAL_MARK, QWEN_FUNCTION, ToolCallingHandler, call_grammar,
                     normalize_tools, tool_format)
@@ -490,7 +490,7 @@ async def start(engine: ContinuousBatchEngine, prompt_ids: List[int], params: Ge
     elif stop is None:
         params.stop = []
 
-    tags = think_token_ids(tok) if params.reasoning else None
+    tags = thinking_block_ids(tok) if params.reasoning else None  # <think>, Gemma 4's and Inkling 2's blocks
     in_thinking = tags is not None and prompt_text.rstrip().endswith("<think>")
     think = ThinkingBudget(*tags, budget=params.thinking_budget, in_thinking=in_thinking) if tags else None
 
