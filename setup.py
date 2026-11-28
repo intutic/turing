@@ -145,8 +145,9 @@ class StripBuildExt(build_ext):
                   "git submodule update --init third_party/llama.cpp")
             return
         bdir = os.path.join(self.build_temp, "llama")
+        metal = "ON" if os.environ.get("TURING_BUILD_LLAMA_METAL") == "1" else "OFF"  # Apple GPU, opt-in
         subprocess.run(["cmake", "-S", ".", "-B", bdir, "-DTURING_LLAMA=ON", "-DCMAKE_BUILD_TYPE=Release",
-                        f"-DPython_EXECUTABLE={sys.executable}"], check=True)
+                        f"-DTURING_LLAMA_METAL={metal}", f"-DPython_EXECUTABLE={sys.executable}"], check=True)
         subprocess.run(["cmake", "--build", bdir, "--target", "turing_llama", "turing-cpu", "-j", str(os.cpu_count() or 4)],
                        check=True)
         built = glob.glob(os.path.join(bdir, "turing_llama*" + sysconfig.get_config_var("EXT_SUFFIX")))

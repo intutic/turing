@@ -200,3 +200,30 @@ def test_the_app_reads_the_vocabulary_at_startup_not_in_a_request():
     assert Tok.calls == 1
     from turing.serving.reasoning import think_token_ids
     assert think_token_ids(tok) is None and Tok.calls == 1
+
+
+def test_image_parts_become_media_markers():
+    """With a vision projector (turing serve --backend libllama --mmproj), each image part becomes the media marker in
+    its message's text, as llama-server does, and its bytes come back in order; only base64 data: URLs are taken (the
+    server never fetches a URL a request names)."""
+    import base64
+    from turing.serving.engine import RequestRejected
+    from turing.serving.generation import openai_media_messages
+
+    def img(data: bytes, mime="image/png"):
+        return {"type": "image_url", "image_url": {"url": f"data:{mime};base64," + base64.b64encode(data).decode()}}
+
+    msgs, images = openai_media_messages(
+        [{"role": "system", "content": "Be brief."},
+         {"role": "user", "content": [img(b"first"), {"type": "text", "text": "Compare"},
+                                      {"type": "input_image", "image_url": "data:image/jpeg;base64," +
+                                       base64.b64encode(b"second").decode()}]}], "<M>")
+    assert images == [b"first", b"second"]
+    assert msgs[1] == {"role": "user", "content": "<M>\nCompare\n<M>"} and msgs[0]["content"] == "Be brief."
+    for bad in [{"type": "image_url", "image_url": {"url": "https://example.com/cat.png"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png,notbase64"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,***"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,"}}]:
+        with pytest.raises(RequestRejected) as e:
+            openai_media_messages([{"role": "user", "content": [bad]}], "<M>")
+        assert e.value.status_code == 400

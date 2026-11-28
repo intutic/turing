@@ -31,6 +31,21 @@ def test_libllama_logits_match_hf(tmp_path, kind):
     assert llm.n_past == len(PROMPT + DECODE)
 
 
+@pytest.mark.parametrize("kind", ["qwen3", "qwen3_moe"])
+def test_gpu_layers_match_hf(tmp_path, kind):
+    """A Metal build (TURING_BUILD_LLAMA_METAL=1) with every layer on the GPU: logits within 2e-3 of HF's. Not 1e-3 as on
+    the CPU: llama.cpp's Metal matrix-matrix kernel for f32 weights stages its tiles in half precision
+    (kernel_mul_mm_f32_f32 = kernel_mul_mm<half, half, ...>), 1.2e-3 at most on these logits. Skips in CPU-only builds
+    (CI)."""
+    if not turing_llama.gpu_devices():
+        pytest.skip("no GPU backend in this build (TURING_BUILD_LLAMA_METAL=1)")
+    hf = _hf_model(kind)
+    llm = _llama(_write_gguf(str(tmp_path / f"{kind}.gguf"), hf, merges=True), n_gpu_layers=-1)
+    rows = [torch.from_numpy(llm.eval(PROMPT, all_logits=True))]
+    rows += [torch.from_numpy(llm.eval([t]))[None] for t in DECODE]
+    torch.testing.assert_close(torch.cat(rows), _hf_logits(hf, PROMPT + DECODE), atol=2e-3, rtol=0)
+
+
 def test_libllama_generate_is_greedy_and_reuses_the_cached_prefix(tmp_path):
     hf = _hf_model("qwen3")
     llm = _llama(_write_gguf(str(tmp_path / "q3.gguf"), hf, merges=True))
@@ -165,9 +180,12 @@ def test_expert_readahead_needs_the_mapped_file(tmp_path):
 
 @pytest.mark.parametrize("flags,want", [([], {}), (["--no-repack"], {"repack": False}),
                                         (["--expert-readahead"], {"repack": False, "readahead": True}),
-                                        (["--no-repack", "--expert-readahead"], {"repack": False, "readahead": True})])
+                                        (["--no-repack", "--expert-readahead"], {"repack": False, "readahead": True}),
+                                        (["--gpu-layers", "-1"], {"n_gpu_layers": -1}),
+                                        (["--mmproj", "mmproj.gguf"], {"mmproj": "mmproj.gguf"})])
 def test_serve_passes_the_weight_flags_to_the_engine(tmp_path, monkeypatch, flags, want):
-    """turing serve --backend libllama: --no-repack (Inkling 2 Mini needs it) and --expert-readahead reach the engine."""
+    """turing serve --backend libllama: --no-repack (Inkling 2 Mini needs it), --expert-readahead and --gpu-layers reach
+    the engine."""
     import sys
     import turing.cli as cli
     import turing.serving.llama_engine as llama_engine
@@ -189,7 +207,7 @@ def test_serve_passes_the_weight_flags_to_the_engine(tmp_path, monkeypatch, flag
             cli.main()
     finally:
         torch.set_num_threads(threads)  # serve sets torch to one thread
-    assert {k: seen[k] for k in ("repack", "readahead") if k in seen} == want
+    assert {k: seen[k] for k in ("repack", "readahead", "n_gpu_layers", "mmproj") if k in seen} == want
 
 
 @pytest.mark.parametrize("kind", ["qwen3", "qwen3_moe"])
@@ -364,6 +382,19 @@ def _write_mamba_gguf(path, n_embd=64, n_layer=2, d_inner=128, d_state=16, d_con
     g.write_tensors_to_file()
     g.close()
     return path
+
+
+def test_images_need_a_vision_projector(tmp_path):
+    """Without --mmproj the backend and the engine refuse images rather than drop them."""
+    import asyncio
+    from turing.serving.engine import RequestRejected
+    hf, _, engine = _engine(tmp_path)
+    with pytest.raises(ValueError):
+        engine.llm.prefill_media(turing_llama.Llama.media_marker + "hi", [b"png bytes"])
+    assert engine.media_marker is None and not engine.llm.has_vision
+    with pytest.raises(RequestRejected) as e:
+        asyncio.run(engine.add_request(PROMPT, 4, media=("text", [b"png bytes"])))
+    assert e.value.status_code == 400
 
 
 def test_prompt_reuse_on_recurrent_memory(tmp_path):

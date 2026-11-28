@@ -8,6 +8,8 @@ stream text with incremental detokenization, stop strings, reasoning split from 
 parsing. After the stream: finish_reason, tool_calls, usage and the schema check.
 """
 
+import base64
+import binascii
 import json
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
@@ -56,6 +58,51 @@ def _text(content: Any) -> str:
         else:
             raise bad_request(f"content part type '{kind}' is not supported by this server (text only)")
     return "\n".join(parts)
+
+
+MAX_IMAGE_BYTES = 20 << 20
+
+
+def _image_bytes(part: Dict[str, Any]) -> bytes:
+    """An image content part's bytes (OpenAI image_url as {"url": ...} or a string, or input_image), from a base64
+    data: URL. Remote URLs are refused: a request must not make the server reach other hosts."""
+    url = part.get("image_url")
+    if isinstance(url, dict):
+        url = url.get("url")
+    if not isinstance(url, str) or not url.startswith("data:"):
+        raise bad_request("images must be base64 data: URLs; this server does not fetch remote URLs")
+    head, _, data = url.partition(",")
+    if not head.endswith(";base64"):
+        raise bad_request("image data: URLs must be base64 (data:image/png;base64,...)")
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise bad_request(f"image data is not valid base64: {e}") from e
+    if not raw:
+        raise bad_request("an image is empty")
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise bad_request(f"an image is {len(raw)} bytes; at most {MAX_IMAGE_BYTES}")
+    return raw
+
+
+def openai_media_messages(messages: List[Dict[str, Any]], marker: str) -> Tuple[List[Dict[str, Any]], List[bytes]]:
+    """openai_messages for a model with a vision projector: each image part becomes `marker` in its message's text
+    (as llama-server does; the projector's embeddings replace it), and the images' bytes come back in order."""
+    images: List[bytes] = []
+    out = []
+    for m in messages:
+        content = m.get("content") if isinstance(m, dict) else None
+        if isinstance(content, list):
+            parts = []
+            for p in content:
+                if isinstance(p, dict) and p.get("type") in ("image_url", "input_image"):
+                    images.append(_image_bytes(p))
+                    parts.append({"type": "text", "text": marker})
+                else:
+                    parts.append(p)
+            m = {**m, "content": parts}
+        out.append(m)
+    return openai_messages(out), images
 
 
 def _arguments(args: Any) -> Any:
@@ -270,6 +317,7 @@ class GenerationParams:
     thinking_budget: Optional[int] = None  # thinking tokens before </think> is forced (reasoning models)
     reasoning: bool = True  # split <think> blocks into reasoning (chat endpoints); off for raw completions
     logits_processor: Optional[Callable] = None  # applied first (the DSL records log-probabilities with it)
+    images: Optional[List[bytes]] = None  # encoded images for the prompt text's media markers, in order (--mmproj)
 
 
 def normalize_tool_choice(choice: Any) -> Any:
@@ -321,7 +369,7 @@ class Generation:
 
     @property
     def prompt_tokens(self) -> int:
-        return len(self.prompt_ids)
+        return getattr(self.req, "prompt_positions", None) or len(self.prompt_ids)  # images take positions, not ids
 
     @property
     def completion_tokens(self) -> int:
@@ -475,8 +523,13 @@ async def start(engine: ContinuousBatchEngine, prompt_ids: List[int], params: Ge
     if need > cap:
         raise bad_request(f"prompt plus max_tokens is {need} tokens, but this server holds at most {cap} per request")
 
+    media = {}
+    if params.images:
+        if getattr(engine, "media_marker", None) is None:
+            raise bad_request("this model takes no images (turing serve --backend libllama --mmproj)")
+        media = {"media": (prompt_text, params.images)}
     req = await engine.add_request(
-        prompt_tokens=prompt_ids, max_new_tokens=params.max_tokens,
+        **media, prompt_tokens=prompt_ids, max_new_tokens=params.max_tokens,
         temperature=0.7 if params.temperature is None else params.temperature,
         top_k=params.top_k if params.top_k is not None and params.top_k > 0 else 0,
         top_p=params.top_p if params.top_p is not None else 1.0, draft_tokens=params.draft_tokens,

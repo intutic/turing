@@ -17,6 +17,8 @@
 #include <memory>
 
 #include "llama.h"
+#include "mtmd-helper.h"
+#include "mtmd.h"
 #if !defined(_WIN32)
 #include "cpu/turing_expert_readahead.hpp"
 #endif
@@ -32,6 +34,9 @@ struct LlamaOptions {
     bool exact = false;      // fp32 KV cache and no flash attention (libllama's defaults round K/V to fp16): parity tests
     bool verbose = false;    // libllama's own log lines
     int n_seq = 1;           // sequences decoded together by step() (Wave 7); one shared KV pool of n_ctx tokens
+    // Layers on the GPU, with a Metal build (TURING_BUILD_LLAMA_METAL=1): 0 keeps the model, its KV cache and every
+    // operation on the CPU; negative puts all layers there. Without a GPU backend libllama runs everything on the CPU.
+    int n_gpu_layers = 0;
     // Wave 2: read each MoE layer's chosen experts from the file before the expert products fault them in
     // (csrc/cpu/turing_expert_readahead.hpp). Needs use_mmap and repack off (a repacked copy is already in memory).
     bool readahead = false;
@@ -50,7 +55,7 @@ public:
         (void)once;
         llama_log_set(opt.verbose ? nullptr : &quiet_log, nullptr);
         llama_model_params mp = llama_model_default_params();
-        mp.n_gpu_layers = 0;
+        mp.n_gpu_layers = opt.n_gpu_layers;
         mp.load_mode = opt.use_mmap ? LLAMA_LOAD_MODE_MMAP : LLAMA_LOAD_MODE_NONE;
         mp.use_extra_bufts = opt.repack;
         model_ = llama_model_load_from_file(path.c_str(), mp);
@@ -65,6 +70,7 @@ public:
         cp.no_perf = true;
         cp.n_seq_max = static_cast<uint32_t>(std::max(1, opt.n_seq));
         cp.kv_unified = true;  // one pool of n_ctx tokens shared by the sequences
+        cp.op_offload = opt.n_gpu_layers != 0;  // else a GPU backend would still take large prompt batches off the CPU
         if (opt.exact) {
             cp.type_k = cp.type_v = GGML_TYPE_F32;
             cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
@@ -93,6 +99,7 @@ public:
         batch_ = llama_batch_ext_init(ctx_);
     }
     ~TuringLlama() {
+        if (mtmd_) mtmd_free(mtmd_);  // it refers to the text model
         if (batch_) llama_batch_ext_free(batch_);
         if (ctx_) llama_free(ctx_);
         if (model_) llama_model_free(model_);
@@ -322,6 +329,63 @@ public:
     };
     SpecStats spec_stats() const { return spec_; }
 
+    // Image input through the model's vision projector (an mmproj GGUF, libmtmd), as llama-server takes it: the prompt
+    // text carries media_marker() where each image goes, and the projector's embeddings replace the markers.
+    void load_mmproj(const std::string& path) {
+        if (mtmd_) mtmd_free(mtmd_);
+        if (!opt_.verbose) mtmd_helper_log_set(&quiet_log, nullptr);  // libmtmd's progress lines
+        mtmd_context_params p = mtmd_context_params_default();
+        p.use_gpu = opt_.n_gpu_layers != 0;
+        p.n_threads = llama_n_threads(ctx_);
+        p.print_timings = false;
+        mtmd_ = mtmd_init_from_file(path.c_str(), model_, p);
+        if (!mtmd_) throw std::runtime_error("libmtmd could not load the projector " + path + " for this model");
+        if (!mtmd_support_vision(mtmd_)) throw std::runtime_error(path + " is not a vision projector");
+    }
+    bool has_vision() const { return mtmd_ != nullptr; }
+    static std::string media_marker() { return mtmd_default_marker(); }
+
+    // Evaluate a prompt holding one media_marker() per image (encoded PNG / JPEG / ... bytes, in order) from an empty
+    // cache: images have no token ids, so no cached prefix can be matched against them, and later prompts never match
+    // into their positions. The last token's logits [n_vocab]; n_past() is the positions the prompt took.
+    std::vector<float> prefill_media(const std::string& text, const std::vector<std::string>& images) {
+        if (!mtmd_) throw std::invalid_argument("no vision projector loaded (load_mmproj)");
+        std::vector<mtmd_bitmap*> bitmaps;
+        mtmd_input_chunks* chunks = mtmd_input_chunks_init();
+        const auto release = [&] {
+            for (mtmd_bitmap* b : bitmaps) mtmd_bitmap_free(b);
+            mtmd_input_chunks_free(chunks);
+        };
+        try {
+            for (size_t i = 0; i < images.size(); ++i) {
+                const auto w = mtmd_helper_bitmap_init_from_buf(
+                    mtmd_, reinterpret_cast<const unsigned char*>(images[i].data()), images[i].size(), false,
+                    mtmd_helper_init_opt_default());
+                if (!w.bitmap) throw std::invalid_argument("image " + std::to_string(i) + " could not be decoded");
+                bitmaps.push_back(w.bitmap);
+            }
+            const mtmd_input_text in{text.c_str(), text.size(), /*add_special=*/false, /*parse_special=*/true};
+            const int32_t rc = mtmd_tokenize(mtmd_, chunks, &in, bitmaps.data(), bitmaps.size());
+            if (rc == 1) throw std::invalid_argument("the prompt's media markers and the images differ in number");
+            if (rc != 0) throw std::invalid_argument("libmtmd could not preprocess the images (" + std::to_string(rc) + ")");
+            if (mtmd_helper_get_n_pos(chunks) >= n_ctx()) throw std::length_error("context is full");
+            truncate(0);
+            llama_pos n_past = 0;
+            if (mtmd_helper_eval_chunks(mtmd_, ctx_, chunks, 0, 0, static_cast<int32_t>(llama_n_batch(ctx_)), true, &n_past) != 0)
+                throw std::runtime_error("libmtmd could not evaluate the prompt");
+            cached_.assign(static_cast<size_t>(n_past), -1);  // no token id ever equals -1: nothing matches these
+            reused_ = 0;
+            const float* row = llama_get_logits_ith(ctx_, -1);
+            if (!row) throw std::runtime_error("no logits after the prompt");
+            std::vector<float> out(row, row + n_vocab());
+            release();
+            return out;
+        } catch (...) {
+            release();
+            throw;
+        }
+    }
+
 private:
     static constexpr int kMaxDraft = 16;
     // Drafts worth verifying out of `available`: the k maximizing (1 + p + ... + p^k) / cost(k), where p is the measured
@@ -387,7 +451,8 @@ private:
     llama_context* ctx_ = nullptr;
     const llama_vocab* vocab_ = nullptr;
     llama_batch_ext* batch_ = nullptr;
-    std::vector<int> cached_;  // tokens whose K/V are in the cache, in order
+    mtmd_context* mtmd_ = nullptr;  // the vision projector, when load_mmproj was called
+    std::vector<int> cached_;  // tokens whose K/V are in the cache, in order (-1: an image's positions)
     int reused_ = 0;           // prompt tokens the last prefill took from the cache
     SpecStats spec_;           // prompt-lookup drafts verified and accepted
     double succ_ = 4.0, fail_ = 1.0;          // decayed draft successes / failures (prior p = 0.8: explore first)

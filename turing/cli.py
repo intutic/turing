@@ -116,6 +116,8 @@ def main():
     serve_parser.add_argument("--ctx", type=int, default=8192, help="--backend libllama: tokens of context, prompt plus output (default: 8192)")
     serve_parser.add_argument("--threads", type=int, default=0, help="--backend libllama: CPU threads (default 0: all)")
     serve_parser.add_argument("--expert-readahead", action="store_true", help="--backend libllama, MoE models larger than RAM: read the experts each layer chose from the file before their products (gpt-oss-120b, real text, a 40 GB cap on Linux: 10.6 against 3.4 tok/s decode); turns weight repacking off")
+    serve_parser.add_argument("--mmproj", type=str, default=None, help="--backend libllama: the model's vision projector GGUF (mmproj-*.gguf): chat requests may then carry images as base64 data: URLs (one request at a time)")
+    serve_parser.add_argument("--gpu-layers", type=int, default=0, help="--backend libllama built with TURING_BUILD_LLAMA_METAL=1 (Apple silicon): layers on the GPU, -1 for all (default 0: everything on the CPU)")
     serve_parser.add_argument("--no-repack", action="store_true", help="--backend libllama: compute from the mapped GGUF instead of ggml's repacked copy of the weights, which needs memory for a second copy (Qwen3-30B-A3B on a 48 GB M4 Pro: 71 tok/s decode without it, 45 with it while swapping) and aborts in llama.cpp for Inkling 2 Mini")
     serve_parser.add_argument("--served-model-name", type=str, default=None, help="The model id /v1/models, /health and /api/tags report (default: HF-<--model>; a request may name any model)")
     serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
@@ -337,6 +339,10 @@ def main():
             weights = dict(repack=False) if args.no_repack or args.expert_readahead else {}
             if args.expert_readahead:
                 weights["readahead"] = True
+            if args.gpu_layers:
+                weights["n_gpu_layers"] = args.gpu_layers
+            if args.mmproj:
+                weights["mmproj"] = args.mmproj
             engine = LlamaCppEngine(args.model, None, args.served_model_name or os.path.basename(args.model),
                                     metadata=meta, n_ctx=args.ctx, n_threads=args.threads,
                                     draft_tokens=args.draft_tokens or 0, max_batch_size=args.max_batch_size or 1,
@@ -344,7 +350,8 @@ def main():
         except ImportError as e:
             raise SystemExit(f"[!] The libllama backend is not built ({e}): git submodule update --init "
                              f"third_party/llama.cpp, then TURING_BUILD_LLAMA=1 pip install -e .")
-        print(f"[+] libllama CPU backend: {engine.llm.desc}, {engine.llm.n_ctx} tokens of context")
+        gpu = f", {'all' if args.gpu_layers < 0 else args.gpu_layers} layers on the GPU" if args.gpu_layers else ""
+        print(f"[+] libllama backend: {engine.llm.desc}, {engine.llm.n_ctx} tokens of context{gpu}")
         app = create_app(engine, embedding_model=args.embedding_model, rerank_model=args.rerank_model,
                          api_key=args.api_key, reasoning_effort=args.reasoning_effort, admission=False, lanes=False,
                          warmup=not args.no_warmup)

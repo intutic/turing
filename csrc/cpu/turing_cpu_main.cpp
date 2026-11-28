@@ -48,6 +48,7 @@ int main(int argc, char** argv) {
         else if (a == "--seqs") n_seqs = std::stoi(next());
         else if (a == "--no-mmap") opt.use_mmap = false;
         else if (a == "--no-repack") opt.repack = false;
+        else if (a == "--gpu-layers") opt.n_gpu_layers = std::stoi(next());  // Metal build: layers on the GPU, -1 = all
         else if (a == "--readahead") opt.readahead = true, opt.repack = false;  // reads the mapped file: no repacked copy
         else if (a == "--readahead-threads") opt.readahead_threads = std::stoi(next());
         else if (a == "--readahead-async") opt.readahead = true, opt.repack = false, opt.readahead_wait = false;
@@ -117,9 +118,9 @@ int main(int argc, char** argv) {
                 const double g_s = std::chrono::duration<double>(clk::now() - t0).count();
                 if (r > 0) pp.push_back(n_seqs * n_prompt / p_s), tg.push_back(n_seqs * n_gen / g_s);
             }
-            std::printf("{\"model\": \"%s\", \"desc\": \"%s\", \"threads\": %d, \"seqs\": %d, \"repack\": %s, "
+            std::printf("{\"model\": \"%s\", \"desc\": \"%s\", \"threads\": %d, \"gpu_layers\": %d, \"seqs\": %d, \"repack\": %s, "
                         "\"pp%d_total_tok_s\": %.2f, \"tg%d_total_tok_s\": %.2f, \"tg_per_seq_tok_s\": %.2f, \"reps\": %d}\n",
-                        model.c_str(), llm.desc().c_str(), threads, n_seqs, opt.repack ? "true" : "false", n_prompt,
+                        model.c_str(), llm.desc().c_str(), threads, opt.n_gpu_layers, n_seqs, opt.repack ? "true" : "false", n_prompt,
                         median(pp), n_gen, median(tg), median(tg) / n_seqs, reps);
             return 0;
         }
@@ -141,11 +142,11 @@ int main(int argc, char** argv) {
             tg.push_back(n_gen / std::chrono::duration<double>(clk::now() - t0).count());
         }
         const turing::ReadAheadStats ra = llm.readahead_stats();
-        std::printf("{\"model\": \"%s\", \"desc\": \"%s\", \"threads\": %d, \"mmap\": %s, \"repack\": %s, \"load_s\": %.2f, "
+        std::printf("{\"model\": \"%s\", \"desc\": \"%s\", \"threads\": %d, \"gpu_layers\": %d, \"mmap\": %s, \"repack\": %s, \"load_s\": %.2f, "
                     "\"pp%d_tok_s\": %.2f, \"tg%d_tok_s\": %.2f, \"reps\": %d, \"readahead\": %s, "
                     "\"readahead_bytes_read\": %llu, \"readahead_bytes_missing\": %llu, \"readahead_bytes_wanted\": %llu, "
                     "\"readahead_active_calls\": %llu, \"readahead_calls\": %llu, \"readahead_s\": %.3f}\n",
-                    model.c_str(), llm.desc().c_str(), threads, opt.use_mmap ? "true" : "false",
+                    model.c_str(), llm.desc().c_str(), threads, opt.n_gpu_layers, opt.use_mmap ? "true" : "false",
                     opt.repack ? "true" : "false", load_s, n_prompt, median(pp), n_gen, median(tg), reps,
                     opt.readahead ? "true" : "false", static_cast<unsigned long long>(ra.bytes_read),
                     static_cast<unsigned long long>(ra.bytes_missing), static_cast<unsigned long long>(ra.bytes_wanted),

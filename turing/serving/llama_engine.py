@@ -41,6 +41,8 @@ class _Request:
         self.cancelled = False
         self.arrival = time.time()
         self.first_token_time: Optional[float] = None
+        self.media = None  # (prompt text with media markers, encoded images) when the request has images
+        self.prompt_positions: Optional[int] = None  # positions the prompt took, images included
         self.output_queue: asyncio.Queue = asyncio.Queue()
 
 
@@ -112,8 +114,10 @@ class LlamaCppEngine:
     _processed = ContinuousBatchEngine._processed
 
     def __init__(self, path: str, tokenizer, name: str, metadata: Optional[dict] = None, n_ctx: int = 4096,
-                 n_threads: int = 0, seed: int = 0, draft_tokens: int = 0, max_batch_size: int = 1, **llama_kwargs):
+                 n_threads: int = 0, seed: int = 0, draft_tokens: int = 0, max_batch_size: int = 1,
+                 mmproj: Optional[str] = None, **llama_kwargs):
         """tokenizer: None for libllama's own (LlamaTokenizer), as turing serve runs it.
+        mmproj: the model's vision projector GGUF: chat requests may then carry images (one request at a time).
         metadata: the GGUF's key/values (GGUFReader(path, willneed=False).metadata), for the model's shape.
         draft_tokens: prompt-lookup drafts per step for greedy requests without a logits processor (0 = off). Greedy in
         exact arithmetic; libllama's batched kernels round differently from its one-token kernels (fp16 KV, 4-bit
@@ -121,6 +125,10 @@ class LlamaCppEngine:
         from turing import turing_llama  # built only with TURING_BUILD_LLAMA=1
         self.max_batch_size = max(1, max_batch_size)
         self.llm = turing_llama.Llama(path, n_ctx=n_ctx, n_threads=n_threads, n_seq=self.max_batch_size, **llama_kwargs)
+        self.media_marker = None  # the text that stands for an image in a prompt, with a projector loaded
+        if mmproj:
+            self.llm.load_mmproj(mmproj)
+            self.media_marker = turing_llama.Llama.media_marker
         # Every libllama call runs on this one thread: libgomp keeps a team of threads per calling thread, and once a
         # process holds more OpenMP threads than CPUs it stops spinning between parallel regions (80 against 60 ms a
         # token, Qwen3-8B on 16 vCPUs: results_cpu_wave7_c4.json).
@@ -190,14 +198,19 @@ class LlamaCppEngine:
     # ------------------------------------------------------------------ requests
     async def add_request(self, prompt_tokens: List[int], max_new_tokens: int, temperature: float = 0.0, top_k: int = 0,
                           top_p: float = 1.0, draft_tokens: Optional[int] = None, lane=None, prefix_kv=None,
-                          logits_processor=None, adapter=None, **_) -> _Request:
+                          logits_processor=None, adapter=None, media=None, **_) -> _Request:
         from turing.serving.generation import bad_request
         if prefix_kv is not None or adapter:
             raise bad_request("the libllama backend serves neither a caller's KV cache nor LoRA adapters")
+        if media is not None and self.media_marker is None:
+            raise bad_request("this model takes no images: start turing serve with --mmproj")
+        if media is not None and self.max_batch_size > 1:  # shortcut: batched decode has no image prefill, add it when asked
+            raise bad_request("image input runs one request at a time: start turing serve without --max-batch-size")
         if len(prompt_tokens) + max_new_tokens > self.llm.n_ctx:
             raise bad_request(f"prompt plus max_tokens is {len(prompt_tokens) + max_new_tokens} tokens, but this "
                               f"server holds at most {self.llm.n_ctx} (--ctx)")
         req = _Request(prompt_tokens, max_new_tokens, temperature, top_k, top_p, logits_processor)
+        req.media = media
         req.draft_tokens = self.default_draft_tokens if draft_tokens is None else draft_tokens
         self.waiting_queue.append(req)
         if self._wake is not None:
@@ -342,13 +355,17 @@ class LlamaCppEngine:
             loop.call_soon_threadsafe(req.output_queue.put_nowait, tok)
             return True
 
-        if req.logits_processor is None:
+        if req.logits_processor is None and req.media is None:
             self.llm.generate(req.prompt_tokens, req.max_new_tokens, temperature=max(req.temperature, 0.0),
                               top_p=req.top_p, top_k=req.top_k, seed=self._seed, on_token=emit,
                               n_draft=req.draft_tokens if req.temperature <= 1e-5 else 0)
             req.cached_prompt_tokens = self.llm.cached_prompt_tokens
         else:
-            logits = torch.from_numpy(self.llm.prefill(req.prompt_tokens))
+            if req.media is not None:
+                logits = torch.from_numpy(self.llm.prefill_media(*req.media))
+                req.prompt_positions = self.llm.n_past
+            else:
+                logits = torch.from_numpy(self.llm.prefill(req.prompt_tokens))
             req.cached_prompt_tokens = self.llm.cached_prompt_tokens
             gen = torch.Generator().manual_seed(self._seed)
             for i in range(req.max_new_tokens):

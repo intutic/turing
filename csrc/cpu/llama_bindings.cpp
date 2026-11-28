@@ -4,6 +4,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <cstdio>
 #include <cstring>
 
 #include "cpu/turing_llama.hpp"
@@ -14,11 +15,25 @@ using turing::TuringLlama;
 
 PYBIND11_MODULE(turing_llama, m) {
     m.doc() = "Turing Engine's CPU backend on libllama (llama.cpp, pinned in third_party/llama.cpp)";
+    m.def(
+        "gpu_devices",
+        [] {
+            llama_log_set([](ggml_log_level l, const char* t, void*) { if (l == GGML_LOG_LEVEL_ERROR) std::fputs(t, stderr); },
+                          nullptr);  // the Metal device's start-up lines otherwise
+            llama_backend_init();
+            std::vector<std::string> out;
+            for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+                ggml_backend_dev_t d = ggml_backend_dev_get(i);
+                if (ggml_backend_dev_type(d) == GGML_BACKEND_DEVICE_TYPE_GPU) out.emplace_back(ggml_backend_dev_name(d));
+            }
+            return out;
+        },
+        "GPU devices this build can put layers on (n_gpu_layers): empty unless built with TURING_BUILD_LLAMA_METAL=1.");
     py::class_<TuringLlama>(m, "Llama")
         .def(py::init([](const std::string& path, int n_ctx, int n_batch, int n_threads, bool use_mmap, bool repack,
                          bool exact, bool verbose, bool readahead, int readahead_threads, size_t readahead_chunk,
                          bool readahead_check_resident, bool readahead_wait, bool readahead_adaptive,
-                         int readahead_window, int n_seq) {
+                         int readahead_window, int n_seq, int n_gpu_layers) {
                  LlamaOptions o;
                  o.n_ctx = n_ctx;
                  o.n_batch = n_batch;
@@ -35,6 +50,7 @@ PYBIND11_MODULE(turing_llama, m) {
                  o.readahead_adaptive = readahead_adaptive;
                  o.readahead_window = readahead_window;
                  o.n_seq = n_seq;
+                 o.n_gpu_layers = n_gpu_layers;
                  py::gil_scoped_release release;
                  return std::make_unique<TuringLlama>(path, o);
              }),
@@ -42,7 +58,8 @@ PYBIND11_MODULE(turing_llama, m) {
              py::arg("use_mmap") = true, py::arg("repack") = true, py::arg("exact") = false, py::arg("verbose") = false,
              py::arg("readahead") = false, py::arg("readahead_threads") = 16, py::arg("readahead_chunk") = size_t(4) << 20,
              py::arg("readahead_check_resident") = true, py::arg("readahead_wait") = true,
-             py::arg("readahead_adaptive") = false, py::arg("readahead_window") = 64, py::arg("n_seq") = 1)
+             py::arg("readahead_adaptive") = false, py::arg("readahead_window") = 64, py::arg("n_seq") = 1,
+             py::arg("n_gpu_layers") = 0)
         .def(
             "readahead_stats",
             [](const TuringLlama& self) {
@@ -79,6 +96,31 @@ PYBIND11_MODULE(turing_llama, m) {
             },
             py::arg("seqs"), py::arg("tokens"), py::arg("pos"),
             "Several sequences in one batch: tokens[i] appended to seqs[i] from position pos[i]; last-token logits [n, V].")
+        .def(
+            "load_mmproj",
+            [](TuringLlama& self, const std::string& path) {
+                py::gil_scoped_release release;
+                self.load_mmproj(path);
+            },
+            py::arg("path"), "Load the model's vision projector (an mmproj GGUF) for prefill_media.")
+        .def_property_readonly("has_vision", &TuringLlama::has_vision)
+        .def_property_readonly_static("media_marker", [](py::object) { return TuringLlama::media_marker(); })
+        .def(
+            "prefill_media",
+            [](TuringLlama& self, const std::string& text, const std::vector<py::bytes>& images) {
+                std::vector<std::string> raw(images.begin(), images.end());
+                std::vector<float> v;
+                {
+                    py::gil_scoped_release release;
+                    v = self.prefill_media(text, raw);
+                }
+                py::array_t<float> out(static_cast<py::ssize_t>(v.size()));
+                std::memcpy(out.mutable_data(), v.data(), v.size() * sizeof(float));
+                return out;
+            },
+            py::arg("text"), py::arg("images"),
+            "Evaluate a prompt with one media_marker per image (encoded bytes, in order) from an empty cache; the last "
+            "token's logits [n_vocab].")
         .def_property_readonly("n_past", &TuringLlama::n_past)
         .def_property_readonly("bos", &TuringLlama::bos)
         .def_property_readonly("eos", &TuringLlama::eos)

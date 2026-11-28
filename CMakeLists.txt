@@ -18,7 +18,12 @@ if (TURING_LLAMA)
     if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")  # ggml refuses KleidiAI on other targets
         set(GGML_CPU_KLEIDIAI ON CACHE BOOL "ARM: KleidiAI kernels")
     endif()
-    set(GGML_METAL OFF CACHE BOOL "" FORCE)  # a CPU backend: Metal would take large prompt batches off the CPU (op offload)
+    # Metal (Apple silicon GPU) is opt-in: a CPU backend by default. With it, LlamaOptions::n_gpu_layers says how many
+    # layers run on the GPU; 0 keeps everything on the CPU (op offload is then off too, so prompts stay on the CPU).
+    option(TURING_LLAMA_METAL "libllama backend: also build ggml's Metal GPU backend" OFF)
+    set(GGML_METAL ${TURING_LLAMA_METAL} CACHE BOOL "" FORCE)
+    set(GGML_METAL_EMBED_LIBRARY ${TURING_LLAMA_METAL} CACHE BOOL "" FORCE)  # the shaders inside the module, not beside it
+    set(LLAMA_BUILD_MTMD ON CACHE BOOL "" FORCE)  # libmtmd alone: image input through a model's vision projector (mmproj)
     # Turing's patches to the pinned llama.cpp (third_party/patches, decision CF5), applied once at configure time: a
     # patch that already applies in reverse is in. They also cover its Python converter, so configure before converting.
     file(GLOB TURING_LLAMA_PATCHES "${CMAKE_SOURCE_DIR}/third_party/patches/*.patch")
@@ -42,10 +47,10 @@ if (TURING_LLAMA)
     find_package(pybind11 CONFIG REQUIRED)
     pybind11_add_module(turing_llama csrc/cpu/llama_bindings.cpp)
     target_include_directories(turing_llama PRIVATE csrc)
-    target_link_libraries(turing_llama PRIVATE llama)
+    target_link_libraries(turing_llama PRIVATE llama mtmd)
     add_executable(turing-cpu csrc/cpu/turing_cpu_main.cpp)
     target_include_directories(turing-cpu PRIVATE csrc)
-    target_link_libraries(turing-cpu PRIVATE llama)
+    target_link_libraries(turing-cpu PRIVATE llama mtmd)
     set_target_properties(turing-cpu PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
     add_executable(turing-teal-bench csrc/cpu/teal_bench.cpp)  # Wave 5 go / no-go microbenchmark
     target_link_libraries(turing-teal-bench PRIVATE ggml)
