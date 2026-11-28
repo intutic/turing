@@ -1595,7 +1595,7 @@
       "Inkling 2 Mini decodes real text at ~26 tok/s (median of 8, 23-26) with repack off; bench tg128 28.7. Output is coherent English (it reasons in plain text first: its template ignores enable_thinking).",
       "Repack on was slower for Qwen3-30B-A3B on this Mac (bench tg 45.3 against 70.8) and swap use rose from 4.5 to 12 GB during it (the repacked copy is anonymous memory); not separated from the swapping.",
       "Inkling 2 Mini with repack on aborts in llama.cpp at context creation: ggml-backend.cpp:1725 GGML_ASSERT(*cur_backend_id != -1) in llama_context::resolve_fused_ops (pin 171527522).",
-      "Turing bug found: TuringLlama::truncate ignores llama_memory_seq_rm's result. Inkling 2's memory is hybrid (grouped with Falcon-H1), whose suffix cannot be dropped, so prefill's prefix reuse (generate after eval, and turing serve's one-at-a-time path) fails with 'sequence positions must be consecutive'. Not fixed yet."
+      "Turing bug found: TuringLlama::truncate ignores llama_memory_seq_rm's result. Inkling 2's memory is hybrid (grouped with Falcon-H1), whose suffix cannot be dropped, so prefill's prefix reuse (generate after eval, and turing serve's one-at-a-time path) fails with 'sequence positions must be consecutive'. Fixed after this run: truncate checks the result and clears the whole sequence when the suffix cannot be dropped, prefill re-evaluates what was cleared, and prompt-lookup drafts are off on recurrent and hybrid models (tests/test_llama_backend.py::test_prompt_reuse_on_recurrent_memory, a tiny Mamba). Checked on Inkling 2 Mini: two chat requests in a row through create_app, both 200, the second with 0 cached prompt tokens."
     ]
   }
 }

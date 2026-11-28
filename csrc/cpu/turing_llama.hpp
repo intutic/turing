@@ -180,11 +180,15 @@ public:
     void seq_clear(int seq) { llama_memory_seq_rm(llama_get_memory(ctx_), seq, -1, -1); }
     int n_seq() const { return static_cast<int>(llama_n_seq_max(ctx_)); }
 
-    // Drop the KV cache beyond the first n tokens.
+    // Drop the KV cache beyond the first n tokens. Recurrent and hybrid memory (Mamba, Inkling 2, Qwen3-Next, Falcon-H1)
+    // keeps no per-token state to drop a suffix of: libllama refuses, and the whole sequence is cleared instead
+    // (n_past() is then 0, and the caller evaluates its tokens again).
     void truncate(int n) {
         n = std::max(0, std::min(n, n_past()));
         if (n < n_past()) {
-            llama_memory_seq_rm(llama_get_memory(ctx_), 0, n, -1);
+            llama_memory_t mem = llama_get_memory(ctx_);
+            if (n > 0 && !llama_memory_seq_rm(mem, 0, n, -1)) n = 0;
+            if (n == 0) llama_memory_seq_rm(mem, 0, -1, -1);
             cached_.resize(static_cast<size_t>(n));
         }
     }
@@ -227,8 +231,8 @@ public:
         while (common < cached_.size() && common < prompt.size() && cached_[common] == prompt[common]) ++common;
         if (common == prompt.size()) --common;  // re-evaluate the last prompt token to get its logits
         truncate(static_cast<int>(common));
-        reused_ = static_cast<int>(common);
-        return eval(std::vector<int>(prompt.begin() + static_cast<long>(common), prompt.end()));
+        reused_ = n_past();  // less than common when the memory could not drop the rest
+        return eval(std::vector<int>(prompt.begin() + reused_, prompt.end()));
     }
     int cached_prompt_tokens() const { return reused_; }
 
@@ -264,6 +268,8 @@ public:
     // per unit of measured cost, and none when no k pays, probing now and then to notice text that starts to repeat.
     std::vector<int> generate_lookup(const std::vector<int>& prompt, int max_new, int n_draft,
                                      const std::function<bool(int)>& on_token = {}) {
+        // rejected drafts are dropped with truncate, which recurrent and hybrid memory cannot do without starting over
+        if (llama_model_is_recurrent(model_) || llama_model_is_hybrid(model_)) n_draft = 0;
         std::vector<int> hist(prompt), out;
         int cur = argmax(prefill(prompt).data());
         bool stop = false;

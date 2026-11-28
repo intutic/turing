@@ -6,7 +6,7 @@ import torch
 pytest.importorskip("gguf")
 turing_llama = pytest.importorskip("turing.turing_llama", reason="libllama backend not built (TURING_BUILD_LLAMA=1)")
 
-from tests.test_gguf_parity import DECODE, PROMPT, _hf_logits, _hf_model, _write_gguf  # noqa: E402
+from tests.test_gguf_parity import DECODE, PROMPT, VOCAB, _hf_logits, _hf_model, _write_gguf  # noqa: E402
 
 # dense, grouped-query, q/k-norm, and two MoE layouts (libllama's llama arch reads separate gate / up expert stacks only)
 KINDS = ["llama", "qwen2", "qwen3", "qwen3_moe", "mixtral"]
@@ -284,6 +284,83 @@ def test_batched_engine_serves_concurrent_requests_exactly(tmp_path):
 
 async def _collect(engine, req):
     return [t async for t in engine.stream_request(req)]
+
+
+def _write_mamba_gguf(path, n_embd=64, n_layer=2, d_inner=128, d_state=16, d_conv=4, dt_rank=4, vocab=VOCAB):
+    """A tiny Mamba with random weights, in the tensor layout llama.cpp's mamba model loads (src/models/mamba.cpp):
+    recurrent memory, which keeps no per-token state to drop a suffix of."""
+    import gguf
+    import numpy as np
+    rng = np.random.default_rng(0)
+
+    def w(*shape):  # numpy order is the reverse of ggml's ne
+        return (rng.standard_normal(shape) / np.sqrt(shape[-1])).astype(np.float32)
+
+    g = gguf.GGUFWriter(path, "mamba")
+    g.add_name("tiny-mamba")
+    g.add_context_length(128)
+    g.add_embedding_length(n_embd)
+    g.add_block_count(n_layer)
+    g.add_feed_forward_length(0)
+    g.add_head_count(0)
+    g.add_ssm_conv_kernel(d_conv)
+    g.add_ssm_inner_size(d_inner)
+    g.add_ssm_state_size(d_state)
+    g.add_ssm_time_step_rank(dt_rank)
+    g.add_layer_norm_rms_eps(1e-5)
+    g.add_file_type(gguf.LlamaFileType.ALL_F32)
+    g.add_tokenizer_model("gpt2")
+    g.add_token_list([f"<tok_{i}>" for i in range(vocab)])
+    g.add_token_types([1] * vocab)
+    g.add_token_merges(["<tok_3> <tok_4>"])
+    g.add_bos_token_id(1)
+    g.add_eos_token_id(2)
+    g.add_tensor("token_embd.weight", w(vocab, n_embd))
+    g.add_tensor("output_norm.weight", np.ones(n_embd, np.float32))
+    g.add_tensor("output.weight", w(vocab, n_embd))
+    for i in range(n_layer):
+        p = f"blk.{i}."
+        g.add_tensor(p + "attn_norm.weight", np.ones(n_embd, np.float32))
+        g.add_tensor(p + "ssm_in.weight", w(2 * d_inner, n_embd))
+        g.add_tensor(p + "ssm_conv1d.weight", w(d_inner, d_conv))
+        g.add_tensor(p + "ssm_conv1d.bias", np.zeros(d_inner, np.float32))
+        g.add_tensor(p + "ssm_x.weight", w(dt_rank + 2 * d_state, d_inner))
+        g.add_tensor(p + "ssm_dt.weight", w(d_inner, dt_rank))
+        g.add_tensor(p + "ssm_dt.bias", np.full(d_inner, -2.0, np.float32))
+        g.add_tensor(p + "ssm_a", -rng.uniform(0.5, 2.0, (d_inner, d_state)).astype(np.float32))  # A = -exp(A_log)
+        g.add_tensor(p + "ssm_d", np.ones(d_inner, np.float32))
+        g.add_tensor(p + "ssm_out.weight", w(n_embd, d_inner))
+    g.write_header_to_file()
+    g.write_kv_data_to_file()
+    g.write_tensors_to_file()
+    g.close()
+    return path
+
+
+def test_prompt_reuse_on_recurrent_memory(tmp_path):
+    """Recurrent and hybrid memory (Mamba here; Inkling 2, Qwen3-Next, Falcon-H1) cannot drop a cached suffix, so a
+    prompt that shares only a prefix with the cache, or repeats it, runs again from the start; speculation drafts
+    nothing (it could not roll back rejected drafts). Every path gives a fresh context's tokens."""
+    path = _write_mamba_gguf(str(tmp_path / "mamba.gguf"))
+
+    def fresh(prompt, n):
+        return _llama(path).generate(prompt, n)
+
+    llm = _llama(path)
+    first = llm.generate(PROMPT, 6)
+    assert first == fresh(PROMPT, 6)
+    other = PROMPT[:5] + [7, 8, 9]  # shares 5 tokens with the cache: the suffix cannot be dropped
+    assert llm.generate(other, 4) == fresh(other, 4)
+    assert llm.cached_prompt_tokens == 0
+    assert llm.generate(PROMPT, 6) == first  # the whole prompt again: its last token cannot be re-evaluated in place
+    longer = _llama(path)
+    longer.eval(PROMPT[:5])
+    longer.prefill(PROMPT)  # the cache is a prefix of the prompt: appending needs no truncation, so it is reused
+    assert longer.cached_prompt_tokens == 5
+    spec = _llama(path)
+    rep = PROMPT + PROMPT + PROMPT[:6]
+    assert spec.generate(rep, 12, n_draft=4) == fresh(rep, 12)
+    assert spec.spec_stats()["drafted"] == 0
 
 
 def test_libllama_tokenizer_matches_hf_on_a_byte_level_vocabulary(tmp_path):
