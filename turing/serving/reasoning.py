@@ -65,7 +65,8 @@ class ReasoningStreamFilter:
     <think>, as DeepSeek-R1's does). Newlines right after </think> are dropped from the content.
     """
 
-    def __init__(self, in_thinking: bool = False):
+    def __init__(self, in_thinking: bool = False, open_tag: str = OPEN, close_tag: str = CLOSE):
+        self.open_tag, self.close_tag = open_tag, close_tag  # think_text_tags: Gemma 4's are <|channel>thought / <channel|>
         self.in_thinking_block = in_thinking
         self.buffered_text = ""
         self.thinking_content = ""
@@ -76,7 +77,7 @@ class ReasoningStreamFilter:
         """Returns the (reasoning_chunk, content_chunk) this text completes; None for an empty chunk."""
         buf, r, c = self.buffered_text + token_text, "", ""
         while True:
-            tag = CLOSE if self.in_thinking_block else OPEN
+            tag = self.close_tag if self.in_thinking_block else self.open_tag
             i = buf.find(tag)
             cut = i if i >= 0 else len(buf) - _partial(buf, tag)
             if self.in_thinking_block:
@@ -119,6 +120,88 @@ def _think_ids(tokenizer) -> Optional[Tuple[int, int]]:
     if OPEN not in vocab or CLOSE not in vocab:
         return None
     return vocab[OPEN], vocab[CLOSE]
+
+
+CHANNEL_THINKING, CHANNEL_HEADER = "<|content_thinking|>", "<|message_model|>"
+CHANNEL_CONTENT = ("<|content_text|>", "<|content_invoke_tool_json|>", "<|content_invoke_tool_text|>", "<|content_xml|>")
+CHANNEL_MARKS = (CHANNEL_HEADER, "<|end_message|>", CHANNEL_THINKING) + CHANNEL_CONTENT
+
+
+@functools.lru_cache(maxsize=8)
+def _channel_ids(tokenizer):
+    try:
+        vocab = tokenizer.get_vocab()
+    except Exception:
+        return None
+    if CHANNEL_THINKING not in vocab or CHANNEL_CONTENT[0] not in vocab:
+        return None
+    return (vocab[CHANNEL_THINKING], frozenset(vocab[t] for t in CHANNEL_CONTENT if t in vocab), vocab.get(CHANNEL_HEADER),
+            frozenset(vocab[t] for t in CHANNEL_MARKS if t in vocab))
+
+
+def channel_token_ids(tokenizer) -> Optional[Tuple[int, frozenset, Optional[int], frozenset]]:
+    """(thinking id, answer content ids, header id, every marker id) for models that mark reasoning with special tokens
+    instead of <think> text (Inkling 2), else None. Read once per tokenizer, as think_token_ids."""
+    return _channel_ids(tokenizer) if tokenizer is not None else None
+
+
+class ChannelSplit:
+    """Reasoning marked with special tokens (Inkling 2): the model writes <|message_model|><|content_thinking|> reasoning
+    <|end_message|>, then <|message_model|><|content_text|> answer <|end_message|> or, for a tool call,
+    <|message_model|>name<|content_invoke_tool_json|>{"name": ..., "args": ...}<|end_message|>. push(token) is the part a
+    generated token belongs to ("reasoning" | "content"), or None for a marker or a message header (the tool name, which
+    the call's JSON repeats). Decoding skips special tokens, so the <think> text filter never sees these markers."""
+
+    def __init__(self, ids: Tuple[int, frozenset, Optional[int], frozenset]):
+        self.thinking, self.content, self.header_id, self.marks = ids
+        self.part = "content"
+        self.header = False
+
+    def push(self, token: int) -> Optional[str]:
+        if token == self.header_id:
+            self.header = True
+        elif token == self.thinking:
+            self.part, self.header = "reasoning", False
+        elif token in self.content:
+            self.part, self.header = "content", False
+        return None if token in self.marks or self.header else self.part
+
+
+GEMMA_OPEN, GEMMA_CLOSE = "<|channel>", "<channel|>"
+
+
+@functools.lru_cache(maxsize=8)
+def _text_tags(tokenizer):
+    try:
+        vocab = tokenizer.get_vocab()
+    except Exception:
+        return None
+    return (GEMMA_OPEN + "thought", GEMMA_CLOSE) if GEMMA_OPEN in vocab and GEMMA_CLOSE in vocab else None
+
+
+def think_text_tags(tokenizer) -> Optional[Tuple[str, str]]:
+    """(open, close) thinking tags that decode as visible text for models other than <think> ones: Gemma 4 writes
+    <|channel>thought ... <channel|> before its answer. None otherwise. Read once per tokenizer."""
+    return _text_tags(tokenizer) if tokenizer is not None else None
+
+
+@functools.lru_cache(maxsize=8)
+def _block_ids(tokenizer):
+    try:
+        vocab = tokenizer.get_vocab()
+    except Exception:
+        return None
+    for opens, closes in (([OPEN], [CLOSE]), ([GEMMA_OPEN], [GEMMA_CLOSE]),
+                          ([CHANNEL_HEADER, CHANNEL_THINKING], ["<|end_message|>"])):
+        if all(t in vocab for t in opens + closes):
+            return [vocab[t] for t in opens], [vocab[t] for t in closes]
+    return None
+
+
+def thinking_block_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:
+    """(token ids opening a thinking block, ids closing it) for <think> models, Gemma 4 (<|channel> / <channel|>) and
+    Inkling 2 (<|message_model|><|content_thinking|> / <|end_message|>): what ThinkingBudget counts and forces."""
+    return _block_ids(tokenizer) if tokenizer is not None else None
 
 
 def think_token_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:

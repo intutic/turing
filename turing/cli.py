@@ -29,6 +29,18 @@ def _load_hf_or_exit(args, dev, dtype=None):
     except Exception as e:
         raise SystemExit(f"[!] Could not load weights for '{args.model}': {e}\n    Pass --mock to run on synthetic weights.")
 
+def _require_free_port(host, port):
+    """Exit before the model loads when host:port is taken: uvicorn binds only after it (a second server on a used
+    port loaded 17 GB of weights beside the first, then failed). Binds the way uvicorn's Config.bind_socket does."""
+    import socket
+    with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError as e:
+            raise SystemExit(f"[!] Cannot listen on {host}:{port} ({e.strerror}): another server is probably running "
+                             f"there. Stop it or pass another --port") from None
+
 def _load_weights(args, dev):
     """Real weights from a .tgate4 directory or file, a local .gguf file, or HuggingFace, with --quantization and the
     KV cache flags applied when the command has them."""
@@ -112,6 +124,13 @@ def main():
     serve_parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     serve_parser.add_argument("--port", type=int, default=8000, help="Port number")
     serve_parser.add_argument("--device", type=str, default="auto", help="Hardware device (auto, cuda, rocm, cpu, mps)")
+    serve_parser.add_argument("--backend", type=str, default="turing", choices=["turing", "libllama"], help="turing: Turing's engine (default); libllama: the CPU backend on llama.cpp for a .gguf file, one request at a time (built with TURING_BUILD_LLAMA=1)")
+    serve_parser.add_argument("--ctx", type=int, default=8192, help="--backend libllama: tokens of context, prompt plus output (default: 8192)")
+    serve_parser.add_argument("--threads", type=int, default=0, help="--backend libllama: CPU threads (default 0: all)")
+    serve_parser.add_argument("--expert-readahead", action="store_true", help="--backend libllama, MoE models larger than RAM: read the experts each layer chose from the file before their products (gpt-oss-120b, real text, a 40 GB cap on Linux: 10.6 against 3.4 tok/s decode); turns weight repacking off")
+    serve_parser.add_argument("--mmproj", type=str, default=None, help="--backend libllama: the model's vision projector GGUF (mmproj-*.gguf): chat requests may then carry images as base64 data: URLs (one request at a time)")
+    serve_parser.add_argument("--gpu-layers", type=int, default=0, help="--backend libllama built with TURING_BUILD_LLAMA_METAL=1 (Apple silicon): layers on the GPU, -1 for all (default 0: everything on the CPU)")
+    serve_parser.add_argument("--no-repack", action="store_true", help="--backend libllama: compute from the mapped GGUF instead of ggml's repacked copy of the weights, which needs memory for a second copy (Qwen3-30B-A3B on a 48 GB M4 Pro: 71 tok/s decode without it, 45 with it while swapping) and aborts in llama.cpp for Inkling 2 Mini")
     serve_parser.add_argument("--served-model-name", type=str, default=None, help="The model id /v1/models, /health and /api/tags report (default: HF-<--model>; a request may name any model)")
     serve_parser.add_argument("--activation-sparsity", type=float, default=0.0, help="TEAL-style: zero this fraction of every projection's inputs by magnitude (0 = off; costs quality, speeds batch-1 decode on CUDA)")
     serve_parser.add_argument("--quantization", type=str, default="none", choices=["none", "w4a16-rtn", "w4a16-gptq"], help="4-bit weights at load (GPTQ calibrates on WikiText-2 and takes minutes; `turing convert` does it once)")
@@ -125,10 +144,10 @@ def main():
     serve_parser.add_argument("--kv-page-budget", type=float, default=1.0, help="Quest: share of 16-token KV pages each decode step reads; 1.0 reads all (default: 1.0)")
     serve_parser.add_argument("--no-cuda-graphs", action="store_true", help="Run decode steps eagerly instead of replaying CUDA graphs")
     serve_parser.add_argument("--kv-cache-memory-fraction", type=float, default=None, help="Share of free GPU memory (after the weights) for the paged KV pool (default: all of it but a reserve of a tenth of the GPU's memory, at least 2 GiB)")
-    serve_parser.add_argument("--max-batch-size", type=int, default=64, help="Continuous batching size")
+    serve_parser.add_argument("--max-batch-size", type=int, default=None, help="Continuous batching size (default 64; --backend libllama: 1, one request at a time, or N sequences decoded together)")
     serve_parser.add_argument("--embedding-model", type=str, default=None, help="HF embedding model (e.g. BAAI/bge-small-en-v1.5) for /v1/embeddings; default: the served model's mean-pooled hidden states")
     serve_parser.add_argument("--rerank-model", type=str, default=None, help="HF cross-encoder (e.g. cross-encoder/ms-marco-MiniLM-L-6-v2) for /v1/rerank; default: the served model's yes/no likelihood")
-    serve_parser.add_argument("--draft-tokens", type=int, default=8, help="Speculative draft tokens per request and step (0 = off): from prompt lookup, or from --draft-head")
+    serve_parser.add_argument("--draft-tokens", type=int, default=None, help="Speculative draft tokens per request and step (0 = off): from prompt lookup, or from --draft-head (default 8; --backend libllama: 0, prompt lookup for greedy requests)")
     serve_parser.add_argument("--draft-head", type=str, default=None, help="EAGLE-3 draft head for this model (a Hugging Face repository or a directory with config.json and its weights): it drafts instead of prompt lookup")
     serve_parser.add_argument("--api-key", type=str, default=os.getenv("TURING_API_KEY"), help="Require this key (Authorization: Bearer or x-api-key) on every endpoint but /health (default: $TURING_API_KEY; off when unset)")
     serve_parser.add_argument("--no-admission-control", action="store_true", help="Do not reject requests the KV pool cannot hold soon (429/503)")
@@ -320,9 +339,48 @@ def main():
                 print("\nSession ended.")
                 break
 
+    elif args.command == "serve" and args.backend == "libllama":
+        # the CPU backend on libllama (decision CF1a): a GGUF file, one request at a time, the same HTTP APIs
+        if not (args.model.endswith(".gguf") and os.path.isfile(args.model)):
+            raise SystemExit("[!] --backend libllama serves a local .gguf file: pass its path to --model")
+        _require_free_port(args.host, args.port)
+        torch.set_num_threads(1)  # torch only samples here; its OpenMP team beside ggml's slows each step (llama_engine.py)
+        try:
+            from turing.serving.llama_engine import LlamaCppEngine
+            from turing.models.gguf_loader import GGUFReader
+            meta = GGUFReader(args.model, willneed=False).metadata
+            weights = dict(repack=False) if args.no_repack or args.expert_readahead else {}
+            if args.expert_readahead:
+                weights["readahead"] = True
+            if args.gpu_layers:
+                weights["n_gpu_layers"] = args.gpu_layers
+            if args.mmproj:
+                weights["mmproj"] = args.mmproj
+            engine = LlamaCppEngine(args.model, None, args.served_model_name or os.path.basename(args.model),
+                                    metadata=meta, n_ctx=args.ctx, n_threads=args.threads,
+                                    draft_tokens=args.draft_tokens or 0, max_batch_size=args.max_batch_size or 1,
+                                    **weights)
+            from turing.turing_llama import gpu_devices
+            gpus = gpu_devices() if args.gpu_layers else []
+        except ImportError as e:
+            raise SystemExit(f"[!] The libllama backend is not built ({e}): git submodule update --init "
+                             f"third_party/llama.cpp, then TURING_BUILD_LLAMA=1 pip install -e .")
+        if args.gpu_layers and not gpus:
+            print("[!] --gpu-layers has no effect: this build has no GPU backend (build with TURING_BUILD_LLAMA_METAL=1)")
+        gpu = f", {'all' if args.gpu_layers < 0 else args.gpu_layers} layers on the GPU" if gpus else ""
+        print(f"[+] libllama backend: {engine.llm.desc}, {engine.llm.n_ctx} tokens of context{gpu}")
+        app = create_app(engine, embedding_model=args.embedding_model, rerank_model=args.rerank_model,
+                         api_key=args.api_key, reasoning_effort=args.reasoning_effort, admission=False, lanes=False,
+                         warmup=not args.no_warmup)
+        print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} "
+              f"(Model: {engine.model_config.name}, Device: {'gpu ' + gpus[0] if gpus else 'cpu'}, backend: libllama)")
+        uvicorn.run(app, host=args.host, port=args.port)
+
     elif args.command == "serve":
-        jcfg = TuringConfig(device=args.device, max_batch_size=args.max_batch_size)
+        jcfg = TuringConfig(device=args.device, max_batch_size=args.max_batch_size or 64)
         dev = jcfg.resolve_device()
+        if not args.prefill_worker and os.getenv("RANK", "0") == "0":  # only rank 0 listens on --port
+            _require_free_port(args.host, args.port)
 
         model_inst = None
         tokenizer_inst = None
@@ -373,11 +431,12 @@ def main():
             from turing.models.eagle3 import load_eagle3
             draft_head = load_eagle3(args.draft_head, cfg.hidden_dim, cfg.num_layers)
             print(f"[+] Loaded EAGLE-3 draft head from {args.draft_head} (reads layers {draft_head.aux_layers})")
+        drafts = 8 if args.draft_tokens is None else args.draft_tokens
         engine = ContinuousBatchEngine(cfg, jcfg, model=model_inst, tokenizer=tokenizer_inst, dist_driver=dist_driver,
                                        draft_head=draft_head,
                                        prefix_caching=not args.no_prefix_caching and dist_driver is None
-                                       and not args.prefill_worker, draft_tokens=args.draft_tokens,
-                                       spec_gate=SpeculationGatePolicy() if args.draft_tokens else None,
+                                       and not args.prefill_worker, draft_tokens=drafts,
+                                       spec_gate=SpeculationGatePolicy() if drafts else None,
                                        remote_prefill=(args.prefill_server.rsplit(":", 1)[0],
                                                        int(args.prefill_server.rsplit(":", 1)[1]))
                                        if args.prefill_server else None)

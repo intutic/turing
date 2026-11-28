@@ -1,0 +1,74 @@
+diff --git a/conversion/bitnet.py b/conversion/bitnet.py
+index 82bcada..7ee28a1 100644
+--- a/conversion/bitnet.py
++++ b/conversion/bitnet.py
+@@ -14,12 +14,17 @@ class BitnetModel(TextModel):
+     model_arch = gguf.MODEL_ARCH.BITNET
+ 
+     def set_vocab(self):
+-        self._set_vocab_sentencepiece()
++        try:
++            self._set_vocab_sentencepiece()
++        except FileNotFoundError:  # bitnet-b1.58-2B-4T ships Llama 3's BPE tokenizer (tokenizer.json), no tokenizer.model
++            self._set_vocab_gpt2()
+ 
+     def set_gguf_parameters(self):
+         super().set_gguf_parameters()
+         self.gguf_writer.add_rope_scaling_type(gguf.RopeScalingType.LINEAR)
+         self.gguf_writer.add_rope_scaling_factor(1.0)
++        if (act := self.hparams.get("hidden_act")) is not None:  # bitnet-b1.58-2B-4T: relu2 (squared ReLU) gate
++            self.gguf_writer.add_hidden_act(act)
+ 
+     def weight_quant(self, weight: Tensor) -> Tensor:
+         dtype = weight.dtype
+diff --git a/gguf-py/gguf/tensor_mapping.py b/gguf-py/gguf/tensor_mapping.py
+index a8e7367..fb321a1 100644
+--- a/gguf-py/gguf/tensor_mapping.py
++++ b/gguf-py/gguf/tensor_mapping.py
+@@ -1537,10 +1537,12 @@ class TensorNameMap:
+ 
+         MODEL_TENSOR.ATTN_SUB_NORM: (
+             "model.layers.{bid}.self_attn.inner_attn_ln",  # bitnet
++            "model.layers.{bid}.self_attn.attn_sub_norm",  # bitnet b1.58 2B4T
+         ),
+ 
+         MODEL_TENSOR.FFN_SUB_NORM: (
+             "model.layers.{bid}.mlp.ffn_layernorm",  # bitnet
++            "model.layers.{bid}.mlp.ffn_sub_norm",  # bitnet b1.58 2B4T
+         ),
+ 
+         MODEL_TENSOR.DEC_ATTN_NORM: (
+diff --git a/src/models/bitnet.cpp b/src/models/bitnet.cpp
+index caee27a..f7ba2cd 100644
+--- a/src/models/bitnet.cpp
++++ b/src/models/bitnet.cpp
+@@ -3,8 +3,20 @@
+ void llama_model_bitnet::load_arch_hparams(llama_model_loader & ml) {
+     ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
+ 
++    // the original BitNet b1.58 gates with SiLU; bitnet-b1.58-2B-4T with squared ReLU (hidden_act "relu2")
++    hparams.llm_ffn_op = LLM_FFN_SILU;
++    std::string hidden_act;
++    if (ml.get_key(LLM_KV_HIDDEN_ACT, hidden_act, false)) {
++        if (hidden_act == "relu2") {
++            hparams.llm_ffn_op = LLM_FFN_RELU_SQR;
++        } else if (hidden_act != "silu") {
++            throw std::runtime_error("unsupported BitNet hidden activation: " + hidden_act);
++        }
++    }
++
+     switch (hparams.n_layer()) {
+         case 26: type = LLM_TYPE_3B; break;
++        case 30: type = LLM_TYPE_2B; break;
+         default: type = LLM_TYPE_UNKNOWN;
+     }
+ }
+@@ -120,7 +132,7 @@ llama_model_bitnet::graph::graph(const llm_graph_params & params) : llm_graph_co
+                 model.layers[il].ffn_gate, NULL, model.layers[il].ffn_gate_s,
+                 NULL,                      NULL, NULL,
+                 NULL,
+-                LLM_FFN_SILU, LLM_FFN_PAR, il);
++                hparams.llm_ffn_op, LLM_FFN_PAR, il);
+         cb(cur, "ffn_sub_out", il);
+ 
+         cur = build_norm(cur,

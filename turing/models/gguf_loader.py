@@ -76,6 +76,14 @@ class GGMLType(IntEnum):
     F64 = 28
     IQ1_M = 29
     BF16 = 30
+    # read (so the metadata of such files loads, as turing serve --backend libllama needs), not dequantized
+    TQ1_0 = 34
+    TQ2_0 = 35
+    MXFP4 = 39
+    NVFP4 = 40
+    Q1_0 = 41
+    Q2_0 = 42
+    F8_E4M3 = 43
 
 
 GGUF_MAGIC = 0x46554747  # 'GGUF' in Little Endian (0x47, 0x47, 0x55, 0x46)
@@ -226,12 +234,14 @@ class GGUFReader:
     Direct zero-copy reader and parser for GGUF binary files.
     """
 
-    def __init__(self, filepath: str):
+    def __init__(self, filepath: str, willneed: bool = True):
+        """willneed: ask the OS to read the whole file ahead (the weights are loaded next); False when only the
+        metadata is read (the libllama backend), which must not page in a model larger than RAM."""
         self.filepath = filepath
         self.file_size = os.path.getsize(filepath)
         self.file_obj = open(filepath, "rb")
         self.mmap_obj = mmap.mmap(self.file_obj.fileno(), 0, access=mmap.ACCESS_READ)
-        if hasattr(self.mmap_obj, "madvise") and hasattr(mmap, "MADV_WILLNEED"):
+        if willneed and hasattr(self.mmap_obj, "madvise") and hasattr(mmap, "MADV_WILLNEED"):
             try:
                 self.mmap_obj.madvise(mmap.MADV_WILLNEED)
             except Exception:

@@ -1,0 +1,297 @@
+{
+  "note": "Waves 4 and 6 on a temporary Spot GCP c4-standard-16 (Xeon Platinum 8581C, 5th-generation Xeon (Emerald Rapids), with AMX: amx_bf16 amx_int8 amx_tile; 16 vCPU, read bandwidth 112 GB/s with 16 threads) of 2026-11-27, llama.cpp 171527522 plus third_party/patches/0001, 16 threads. Turing's own rows (turing-cpu parity, --seqs batching, the TEAL bench) are missing: its build forced GGML_CPU_KLEIDIAI on, which ggml refuses outside ARM (fixed in CMakeLists.txt after this run).",
+  "wave6_amx_qwen3_8b": {
+    "note": "llama-bench -p 512 -n 128 -r 3; repack 1 = ggml's extra buffer types on (AMX for Q4_0/Q8_0/Q4_K), repack 0 = off.",
+    "Q4_0_repack1": [
+      {
+        "model_filename": "Qwen3-8B-Q4_0.gguf",
+        "model_size": 4768792576,
+        "n_prompt": 512,
+        "n_gen": 0,
+        "n_threads": 16,
+        "repack": true,
+        "avg_ts": 187.216291,
+        "stddev_ts": 1.008324,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      },
+      {
+        "model_filename": "Qwen3-8B-Q4_0.gguf",
+        "model_size": 4768792576,
+        "n_prompt": 0,
+        "n_gen": 128,
+        "n_threads": 16,
+        "repack": true,
+        "avg_ts": 21.168611,
+        "stddev_ts": 0.505937,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      }
+    ],
+    "Q4_0_repack0": [
+      {
+        "model_filename": "Qwen3-8B-Q4_0.gguf",
+        "model_size": 4768792576,
+        "n_prompt": 512,
+        "n_gen": 0,
+        "n_threads": 16,
+        "repack": false,
+        "avg_ts": 57.171543,
+        "stddev_ts": 0.137671,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      },
+      {
+        "model_filename": "Qwen3-8B-Q4_0.gguf",
+        "model_size": 4768792576,
+        "n_prompt": 0,
+        "n_gen": 128,
+        "n_threads": 16,
+        "repack": false,
+        "avg_ts": 16.111045,
+        "stddev_ts": 0.007221,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      }
+    ],
+    "Q4_K_M_repack1": [
+      {
+        "model_filename": "Qwen3-8B-Q4_K_M.gguf",
+        "model_size": 5021827072,
+        "n_prompt": 512,
+        "n_gen": 0,
+        "n_threads": 16,
+        "repack": true,
+        "avg_ts": 204.354616,
+        "stddev_ts": 0.347287,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      },
+      {
+        "model_filename": "Qwen3-8B-Q4_K_M.gguf",
+        "model_size": 5021827072,
+        "n_prompt": 0,
+        "n_gen": 128,
+        "n_threads": 16,
+        "repack": true,
+        "avg_ts": 14.477377,
+        "stddev_ts": 0.018117,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      }
+    ],
+    "Q4_K_M_repack0": [
+      {
+        "model_filename": "Qwen3-8B-Q4_K_M.gguf",
+        "model_size": 5021827072,
+        "n_prompt": 512,
+        "n_gen": 0,
+        "n_threads": 16,
+        "repack": false,
+        "avg_ts": 181.635757,
+        "stddev_ts": 0.543935,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      },
+      {
+        "model_filename": "Qwen3-8B-Q4_K_M.gguf",
+        "model_size": 5021827072,
+        "n_prompt": 0,
+        "n_gen": 128,
+        "n_threads": 16,
+        "repack": false,
+        "avg_ts": 16.275071,
+        "stddev_ts": 0.305585,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      }
+    ],
+    "Q8_0_repack1": [
+      {
+        "model_filename": "Qwen3-8B-Q8_0.gguf",
+        "model_size": 8703561728,
+        "n_prompt": 512,
+        "n_gen": 0,
+        "n_threads": 16,
+        "repack": true,
+        "avg_ts": 201.347497,
+        "stddev_ts": 1.041398,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      },
+      {
+        "model_filename": "Qwen3-8B-Q8_0.gguf",
+        "model_size": 8703561728,
+        "n_prompt": 0,
+        "n_gen": 128,
+        "n_threads": 16,
+        "repack": true,
+        "avg_ts": 12.836,
+        "stddev_ts": 0.012464,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      }
+    ],
+    "Q8_0_repack0": [
+      {
+        "model_filename": "Qwen3-8B-Q8_0.gguf",
+        "model_size": 8703561728,
+        "n_prompt": 512,
+        "n_gen": 0,
+        "n_threads": 16,
+        "repack": false,
+        "avg_ts": 61.082354,
+        "stddev_ts": 0.427666,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      },
+      {
+        "model_filename": "Qwen3-8B-Q8_0.gguf",
+        "model_size": 8703561728,
+        "n_prompt": 0,
+        "n_gen": 128,
+        "n_threads": 16,
+        "repack": false,
+        "avg_ts": 10.338618,
+        "stddev_ts": 0.003167,
+        "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+      }
+    ]
+  },
+  "wave4_bitnet_b158_2b4t": {
+    "note": "microsoft/bitnet-b1.58-2B-4T-bf16 converted with the patched converter (ternarized at conversion), then llama-quantize. Perplexity: llama-perplexity on WikiText-2 raw test, 512-token context, 40 chunks. The ternary formats lose nothing for this ternary-trained model.",
+    "speed": {
+      "F16": [
+        {
+          "model_filename": "bitnet-F16.gguf",
+          "model_size": 4826521600,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 232.804547,
+          "stddev_ts": 0.900508,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        },
+        {
+          "model_filename": "bitnet-F16.gguf",
+          "model_size": 4826521600,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 21.058184,
+          "stddev_ts": 0.024704,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        }
+      ],
+      "Q8_0": [
+        {
+          "model_filename": "bitnet-Q8_0.gguf",
+          "model_size": 2564915200,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 682.22032,
+          "stddev_ts": 2.326815,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        },
+        {
+          "model_filename": "bitnet-Q8_0.gguf",
+          "model_size": 2564915200,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 33.940816,
+          "stddev_ts": 1.471677,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        }
+      ],
+      "Q4_K_M": [
+        {
+          "model_filename": "bitnet-Q4_K_M.gguf",
+          "model_size": 1513154560,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 619.183608,
+          "stddev_ts": 2.879682,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        },
+        {
+          "model_filename": "bitnet-Q4_K_M.gguf",
+          "model_size": 1513154560,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 41.433324,
+          "stddev_ts": 0.036298,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        }
+      ],
+      "TQ2_0": [
+        {
+          "model_filename": "bitnet-TQ2_0.gguf",
+          "model_size": 808391680,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 262.618311,
+          "stddev_ts": 0.369988,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        },
+        {
+          "model_filename": "bitnet-TQ2_0.gguf",
+          "model_size": 808391680,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 85.246424,
+          "stddev_ts": 0.311824,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        }
+      ],
+      "TQ1_0": [
+        {
+          "model_filename": "bitnet-TQ1_0.gguf",
+          "model_size": 710702080,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 119.323907,
+          "stddev_ts": 0.082638,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        },
+        {
+          "model_filename": "bitnet-TQ1_0.gguf",
+          "model_size": 710702080,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 72.249582,
+          "stddev_ts": 0.120692,
+          "cpu_info": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz"
+        }
+      ]
+    },
+    "perplexity": {
+      "bitnet-F16": {
+        "ppl": 15.0737,
+        "se": 0.43381
+      },
+      "bitnet-Q8_0": {
+        "ppl": 15.0758,
+        "se": 0.43388
+      },
+      "bitnet-Q4_K_M": {
+        "ppl": 15.0866,
+        "se": 0.43407
+      },
+      "bitnet-TQ2_0": {
+        "ppl": 15.0703,
+        "se": 0.43357
+      },
+      "bitnet-TQ1_0": {
+        "ppl": 15.0703,
+        "se": 0.43357
+      }
+    }
+  }
+}

@@ -32,7 +32,8 @@ from .ollama_api import (
 )
 from . import generation
 from .generation import (GenerationParams, REMOVED_FIELDS, REMOVED_HEADERS, bad_request, effort_budget,
-                         normalize_tool_choice, openai_messages, render_chat, render_text, thinking_kwargs)
+                         normalize_tool_choice, openai_media_messages, openai_messages, render_chat, render_text,
+                         thinking_kwargs)
 from .tools import normalize_tools
 from .kv_events import KVBlockEventPublisher, attach_kv_events
 from .traffic import AdmissionController, LanePolicy, Lane
@@ -322,10 +323,13 @@ def create_app(
         except ValueError as e:
             raise bad_request(str(e))
         choice = normalize_tool_choice(req.tool_choice)
-        enabled, budget = effort_budget(req.reasoning_effort or reasoning_effort)
-        ids, text = render_chat(engine, openai_messages(req.messages), tools if choice != "none" else None,
-                                **thinking_kwargs(engine, enabled))
-        return ids, text, tools, choice, budget
+        effort = req.reasoning_effort or reasoning_effort
+        enabled, budget = effort_budget(effort)
+        marker = getattr(engine, "media_marker", None)  # a vision projector (--mmproj): image parts become markers
+        messages, images = openai_media_messages(req.messages, marker) if marker else (openai_messages(req.messages), [])
+        ids, text = render_chat(engine, messages, tools if choice != "none" else None,
+                                **thinking_kwargs(engine, enabled, effort))
+        return ids, text, tools, choice, budget, images
 
     @app.get("/health")
     async def health_check():
@@ -565,11 +569,12 @@ def create_app(
     @app.post("/v1/chat/completions")
     async def chat_completions(req: ChatCompletionRequest, raw_req: Request):
         ctl = _controls(await raw_req.json(), raw_req)
-        prompt_ids, prompt_text, tools, choice, budget = _chat_prompt(req)
+        prompt_ids, prompt_text, tools, choice, budget, images = _chat_prompt(req)
         params = GenerationParams(
             max_tokens=_max_tokens(req.max_completion_tokens or req.max_tokens, prompt_ids, 64),
             temperature=req.temperature, top_p=req.top_p, top_k=req.top_k, stop=req.stop, tools=tools,
-            tool_choice=choice, schema=_response_schema(req.response_format), thinking_budget=budget, **ctl)
+            tool_choice=choice, schema=_response_schema(req.response_format), thinking_budget=budget,
+            images=images or None, **ctl)
         gen = await _start(prompt_ids, params, prompt_text)
         rid, created, model = f"chatcmpl-{uuid.uuid4().hex[:24]}", int(time.time()), req.model or cfg.name
 
@@ -617,10 +622,13 @@ def create_app(
             raise bad_request(str(e))
         choice = normalize_tool_choice(req.tool_choice)
         enabled, budget = AnthropicAPIHandler.thinking(req)
+        effort = None
         if enabled is None:
+            effort = reasoning_effort
             enabled, budget = effort_budget(reasoning_effort)
         prompt_ids, prompt_text = render_chat(engine, AnthropicAPIHandler.to_chat_messages(req),
-                                              tools if choice != "none" else None, **thinking_kwargs(engine, enabled))
+                                              tools if choice != "none" else None,
+                                              **thinking_kwargs(engine, enabled, effort))
         params = GenerationParams(
             max_tokens=_max_tokens(req.max_tokens, prompt_ids, 1024), temperature=req.temperature, top_p=req.top_p,
             top_k=req.top_k, stop=req.stop_sequences, tools=tools, tool_choice=choice, thinking_budget=budget, **ctl)

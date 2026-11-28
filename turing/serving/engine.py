@@ -37,6 +37,14 @@ class RequestRejected(RuntimeError):
         self.status_code, self.retry_after = status_code, retry_after
 
 
+def context_exceeded(cap: int, prompt: int, completion: int) -> str:
+    """OpenAI's wording for a request longer than the context: agents match it, compact the conversation and retry
+    (OpenCode's context-overflow patterns, LiteLLM's ContextWindowExceededError); other words only stop the session."""
+    return (f"This model's maximum context length is {cap} tokens. However, you requested {prompt + completion} tokens "
+            f"({prompt} in the messages, {completion} in the completion). Please reduce the length of the messages or "
+            f"completion.")
+
+
 def _eos_ids(tokenizer) -> Set[int]:
     """End-of-sequence ids of a tokenizer: eos_token_id plus the generation config's (chat models end turns with
     <|im_end|>, <|eot_id|>, <end_of_turn> ...). Empty without a tokenizer (synthetic models run to max_tokens)."""
@@ -46,7 +54,7 @@ def _eos_ids(tokenizer) -> Set[int]:
     eos = getattr(tokenizer, "eos_token_id", None)
     if isinstance(eos, int):
         ids.add(eos)
-    for tok in ("<|im_end|>", "<|eot_id|>", "<end_of_turn>", "<|end|>", "<|endoftext|>"):
+    for tok in ("<|im_end|>", "<|eot_id|>", "<end_of_turn>", "<|end|>", "<|endoftext|>", "<|content_model_end_sampling|>"):
         try:
             tid = tokenizer.convert_tokens_to_ids(tok)
         except Exception:
@@ -377,7 +385,7 @@ class ContinuousBatchEngine:
         need = prefix_len + len(prompt_tokens) + max_new_tokens
         cap = min(self.kv_pool.table_width, self.kv_pool.page_limit) * PAGE
         if need > cap:
-            reject(f"prompt plus max_tokens is {need} tokens, but this server holds at most {cap} per request", 400)
+            reject(context_exceeded(cap, need - max_new_tokens, max_new_tokens), 400)
 
         # A request continuing a caller's cache cannot be recomputed from its tokens, so it reserves every page it
         # can need and is never preempted. Any other request reserves its prompt's pages; if the pool is short now

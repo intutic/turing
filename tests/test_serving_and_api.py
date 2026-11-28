@@ -86,6 +86,10 @@ def test_rejections_return_400_429_503_with_retry_after():
         too_big = pool.page_limit * 16 + 1
         r = client.post("/v1/completions", json={"model": "m", "prompt": "hi", "max_tokens": too_big, "stream": True})
         assert r.status_code == 400 and r.json()["error"]["type"] == "invalid_request_error"
+        # OpenAI's wording: agents (OpenCode, LiteLLM) match it, compact the conversation and retry
+        msg = r.json()["error"]["message"]
+        assert msg.startswith(f"This model's maximum context length is {pool.page_limit * 16} tokens. However, you "
+                              f"requested ") and f", {too_big} in the completion). Please reduce the length" in msg, msg
 
         held = pool.alloc_pages(pool.page_limit)  # another tenant holds every page
         try:
@@ -118,13 +122,31 @@ def test_serve_lists_the_served_model_name(monkeypatch):
     import turing.cli as cli
     apps = []
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: apps.append(app))
-    monkeypatch.setattr(sys, "argv", ["turing", "serve", "--model", "test-tiny", "--device", "cpu",
+    monkeypatch.setattr(sys, "argv", ["turing", "serve", "--model", "test-tiny", "--device", "cpu", "--port", "0",
                                       "--served-model-name", "my-model"])
     cli.main()
     with TestClient(apps[0]) as client:
         assert [m["id"] for m in client.get("/v1/models").json()["data"]] == ["my-model"]
         assert client.get("/health").json()["model"] == "my-model"
     assert get_model_config("test-tiny").name != "my-model"  # the preset is a shared object
+
+
+def test_serve_stops_before_loading_weights_when_the_port_is_taken(monkeypatch):
+    """`turing serve` on a port another process listens on exits before it loads any weights, not after."""
+    import socket
+    import sys
+    import turing.cli as cli
+    loaded = []
+    monkeypatch.setattr(cli, "_load_weights", lambda *a, **kw: loaded.append(1))
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen()
+        port = held.getsockname()[1]
+        monkeypatch.setattr(sys, "argv", ["turing", "serve", "--model", "Qwen/Qwen2.5-0.5B-Instruct", "--device", "cpu",
+                                          "--host", "127.0.0.1", "--port", str(port)])
+        with pytest.raises(SystemExit, match=f"127.0.0.1:{port}"):
+            cli.main()
+    assert not loaded
 
 
 def test_engine_warm_up_leaves_no_trace():
@@ -200,3 +222,30 @@ def test_the_app_reads_the_vocabulary_at_startup_not_in_a_request():
     assert Tok.calls == 1
     from turing.serving.reasoning import think_token_ids
     assert think_token_ids(tok) is None and Tok.calls == 1
+
+
+def test_image_parts_become_media_markers():
+    """With a vision projector (turing serve --backend libllama --mmproj), each image part becomes the media marker in
+    its message's text, as llama-server does, and its bytes come back in order; only base64 data: URLs are taken (the
+    server never fetches a URL a request names)."""
+    import base64
+    from turing.serving.engine import RequestRejected
+    from turing.serving.generation import openai_media_messages
+
+    def img(data: bytes, mime="image/png"):
+        return {"type": "image_url", "image_url": {"url": f"data:{mime};base64," + base64.b64encode(data).decode()}}
+
+    msgs, images = openai_media_messages(
+        [{"role": "system", "content": "Be brief."},
+         {"role": "user", "content": [img(b"first"), {"type": "text", "text": "Compare"},
+                                      {"type": "input_image", "image_url": "data:image/jpeg;base64," +
+                                       base64.b64encode(b"second").decode()}]}], "<M>")
+    assert images == [b"first", b"second"]
+    assert msgs[1] == {"role": "user", "content": "<M>\nCompare\n<M>"} and msgs[0]["content"] == "Be brief."
+    for bad in [{"type": "image_url", "image_url": {"url": "https://example.com/cat.png"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png,notbase64"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,***"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,"}}]:
+        with pytest.raises(RequestRejected) as e:
+            openai_media_messages([{"role": "user", "content": [bad]}], "<M>")
+        assert e.value.status_code == 400

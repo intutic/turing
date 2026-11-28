@@ -134,6 +134,27 @@ class StripBuildExt(build_ext):
                     print(f"[+] Successfully prepared binary artifact: {ext_path}")
                 except Exception as e:
                     print(f"[!] Note: Symbol stripping: {e}")
+        if os.environ.get("TURING_BUILD_LLAMA") == "1":
+            self.build_llama_backend()
+
+    def build_llama_backend(self):
+        """turing.turing_llama, the CPU backend on libllama (third_party/llama.cpp, a pinned submodule), built with CMake
+        for this interpreter: only with TURING_BUILD_LLAMA=1."""
+        if not os.path.exists(os.path.join("third_party", "llama.cpp", "CMakeLists.txt")):
+            print("[!] TURING_BUILD_LLAMA=1 but third_party/llama.cpp is missing: "
+                  "git submodule update --init third_party/llama.cpp")
+            return
+        bdir = os.path.join(self.build_temp, "llama")
+        metal = "ON" if os.environ.get("TURING_BUILD_LLAMA_METAL") == "1" else "OFF"  # Apple GPU, opt-in
+        subprocess.run(["cmake", "-S", ".", "-B", bdir, "-DTURING_LLAMA=ON", "-DCMAKE_BUILD_TYPE=Release",
+                        f"-DTURING_LLAMA_METAL={metal}", f"-DPython_EXECUTABLE={sys.executable}"], check=True)
+        subprocess.run(["cmake", "--build", bdir, "--target", "turing_llama", "turing-cpu", "-j", str(os.cpu_count() or 4)],
+                       check=True)
+        built = glob.glob(os.path.join(bdir, "turing_llama*" + sysconfig.get_config_var("EXT_SUFFIX")))
+        dest_dir = "turing" if self.inplace else os.path.join(self.build_lib, "turing")
+        import shutil
+        shutil.copy2(built[0], os.path.join(dest_dir, os.path.basename(built[0])))
+        print(f"[+] libllama CPU backend: {os.path.join(dest_dir, os.path.basename(built[0]))}")
 
 ext_modules = [
     Extension(

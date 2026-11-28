@@ -21,6 +21,7 @@ a LoRA adapter (§8). The main flags by topic are below; `turing serve --help` l
 | Flag | Default | Effect |
 | :--- | :--- | :--- |
 | `--model` | `smollm2` | HuggingFace repo id, local directory, `.gguf` file, `.tgate4` directory or alias |
+| `--backend` | `turing` | `libllama`: serve a `.gguf` file through llama.cpp on the CPU or an Apple GPU ([the libllama backend](cpu_backend.md)) |
 | `--device` | `auto` | `auto` picks CUDA, then XPU, then MPS, then Vulkan, then CPU; `rocm` needs PyTorch's HIP build |
 | `--served-model-name` | `HF-<--model>` | The model id `/v1/models`, `/health` and `/api/tags` report. A request may name any model |
 | `--dtype` | checkpoint | `bf16`/`fp16`/`fp32`; default: the checkpoint's half type on CUDA, fp32 on CPU and MPS |
@@ -109,9 +110,11 @@ curl http://localhost:8000/v1/chat/completions -H "Content-Type: application/jso
 
 ### Reasoning
 
-For models that think in `<think>…</think>` (DeepSeek-R1 distills, Qwen3), the thinking goes to
-`message.reasoning_content` (streamed as `delta.reasoning_content`) on the OpenAI API and to `thinking` blocks on the
-Anthropic API. A thinking budget is enforced by forcing `</think>` when it runs out:
+For models that think in `<think>…</think>` (DeepSeek-R1 distills, Qwen3), in Gemma 4's thought channel or in
+Inkling 2's special-token channels, the thinking goes to `message.reasoning_content` (streamed as
+`delta.reasoning_content`) on the OpenAI API and to `thinking` blocks on the Anthropic API. A thinking budget is
+enforced by forcing the end of the thinking block when it runs out. Gemma 4 thinks only when a request asks for
+reasoning:
 
 | Request | Budget |
 | :--- | :--- |
@@ -123,9 +126,10 @@ Anthropic API. A thinking budget is enforced by forcing `</think>` when it runs 
 ### Tools
 
 OpenAI `tools` / `tool_choice` and Anthropic `tools` / `tool_choice` are passed to the chat template. Calls the
-model writes in the Hermes/Qwen (`<tool_call>{…}</tool_call>`), Mistral (`[TOOL_CALLS][…]`) or Llama 3 (a bare
-`{"name": …, "parameters": …}`) format come back as `tool_calls` (OpenAI, also in stream deltas) or `tool_use`
-blocks (Anthropic). `tool_choice: "required"` or a named tool is enforced by a grammar during decoding (needs the
+model writes in the Hermes/Qwen (`<tool_call>{…}</tool_call>`), Qwen3.5/3.6 (`<function=name><parameter=…>`,
+values typed by the tool's schema), Mistral (`[TOOL_CALLS][…]`), Llama 3 (a bare `{"name": …, "parameters": …}`),
+Gemma 4 (`call:name{…}`) or Inkling 2 (JSON in its tool channel) format come back as `tool_calls` (OpenAI, also in
+stream deltas) or `tool_use` blocks (Anthropic). `tool_choice: "required"` or a named tool is enforced by a grammar during decoding (needs the
 `[structured]` extra).
 
 ### Structured output

@@ -1,0 +1,220 @@
+{
+  "note": "Waves 1-3 of the CPU-first plan on a temporary Spot GCP c4a-standard-16-lssd (Neoverse-V2, 16 vCPU, 64 GB) of 2026-11-27, 16 threads; llama.cpp and Turing's libllama backend (turing-cpu) built from the same pinned commit 171527522 with KleidiAI. Local NVMe SSD read 0.68 GB/s (dd iflag=direct, 8 GiB).",
+  "wave1_parity": {
+    "Qwen3-8B-Q4_K_M": {
+      "llama_bench": [
+        {
+          "model_filename": "/mnt/ssd/models/Qwen3-8B-Q4_K_M.gguf",
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 111.847772,
+          "stddev_ts": 0.035047,
+          "samples_ts": [
+            111.885,
+            111.816,
+            111.842
+          ]
+        },
+        {
+          "model_filename": "/mnt/ssd/models/Qwen3-8B-Q4_K_M.gguf",
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 38.61467,
+          "stddev_ts": 0.501068,
+          "samples_ts": [
+            38.7386,
+            38.0633,
+            39.0422
+          ]
+        }
+      ],
+      "turing_cpu": [
+        {
+          "model": "/mnt/ssd/models/Qwen3-8B-Q4_K_M.gguf",
+          "desc": "qwen3 8B Q4_K - Medium",
+          "threads": 16,
+          "mmap": true,
+          "repack": true,
+          "load_s": 8.87,
+          "pp512_tok_s": 112.07,
+          "tg128_tok_s": 39.2,
+          "reps": 3,
+          "readahead": false,
+          "readahead_bytes_read": 0,
+          "readahead_bytes_wanted": 0,
+          "readahead_s": 0.0
+        }
+      ]
+    },
+    "Qwen3-30B-A3B-Q4_K_M": {
+      "llama_bench": [
+        {
+          "model_filename": "/mnt/ssd/models/Qwen3-30B-A3B-Q4_K_M.gguf",
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 107.392167,
+          "stddev_ts": 0.04241,
+          "samples_ts": [
+            107.344,
+            107.411,
+            107.422
+          ]
+        },
+        {
+          "model_filename": "/mnt/ssd/models/Qwen3-30B-A3B-Q4_K_M.gguf",
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_threads": 16,
+          "repack": true,
+          "avg_ts": 67.233726,
+          "stddev_ts": 0.170726,
+          "samples_ts": [
+            67.429,
+            67.1594,
+            67.1128
+          ]
+        }
+      ],
+      "turing_cpu": [
+        {
+          "model": "/mnt/ssd/models/Qwen3-30B-A3B-Q4_K_M.gguf",
+          "desc": "qwen3moe 30B.A3B Q4_K - Medium",
+          "threads": 16,
+          "mmap": true,
+          "repack": true,
+          "load_s": 13.57,
+          "pp512_tok_s": 107.37,
+          "tg128_tok_s": 65.09,
+          "reps": 3,
+          "readahead": false,
+          "readahead_bytes_read": 0,
+          "readahead_bytes_wanted": 0,
+          "readahead_s": 0.0
+        }
+      ]
+    }
+  },
+  "wave2_gpt_oss_120b_40gb_cap": {
+    "note": "gpt-oss-120b MXFP4 (63.4 GB) under a 40 GB systemd scope (MemoryMax, MemorySwapMax=0), page cache dropped before each run, 64-token prompt and 64 decoded tokens x2. 95.6% of the expert bytes the read-ahead looked up were already resident (12.9 of 291.7 GB read): the 40 GB cache held the hot set, so this did not test the streaming regime the read-ahead is for. Model load read the whole file (94 s).",
+    "llama_bench_mmap": [
+      {
+        "model_filename": "/mnt/ssd/models/gpt-oss-120b-MXFP4.gguf",
+        "n_prompt": 64,
+        "n_gen": 0,
+        "n_threads": 16,
+        "repack": false,
+        "avg_ts": 14.068966,
+        "stddev_ts": 0.682767,
+        "samples_ts": [
+          13.5862,
+          14.5518
+        ]
+      },
+      {
+        "model_filename": "/mnt/ssd/models/gpt-oss-120b-MXFP4.gguf",
+        "n_prompt": 0,
+        "n_gen": 64,
+        "n_threads": 16,
+        "repack": false,
+        "avg_ts": 15.926306,
+        "stddev_ts": 3.835606,
+        "samples_ts": [
+          13.2141,
+          18.6385
+        ]
+      }
+    ],
+    "turing_cpu_mmap": [
+      {
+        "model": "/mnt/ssd/models/gpt-oss-120b-MXFP4.gguf",
+        "desc": "gpt-oss 120B MXFP4 MoE",
+        "threads": 16,
+        "mmap": true,
+        "repack": false,
+        "load_s": 94.4,
+        "pp64_tok_s": 75.55,
+        "tg64_tok_s": 17.37,
+        "reps": 2,
+        "readahead": false,
+        "readahead_bytes_read": 0,
+        "readahead_bytes_wanted": 0,
+        "readahead_s": 0.0
+      }
+    ],
+    "turing_cpu_readahead": [
+      {
+        "model": "/mnt/ssd/models/gpt-oss-120b-MXFP4.gguf",
+        "desc": "gpt-oss 120B MXFP4 MoE",
+        "threads": 16,
+        "mmap": true,
+        "repack": false,
+        "load_s": 94.46,
+        "pp64_tok_s": 62.05,
+        "tg64_tok_s": 12.8,
+        "reps": 2,
+        "readahead": true,
+        "readahead_bytes_read": 12900732928,
+        "readahead_bytes_wanted": 291708086400,
+        "readahead_s": 21.094
+      }
+    ],
+    "greedy_text_identical_with_and_without_readahead": true
+  },
+  "wave3_prompt_lookup_qwen3_8b": {
+    "note": "Qwen3-8B Q4_K_M, raw prompts without a chat template (the model reasoned first instead of copying the code, so acceptance was low), greedy, 160 tokens. Text with drafts differed from plain decoding: libllama's batched kernels (fp16 KV) round differently from its one-token kernels, so near-ties flip.",
+    "code_prompt": {
+      "draft_0": {
+        "tokens": 160,
+        "seconds": 4.81438,
+        "tok_s": 33.2337
+      },
+      "draft_4": {
+        "tokens": 160,
+        "seconds": 6.26275,
+        "tok_s": 25.5479,
+        "drafted": 144,
+        "accepted": 10,
+        "steps": 149
+      },
+      "draft_8": {
+        "tokens": 160,
+        "seconds": 7.60526,
+        "tok_s": 21.0381,
+        "drafted": 277,
+        "accepted": 10,
+        "steps": 149
+      },
+      "identical_to_draft_0": false
+    },
+    "open_prompt": {
+      "draft_0": {
+        "tokens": 160,
+        "seconds": 4.15322,
+        "tok_s": 38.5243
+      },
+      "draft_4": {
+        "tokens": 160,
+        "seconds": 5.4888,
+        "tok_s": 29.1503,
+        "drafted": 133,
+        "accepted": 8,
+        "steps": 151
+      },
+      "draft_8": {
+        "tokens": 160,
+        "seconds": 6.45833,
+        "tok_s": 24.7742,
+        "drafted": 242,
+        "accepted": 8,
+        "steps": 151
+      },
+      "identical_to_draft_0": false
+    }
+  }
+}

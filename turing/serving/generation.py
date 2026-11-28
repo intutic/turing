@@ -8,6 +8,8 @@ stream text with incremental detokenization, stop strings, reasoning split from 
 parsing. After the stream: finish_reason, tool_calls, usage and the schema check.
 """
 
+import base64
+import binascii
 import json
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
@@ -15,10 +17,12 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Tuple
 import torch
 
 from ..core.kv_cache import PAGE, KVCache
-from .engine import ContinuousBatchEngine, RequestRejected
-from .reasoning import ReasoningBudgetManager, ReasoningStreamFilter, ThinkingBudget, think_token_ids
+from .engine import ContinuousBatchEngine, RequestRejected, context_exceeded
+from .reasoning import (ChannelSplit, ReasoningBudgetManager, ReasoningStreamFilter, ThinkingBudget,
+                        channel_token_ids, think_text_tags, think_token_ids, thinking_block_ids)
 from .structured import GrammarConstraint, StructuredOutputError, validate_json
-from .tools import (HERMES_OPEN, MISTRAL_MARK, ToolCallingHandler, call_grammar, normalize_tools, tool_format)
+from .tools import (GEMMA_OPEN, HERMES_OPEN, MISTRAL_MARK, QWEN_FUNCTION, ToolCallingHandler, call_grammar,
+                    normalize_tools, tool_format)
 from .traffic import Lane
 
 # Request fields and headers that once claimed per-request effects the engine does not have
@@ -55,6 +59,51 @@ def _text(content: Any) -> str:
         else:
             raise bad_request(f"content part type '{kind}' is not supported by this server (text only)")
     return "\n".join(parts)
+
+
+MAX_IMAGE_BYTES = 20 << 20
+
+
+def _image_bytes(part: Dict[str, Any]) -> bytes:
+    """An image content part's bytes (OpenAI image_url as {"url": ...} or a string, or input_image), from a base64
+    data: URL. Remote URLs are refused: a request must not make the server reach other hosts."""
+    url = part.get("image_url")
+    if isinstance(url, dict):
+        url = url.get("url")
+    if not isinstance(url, str) or not url.startswith("data:"):
+        raise bad_request("images must be base64 data: URLs; this server does not fetch remote URLs")
+    head, _, data = url.partition(",")
+    if not head.endswith(";base64"):
+        raise bad_request("image data: URLs must be base64 (data:image/png;base64,...)")
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise bad_request(f"image data is not valid base64: {e}") from e
+    if not raw:
+        raise bad_request("an image is empty")
+    if len(raw) > MAX_IMAGE_BYTES:
+        raise bad_request(f"an image is {len(raw)} bytes; at most {MAX_IMAGE_BYTES}")
+    return raw
+
+
+def openai_media_messages(messages: List[Dict[str, Any]], marker: str) -> Tuple[List[Dict[str, Any]], List[bytes]]:
+    """openai_messages for a model with a vision projector: each image part becomes `marker` in its message's text
+    (as llama-server does; the projector's embeddings replace it), and the images' bytes come back in order."""
+    images: List[bytes] = []
+    out = []
+    for m in messages:
+        content = m.get("content") if isinstance(m, dict) else None
+        if isinstance(content, list):
+            parts = []
+            for p in content:
+                if isinstance(p, dict) and p.get("type") in ("image_url", "input_image"):
+                    images.append(_image_bytes(p))
+                    parts.append({"type": "text", "text": marker})
+                else:
+                    parts.append(p)
+            m = {**m, "content": parts}
+        out.append(m)
+    return openai_messages(out), images
 
 
 def _arguments(args: Any) -> Any:
@@ -135,11 +184,19 @@ def render_text(engine: ContinuousBatchEngine, prompt: Any) -> List[int]:
     return engine.encode_prompt(prompt)
 
 
-def thinking_kwargs(engine: ContinuousBatchEngine, enabled: Optional[bool]) -> Dict[str, Any]:
-    """Chat-template kwargs that switch thinking off (Qwen3's enable_thinking) when a request disables it."""
-    if enabled is False and think_token_ids(engine.tokenizer) is not None:
-        return {"enable_thinking": False}
-    return {}
+def thinking_kwargs(engine: ContinuousBatchEngine, enabled: Optional[bool], effort: Optional[str] = None) -> Dict[str, Any]:
+    """Chat-template kwargs that switch thinking off or on (enable_thinking: Qwen3 thinks unless told not to, Gemma 4
+    only when told to) as a request's reasoning effort says, and pass that effort to templates that read one (Inkling
+    2: none / minimal / low / medium / high)."""
+    kw: Dict[str, Any] = {}
+    template = getattr(engine.tokenizer, "chat_template", None) or ""
+    if enabled is False and (think_token_ids(engine.tokenizer) is not None or "enable_thinking" in template):
+        kw["enable_thinking"] = False
+    elif enabled is True and "enable_thinking" in template:  # Gemma 4 thinks only when asked
+        kw["enable_thinking"] = True
+    if effort is not None and "reasoning_effort" in (getattr(engine.tokenizer, "chat_template", None) or ""):
+        kw["reasoning_effort"] = effort.lower()
+    return kw
 
 
 def effort_budget(effort: Optional[str]) -> Tuple[Optional[bool], Optional[int]]:
@@ -220,8 +277,8 @@ class ToolGate:
     answer for the bare-JSON format), so calls are emitted parsed rather than as text."""
 
     def __init__(self, fmt: str):
-        self.marks = [HERMES_OPEN, MISTRAL_MARK]
-        self.bare_json = fmt == "llama"
+        self.marks = [HERMES_OPEN, MISTRAL_MARK, QWEN_FUNCTION, GEMMA_OPEN]
+        self.bare_json = fmt in ("llama", "inkling")
         self.released = ""
         self.buf = ""
         self.holding = False
@@ -265,6 +322,7 @@ class GenerationParams:
     thinking_budget: Optional[int] = None  # thinking tokens before </think> is forced (reasoning models)
     reasoning: bool = True  # split <think> blocks into reasoning (chat endpoints); off for raw completions
     logits_processor: Optional[Callable] = None  # applied first (the DSL records log-probabilities with it)
+    images: Optional[List[bytes]] = None  # encoded images for the prompt text's media markers, in order (--mmproj)
 
 
 def normalize_tool_choice(choice: Any) -> Any:
@@ -302,6 +360,11 @@ class Generation:
         self.constraint = constraint
         self.reasoning = ReasoningStreamFilter(in_thinking) if params.reasoning and \
             think_token_ids(engine.tokenizer) is not None else None
+        channels = channel_token_ids(engine.tokenizer) if params.reasoning and self.reasoning is None else None
+        self.channels = ChannelSplit(channels) if channels else None  # reasoning marked by special tokens (Inkling 2)
+        tags = think_text_tags(engine.tokenizer) if params.reasoning and self.reasoning is None and not channels else None
+        if tags:  # reasoning marked by other visible tags (Gemma 4's <|channel>thought ... <channel|>)
+            self.reasoning = ReasoningStreamFilter(in_thinking, *tags)
         self.tool_fmt = tool_fmt
         self.stats: Optional[dict] = None  # the server's per-lane counters ("finished" counts this request's end)
         self.finish_reason: Optional[str] = None
@@ -314,7 +377,7 @@ class Generation:
 
     @property
     def prompt_tokens(self) -> int:
-        return len(self.prompt_ids)
+        return getattr(self.req, "prompt_positions", None) or len(self.prompt_ids)  # images take positions, not ids
 
     @property
     def completion_tokens(self) -> int:
@@ -332,8 +395,11 @@ class Generation:
         d = self.req.draft_tokens
         return self.engine.default_draft_tokens if d is None else d
 
-    def _route(self, text: str, gate: Optional[ToolGate]):
-        pieces = [(None, text)] if self.reasoning is None else [self.reasoning.process_token(text)]
+    def _route(self, text: str, gate: Optional[ToolGate], part: str = "content"):
+        if part == "reasoning":
+            pieces = [(text, None)]
+        else:
+            pieces = [(None, text)] if self.reasoning is None else [self.reasoning.process_token(text)]
         return self._emit(pieces, gate)
 
     def _emit(self, pieces, gate):
@@ -352,18 +418,28 @@ class Generation:
         stops = StopStrings(self.params.stop)
         gate = ToolGate(self.tool_fmt) if self.tool_fmt else None
         stream = self.engine.stream_request(self.req)
+        part = "content"
         try:
             async for token in stream:
                 self.output_ids.append(token)
+                if self.channels is not None:
+                    p = self.channels.push(token)
+                    if p is None:  # a marker: no text of its own
+                        continue
+                    if p != part:  # text decoded before the switch belongs to the part it was generated in
+                        out, _ = stops.push(detok.flush())
+                        for ev in self._route(out, gate, part):
+                            yield ev
+                        part = p
                 out, hit = stops.push(detok.push(token))
-                for ev in self._route(out, gate):
+                for ev in self._route(out, gate, part):
                     yield ev
                 if hit is not None:
                     self.stop_sequence = hit
                     break
             if self.stop_sequence is None:
                 out, _ = stops.push(detok.flush())
-                for ev in self._route(out + stops.flush(), gate):
+                for ev in self._route(out + stops.flush(), gate, part):
                     yield ev
             if self.reasoning is not None:
                 for ev in self._emit([self.reasoning.flush()], gate):
@@ -378,7 +454,7 @@ class Generation:
 
     def _finish(self, gate: Optional[ToolGate]) -> None:
         if gate is not None:
-            clean, calls = ToolCallingHandler.extract_tool_calls(self.content)
+            clean, calls = ToolCallingHandler.extract_tool_calls(self.content, self.params.tools)
             if calls:
                 self.tool_calls, self.content = calls, clean
         if self.tool_calls:
@@ -414,7 +490,7 @@ async def start(engine: ContinuousBatchEngine, prompt_ids: List[int], params: Ge
     elif stop is None:
         params.stop = []
 
-    tags = think_token_ids(tok) if params.reasoning else None
+    tags = thinking_block_ids(tok) if params.reasoning else None  # <think>, Gemma 4's and Inkling 2's blocks
     in_thinking = tags is not None and prompt_text.rstrip().endswith("<think>")
     think = ThinkingBudget(*tags, budget=params.thinking_budget, in_thinking=in_thinking) if tags else None
 
@@ -453,10 +529,15 @@ async def start(engine: ContinuousBatchEngine, prompt_ids: List[int], params: Ge
     need = (prefix_kv.length if prefix_kv is not None else 0) + len(prompt_ids) + params.max_tokens
     cap = min(pool.table_width, pool.page_limit) * PAGE
     if need > cap:
-        raise bad_request(f"prompt plus max_tokens is {need} tokens, but this server holds at most {cap} per request")
+        raise bad_request(context_exceeded(cap, need - params.max_tokens, params.max_tokens))
 
+    media = {}
+    if params.images:
+        if getattr(engine, "media_marker", None) is None:
+            raise bad_request("this model takes no images (turing serve --backend libllama --mmproj)")
+        media = {"media": (prompt_text, params.images)}
     req = await engine.add_request(
-        prompt_tokens=prompt_ids, max_new_tokens=params.max_tokens,
+        **media, prompt_tokens=prompt_ids, max_new_tokens=params.max_tokens,
         temperature=0.7 if params.temperature is None else params.temperature,
         top_k=params.top_k if params.top_k is not None and params.top_k > 0 else 0,
         top_p=params.top_p if params.top_p is not None else 1.0, draft_tokens=params.draft_tokens,
