@@ -19,7 +19,7 @@ import torch
 from ..core.kv_cache import PAGE, KVCache
 from .engine import ContinuousBatchEngine, RequestRejected
 from .reasoning import (ChannelSplit, ReasoningBudgetManager, ReasoningStreamFilter, ThinkingBudget,
-                        channel_token_ids, think_token_ids)
+                        channel_token_ids, think_text_tags, think_token_ids)
 from .structured import GrammarConstraint, StructuredOutputError, validate_json
 from .tools import (GEMMA_OPEN, HERMES_OPEN, MISTRAL_MARK, QWEN_FUNCTION, ToolCallingHandler, call_grammar,
                     normalize_tools, tool_format)
@@ -185,11 +185,15 @@ def render_text(engine: ContinuousBatchEngine, prompt: Any) -> List[int]:
 
 
 def thinking_kwargs(engine: ContinuousBatchEngine, enabled: Optional[bool], effort: Optional[str] = None) -> Dict[str, Any]:
-    """Chat-template kwargs that switch thinking off (Qwen3's enable_thinking) when a request disables it, and pass
-    the request's reasoning effort to templates that read one (Inkling 2: none / minimal / low / medium / high)."""
+    """Chat-template kwargs that switch thinking off or on (enable_thinking: Qwen3 thinks unless told not to, Gemma 4
+    only when told to) as a request's reasoning effort says, and pass that effort to templates that read one (Inkling
+    2: none / minimal / low / medium / high)."""
     kw: Dict[str, Any] = {}
-    if enabled is False and think_token_ids(engine.tokenizer) is not None:
+    template = getattr(engine.tokenizer, "chat_template", None) or ""
+    if enabled is False and (think_token_ids(engine.tokenizer) is not None or "enable_thinking" in template):
         kw["enable_thinking"] = False
+    elif enabled is True and "enable_thinking" in template:  # Gemma 4 thinks only when asked
+        kw["enable_thinking"] = True
     if effort is not None and "reasoning_effort" in (getattr(engine.tokenizer, "chat_template", None) or ""):
         kw["reasoning_effort"] = effort.lower()
     return kw
@@ -358,6 +362,9 @@ class Generation:
             think_token_ids(engine.tokenizer) is not None else None
         channels = channel_token_ids(engine.tokenizer) if params.reasoning and self.reasoning is None else None
         self.channels = ChannelSplit(channels) if channels else None  # reasoning marked by special tokens (Inkling 2)
+        tags = think_text_tags(engine.tokenizer) if params.reasoning and self.reasoning is None and not channels else None
+        if tags:  # reasoning marked by other visible tags (Gemma 4's <|channel>thought ... <channel|>)
+            self.reasoning = ReasoningStreamFilter(in_thinking, *tags)
         self.tool_fmt = tool_fmt
         self.stats: Optional[dict] = None  # the server's per-lane counters ("finished" counts this request's end)
         self.finish_reason: Optional[str] = None

@@ -65,7 +65,8 @@ class ReasoningStreamFilter:
     <think>, as DeepSeek-R1's does). Newlines right after </think> are dropped from the content.
     """
 
-    def __init__(self, in_thinking: bool = False):
+    def __init__(self, in_thinking: bool = False, open_tag: str = OPEN, close_tag: str = CLOSE):
+        self.open_tag, self.close_tag = open_tag, close_tag  # think_text_tags: Gemma 4's are <|channel>thought / <channel|>
         self.in_thinking_block = in_thinking
         self.buffered_text = ""
         self.thinking_content = ""
@@ -76,7 +77,7 @@ class ReasoningStreamFilter:
         """Returns the (reasoning_chunk, content_chunk) this text completes; None for an empty chunk."""
         buf, r, c = self.buffered_text + token_text, "", ""
         while True:
-            tag = CLOSE if self.in_thinking_block else OPEN
+            tag = self.close_tag if self.in_thinking_block else self.open_tag
             i = buf.find(tag)
             cut = i if i >= 0 else len(buf) - _partial(buf, tag)
             if self.in_thinking_block:
@@ -164,6 +165,24 @@ class ChannelSplit:
         elif token in self.content:
             self.part, self.header = "content", False
         return None if token in self.marks or self.header else self.part
+
+
+GEMMA_OPEN, GEMMA_CLOSE = "<|channel>", "<channel|>"
+
+
+@functools.lru_cache(maxsize=8)
+def _text_tags(tokenizer):
+    try:
+        vocab = tokenizer.get_vocab()
+    except Exception:
+        return None
+    return (GEMMA_OPEN + "thought", GEMMA_CLOSE) if GEMMA_OPEN in vocab and GEMMA_CLOSE in vocab else None
+
+
+def think_text_tags(tokenizer) -> Optional[Tuple[str, str]]:
+    """(open, close) thinking tags that decode as visible text for models other than <think> ones: Gemma 4 writes
+    <|channel>thought ... <channel|> before its answer. None otherwise. Read once per tokenizer."""
+    return _text_tags(tokenizer) if tokenizer is not None else None
 
 
 def think_token_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:

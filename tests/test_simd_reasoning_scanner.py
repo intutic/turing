@@ -80,3 +80,38 @@ def test_channel_split_routes_reasoning_marked_by_special_tokens():
     Tok.chat_template = "no effort here"
     assert thinking_kwargs(Engine(), False, "low") == {}
     assert 104 in _eos_ids(Tok()) and 99 in _eos_ids(Tok())
+
+
+def test_gemma4_thinking_channel_is_split_and_switched_on():
+    """Gemma 4 thinks only with enable_thinking (its template defaults it to false) and writes <|channel>thought ...
+    <channel|> then the answer, as visible text: the text filter splits on those tags, held back across chunks, and a
+    request's reasoning effort switches the template's enable_thinking either way."""
+    from types import SimpleNamespace
+    from turing.serving.generation import thinking_kwargs
+    from turing.serving.reasoning import ReasoningStreamFilter, think_text_tags
+
+    class Tok:
+        chat_template = "{%- set enable_thinking = enable_thinking | default(false) -%}"
+
+        def get_vocab(self):
+            return {"<|channel>": 100, "<channel|>": 101, "<|think|>": 98}
+
+    tags = think_text_tags(Tok())
+    assert tags == ("<|channel>thought", "<channel|>")
+    f = ReasoningStreamFilter(False, *tags)
+    r, c = [], []
+    for chunk in ["<|chan", "nel>tho", "ught\n17*23 = 391.", "<chann", "el|>", "Answer: 391"]:
+        a, b = f.process_token(chunk)
+        r.append(a or "")
+        c.append(b or "")
+    a, b = f.flush()
+    assert "".join(r) + (a or "") == "\n17*23 = 391." and "".join(c) + (b or "") == "Answer: 391"
+    engine = SimpleNamespace(tokenizer=Tok())
+    assert thinking_kwargs(engine, True) == {"enable_thinking": True}
+    assert thinking_kwargs(engine, False) == {"enable_thinking": False}
+    assert thinking_kwargs(engine, None) == {}
+    class Qwen:
+        def get_vocab(self):
+            return {"<think>": 1, "</think>": 2}
+
+    assert think_text_tags(Qwen()) is None
