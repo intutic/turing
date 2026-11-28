@@ -21,7 +21,8 @@ from .engine import ContinuousBatchEngine, RequestRejected
 from .reasoning import (ChannelSplit, ReasoningBudgetManager, ReasoningStreamFilter, ThinkingBudget,
                         channel_token_ids, think_token_ids)
 from .structured import GrammarConstraint, StructuredOutputError, validate_json
-from .tools import (HERMES_OPEN, MISTRAL_MARK, ToolCallingHandler, call_grammar, normalize_tools, tool_format)
+from .tools import (GEMMA_OPEN, HERMES_OPEN, MISTRAL_MARK, QWEN_FUNCTION, ToolCallingHandler, call_grammar,
+                    normalize_tools, tool_format)
 from .traffic import Lane
 
 # Request fields and headers that once claimed per-request effects the engine does not have
@@ -272,8 +273,8 @@ class ToolGate:
     answer for the bare-JSON format), so calls are emitted parsed rather than as text."""
 
     def __init__(self, fmt: str):
-        self.marks = [HERMES_OPEN, MISTRAL_MARK]
-        self.bare_json = fmt == "llama"
+        self.marks = [HERMES_OPEN, MISTRAL_MARK, QWEN_FUNCTION, GEMMA_OPEN]
+        self.bare_json = fmt in ("llama", "inkling")
         self.released = ""
         self.buf = ""
         self.holding = False
@@ -446,7 +447,7 @@ class Generation:
 
     def _finish(self, gate: Optional[ToolGate]) -> None:
         if gate is not None:
-            clean, calls = ToolCallingHandler.extract_tool_calls(self.content)
+            clean, calls = ToolCallingHandler.extract_tool_calls(self.content, self.params.tools)
             if calls:
                 self.tool_calls, self.content = calls, clean
         if self.tool_calls:

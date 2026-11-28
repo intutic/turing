@@ -217,7 +217,7 @@
  "findings": [
   "Gemma 4 26B-A4B (75/76) and Qwen3.6 35B-A3B (74/76) lead, within one standard error of each other; Qwen3-30B-A3B and Inkling 2 Mini 70/76.",
   "Inkling 2 Mini reasons even at reasoning_effort none: 5 of its 6 misses were answers cut off by the shared token budget, and it took 796 s for the 76 tasks against 123-239 s for the others.",
-  "Through Turing's OpenAI API only Qwen3-30B-A3B's tool calls come back as tool_calls: Turing's parser does not read the Qwen3.5/3.6 XML form, Gemma 4's call:name{...} form, or Inkling's {\"name\",\"args\"} JSON.",
+  "Before the parser change only Qwen3-30B-A3B's tool calls came back as tool_calls; after it all four models' 10 calls do (tool_calls_after_parsers).",
   "Shared misses: split_bill (money in cents) failed for Qwen3.6, Gemma 4 and Qwen3-30B-A3B; Inkling fixed it."
  ],
  "rows": [
@@ -6695,5 +6695,1222 @@
    "finish": "stop",
    "seconds": 5.12
   }
- ]
+ ],
+ "tool_calls_after_parsers": {
+  "note": "The 10 tool tasks (6 base, 4 harder) run again through turing serve after Turing's tool parser learned the Qwen3.5/3.6 XML, Gemma 4 and Inkling 2 formats (tools.py; XML values typed by the tool's JSON schema). Counts: returned as structured tool_calls with finish_reason tool_calls, and scored right.",
+  "parsed": {
+   "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf": "10/10",
+   "google_gemma-4-26B-A4B-it-Q4_K_M.gguf": "10/10",
+   "Qwen3-30B-A3B-Q4_K_M.gguf": "10/10",
+   "Inkling-2-Mini-Q4_K_M.gguf": "10/10"
+  },
+  "right": {
+   "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf": "10/10",
+   "google_gemma-4-26B-A4B-it-Q4_K_M.gguf": "10/10",
+   "Qwen3-30B-A3B-Q4_K_M.gguf": "10/10",
+   "Inkling-2-Mini-Q4_K_M.gguf": "10/10"
+  },
+  "rows": [
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "tool/0",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Tokyo\", \"unit\": \"fahrenheit\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_863dfc77076c45c088167bb5",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Tokyo\", \"unit\": \"fahrenheit\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 605,
+     "completion_tokens": 39,
+     "total_tokens": 644,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 1.5
+   },
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "tool/1",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 250, \"from_currency\": \"USD\", \"to_currency\": \"EUR\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_74206f092567410c8762b2a6",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 250, \"from_currency\": \"USD\", \"to_currency\": \"EUR\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 604,
+     "completion_tokens": 54,
+     "total_tokens": 658,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 1.7
+   },
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "tool/2",
+    "cat": "tool call",
+    "ok": true,
+    "note": "create_calendar_event {\"title\": \"Design review\", \"date\": \"2026-12-03\", \"time\": \"14:00\", \"duration_minutes\": 45}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_d83a9fb7755d43b38db4e572",
+      "type": "function",
+      "function": {
+       "name": "create_calendar_event",
+       "arguments": "{\"title\": \"Design review\", \"date\": \"2026-12-03\", \"time\": \"14:00\", \"duration_minutes\": 45}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 624,
+     "completion_tokens": 75,
+     "total_tokens": 699,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 2.12
+   },
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "tool/3",
+    "cat": "tool call",
+    "ok": true,
+    "note": "search_files {\"query\": \"tokenizer\", \"extension\": \"py\"}",
+    "unparsed_tool_call_ok": false,
+    "content": "I'll search for Python files related to tokenizers for you.",
+    "tool_calls": [
+     {
+      "id": "call_af6f28c4db814bf98246627a",
+      "type": "function",
+      "function": {
+       "name": "search_files",
+       "arguments": "{\"query\": \"tokenizer\", \"extension\": \"py\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 600,
+     "completion_tokens": 50,
+     "total_tokens": 650,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 1.81
+   },
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "tool/4",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Paris\", \"unit\": \"celsius\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_526736c580fd4ee1aee6fdb7",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Paris\", \"unit\": \"celsius\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 602,
+     "completion_tokens": 38,
+     "total_tokens": 640,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 1.49
+   },
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "tool/5",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 1000, \"from_currency\": \"JPY\", \"to_currency\": \"GBP\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_ea86315e92a64bf1b5a3e601",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 1000, \"from_currency\": \"JPY\", \"to_currency\": \"GBP\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 605,
+     "completion_tokens": 56,
+     "total_tokens": 661,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 1.83
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "tool/0",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Tokyo\", \"unit\": \"fahrenheit\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_300d975cbeb1459f8f9dd64f",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Tokyo\", \"unit\": \"fahrenheit\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 371,
+     "completion_tokens": 21,
+     "total_tokens": 392,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.91
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "tool/1",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 250, \"from_currency\": \"USD\", \"to_currency\": \"EUR\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_32e71aeeceb04cb996393265",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 250, \"from_currency\": \"USD\", \"to_currency\": \"EUR\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 369,
+     "completion_tokens": 30,
+     "total_tokens": 399,
+     "prompt_tokens_details": {
+      "cached_tokens": 348
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.64
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "tool/2",
+    "cat": "tool call",
+    "ok": true,
+    "note": "create_calendar_event {\"date\": \"2026-12-03\", \"duration_minutes\": 45, \"time\": \"14:00\", \"title\": \"Design review\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_0f711cb0c773465b9a1ced5d",
+      "type": "function",
+      "function": {
+       "name": "create_calendar_event",
+       "arguments": "{\"date\": \"2026-12-03\", \"duration_minutes\": 45, \"time\": \"14:00\", \"title\": \"Design review\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 390,
+     "completion_tokens": 49,
+     "total_tokens": 439,
+     "prompt_tokens_details": {
+      "cached_tokens": 348
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.96
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "tool/3",
+    "cat": "tool call",
+    "ok": true,
+    "note": "search_files {\"extension\": \"py\", \"query\": \"tokenizer\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_14ceb9564d5f464ab1dc612c",
+      "type": "function",
+      "function": {
+       "name": "search_files",
+       "arguments": "{\"extension\": \"py\", \"query\": \"tokenizer\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 365,
+     "completion_tokens": 20,
+     "total_tokens": 385,
+     "prompt_tokens_details": {
+      "cached_tokens": 348
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.46
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "tool/4",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Paris\", \"unit\": \"celsius\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_ed3f8df9a29048aaac256ac9",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Paris\", \"unit\": \"celsius\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 366,
+     "completion_tokens": 21,
+     "total_tokens": 387,
+     "prompt_tokens_details": {
+      "cached_tokens": 348
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.48
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "tool/5",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 1000, \"from_currency\": \"JPY\", \"to_currency\": \"GBP\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_987699e84f10481692b5de22",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 1000, \"from_currency\": \"JPY\", \"to_currency\": \"GBP\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 370,
+     "completion_tokens": 31,
+     "total_tokens": 401,
+     "prompt_tokens_details": {
+      "cached_tokens": 348
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.66
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "tool/0",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Tokyo\", \"unit\": \"fahrenheit\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_a3c6c58f773047b9b6f4614b",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Tokyo\", \"unit\": \"fahrenheit\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 486,
+     "completion_tokens": 27,
+     "total_tokens": 513,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.99
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "tool/1",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 250, \"from_currency\": \"USD\", \"to_currency\": \"EUR\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_33fd2c9a4cbd43ef8396c8f7",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 250, \"from_currency\": \"USD\", \"to_currency\": \"EUR\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 485,
+     "completion_tokens": 35,
+     "total_tokens": 520,
+     "prompt_tokens_details": {
+      "cached_tokens": 464
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.6
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "tool/2",
+    "cat": "tool call",
+    "ok": true,
+    "note": "create_calendar_event {\"title\": \"Design review\", \"date\": \"2026-12-03\", \"time\": \"14:00\", \"duration_minutes\": 45}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_574a20aae7624ece93fc6d54",
+      "type": "function",
+      "function": {
+       "name": "create_calendar_event",
+       "arguments": "{\"title\": \"Design review\", \"date\": \"2026-12-03\", \"time\": \"14:00\", \"duration_minutes\": 45}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 505,
+     "completion_tokens": 54,
+     "total_tokens": 559,
+     "prompt_tokens_details": {
+      "cached_tokens": 464
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.87
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "tool/3",
+    "cat": "tool call",
+    "ok": true,
+    "note": "search_files {\"query\": \"tokenizers\", \"extension\": \"py\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_d877f8cb1e9c4a98a5e1e38a",
+      "type": "function",
+      "function": {
+       "name": "search_files",
+       "arguments": "{\"query\": \"tokenizers\", \"extension\": \"py\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 481,
+     "completion_tokens": 26,
+     "total_tokens": 507,
+     "prompt_tokens_details": {
+      "cached_tokens": 464
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.47
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "tool/4",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Paris\", \"unit\": \"celsius\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_912a0afa476045cca76f8187",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Paris\", \"unit\": \"celsius\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 483,
+     "completion_tokens": 26,
+     "total_tokens": 509,
+     "prompt_tokens_details": {
+      "cached_tokens": 464
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.48
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "tool/5",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 1000, \"from_currency\": \"JPY\", \"to_currency\": \"GBP\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_d5a9abd682bc453587218717",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 1000, \"from_currency\": \"JPY\", \"to_currency\": \"GBP\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 486,
+     "completion_tokens": 37,
+     "total_tokens": 523,
+     "prompt_tokens_details": {
+      "cached_tokens": 464
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.63
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "tool/0",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Tokyo\", \"unit\": \"fahrenheit\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_aa3ae9dc3a1b432ca66a42e4",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Tokyo\", \"unit\": \"fahrenheit\"}"
+      }
+     }
+    ],
+    "reasoning": "The user asks for current weather in Tokyo in fahrenheit. Need use get_weather. Then answer.",
+    "usage": {
+     "prompt_tokens": 561,
+     "completion_tokens": 64,
+     "total_tokens": 625,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 4.35
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "tool/1",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 250, \"from_currency\": \"USD\", \"to_currency\": \"EUR\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_df368b3f7891415d964c3d10",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 250, \"from_currency\": \"USD\", \"to_currency\": \"EUR\"}"
+      }
+     }
+    ],
+    "reasoning": "The user asks a currency conversion. Need use convert_currency tool. Need not call other tools. Let's do conversion USD to EUR.",
+    "usage": {
+     "prompt_tokens": 557,
+     "completion_tokens": 81,
+     "total_tokens": 638,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 4.88
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "tool/2",
+    "cat": "tool call",
+    "ok": true,
+    "note": "create_calendar_event {\"date\": \"2026-12-03\", \"duration_minutes\": 45, \"time\": \"14:00\", \"title\": \"Design review\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_ffbfd743e50a44d59a5292ee",
+      "type": "function",
+      "function": {
+       "name": "create_calendar_event",
+       "arguments": "{\"date\": \"2026-12-03\", \"duration_minutes\": 45, \"time\": \"14:00\", \"title\": \"Design review\"}"
+      }
+     }
+    ],
+    "reasoning": "The user wants to book a calendar event. Need to check calendar availability? There's no list events tool. Just create event. Need date/time. Do it.",
+    "usage": {
+     "prompt_tokens": 574,
+     "completion_tokens": 105,
+     "total_tokens": 679,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 5.76
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "tool/3",
+    "cat": "tool call",
+    "ok": true,
+    "note": "search_files {\"extension\": \"py\", \"query\": \"tokenizer\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_51febe3ef3284fd3a42925a8",
+      "type": "function",
+      "function": {
+       "name": "search_files",
+       "arguments": "{\"extension\": \"py\", \"query\": \"tokenizer\"}"
+      }
+     }
+    ],
+    "reasoning": "The user wants to find Python files about tokenizers. I should use search_files with query \"tokenizer\" and extension py.",
+    "usage": {
+     "prompt_tokens": 555,
+     "completion_tokens": 68,
+     "total_tokens": 623,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 4.42
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "tool/4",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Paris\", \"unit\": \"celsius\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_77cb3a6500ef4a8ba83bb4a5",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Paris\", \"unit\": \"celsius\"}"
+      }
+     }
+    ],
+    "reasoning": "The user asks if it's raining in Paris, use celsius. Need get_weather. Need determine if weather tool returns rain? Let's call get_weather for Paris celsius.",
+    "usage": {
+     "prompt_tokens": 558,
+     "completion_tokens": 83,
+     "total_tokens": 641,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 4.95
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "tool/5",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 1000, \"from_currency\": \"JPY\", \"to_currency\": \"GBP\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_e6bb5bb1120943429dc765b1",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 1000, \"from_currency\": \"JPY\", \"to_currency\": \"GBP\"}"
+      }
+     }
+    ],
+    "reasoning": "The user wants to convert 1,000 Japanese yen to British pounds. I have a convert_currency tool. Let me use it.",
+    "usage": {
+     "prompt_tokens": 558,
+     "completion_tokens": 82,
+     "total_tokens": 640,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 4.93
+   },
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "hard/tool/0",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Berlin\", \"unit\": \"celsius\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_8695bcefa7cf4ab495458b37",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Berlin\", \"unit\": \"celsius\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 612,
+     "completion_tokens": 38,
+     "total_tokens": 650,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 1.5
+   },
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "hard/tool/1",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 99.5, \"from_currency\": \"CHF\", \"to_currency\": \"JPY\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_ed9f4c4d60ca4004a6257bd4",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 99.5, \"from_currency\": \"CHF\", \"to_currency\": \"JPY\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 606,
+     "completion_tokens": 56,
+     "total_tokens": 662,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 1.73
+   },
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "hard/tool/2",
+    "cat": "tool call",
+    "ok": true,
+    "note": "create_calendar_event {\"title\": \"Quarterly planning\", \"date\": \"2027-01-15\", \"time\": \"09:00\", \"duration_minutes\": 90}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_4a76e85333b64e0285dec9a6",
+      "type": "function",
+      "function": {
+       "name": "create_calendar_event",
+       "arguments": "{\"title\": \"Quarterly planning\", \"date\": \"2027-01-15\", \"time\": \"09:00\", \"duration_minutes\": 90}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 623,
+     "completion_tokens": 76,
+     "total_tokens": 699,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 2.09
+   },
+   {
+    "model": "Qwen_Qwen3.6-35B-A3B-Q4_K_M.gguf",
+    "id": "hard/tool/3",
+    "cat": "tool call",
+    "ok": true,
+    "note": "search_files {\"query\": \"roadmap\", \"extension\": \"md\"}",
+    "unparsed_tool_call_ok": false,
+    "content": "I'll search your files for markdown notes that mention the roadmap.",
+    "tool_calls": [
+     {
+      "id": "call_cd2f1495d8214572a25ae0f0",
+      "type": "function",
+      "function": {
+       "name": "search_files",
+       "arguments": "{\"query\": \"roadmap\", \"extension\": \"md\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 602,
+     "completion_tokens": 51,
+     "total_tokens": 653,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 1.65
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "hard/tool/0",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Berlin\", \"unit\": \"celsius\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_1f96d588b8ac4596b13e3ba2",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Berlin\", \"unit\": \"celsius\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 377,
+     "completion_tokens": 21,
+     "total_tokens": 398,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.92
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "hard/tool/1",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 99.5, \"from_currency\": \"CHF\", \"to_currency\": \"JPY\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_00899db9350c4e2e9ad06d09",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 99.5, \"from_currency\": \"CHF\", \"to_currency\": \"JPY\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 370,
+     "completion_tokens": 31,
+     "total_tokens": 401,
+     "prompt_tokens_details": {
+      "cached_tokens": 348
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.66
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "hard/tool/2",
+    "cat": "tool call",
+    "ok": true,
+    "note": "create_calendar_event {\"date\": \"2027-01-15\", \"duration_minutes\": 90, \"time\": \"09:00\", \"title\": \"Quarterly planning\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_2dcdb201ea2b4329b58b5585",
+      "type": "function",
+      "function": {
+       "name": "create_calendar_event",
+       "arguments": "{\"date\": \"2027-01-15\", \"duration_minutes\": 90, \"time\": \"09:00\", \"title\": \"Quarterly planning\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 388,
+     "completion_tokens": 50,
+     "total_tokens": 438,
+     "prompt_tokens_details": {
+      "cached_tokens": 348
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.98
+   },
+   {
+    "model": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+    "id": "hard/tool/3",
+    "cat": "tool call",
+    "ok": true,
+    "note": "search_files {\"extension\": \"md\", \"query\": \"roadmap\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_3a46e02d58824ba2aae9fe8a",
+      "type": "function",
+      "function": {
+       "name": "search_files",
+       "arguments": "{\"extension\": \"md\", \"query\": \"roadmap\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 367,
+     "completion_tokens": 20,
+     "total_tokens": 387,
+     "prompt_tokens_details": {
+      "cached_tokens": 348
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.47
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "hard/tool/0",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Berlin\", \"unit\": \"celsius\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_c94ff99f93aa416991c89a39",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Berlin\", \"unit\": \"celsius\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 493,
+     "completion_tokens": 26,
+     "total_tokens": 519,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.98
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "hard/tool/1",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 99.5, \"from_currency\": \"CHF\", \"to_currency\": \"JPY\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_bc6910bd3eb9426eb4e5a423",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 99.5, \"from_currency\": \"CHF\", \"to_currency\": \"JPY\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 487,
+     "completion_tokens": 38,
+     "total_tokens": 525,
+     "prompt_tokens_details": {
+      "cached_tokens": 464
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.65
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "hard/tool/2",
+    "cat": "tool call",
+    "ok": true,
+    "note": "create_calendar_event {\"title\": \"Quarterly planning\", \"date\": \"2027-01-15\", \"time\": \"09:00\", \"duration_minutes\": 90}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_49d528b4c7c54455b55c357b",
+      "type": "function",
+      "function": {
+       "name": "create_calendar_event",
+       "arguments": "{\"title\": \"Quarterly planning\", \"date\": \"2027-01-15\", \"time\": \"09:00\", \"duration_minutes\": 90}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 504,
+     "completion_tokens": 55,
+     "total_tokens": 559,
+     "prompt_tokens_details": {
+      "cached_tokens": 464
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.89
+   },
+   {
+    "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+    "id": "hard/tool/3",
+    "cat": "tool call",
+    "ok": true,
+    "note": "search_files {\"query\": \"roadmap\", \"extension\": \"md\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_0d00e00bfddb47df98179328",
+      "type": "function",
+      "function": {
+       "name": "search_files",
+       "arguments": "{\"query\": \"roadmap\", \"extension\": \"md\"}"
+      }
+     }
+    ],
+    "reasoning": null,
+    "usage": {
+     "prompt_tokens": 483,
+     "completion_tokens": 26,
+     "total_tokens": 509,
+     "prompt_tokens_details": {
+      "cached_tokens": 464
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 0.48
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "hard/tool/0",
+    "cat": "tool call",
+    "ok": true,
+    "note": "get_weather {\"city\": \"Berlin\", \"unit\": \"celsius\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_f0363a6a8dce47dea4de2beb",
+      "type": "function",
+      "function": {
+       "name": "get_weather",
+       "arguments": "{\"city\": \"Berlin\", \"unit\": \"celsius\"}"
+      }
+     }
+    ],
+    "reasoning": "The user asks current weather in Berlin in celsius. Need use get_weather. No other dependencies.",
+    "usage": {
+     "prompt_tokens": 568,
+     "completion_tokens": 63,
+     "total_tokens": 631,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 4.35
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "hard/tool/1",
+    "cat": "tool call",
+    "ok": true,
+    "note": "convert_currency {\"amount\": 99.5, \"from_currency\": \"CHF\", \"to_currency\": \"JPY\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_10bfb80d987f49a58dd03a26",
+      "type": "function",
+      "function": {
+       "name": "convert_currency",
+       "arguments": "{\"amount\": 99.5, \"from_currency\": \"CHF\", \"to_currency\": \"JPY\"}"
+      }
+     }
+    ],
+    "reasoning": "The user asks a currency conversion. Need use convert_currency tool. Need not use other tools. Let's call convert_currency with amount 99.5 from CHF to JPY.",
+    "usage": {
+     "prompt_tokens": 560,
+     "completion_tokens": 93,
+     "total_tokens": 653,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 5.31
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "hard/tool/2",
+    "cat": "tool call",
+    "ok": true,
+    "note": "create_calendar_event {\"date\": \"2027-01-15\", \"duration_minutes\": 90, \"time\": \"09:00\", \"title\": \"Quarterly planning\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_878e23a68e96425583332133",
+      "type": "function",
+      "function": {
+       "name": "create_calendar_event",
+       "arguments": "{\"date\": \"2027-01-15\", \"duration_minutes\": 90, \"time\": \"09:00\", \"title\": \"Quarterly planning\"}"
+      }
+     }
+    ],
+    "reasoning": "The user wants to create a calendar event. Need to use create_calendar_event with title, date, time, duration. 2027-01-15 09:00, 90 minutes.",
+    "usage": {
+     "prompt_tokens": 573,
+     "completion_tokens": 113,
+     "total_tokens": 686,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 6.04
+   },
+   {
+    "model": "Inkling-2-Mini-Q4_K_M.gguf",
+    "id": "hard/tool/3",
+    "cat": "tool call",
+    "ok": true,
+    "note": "search_files {\"extension\": \"md\", \"query\": \"roadmap\"}",
+    "unparsed_tool_call_ok": false,
+    "content": null,
+    "tool_calls": [
+     {
+      "id": "call_65cd5cd1909f45d695915193",
+      "type": "function",
+      "function": {
+       "name": "search_files",
+       "arguments": "{\"extension\": \"md\", \"query\": \"roadmap\"}"
+      }
+     }
+    ],
+    "reasoning": "The user wants me to search files for markdown notes mentioning roadmap. Use search_files with query roadmap and extension md likely.",
+    "usage": {
+     "prompt_tokens": 558,
+     "completion_tokens": 71,
+     "total_tokens": 629,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "finish": "tool_calls",
+    "seconds": 4.54
+   }
+  ]
+ }
 }
