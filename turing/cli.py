@@ -29,6 +29,18 @@ def _load_hf_or_exit(args, dev, dtype=None):
     except Exception as e:
         raise SystemExit(f"[!] Could not load weights for '{args.model}': {e}\n    Pass --mock to run on synthetic weights.")
 
+def _require_free_port(host, port):
+    """Exit before the model loads when host:port is taken: uvicorn binds only after it (a second server on a used
+    port loaded 17 GB of weights beside the first, then failed). Binds the way uvicorn's Config.bind_socket does."""
+    import socket
+    with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError as e:
+            raise SystemExit(f"[!] Cannot listen on {host}:{port} ({e.strerror}): another server is probably running "
+                             f"there. Stop it or pass another --port") from None
+
 def _load_weights(args, dev):
     """Real weights from a .tgate4 directory or file, a local .gguf file, or HuggingFace, with --quantization and the
     KV cache flags applied when the command has them."""
@@ -331,6 +343,7 @@ def main():
         # the CPU backend on libllama (decision CF1a): a GGUF file, one request at a time, the same HTTP APIs
         if not (args.model.endswith(".gguf") and os.path.isfile(args.model)):
             raise SystemExit("[!] --backend libllama serves a local .gguf file: pass its path to --model")
+        _require_free_port(args.host, args.port)
         torch.set_num_threads(1)  # torch only samples here; its OpenMP team beside ggml's slows each step (llama_engine.py)
         try:
             from turing.serving.llama_engine import LlamaCppEngine
@@ -347,21 +360,27 @@ def main():
                                     metadata=meta, n_ctx=args.ctx, n_threads=args.threads,
                                     draft_tokens=args.draft_tokens or 0, max_batch_size=args.max_batch_size or 1,
                                     **weights)
+            from turing.turing_llama import gpu_devices
+            gpus = gpu_devices() if args.gpu_layers else []
         except ImportError as e:
             raise SystemExit(f"[!] The libllama backend is not built ({e}): git submodule update --init "
                              f"third_party/llama.cpp, then TURING_BUILD_LLAMA=1 pip install -e .")
-        gpu = f", {'all' if args.gpu_layers < 0 else args.gpu_layers} layers on the GPU" if args.gpu_layers else ""
+        if args.gpu_layers and not gpus:
+            print("[!] --gpu-layers has no effect: this build has no GPU backend (build with TURING_BUILD_LLAMA_METAL=1)")
+        gpu = f", {'all' if args.gpu_layers < 0 else args.gpu_layers} layers on the GPU" if gpus else ""
         print(f"[+] libllama backend: {engine.llm.desc}, {engine.llm.n_ctx} tokens of context{gpu}")
         app = create_app(engine, embedding_model=args.embedding_model, rerank_model=args.rerank_model,
                          api_key=args.api_key, reasoning_effort=args.reasoning_effort, admission=False, lanes=False,
                          warmup=not args.no_warmup)
         print(f"[*] Starting Turing Engine OpenAI Server on http://{args.host}:{args.port} "
-              f"(Model: {engine.model_config.name}, Device: cpu, backend: libllama)")
+              f"(Model: {engine.model_config.name}, Device: {'gpu ' + gpus[0] if gpus else 'cpu'}, backend: libllama)")
         uvicorn.run(app, host=args.host, port=args.port)
 
     elif args.command == "serve":
         jcfg = TuringConfig(device=args.device, max_batch_size=args.max_batch_size or 64)
         dev = jcfg.resolve_device()
+        if not args.prefill_worker and os.getenv("RANK", "0") == "0":  # only rank 0 listens on --port
+            _require_free_port(args.host, args.port)
 
         model_inst = None
         tokenizer_inst = None

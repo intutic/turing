@@ -118,13 +118,31 @@ def test_serve_lists_the_served_model_name(monkeypatch):
     import turing.cli as cli
     apps = []
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: apps.append(app))
-    monkeypatch.setattr(sys, "argv", ["turing", "serve", "--model", "test-tiny", "--device", "cpu",
+    monkeypatch.setattr(sys, "argv", ["turing", "serve", "--model", "test-tiny", "--device", "cpu", "--port", "0",
                                       "--served-model-name", "my-model"])
     cli.main()
     with TestClient(apps[0]) as client:
         assert [m["id"] for m in client.get("/v1/models").json()["data"]] == ["my-model"]
         assert client.get("/health").json()["model"] == "my-model"
     assert get_model_config("test-tiny").name != "my-model"  # the preset is a shared object
+
+
+def test_serve_stops_before_loading_weights_when_the_port_is_taken(monkeypatch):
+    """`turing serve` on a port another process listens on exits before it loads any weights, not after."""
+    import socket
+    import sys
+    import turing.cli as cli
+    loaded = []
+    monkeypatch.setattr(cli, "_load_weights", lambda *a, **kw: loaded.append(1))
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen()
+        port = held.getsockname()[1]
+        monkeypatch.setattr(sys, "argv", ["turing", "serve", "--model", "Qwen/Qwen2.5-0.5B-Instruct", "--device", "cpu",
+                                          "--host", "127.0.0.1", "--port", str(port)])
+        with pytest.raises(SystemExit, match=f"127.0.0.1:{port}"):
+            cli.main()
+    assert not loaded
 
 
 def test_engine_warm_up_leaves_no_trace():

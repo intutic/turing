@@ -200,7 +200,8 @@ def test_serve_passes_the_weight_flags_to_the_engine(tmp_path, monkeypatch, flag
         raise Stop  # before the server starts
 
     monkeypatch.setattr(llama_engine, "LlamaCppEngine", engine)
-    monkeypatch.setattr(sys, "argv", ["turing", "serve", "--backend", "libllama", "--model", path, *flags])
+    monkeypatch.setattr(sys, "argv", ["turing", "serve", "--backend", "libllama", "--model", path, "--port", "0",
+                                      *flags])
     threads = torch.get_num_threads()
     try:
         with pytest.raises(Stop):
@@ -208,6 +209,31 @@ def test_serve_passes_the_weight_flags_to_the_engine(tmp_path, monkeypatch, flag
     finally:
         torch.set_num_threads(threads)  # serve sets torch to one thread
     assert {k: seen[k] for k in ("repack", "readahead", "n_gpu_layers", "mmproj") if k in seen} == want
+
+
+def test_serve_stops_before_loading_when_the_port_is_taken(tmp_path, monkeypatch):
+    """A second `turing serve` on a port in use exits before it loads the model: it used to load all the weights
+    (17 GB for Gemma 4) beside the running server, then fail to bind."""
+    import socket
+    import sys
+    import turing.cli as cli
+    import turing.serving.llama_engine as llama_engine
+    path = _write_gguf(str(tmp_path / "q3.gguf"), _hf_model("qwen3"), merges=True)
+    loaded = []
+    monkeypatch.setattr(llama_engine, "LlamaCppEngine", lambda *a, **kw: loaded.append(1))
+    threads = torch.get_num_threads()
+    with socket.socket() as held:
+        held.bind(("127.0.0.1", 0))
+        held.listen()
+        port = held.getsockname()[1]
+        monkeypatch.setattr(sys, "argv", ["turing", "serve", "--backend", "libllama", "--model", path,
+                                          "--host", "127.0.0.1", "--port", str(port)])
+        try:
+            with pytest.raises(SystemExit, match=f"127.0.0.1:{port}"):
+                cli.main()
+        finally:
+            torch.set_num_threads(threads)
+    assert not loaded
 
 
 @pytest.mark.parametrize("kind", ["qwen3", "qwen3_moe"])
