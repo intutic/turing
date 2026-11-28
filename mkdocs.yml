@@ -65,6 +65,7 @@ nav:
   - User guide:
       - Serving & API: serving.md
       - Models & hardware: models_and_hardware.md
+      - CPU & Apple GPU (libllama): cpu_backend.md
       - Integrations: integrations.md
       - Kubernetes & llm-d: llmd-integration.md
   - Performance:

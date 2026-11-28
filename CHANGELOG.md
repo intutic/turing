@@ -6,7 +6,54 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+- A CPU backend on llama.cpp's libllama (`turing serve --backend libllama --model file.gguf`; plan, decisions and
+  measurements in `bmad-output/cpu-first/`). llama.cpp is pinned as a submodule (`third_party/llama.cpp`) and built only
+  with `TURING_BUILD_LLAMA=1`, so a default install does not change. The same OpenAI, Anthropic and Ollama endpoints,
+  tokenized by libllama with the GGUF's chat template rendered as Hugging Face does; `turing-cpu bench|generate` runs it
+  without a server. On a Neoverse-V2 (c4a-standard-16) it decodes Qwen3-8B Q4_K_M at 39.2 tok/s against llama-bench's
+  38.6 and Qwen3-30B-A3B at 65.1 against 67.2, and its logits match Hugging Face's within 1e-3. Over HTTP on a
+  c4-standard-16 (Xeon Platinum 8581C), Qwen3-8B Q4_K_M with 8 sequences decoded together (`--max-batch-size 8`):
+  15.4 / 36.3 / 59.1-62.9 tok/s at 1 / 4 / 8 requests against `llama-server -np 8`'s 15.6-16.0 / 36.8-37.0 /
+  63.2-63.5, and 90.4-92.5 against 98.2-98.7 at 16 (once each). See [the libllama backend](docs/cpu_backend.md).
+- `--expert-readahead`: for MoE models larger than RAM, the experts each layer's router chose are read from the file
+  in parallel before their products, instead of faulting in a page at a time. gpt-oss-120b (63 GB) on real text, page
+  cache capped at 40 / 28 / 20 GB on a c4a-standard-16 with a 2.7 GB/s disk: 10.6 / 5.7 / 3.6 tok/s against plain
+  mmap's 3.6 / 1.2 / 0.74, same text. On an M4 Pro's internal SSD: 5.5 tok/s against 4.7. It reads for every token;
+  `--readahead-adaptive` (turing-cpu) reads only while 5% or more of the chosen experts' bytes miss the cache.
+- Apple GPU (opt-in Metal build, `TURING_BUILD_LLAMA_METAL=1`, `--gpu-layers -1`) and image input through a vision
+  projector (`--mmproj mmproj.gguf`; chat images as base64 `data:` URLs). On an M4 Pro, real text, CPU against GPU:
+  Qwen3-30B-A3B 69.8 / 73.5, Qwen3.6 35B-A3B 47.4 / 60.4, Gemma 4 26B-A4B 46.8 / 58.9, Inkling 2 Mini 25.5 / 29.6
+  tok/s decode; the GPU processes 512-token prompts at 760-840 tok/s.
+- Prompt-lookup speculation on the libllama backend (`--draft-tokens`, greedy requests), with a gate that stops drafting
+  while drafts do not pay: a code edit with Qwen3-8B decodes 37.4 tok/s against 28.7 without drafts, an open prompt
+  36.7 against 37.4. With 4-bit weights and an fp16 KV cache, batched and one-token kernels round apart, so a near-tie
+  can come out differently from plain decoding.
+- `--no-repack` computes from the mapped GGUF instead of ggml's repacked copy of the weights, which needs memory for a
+  second copy. Inkling 2 Mini needs it: with repacking, llama.cpp aborts at the pinned commit.
+- Patches to the pinned llama.cpp, applied when CMake configures (`third_party/patches/`); the first runs
+  BitNet-b1.58-2B-4T, whose TQ2_0 / TQ1_0 files have its F16 WikiText-2 perplexity (15.070 / 15.070 / 15.074).
+- `scripts/model_quality`: 76 auto-scored tasks (code, bug fixes, word problems, JSON extraction, tool calls) run
+  against any OpenAI endpoint. On an M4 Pro through `turing serve`, reasoning off: Gemma 4 26B-A4B 75, Qwen3.6 35B-A3B
+  74, Qwen3-30B-A3B 70, Inkling 2 Mini 70; reasoning on (medium): 76, 74, 75, 75
+  (`benchmarks/results/results_model_quality_mac_m4pro.json`).
+
+### Fixed
+- Tool calls of Qwen3.5 / 3.6 (`<function=name><parameter=…>`, values typed by the tool's schema), Gemma 4
+  (`call:name{…}`) and Inkling 2 (JSON in its tool channel) come back as `tool_calls` and `tool_use` blocks; they came
+  back as text. In the quality run above, all four models' 10 tool calls parse.
+- Reasoning of Gemma 4 (its thought channel) and Inkling 2 (special-token channels) comes back as `reasoning_content`
+  and Anthropic `thinking` blocks instead of inside the answer, and a reasoning effort's thinking budget applies to
+  them as to `<think>` models. Gemma 4 thinks only when a request asks for reasoning, as its chat template expects.
+- A request longer than the context fails with OpenAI's message ("This model's maximum context length is N tokens.
+  However, you requested …"). Agents recognize it as a context overflow, compact the conversation and retry; OpenCode
+  stopped the session on the old message.
+- `turing serve` checks that its port is free before it loads the model. A second server on a port in use loaded all
+  the weights (17 GB for Gemma 4) beside the first, then failed.
+
 ### Changed
+- CI also runs on `feat/**` branches, and a job builds and tests the libllama backend on Linux x86_64 and arm64 and
+  on macOS.
 - The Colab notebook, run on Colab itself on 2026-11-26 (Python 3.13.16, PyTorch 2.14.1, a T4) with 2.1.1 from PyPI:
   `turing serve` was up in 272 s, the int8 answers were right, and one stream decoded at 58.6 tok/s. With int4, as on
   a T4 VM with PyTorch 2.15, the one-liner came back as `reversed(s) = s[::-1]`, which does not run; with PyTorch 2.11

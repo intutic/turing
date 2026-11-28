@@ -20,3 +20,13 @@ csrc/marlin_moe/ : Marlin mixed-precision (W4A16) GEMM kernel for mixture-of-exp
   Licensed under the Apache License, Version 2.0 (csrc/marlin/LICENSE). Each file's header says whether Turing Engine
   modified it and how. turing/kernels/marlin_moe.py follows the call sequence of vLLM's
   vllm/model_executor/layers/fused_moe/experts/marlin_moe.py (Apache-2.0).
+
+third_party/llama.cpp/ : llama.cpp (libllama, ggml and libmtmd), the libllama backend
+  A git submodule of https://github.com/ggml-org/llama.cpp pinned at commit 171527522610996f5f0acf12334e185156ca8f44,
+  compiled into turing.turing_llama and turing-cpu only when built with TURING_BUILD_LLAMA=1.
+  Copyright (c) 2023-2026 The ggml authors. Licensed under the MIT License (third_party/llama.cpp/LICENSE).
+  Turing Engine modifies it at configure time with third_party/patches/ (0001: BitNet-b1.58-2B-4T in its converter,
+  gguf-py tensor mapping and src/models/bitnet.cpp).
+  It bundles code under its own licenses: nlohmann/json (MIT, third_party/llama.cpp/licenses/LICENSE-jsonhpp),
+  stb_image (public domain or MIT) and miniaudio (public domain or MIT-0) in libmtmd. On ARM, the build fetches ARM's
+  KleidiAI v1.32.0 (https://github.com/ARM-software/kleidiai, Apache License 2.0) and links it in.
