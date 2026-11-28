@@ -34,7 +34,7 @@ def test_channel_split_routes_reasoning_marked_by_special_tokens():
 
     words = {10: "The user asks", 11: " about tides.", 12: "Tides come", 13: " from the moon."}
     marks = {"<|message_model|>": 100, "<|content_thinking|>": 101, "<|content_text|>": 102, "<|end_message|>": 103,
-             "<|content_model_end_sampling|>": 104}
+             "<|content_model_end_sampling|>": 104, "<|content_invoke_tool_json|>": 105}
 
     class Tok:
         chat_template = "{{ reasoning_effort }}"
@@ -71,6 +71,11 @@ def test_channel_split_routes_reasoning_marked_by_special_tokens():
     plain = Generation(Engine(), req, GenerationParams(stop=[], reasoning=False), [1, 2], False, None, None)
     asyncio.run(plain.collect())  # raw completions keep everything as content
     assert plain.reasoning_text == "" and plain.content == "The user asks about tides.Tides come from the moon."
+    words.update({20: "get_weather", 21: '{"name":"get_weather","args":{}}'})
+    out[:] = [100, 101, 10, 103, 100, 20, 105, 21, 103]  # reasoning, then a tool call: the header (its name) is not text
+    call = Generation(Engine(), req, GenerationParams(stop=[]), [1, 2], False, None, None)
+    asyncio.run(call.collect())
+    assert call.reasoning_text == "The user asks" and call.content == '{"name":"get_weather","args":{}}'
     assert thinking_kwargs(Engine(), False, "None") == {"reasoning_effort": "none"}
     Tok.chat_template = "no effort here"
     assert thinking_kwargs(Engine(), False, "low") == {}

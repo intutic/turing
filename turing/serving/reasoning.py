@@ -121,8 +121,9 @@ def _think_ids(tokenizer) -> Optional[Tuple[int, int]]:
     return vocab[OPEN], vocab[CLOSE]
 
 
-CHANNEL_THINKING, CHANNEL_TEXT = "<|content_thinking|>", "<|content_text|>"
-CHANNEL_MARKS = ("<|message_model|>", "<|end_message|>", CHANNEL_THINKING, CHANNEL_TEXT)
+CHANNEL_THINKING, CHANNEL_HEADER = "<|content_thinking|>", "<|message_model|>"
+CHANNEL_CONTENT = ("<|content_text|>", "<|content_invoke_tool_json|>", "<|content_invoke_tool_text|>", "<|content_xml|>")
+CHANNEL_MARKS = (CHANNEL_HEADER, "<|end_message|>", CHANNEL_THINKING) + CHANNEL_CONTENT
 
 
 @functools.lru_cache(maxsize=8)
@@ -131,33 +132,38 @@ def _channel_ids(tokenizer):
         vocab = tokenizer.get_vocab()
     except Exception:
         return None
-    if CHANNEL_THINKING not in vocab or CHANNEL_TEXT not in vocab:
+    if CHANNEL_THINKING not in vocab or CHANNEL_CONTENT[0] not in vocab:
         return None
-    return vocab[CHANNEL_THINKING], vocab[CHANNEL_TEXT], frozenset(vocab[t] for t in CHANNEL_MARKS if t in vocab)
+    return (vocab[CHANNEL_THINKING], frozenset(vocab[t] for t in CHANNEL_CONTENT if t in vocab), vocab.get(CHANNEL_HEADER),
+            frozenset(vocab[t] for t in CHANNEL_MARKS if t in vocab))
 
 
-def channel_token_ids(tokenizer) -> Optional[Tuple[int, int, frozenset]]:
-    """(thinking id, text id, every marker id) for models that mark reasoning with special tokens instead of <think>
-    text (Inkling 2), else None. Read once per tokenizer, as think_token_ids."""
+def channel_token_ids(tokenizer) -> Optional[Tuple[int, frozenset, Optional[int], frozenset]]:
+    """(thinking id, answer content ids, header id, every marker id) for models that mark reasoning with special tokens
+    instead of <think> text (Inkling 2), else None. Read once per tokenizer, as think_token_ids."""
     return _channel_ids(tokenizer) if tokenizer is not None else None
 
 
 class ChannelSplit:
     """Reasoning marked with special tokens (Inkling 2): the model writes <|message_model|><|content_thinking|> reasoning
-    <|end_message|> <|message_model|><|content_text|> answer <|end_message|>. push(token) is the part a generated token
-    belongs to ("reasoning" | "content"), or None for a marker, which is not text. Decoding skips special tokens, so the
-    text filter (ReasoningStreamFilter) would never see these markers."""
+    <|end_message|>, then <|message_model|><|content_text|> answer <|end_message|> or, for a tool call,
+    <|message_model|>name<|content_invoke_tool_json|>{"name": ..., "args": ...}<|end_message|>. push(token) is the part a
+    generated token belongs to ("reasoning" | "content"), or None for a marker or a message header (the tool name, which
+    the call's JSON repeats). Decoding skips special tokens, so the <think> text filter never sees these markers."""
 
-    def __init__(self, ids: Tuple[int, int, frozenset]):
-        self.thinking, self.text, self.marks = ids
+    def __init__(self, ids: Tuple[int, frozenset, Optional[int], frozenset]):
+        self.thinking, self.content, self.header_id, self.marks = ids
         self.part = "content"
+        self.header = False
 
     def push(self, token: int) -> Optional[str]:
-        if token == self.thinking:
-            self.part = "reasoning"
-        elif token == self.text:
-            self.part = "content"
-        return None if token in self.marks else self.part
+        if token == self.header_id:
+            self.header = True
+        elif token == self.thinking:
+            self.part, self.header = "reasoning", False
+        elif token in self.content:
+            self.part, self.header = "content", False
+        return None if token in self.marks or self.header else self.part
 
 
 def think_token_ids(tokenizer) -> Optional[Tuple[List[int], List[int]]]:
